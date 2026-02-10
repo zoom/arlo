@@ -264,10 +264,9 @@ Comprehensive guides available in [`/docs/`](./docs/):
 - **[CLAUDE.md](./CLAUDE.md)** - Quick reference for Claude Code
 - **[Architecture](./docs/ARCHITECTURE.md)** - System design and data flow
 - **[Project Status](./docs/PROJECT_STATUS.md)** - Roadmap and phases
-- **[Quick Start](./docs/00-quick-start.md)** - Detailed setup (30 min)
-- **[SDK Setup](./docs/02-sdk-setup.md)** - Zoom Apps SDK config
-- **[RTMS Guide](./docs/05-rtms-guide.md)** - Real-time transcription
+- **[Specification](./SPEC.md)** - Feature spec and version milestones
 - **[Troubleshooting](./docs/TROUBLESHOOTING.md)** - Common issues
+- **[Zoom Apps Skills](./.claude/skills/zoom-apps/)** - SDK setup, RTMS guide, OAuth, security
 
 ---
 

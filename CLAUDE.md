@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Arlo Meeting Assistant** is an open-source Zoom Apps reference implementation demonstrating how to build intelligent meeting assistants that capture real-time transcripts using RTMS (Real-Time Media Streams) — **without requiring a meeting bot**. The app runs natively inside Zoom meetings and provides AI-powered summaries, action items, and transcript search.
 
-**Current Phase:** v0.5 MVP functional, frontend UI migrated to Base UI, feature push next.
+**Current Phase:** v0.9 — see [`SPEC.md`](./SPEC.md) for the full feature specification and version milestones.
 
 ## Development Commands
 
@@ -279,9 +279,10 @@ arlo-meeting-assistant/
 
 ## Documentation Reference
 
+- `/SPEC.md` — Authoritative feature specification and version milestones
 - `.claude/skills/zoom-apps/` — General Zoom Apps development guides (SDK, OAuth, RTMS, security)
 - `/docs/ARCHITECTURE.md` — System architecture details
-- `/docs/PROJECT_STATUS.md` — Roadmap and phase tracking
+- `/docs/PROJECT_STATUS.md` — Current status and next actions
 - `/docs/TROUBLESHOOTING.md` — Common issues and fixes
 
 ## Known Issues
