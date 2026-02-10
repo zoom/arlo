@@ -1,13 +1,13 @@
 .test-page {
   min-height: 100vh;
-  background: #f5f5f5;
+  background: var(--color-bg-light);
   padding: 20px;
 }
 
 .loading {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .test-header {
@@ -17,13 +17,13 @@
 
 .test-header h1 {
   margin: 0;
-  color: #333;
+  color: var(--color-text-primary);
   font-size: 28px;
 }
 
 .test-header p {
   margin: 8px 0 0 0;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .test-content {
@@ -37,7 +37,7 @@
 /* Meetings Section */
 .meetings-section {
   background: white;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
@@ -45,11 +45,11 @@
 .meetings-section h2 {
   margin: 0 0 16px 0;
   font-size: 18px;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .no-meetings {
-  color: #888;
+  color: var(--color-text-muted);
   font-style: italic;
 }
 
@@ -67,19 +67,19 @@
   align-items: center;
   gap: 16px;
   padding: 12px 16px;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .meeting-item:hover {
-  background: #f5f5f5;
+  background: var(--color-bg-light);
 }
 
 .meeting-item.selected {
-  border-color: #2196F3;
-  background: #E3F2FD;
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
 }
 
 .meeting-info {
@@ -91,19 +91,19 @@
 
 .meeting-title {
   font-weight: 500;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .meeting-timestamp {
   font-size: 12px;
-  color: #888;
+  color: var(--color-text-muted);
   font-family: monospace;
 }
 
 .meeting-transcript-status {
   font-size: 11px;
-  color: #4CAF50;
-  background: #e8f5e9;
+  color: var(--color-success);
+  background: var(--color-success-bg);
   padding: 3px 8px;
   border-radius: 10px;
   font-weight: 500;
@@ -112,7 +112,7 @@
 /* Search Section */
 .search-section {
   background: white;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
@@ -120,7 +120,7 @@
 .search-section h2 {
   margin: 0 0 16px 0;
   font-size: 18px;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .search-form {
@@ -131,28 +131,28 @@
 .search-form input {
   flex: 1;
   padding: 10px 14px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  border: 1px solid var(--color-border-input);
+  border-radius: var(--radius-md);
   font-size: 14px;
 }
 
 .search-form input:focus {
   outline: none;
-  border-color: #2196F3;
+  border-color: var(--color-accent);
 }
 
 .search-form button {
   padding: 10px 24px;
-  background: #2196F3;
+  background: var(--color-accent);
   color: white;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-weight: 500;
 }
 
 .search-form button:hover {
-  background: #1976D2;
+  background: var(--color-accent-hover);
 }
 
 .search-results {
@@ -161,7 +161,7 @@
 
 .search-results h3 {
   font-size: 14px;
-  color: #666;
+  color: var(--color-text-secondary);
   margin: 0 0 12px 0;
 }
 
@@ -173,33 +173,33 @@
 
 .search-result {
   padding: 12px;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   margin-bottom: 8px;
 }
 
 .result-meeting {
   font-weight: 500;
-  color: #333;
+  color: var(--color-text-primary);
   margin-bottom: 4px;
 }
 
 .result-speaker {
   font-size: 12px;
-  color: #2196F3;
+  color: var(--color-accent);
   margin-bottom: 8px;
 }
 
 .result-snippet {
   font-size: 13px;
-  color: #555;
+  color: var(--color-text-body);
   line-height: 1.5;
 }
 
 /* AI Section */
 .ai-section {
   background: white;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 20px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
@@ -207,7 +207,7 @@
 .ai-section h2 {
   margin: 0;
   font-size: 18px;
-  color: #333;
+  color: var(--color-text-primary);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -244,36 +244,36 @@
 .rename-form input {
   flex: 1;
   padding: 8px 12px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+  border: 1px solid var(--color-border-input);
+  border-radius: var(--radius-sm);
   font-size: 14px;
 }
 
 .rename-form input:focus {
   outline: none;
-  border-color: #2196F3;
+  border-color: var(--color-accent);
 }
 
 .rename-form button {
   padding: 8px 16px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 14px;
 }
 
 .rename-form button:first-of-type {
-  background: #2196F3;
+  background: var(--color-accent);
   color: white;
 }
 
 .rename-form button:first-of-type:hover {
-  background: #1976D2;
+  background: var(--color-accent-hover);
 }
 
 .cancel-btn {
-  background: #e0e0e0;
-  color: #333;
+  background: var(--color-border);
+  color: var(--color-text-primary);
 }
 
 .cancel-btn:hover {
@@ -287,28 +287,98 @@
 
 .export-btn {
   padding: 8px 16px;
-  background: #4CAF50;
+  background: var(--color-success);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
 }
 
 .export-btn:hover {
-  background: #43A047;
+  background: var(--color-success-hover);
 }
 
 .delete-btn {
   padding: 8px 16px;
-  background: #f44336;
+  background: var(--color-error);
   color: white;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 13px;
 }
 
 .delete-btn:hover {
-  background: #e53935;
+  background: var(--color-error-hover);
+}
+
+/* Alert Dialog */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 100;
+}
+
+.dialog-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--color-bg-white);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 101;
+}
+
+.dialog-title {
+  margin: 0 0 8px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.dialog-description {
+  margin: 0 0 20px 0;
+  font-size: 14px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dialog-cancel-btn {
+  padding: 8px 16px;
+  background: var(--color-border);
+  color: var(--color-text-primary);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dialog-cancel-btn:hover {
+  background: #d0d0d0;
+}
+
+.dialog-delete-btn {
+  padding: 8px 16px;
+  background: var(--color-error);
+  color: white;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dialog-delete-btn:hover {
+  background: var(--color-error-hover);
 }
