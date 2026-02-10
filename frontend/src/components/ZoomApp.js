@@ -546,7 +546,11 @@ function ZoomApp({ runningContext, meetingContext, userContext }) {
           meetingId={meetingContext?.meetingUUID}
         />
 
+        <hr className="section-separator" />
+
         <AIPanel meetingId={meetingContext?.meetingUUID} />
+
+        <hr className="section-separator" />
 
         <MeetingHistory />
       </div>

@@ -16,6 +16,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Start all services (Postgres, Backend, Frontend)
 docker-compose up --build
 
+# Rebuild after adding/removing npm dependencies
+# -V recreates anonymous volumes (node_modules) from fresh image
+docker-compose up --build -V
+
 # View logs
 docker-compose logs -f backend
 docker-compose logs -f frontend
@@ -23,7 +27,7 @@ docker-compose logs -f frontend
 # Restart specific service
 docker-compose restart backend
 
-# Clean restart (removes volumes)
+# Clean restart (removes ALL volumes including DB data)
 docker-compose down -v && docker-compose up --build
 
 # Stop all services
@@ -92,8 +96,9 @@ ZOOM_APP_REDIRECT_URI=https://your-ngrok-url.ngrok-free.app/api/zoomapp/auth
 
 ### Three-Component System
 
-1. **In-Meeting Zoom App** (React + Zoom Apps SDK)
+1. **In-Meeting Zoom App** (React + Base UI + Zoom Apps SDK)
    - Runs embedded in Zoom client during meetings
+   - UI built with `@base-ui/react` (unstyled, accessible components) + plain CSS
    - Live transcript display with < 1s latency
    - Real-time AI suggestions
    - Start/stop RTMS via `zoomSdk.callZoomApi('startRTMS')`
@@ -155,6 +160,7 @@ ZOOM_APP_REDIRECT_URI=https://your-ngrok-url.ngrok-free.app/api/zoomapp/auth
 - `frontend/src/App.js` - Main component, SDK configuration
 - `frontend/src/apis.js` - SDK API demonstrations
 - `frontend/src/components/Authorization.js` - OAuth flows
+- `frontend/src/index.css` - CSS design tokens (`:root` custom properties) and shared Base UI styles
 - `frontend/public/index.html` - Loads Zoom Apps SDK script
 
 ### RTMS
@@ -164,6 +170,49 @@ ZOOM_APP_REDIRECT_URI=https://your-ngrok-url.ngrok-free.app/api/zoomapp/auth
 ### Database
 - `backend/prisma/schema.prisma` - Database schema (PostgreSQL)
 - Key tables: User, Meeting, Speaker, TranscriptSegment, Highlight, VttFile
+
+## Frontend UI (Base UI)
+
+The frontend uses `@base-ui/react` for accessible, unstyled component primitives, styled with plain CSS and CSS custom properties (design tokens).
+
+### Base UI Components in Use
+
+| Component | Used In | Purpose |
+|-----------|---------|---------|
+| `Tabs` | AIPanel, MeetingHistory | Tab navigation (summary/actions/chat, AI/transcript) |
+| `Collapsible` | MeetingHistory | Expandable past meetings section |
+| `Progress` | MeetingSuggestions | Meeting time progress bar |
+| `Toggle` + `ToggleGroup` | MeetingSuggestions | Duration picker (15/30/45/60/90/120 min) |
+| `ScrollArea` | LiveTranscript | Custom scrollbar for transcript |
+| `Tooltip` | MeetingSuggestions, HighlightsPanel, TestPage | Accessible tooltips replacing native `title` |
+| `AlertDialog` | TestPage | Delete confirmation dialog |
+| `Field` | HighlightsPanel | Form fields with labels and validation |
+
+### Import Pattern
+
+CRA 5 does not support package.json `exports` subpath patterns. Always import from the main entry:
+
+```javascript
+// CORRECT - use main entry
+import { Tabs, Collapsible, Tooltip } from '@base-ui/react';
+
+// WRONG - subpath imports fail at runtime in CRA
+import { Tabs } from '@base-ui/react/tabs';
+```
+
+### CSS Data Attributes
+
+Base UI exposes state via data attributes instead of class toggles:
+
+```css
+.ai-tab[data-active] { /* selected tab */ }
+.duration-option[data-pressed] { /* selected toggle */ }
+.history-header[data-panel-open] { /* expanded collapsible */ }
+```
+
+### Design Tokens
+
+CSS custom properties are defined in `frontend/src/index.css` under `:root`. All component CSS uses `var(--color-*)`, `var(--radius-*)` etc. instead of hardcoded values.
 
 ## Critical Configuration Requirements
 
@@ -440,8 +489,7 @@ The `/docs/` directory contains Arlo-specific documentation:
 
 ## Project Status
 
-**Current Phase:** Planning & Architecture Complete
-**Target:** v0.5 MVP (2-3 weeks) → v1.0 Production (4-6 weeks)
-**Tech Readiness:** All architecture documented, no code written yet
+**Current Phase:** Frontend UI migration to Base UI complete, feature push next
+**Tech Stack:** React 18 + Base UI + CRA 5, Node.js/Express backend, PostgreSQL, @zoom/rtms v1.0
 
 See `/docs/PROJECT_STATUS.md` for detailed roadmap and phase breakdowns.

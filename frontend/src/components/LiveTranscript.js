@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ScrollArea } from '@base-ui/react';
 import './LiveTranscript.css';
 
 function LiveTranscript({ ws, rtmsActive, meetingId }) {
@@ -76,23 +77,28 @@ function LiveTranscript({ ws, rtmsActive, meetingId }) {
         )}
       </div>
 
-      <div
-        ref={transcriptRef}
-        className="transcript-container"
-        onScroll={handleScroll}
-      >
-        {segments.map((segment, index) => (
-          <div key={index} className="transcript-segment">
-            <div className="segment-meta">
-              <span className="speaker">{segment.speakerLabel}</span>
-              <span className="timestamp">
-                {formatTimestamp(segment.tStartMs)}
-              </span>
+      <ScrollArea.Root className="transcript-scroll-area">
+        <ScrollArea.Viewport
+          ref={transcriptRef}
+          className="transcript-container"
+          onScroll={handleScroll}
+        >
+          {segments.map((segment, index) => (
+            <div key={index} className="transcript-segment">
+              <div className="segment-meta">
+                <span className="speaker">{segment.speakerLabel}</span>
+                <span className="timestamp">
+                  {formatTimestamp(segment.tStartMs)}
+                </span>
+              </div>
+              <div className="segment-text">{segment.text}</div>
             </div>
-            <div className="segment-text">{segment.text}</div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </ScrollArea.Viewport>
+        <ScrollArea.Scrollbar orientation="vertical" className="transcript-scrollbar">
+          <ScrollArea.Thumb className="transcript-scrollbar-thumb" />
+        </ScrollArea.Scrollbar>
+      </ScrollArea.Root>
     </div>
   );
 }

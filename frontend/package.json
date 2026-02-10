@@ -5,11 +5,12 @@
   "private": true,
   "proxy": "http://backend:3000",
   "dependencies": {
+    "@base-ui/react": "^1.1.0",
+    "@zoom/appssdk": "^0.16.0",
+    "axios": "^1.6.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
-    "@zoom/appssdk": "^0.16.0",
-    "axios": "^1.6.5"
+    "react-scripts": "5.0.1"
   },
   "scripts": {
     "start": "react-scripts start",

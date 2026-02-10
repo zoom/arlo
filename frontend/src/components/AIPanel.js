@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
+import { Tabs } from '@base-ui/react';
 import './AIPanel.css';
 
 function AIPanel({ meetingId }) {
-  const [activeTab, setActiveTab] = useState('summary');
   const [loading, setLoading] = useState(false);
   const [summary, setSummary] = useState(null);
   const [actionItems, setActionItems] = useState(null);
@@ -22,7 +22,7 @@ function AIPanel({ meetingId }) {
       const response = await fetch('/api/ai/summary', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Include cookies for authentication
+        credentials: 'include',
         body: JSON.stringify({ meetingId }),
       });
 
@@ -52,7 +52,7 @@ function AIPanel({ meetingId }) {
       const response = await fetch('/api/ai/action-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Include cookies for authentication
+        credentials: 'include',
         body: JSON.stringify({ meetingId }),
       });
 
@@ -80,7 +80,7 @@ function AIPanel({ meetingId }) {
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Include cookies for authentication
+        credentials: 'include',
         body: JSON.stringify({ meetingId, question: chatQuestion }),
       });
 
@@ -102,38 +102,23 @@ function AIPanel({ meetingId }) {
 
   return (
     <div className="ai-panel">
-      <div className="ai-tabs">
-        <button
-          className={`ai-tab ${activeTab === 'summary' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('summary'); clearError(); }}
-        >
-          Summary
-        </button>
-        <button
-          className={`ai-tab ${activeTab === 'actions' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('actions'); clearError(); }}
-        >
-          Action Items
-        </button>
-        <button
-          className={`ai-tab ${activeTab === 'chat' ? 'active' : ''}`}
-          onClick={() => { setActiveTab('chat'); clearError(); }}
-        >
-          Ask AI
-        </button>
-      </div>
+      <Tabs.Root defaultValue="summary" onValueChange={clearError}>
+        <Tabs.List className="ai-tabs">
+          <Tabs.Tab value="summary" className="ai-tab">Summary</Tabs.Tab>
+          <Tabs.Tab value="actions" className="ai-tab">Action Items</Tabs.Tab>
+          <Tabs.Tab value="chat" className="ai-tab">Ask AI</Tabs.Tab>
+        </Tabs.List>
 
-      <div className="ai-content">
-        {error && (
-          <div className="ai-error">
-            <span className="error-icon">⚠️</span>
-            <span className="error-message">{error}</span>
-            <button className="error-dismiss" onClick={clearError}>×</button>
-          </div>
-        )}
+        <div className="ai-content">
+          {error && (
+            <div className="ai-error">
+              <span className="error-icon">⚠️</span>
+              <span className="error-message">{error}</span>
+              <button className="error-dismiss" onClick={clearError}>×</button>
+            </div>
+          )}
 
-        {activeTab === 'summary' && (
-          <div className="ai-section">
+          <Tabs.Panel value="summary" className="ai-section">
             {loading && !summary ? (
               <div className="ai-loading">
                 <div className="loading-spinner"></div>
@@ -194,11 +179,9 @@ function AIPanel({ meetingId }) {
                 </button>
               </div>
             )}
-          </div>
-        )}
+          </Tabs.Panel>
 
-        {activeTab === 'actions' && (
-          <div className="ai-section">
+          <Tabs.Panel value="actions" className="ai-section">
             {loading && !actionItems ? (
               <div className="ai-loading">
                 <div className="loading-spinner"></div>
@@ -241,11 +224,9 @@ function AIPanel({ meetingId }) {
                 </button>
               </div>
             )}
-          </div>
-        )}
+          </Tabs.Panel>
 
-        {activeTab === 'chat' && (
-          <div className="ai-section chat-section">
+          <Tabs.Panel value="chat" className="ai-section chat-section">
             <form onSubmit={askQuestion} className="chat-form">
               <input
                 type="text"
@@ -276,9 +257,9 @@ function AIPanel({ meetingId }) {
                 <p>{chatAnswer}</p>
               </div>
             )}
-          </div>
-        )}
-      </div>
+          </Tabs.Panel>
+        </div>
+      </Tabs.Root>
     </div>
   );
 }

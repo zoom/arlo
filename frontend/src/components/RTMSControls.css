@@ -1,7 +1,7 @@
 .rtms-controls {
   padding: 16px 20px;
-  border-bottom: 1px solid #e0e0e0;
-  background: #f9f9f9;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-lighter);
 }
 
 .start-button {
@@ -9,16 +9,16 @@
   padding: 12px 24px;
   font-size: 16px;
   font-weight: 600;
-  color: #fff;
-  background: #2D8CFF;
+  color: var(--color-bg-white);
+  background: var(--color-primary);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .start-button:hover {
-  background: #0B5CFF;
+  background: var(--color-primary-hover);
 }
 
 .rtms-status {
@@ -32,7 +32,7 @@
   align-items: center;
   gap: 8px;
   font-weight: 500;
-  color: #333;
+  color: var(--color-text-primary);
 }
 
 .pulse {
@@ -51,15 +51,15 @@
 .stop-button {
   padding: 8px 16px;
   font-size: 14px;
-  color: #666;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-white);
+  border: 1px solid var(--color-border-input);
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
 .stop-button:hover {
-  background: #f5f5f5;
+  background: var(--color-bg-light);
 }
 
 .start-button:disabled,
@@ -73,7 +73,7 @@
   width: 14px;
   height: 14px;
   border: 2px solid rgba(255, 255, 255, 0.3);
-  border-top-color: #fff;
+  border-top-color: var(--color-bg-white);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
   margin-right: 8px;
@@ -82,7 +82,7 @@
 
 .stop-button .button-spinner {
   border: 2px solid rgba(102, 102, 102, 0.3);
-  border-top-color: #666;
+  border-top-color: var(--color-text-secondary);
 }
 
 @keyframes spin {
