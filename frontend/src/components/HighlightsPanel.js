@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Tooltip, Field } from '@base-ui/react';
 import './HighlightsPanel.css';
 
 function HighlightsPanel({ meetingId }) {
@@ -97,19 +98,31 @@ function HighlightsPanel({ meetingId }) {
 
       {showForm && (
         <form onSubmit={handleCreate} className="highlight-form">
-          <input
-            type="text"
-            value={newHighlight.title}
-            onChange={(e) => setNewHighlight({ ...newHighlight, title: e.target.value })}
-            placeholder="Highlight title..."
-            required
-          />
-          <textarea
-            value={newHighlight.notes}
-            onChange={(e) => setNewHighlight({ ...newHighlight, notes: e.target.value })}
-            placeholder="Notes (optional)..."
-            rows={2}
-          />
+          <Field.Root>
+            <Field.Label className="field-label">Title</Field.Label>
+            <Field.Control
+              required
+              value={newHighlight.title}
+              onChange={(e) => setNewHighlight({ ...newHighlight, title: e.target.value })}
+              placeholder="Highlight title..."
+            />
+            <Field.Error match="valueMissing" className="field-error">
+              Please enter a title
+            </Field.Error>
+          </Field.Root>
+          <Field.Root>
+            <Field.Label className="field-label">Notes</Field.Label>
+            <Field.Control
+              render={
+                <textarea
+                  value={newHighlight.notes}
+                  onChange={(e) => setNewHighlight({ ...newHighlight, notes: e.target.value })}
+                  placeholder="Notes (optional)..."
+                  rows={2}
+                />
+              }
+            />
+          </Field.Root>
           <button type="submit">Save Highlight</button>
         </form>
       )}
@@ -136,13 +149,25 @@ function HighlightsPanel({ meetingId }) {
                   {new Date(highlight.createdAt).toLocaleString()}
                 </span>
               </div>
-              <button
-                className="delete-highlight-btn"
-                onClick={() => handleDelete(highlight.id)}
-                title="Delete highlight"
-              >
-                x
-              </button>
+              <Tooltip.Root>
+                <Tooltip.Trigger
+                  render={
+                    <button
+                      className="delete-highlight-btn"
+                      onClick={() => handleDelete(highlight.id)}
+                    />
+                  }
+                >
+                  x
+                </Tooltip.Trigger>
+                <Tooltip.Portal>
+                  <Tooltip.Positioner sideOffset={6}>
+                    <Tooltip.Popup className="tooltip-popup">
+                      Delete highlight
+                    </Tooltip.Popup>
+                  </Tooltip.Positioner>
+                </Tooltip.Portal>
+              </Tooltip.Root>
             </li>
           ))}
         </ul>

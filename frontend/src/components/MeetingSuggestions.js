@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { Progress, Toggle, ToggleGroup, Tooltip } from '@base-ui/react';
 import './MeetingSuggestions.css';
 
-const DEFAULT_DURATION_MIN = 60; // Default meeting duration in minutes
-const SUGGESTION_THRESHOLD = 0.80; // Show suggestions at 80% of meeting duration
+const DEFAULT_DURATION_MIN = 60;
+const SUGGESTION_THRESHOLD = 0.80;
 
 function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduledDuration }) {
   const [suggestions, setSuggestions] = useState([]);
@@ -12,19 +13,15 @@ function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduled
   const [customDuration, setCustomDuration] = useState(null);
   const [showDurationPicker, setShowDurationPicker] = useState(false);
 
-  // Calculate meeting duration in ms (from SDK, custom setting, or default)
   const meetingDurationMs = (customDuration || scheduledDuration || DEFAULT_DURATION_MIN) * 60 * 1000;
   const suggestionTimeMs = meetingDurationMs * SUGGESTION_THRESHOLD;
 
-  // Track elapsed time (continuous timer from meeting start - NEVER stops)
   useEffect(() => {
-    // If meeting hasn't started yet, show 0
     if (!meetingStartTime) {
       setElapsedTime(0);
       return;
     }
 
-    // Once meeting starts, timer runs continuously regardless of RTMS pause/resume
     const interval = setInterval(() => {
       const totalElapsed = Date.now() - meetingStartTime;
       setElapsedTime(totalElapsed);
@@ -33,20 +30,17 @@ function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduled
     return () => clearInterval(interval);
   }, [meetingStartTime]);
 
-  // Calculate progress percentage
   const progressPercent = Math.min((elapsedTime / meetingDurationMs) * 100, 100);
 
-  // Fetch suggestions when hitting threshold
   const fetchSuggestions = useCallback(async () => {
     if (!meetingId || loading) return;
 
     setLoading(true);
     try {
-      // First try to get action items
       const response = await fetch('/api/ai/action-items', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // Include cookies for authentication
+        credentials: 'include',
         body: JSON.stringify({ meetingId }),
       });
 
@@ -54,7 +48,6 @@ function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduled
         const data = await response.json();
         const newSuggestions = [];
 
-        // Add wrap-up suggestion with percentage
         const percentDone = Math.round((elapsedTime / meetingDurationMs) * 100);
         newSuggestions.push({
           type: 'time',
@@ -62,17 +55,15 @@ function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduled
           icon: '⏰',
         });
 
-        // Add action items if any
         if (data.actionItems && data.actionItems.length > 0) {
           newSuggestions.push({
             type: 'action-items',
             text: `${data.actionItems.length} action item(s) identified so far`,
             icon: '✅',
-            items: data.actionItems.slice(0, 3), // Show first 3
+            items: data.actionItems.slice(0, 3),
           });
         }
 
-        // Add suggestion to review decisions
         newSuggestions.push({
           type: 'review',
           text: 'Review key decisions before ending the meeting',
@@ -83,7 +74,6 @@ function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduled
       }
     } catch (error) {
       console.error('Failed to fetch suggestions:', error);
-      // Still show time suggestion even if AI fails
       const percentDone = Math.round((elapsedTime / meetingDurationMs) * 100);
       setSuggestions([{
         type: 'time',
@@ -95,7 +85,6 @@ function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduled
     }
   }, [meetingId, loading, elapsedTime, meetingDurationMs]);
 
-  // Trigger suggestions at threshold
   useEffect(() => {
     if (
       rtmsActive &&
@@ -108,7 +97,6 @@ function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduled
     }
   }, [rtmsActive, elapsedTime, suggestionTimeMs, suggestions.length, dismissed, loading, fetchSuggestions]);
 
-  // Reset suggestions when RTMS stops (but keep timer running)
   useEffect(() => {
     if (!rtmsActive) {
       setSuggestions([]);
@@ -132,57 +120,82 @@ function MeetingSuggestions({ rtmsActive, meetingStartTime, meetingId, scheduled
   const handleDurationChange = (newDuration) => {
     setCustomDuration(newDuration);
     setShowDurationPicker(false);
-    // Reset suggestions if we changed duration
     if (elapsedTime < newDuration * 60 * 1000 * SUGGESTION_THRESHOLD) {
       setSuggestions([]);
       setDismissed(false);
     }
   };
 
-  // Don't show anything if meeting hasn't started yet
   if (!meetingStartTime) return null;
 
   return (
     <div className="meeting-suggestions">
-      {/* Timer display with progress - always visible once meeting starts */}
+      {/* Timer display with progress */}
       <div className="meeting-timer">
         <div className="timer-info">
           <span className="timer-label">Meeting time:</span>
           <span className="timer-value">{formatTime(elapsedTime)}</span>
           <span className="timer-duration">
             / {currentDuration} min
-            <button
-              className="duration-edit-btn"
-              onClick={() => setShowDurationPicker(!showDurationPicker)}
-              title="Change meeting duration"
-            >
-              ⚙️
-            </button>
+            <Tooltip.Root>
+              <Tooltip.Trigger
+                render={
+                  <button
+                    className="duration-edit-btn"
+                    onClick={() => setShowDurationPicker(!showDurationPicker)}
+                  />
+                }
+              >
+                ⚙️
+              </Tooltip.Trigger>
+              <Tooltip.Portal>
+                <Tooltip.Positioner sideOffset={6}>
+                  <Tooltip.Popup className="tooltip-popup">
+                    Change meeting duration
+                  </Tooltip.Popup>
+                </Tooltip.Positioner>
+              </Tooltip.Portal>
+            </Tooltip.Root>
           </span>
         </div>
-        <div className="progress-bar">
-          <div
-            className={`progress-fill ${progressPercent >= 80 ? 'warning' : ''}`}
-            style={{ width: `${progressPercent}%` }}
-          />
-        </div>
+        <Progress.Root
+          value={progressPercent}
+          aria-label="Meeting progress"
+          className="progress-bar"
+        >
+          <Progress.Track className="progress-track">
+            <Progress.Indicator
+              className={`progress-fill ${progressPercent >= 80 ? 'warning' : ''}`}
+              style={{ width: `${progressPercent}%` }}
+            />
+          </Progress.Track>
+        </Progress.Root>
       </div>
 
       {/* Duration picker */}
       {showDurationPicker && (
         <div className="duration-picker">
           <span className="picker-label">Set meeting duration:</span>
-          <div className="duration-options">
+          <ToggleGroup
+            value={[String(currentDuration)]}
+            onValueChange={(vals) => {
+              if (vals.length > 0) {
+                handleDurationChange(Number(vals[0]));
+              }
+            }}
+            className="duration-options"
+          >
             {[15, 30, 45, 60, 90, 120].map((min) => (
-              <button
+              <Toggle
                 key={min}
-                className={`duration-option ${currentDuration === min ? 'selected' : ''}`}
-                onClick={() => handleDurationChange(min)}
+                value={String(min)}
+                aria-label={`${min} minutes`}
+                className="duration-option"
               >
                 {min} min
-              </button>
+              </Toggle>
             ))}
-          </div>
+          </ToggleGroup>
         </div>
       )}
 

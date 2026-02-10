@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Tooltip, AlertDialog } from '@base-ui/react';
 import AIPanel from './AIPanel';
 import HighlightsPanel from './HighlightsPanel';
 import './TestPage.css';
@@ -75,7 +76,6 @@ function TestPage() {
 
   const handleDelete = async () => {
     if (!selectedMeeting) return;
-    if (!window.confirm(`Delete "${selectedMeeting.title}"? This cannot be undone.`)) return;
 
     try {
       const response = await fetch(`/api/meetings/${selectedMeeting.id}`, {
@@ -187,25 +187,68 @@ function TestPage() {
               ) : (
                 <h2>
                   AI Features for: {selectedMeeting.title}
-                  <button
-                    className="edit-btn"
-                    onClick={() => {
-                      setNewTitle(selectedMeeting.title);
-                      setEditingTitle(true);
-                    }}
-                    title="Rename meeting"
-                  >
-                    ✏️
-                  </button>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger
+                      render={
+                        <button
+                          className="edit-btn"
+                          onClick={() => {
+                            setNewTitle(selectedMeeting.title);
+                            setEditingTitle(true);
+                          }}
+                        />
+                      }
+                    >
+                      ✏️
+                    </Tooltip.Trigger>
+                    <Tooltip.Portal>
+                      <Tooltip.Positioner sideOffset={6}>
+                        <Tooltip.Popup className="tooltip-popup">
+                          Rename meeting
+                        </Tooltip.Popup>
+                      </Tooltip.Positioner>
+                    </Tooltip.Portal>
+                  </Tooltip.Root>
                 </h2>
               )}
               <div className="meeting-actions">
-                <button onClick={handleExportVTT} className="export-btn" title="Download transcript as VTT">
-                  Download VTT
-                </button>
-                <button onClick={handleDelete} className="delete-btn" title="Delete meeting">
-                  Delete
-                </button>
+                <Tooltip.Root>
+                  <Tooltip.Trigger
+                    render={<button onClick={handleExportVTT} className="export-btn" />}
+                  >
+                    Download VTT
+                  </Tooltip.Trigger>
+                  <Tooltip.Portal>
+                    <Tooltip.Positioner sideOffset={6}>
+                      <Tooltip.Popup className="tooltip-popup">
+                        Download transcript as VTT
+                      </Tooltip.Popup>
+                    </Tooltip.Positioner>
+                  </Tooltip.Portal>
+                </Tooltip.Root>
+                <AlertDialog.Root>
+                  <AlertDialog.Trigger className="delete-btn">
+                    Delete
+                  </AlertDialog.Trigger>
+                  <AlertDialog.Portal>
+                    <AlertDialog.Backdrop className="dialog-backdrop" />
+                    <AlertDialog.Popup className="dialog-popup">
+                      <AlertDialog.Title className="dialog-title">Delete Meeting</AlertDialog.Title>
+                      <AlertDialog.Description className="dialog-description">
+                        Delete &ldquo;{selectedMeeting.title}&rdquo;? This cannot be undone.
+                      </AlertDialog.Description>
+                      <div className="dialog-actions">
+                        <AlertDialog.Close className="dialog-cancel-btn">Cancel</AlertDialog.Close>
+                        <AlertDialog.Close
+                          className="dialog-delete-btn"
+                          onClick={handleDelete}
+                        >
+                          Delete
+                        </AlertDialog.Close>
+                      </div>
+                    </AlertDialog.Popup>
+                  </AlertDialog.Portal>
+                </AlertDialog.Root>
               </div>
             </div>
             <AIPanel meetingId={selectedMeeting.id} />

@@ -10,22 +10,22 @@
   justify-content: space-between;
   align-items: center;
   padding: 12px 20px;
-  border-bottom: 1px solid #e0e0e0;
-  background: #fafafa;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-subtle);
 }
 
 .transcript-count {
   font-size: 14px;
-  color: #666;
+  color: var(--color-text-secondary);
 }
 
 .resume-live {
   padding: 6px 12px;
   font-size: 14px;
-  color: #2D8CFF;
-  background: #fff;
-  border: 1px solid #2D8CFF;
-  border-radius: 4px;
+  color: var(--color-primary);
+  background: var(--color-bg-white);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -35,20 +35,40 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #999;
+  color: var(--color-text-disabled);
   gap: 16px;
 }
 
-.transcript-container {
+/* ScrollArea */
+.transcript-scroll-area {
   flex: 1;
-  overflow-y: auto;
+  overflow: hidden;
+}
+
+.transcript-container {
   padding: 20px;
+}
+
+.transcript-scrollbar {
+  width: 10px;
+  padding: 2px;
+  background: var(--color-bg-light);
+  border-radius: 5px;
+}
+
+.transcript-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 5px;
+}
+
+.transcript-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 
 .transcript-segment {
   margin-bottom: 20px;
   padding-bottom: 20px;
-  border-bottom: 1px solid #f0f0f0;
+  border-bottom: 1px solid var(--color-border-subtle);
 }
 
 .transcript-segment:last-child {
@@ -64,17 +84,17 @@
 
 .speaker {
   font-weight: 600;
-  color: #333;
+  color: var(--color-text-primary);
   font-size: 14px;
 }
 
 .timestamp {
   font-size: 12px;
-  color: #999;
+  color: var(--color-text-disabled);
 }
 
 .segment-text {
   font-size: 15px;
   line-height: 1.6;
-  color: #333;
+  color: var(--color-text-primary);
 }
