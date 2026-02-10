@@ -694,7 +694,9 @@ DEFAULT_MODEL                          # Default: google/gemini-2.0-flash-thinki
 
 ## Next Steps
 
-See [PROJECT_STATUS.md](./PROJECT_STATUS.md) for current implementation status and roadmap (v0.5 → v1.0 → v2.0).
+See [`/SPEC.md`](../SPEC.md) for the authoritative feature specification and version milestones (v0.9 → v1.0 → v1.5 → v2.0).
+
+See [PROJECT_STATUS.md](./PROJECT_STATUS.md) for current implementation status and next actions.
 
 For Zoom Apps development guidance, see the reusable skill at `/.claude/skills/zoom-apps/`:
 - `02-sdk-setup.md` — SDK initialization, capabilities, contexts
