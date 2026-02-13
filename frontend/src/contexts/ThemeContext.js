@@ -5,10 +5,12 @@ const ThemeContext = createContext();
 export function ThemeProvider({ children }) {
   const [theme, setTheme] = useState(() => {
     try {
-      return localStorage.getItem('arlo-theme') || 'light';
+      const saved = localStorage.getItem('arlo-theme');
+      if (saved) return saved;
     } catch {
-      return 'light';
+      // localStorage unavailable
     }
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
   useEffect(() => {
