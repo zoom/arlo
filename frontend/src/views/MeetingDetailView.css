@@ -4,6 +4,9 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
 
 .detail-loading,
@@ -71,11 +74,27 @@
   gap: 8px;
 }
 
+.detail-tabs-root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
 .detail-tab-panel {
   margin-top: 16px;
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.detail-tab-panel[hidden] {
+  display: none;
+}
+
+.detail-tab-panel:not([hidden]) {
+  flex: 1;
+  min-height: 0;
 }
 
 .detail-card-inner {
@@ -124,10 +143,21 @@
 /* Transcript */
 .transcript-card {
   position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.transcript-scroll-root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .detail-transcript-viewport {
-  height: 500px;
+  flex: 1;
   overflow-y: auto;
   padding: 20px;
 }
