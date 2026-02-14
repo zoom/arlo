@@ -29,6 +29,11 @@ This roadmap outlines what's been built, what's coming next, and where contribut
 
 Zoom supports automatic RTMS start at three levels: account-wide, group, and per-user. The app currently has a basic auto-start timer in `InMeetingView.js` (line 55), but it doesn't handle the full matrix of scenarios. This item covers: host-initiated auto-start via webhook, participant-triggered RTMS with optional host approval, and suppressing auto-restart when the user has explicitly stopped transcription. See also the related known issue below.
 
+### Move dark mode toggle to Settings
+`good-first-issue` · `frontend/src/views/SettingsView.js`, `frontend/src/components/AppShell.js`
+
+The dark mode toggle currently lives in the AppShell header. Move it to `SettingsView` under a new "Appearance" section so the header stays clean. Remove the toggle from AppShell and add a light/dark/system selector in Settings (using the existing `ThemeContext`).
+
 ### Polish guest mode views
 `intermediate` · `frontend/src/views/GuestInMeetingView.js`, `frontend/src/views/GuestNoMeetingView.js`
 
