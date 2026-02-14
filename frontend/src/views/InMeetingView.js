@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, ScrollArea } from '@base-ui/react';
 import { ArrowDown, X, Sparkles, Pause, Play, Square } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
@@ -21,10 +21,20 @@ function formatTimestamp(ms) {
 
 export default function InMeetingView() {
   useParams(); // id available from route but meetingId comes from context
+  const navigate = useNavigate();
   const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
+
+  // Context guard: redirect to home if not in a meeting
+  useEffect(() => {
+    if (isTestMode) return;
+    if (runningContext === null) return; // SDK still loading
+    if (runningContext !== 'inMeeting') {
+      navigate('/home', { replace: true });
+    }
+  }, [isTestMode, runningContext, navigate]);
 
   const [segments, setSegments] = useState([]);
   const [followLive, setFollowLive] = useState(true);
@@ -131,6 +141,11 @@ export default function InMeetingView() {
       : rtmsActive
         ? 'waiting'
         : 'not-started';
+
+  // Early return while redirecting (after all hooks)
+  if (!isTestMode && runningContext !== null && runningContext !== 'inMeeting') {
+    return null;
+  }
 
   // Get meeting title (from meetingContext or URL)
   const title = meetingContext?.meetingTopic || 'Live Meeting';

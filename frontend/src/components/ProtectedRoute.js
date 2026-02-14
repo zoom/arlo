@@ -6,13 +6,13 @@ import LoadingSpinner from './ui/LoadingSpinner';
 
 export default function ProtectedRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
-  const { isTestMode } = useZoomSdk();
+  const { isTestMode, runningContext } = useZoomSdk();
 
   // In test mode, bypass auth
   if (isTestMode) return children;
 
-  // While restoring session, show spinner instead of redirecting
-  if (isLoading) {
+  // While restoring session or waiting for SDK context, show spinner
+  if (isLoading || runningContext === null) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
         <LoadingSpinner />
