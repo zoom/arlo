@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
@@ -11,15 +11,22 @@ import './AuthView.css';
 export default function AuthView() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading, login } = useAuth();
-  const { isTestMode } = useZoomSdk();
+  const { isTestMode, runningContext, meetingContext } = useZoomSdk();
   const { authorize, isAuthorizing, error } = useZoomAuth();
 
-  // Redirect if already authenticated (e.g. session restored from cookie)
-  useEffect(() => {
-    if (isAuthenticated) {
-      navigate('/home', { replace: true });
+  const getPostAuthDestination = useCallback(() => {
+    if (runningContext === 'inMeeting' && meetingContext?.meetingUUID) {
+      return `/meeting/${encodeURIComponent(meetingContext.meetingUUID)}`;
     }
-  }, [isAuthenticated, navigate]);
+    return '/home';
+  }, [runningContext, meetingContext]);
+
+  // Redirect if already authenticated and SDK context is ready
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (runningContext === null) return; // SDK still loading
+    navigate(getPostAuthDestination(), { replace: true });
+  }, [isAuthenticated, runningContext, navigate, getPostAuthDestination]);
 
   // In test mode, allow bypass
   useEffect(() => {
@@ -32,14 +39,14 @@ export default function AuthView() {
   const handleConnect = async () => {
     try {
       await authorize();
-      navigate('/home', { replace: true });
+      // Navigation handled by the useEffect above after login sets isAuthenticated
     } catch (err) {
       console.error('Authentication error:', err);
     }
   };
 
-  // Show spinner while session is being restored
-  if (isLoading) {
+  // Show spinner while session is being restored or authenticated but waiting for SDK
+  if (isLoading || (isAuthenticated && runningContext === null)) {
     return (
       <div className="auth-view">
         <div className="auth-content">
