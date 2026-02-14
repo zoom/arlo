@@ -340,7 +340,7 @@ export default function MeetingDetailView() {
       </div>
 
       {/* 4-tab view */}
-      <Tabs.Root defaultValue="summary" onValueChange={(val) => setActiveTab(val)}>
+      <Tabs.Root defaultValue="summary" className="detail-tabs-root" onValueChange={(val) => setActiveTab(val)}>
         <Tabs.List className="tabs-list" data-cols="5">
           <Tabs.Tab value="summary" className="tab-trigger">Summary</Tabs.Tab>
           <Tabs.Tab value="transcript" className="tab-trigger">Transcript</Tabs.Tab>
@@ -408,7 +408,7 @@ export default function MeetingDetailView() {
         {/* Transcript tab */}
         <Tabs.Panel value="transcript" className="detail-tab-panel">
           <Card className="transcript-card">
-            <ScrollArea.Root>
+            <ScrollArea.Root className="transcript-scroll-root">
               <ScrollArea.Viewport ref={transcriptRef} className="detail-transcript-viewport">
                 {segments.length === 0 ? (
                   <p className="text-muted text-sm" style={{ padding: 20 }}>No transcript available</p>
