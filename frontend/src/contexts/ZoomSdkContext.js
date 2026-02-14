@@ -93,6 +93,7 @@ export function ZoomSdkProvider({ children }) {
       } catch (error) {
         console.error('SDK Configuration Error:', error);
         setSdkError(error.message);
+        setRunningContext('error'); // Fallback so routing can proceed
       }
     }
 
