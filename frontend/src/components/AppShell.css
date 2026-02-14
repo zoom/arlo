@@ -95,4 +95,7 @@
 .app-main {
   flex: 1;
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
