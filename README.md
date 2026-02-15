@@ -103,6 +103,8 @@ cd arlo-meeting-assistant
 3. Name your app (e.g., "Arlo Meeting Assistant")
 4. Note your **Client ID** and **Client Secret**
 
+> **App Manifest (Beta):** If you have access to the Zoom App Manifest beta, you can upload `zoom-app-manifest.json` from this repo to pre-configure your app's scopes, SDK capabilities, event subscriptions, and more. See [App Manifest](#-app-manifest-beta) below for details.
+
 ### 4. Configure Environment
 
 ```bash
@@ -341,6 +343,7 @@ arlo-meeting-assistant/
 │
 ├── docs/             # 15 comprehensive guides
 ├── .env.example      # Environment variables template
+├── zoom-app-manifest.json  # Zoom App Manifest (beta)
 ├── docker-compose.yml
 └── README.md
 ```
@@ -449,6 +452,53 @@ This is an open-source starter kit designed to be forked and customized!
 - Risk/compliance signals
 - Background task extraction
 - Public sharing links
+
+---
+
+## 📦 App Manifest (Beta)
+
+Zoom App Manifests are JSON files that contain your app's configuration — scopes, SDK capabilities, event subscriptions, URLs, and more. This repo includes a pre-configured manifest at [`zoom-app-manifest.json`](./zoom-app-manifest.json) that you can upload to quickly configure your Zoom App.
+
+### Prerequisites
+
+- You must be accepted into the **Zoom App Manifest beta program** (request access from Zoom)
+- Your app must be a **General App** on the Zoom Marketplace
+- You must be the account owner, admin, or have the "Zoom for developers" role
+
+### Using the Manifest
+
+**Before uploading**, edit `zoom-app-manifest.json` and replace all instances of `your-ngrok-url.ngrok-free.app` with your actual ngrok domain (or production domain).
+
+**Upload to an existing app:**
+
+1. Log into [Zoom Marketplace](https://marketplace.zoom.us/) → **Manage** → select your app
+2. Open the manifest panel (persistent menu bar or Basic Information page)
+3. Click **Upload New Manifest** and select `zoom-app-manifest.json`
+4. Zoom validates the manifest and shows a green checkmark on success
+5. Close the manifest window, refresh your browser, and confirm changes
+
+**Download from an existing app:**
+
+1. In the manifest panel, click the **download icon** to save the current configuration
+2. Edit the JSON locally, then re-upload to apply changes
+
+### What's Included
+
+The manifest pre-configures:
+
+- **OAuth scopes:** `zoomapp:inmeeting`, `meeting:read:meeting`, `meeting:write:open_app` (optional), `user:read` (optional)
+- **SDK capabilities:** All 16 APIs used by Arlo (getMeetingContext, callZoomApi, authorize, showNotification, etc.)
+- **Event subscriptions:** `meeting.rtms_started`, `meeting.rtms_stopped`
+- **In-client OAuth:** Enabled (PKCE flow)
+- **Guest mode:** Enabled with test guest mode
+- **Domain allow list:** Your ngrok domain + `appssdk.zoom.us`
+
+### Limitations (Beta)
+
+- Manifests can only **update** existing apps, not create new ones
+- Only user-editable values are updated; the build-flow UX verifies completeness
+- Values are case-sensitive and must match Zoom's expected format
+- RTMS access still requires separate approval from Zoom (the manifest alone does not grant RTMS)
 
 ---
 
