@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { ArrowLeft, Search, Settings, Moon, Sun } from 'lucide-react';
-import { useTheme } from '../contexts/ThemeContext';
+import { ArrowLeft, Search, Settings } from 'lucide-react';
 import OwlIcon from './OwlIcon';
 import Button from './ui/Button';
 import LiveMeetingBanner from './LiveMeetingBanner';
@@ -10,7 +9,6 @@ import './AppShell.css';
 export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { theme, toggleTheme } = useTheme();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -123,10 +121,6 @@ export default function AppShell() {
 
           <Button variant="ghost" size="icon" onClick={() => setSearchOpen(!searchOpen)}>
             <Search size={16} />
-          </Button>
-
-          <Button variant="ghost" size="icon" onClick={toggleTheme}>
-            {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
           </Button>
 
           <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
