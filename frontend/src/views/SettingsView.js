@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, CheckCircle2, XCircle, MessageSquare, ExternalLink } from 'lucide-react';
+import { Eye, EyeOff, CheckCircle2, XCircle, MessageSquare, ExternalLink, Moon, Sun } from 'lucide-react';
+import { useTheme } from '../contexts/ThemeContext';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -52,6 +53,7 @@ const MOCK_SETTINGS_UPCOMING = [
 
 export default function SettingsView() {
   const navigate = useNavigate();
+  const { theme, toggleTheme } = useTheme();
   const [autoOpen, setAutoOpen] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
   const [settingsUpcoming, setSettingsUpcoming] = useState([]);
@@ -236,10 +238,15 @@ export default function SettingsView() {
   return (
     <div className="settings-view">
       <div className="settings-header">
-        <h1 className="text-serif text-2xl">Settings</h1>
-        <p className="text-sans text-sm text-muted">
-          Configure Arlo&apos;s behavior and AI provider
-        </p>
+        <div className="settings-header-text">
+          <h1 className="text-serif text-2xl">Settings</h1>
+          <p className="text-sans text-sm text-muted">
+            Configure Arlo&apos;s behavior and AI provider
+          </p>
+        </div>
+        <Button variant="ghost" size="icon" onClick={toggleTheme}>
+          {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+        </Button>
       </div>
 
       {/* Transcription Preferences */}
