@@ -57,10 +57,8 @@ A visual timeline showing when each participant joined and left the meeting. Req
 
 Currently all AI features route through OpenRouter. This item adds support for calling Anthropic, OpenAI, or local LLM endpoints directly. Includes a Settings UI where users can enter their own API keys and select a preferred provider.
 
-### Web-based OAuth redirect flow
-`advanced` · New route in `backend/src/routes/auth.js`, new frontend entry point
-
-Implement a standard OAuth redirect flow (outside the Zoom client) so users can install Arlo from a web browser. This is a prerequisite for building a post-meeting web dashboard where users can review transcripts and summaries without being in a Zoom meeting.
+### ~~Web-based OAuth redirect flow~~ ✅
+Implemented — `GET /api/auth/start`, `GET /api/auth/callback`, landing page, onboarding, and error views. See Known Issues for remaining gaps.
 
 ---
 
@@ -87,6 +85,8 @@ Create purpose-built views for specific use cases: **Healthcare** (HIPAA-aware t
 
 - **Participant webhook events need audit** — `meeting.participant_joined` and `meeting.participant_left` webhooks may be firing but aren't currently used. These events are only relevant when the app is running as the meeting host. Audit whether these create unnecessary processing or noise, and either use them (for the timeline view) or unsubscribe.
 - **"Live meeting in progress" persists after meeting ends** — The `LiveMeetingBanner` and `InMeetingView` remain active after a meeting ends and the user is no longer in the meeting context. `MeetingContext` does not clear the active meeting state when the Zoom meeting ends.
+- **Browser `/auth` route shows SDK error** — When a browser user visits the root URL (`/`), `RootView` detects no Zoom SDK and should show the landing page. However, if the user somehow navigates to `/#/auth` (e.g. via `ProtectedRoute` redirect), `AuthView` attempts to call `zoomSdk.authorize()` which fails outside the Zoom client. The "Connect with Zoom" button on `AuthView` should detect browser context and redirect to the Marketplace install URL (`/api/auth/start`) instead of calling SDK methods.
+- **`/welcome` onboarding could show upcoming meetings** — After a successful Marketplace install, the `/welcome` screen currently shows static "Next Steps" instructions. It should fetch the user's upcoming Zoom meetings (via `GET /api/zoom-meetings`) and display them with auto-open toggles, prompting the user to enable auto-open so Arlo launches automatically in their next meetings. This would make the post-install experience more actionable.
 
 ---
 
