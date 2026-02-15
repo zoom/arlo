@@ -296,6 +296,7 @@ DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
 6. **Home URL** — Your ngrok/production URL
 7. **Event Subscriptions** — `meeting.rtms_started`, `meeting.rtms_stopped`
 8. **App ID** — Copy from Marketplace app overview page → set as `ZOOM_APP_ID` in `.env` (different from Client ID)
+9. **App Manifest (Beta)** — If enrolled in the manifest beta, upload `zoom-app-manifest.json` to pre-configure steps 1-7 (replace placeholder URLs first). See README for details.
 
 ## Security
 
@@ -337,6 +338,7 @@ arlo-meeting-assistant/
 │   └── TROUBLESHOOTING.md
 ├── .claude/skills/zoom-apps/  # Reusable Zoom Apps development guides (8 docs)
 ├── docker-compose.yml
+├── zoom-app-manifest.json  # Zoom App Manifest (beta) — pre-configured scopes, SDK APIs, events
 ├── .env.example
 └── package.json       # Root workspace config
 ```

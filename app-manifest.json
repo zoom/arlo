@@ -1,0 +1,136 @@
+{
+    "display_information": {
+        "description": "AI meeting assistant with live transcription",
+        "display_name": "Arlo Meeting Assistant",
+        "long_description": "Arlo is an intelligent meeting companion that lives inside Zoom. It captures real-time transcripts using RTMS (Realtime Media Streams) without requiring a meeting bot, and provides AI-powered summaries, action items, transcript search, and meeting highlights."
+    },
+    "oauth_information": {
+        "usage": "USER_OPERATION",
+        "development_redirect_uri": "https://your-ngrok-url.ngrok-free.app/api/auth/callback",
+        "production_redirect_uri": "https://your-ngrok-url.ngrok-free.app/api/auth/callback",
+        "oauth_allow_list": [
+            "https://your-ngrok-url.ngrok-free.app"
+        ],
+        "strict_mode": false,
+        "subdomain_strict_mode": true,
+        "scopes": [
+            {
+                "scope": "zoomapp:inmeeting",
+                "optional": false
+            },
+            {
+                "scope": "meeting:read:meeting",
+                "optional": false
+            },
+            {
+                "scope": "meeting:write:open_app",
+                "optional": true
+            },
+            {
+                "scope": "user:read",
+                "optional": true
+            }
+        ],
+        "scope_description": "Arlo needs meeting access for live transcription via RTMS, meeting list access for the upcoming meetings feature, and optional auto-open registration for hands-free meeting start."
+    },
+    "features": {
+        "products": [
+            "ZOOM_MEETING"
+        ],
+        "development_home_uri": "https://your-ngrok-url.ngrok-free.app",
+        "production_home_uri": "https://your-ngrok-url.ngrok-free.app",
+        "domain_allow_list": [
+            {
+                "domain": "your-ngrok-url.ngrok-free.app",
+                "explanation": "Development server for Arlo Meeting Assistant"
+            },
+            {
+                "domain": "appssdk.zoom.us",
+                "explanation": "Required for Zoom Apps SDK"
+            }
+        ],
+        "in_client_feature": {
+            "zoom_app_api": {
+                "enable": true,
+                "zoom_app_apis": [
+                    "getMeetingContext",
+                    "getMeetingUUID",
+                    "getRunningContext",
+                    "getUserContext",
+                    "getMeetingParticipants",
+                    "authorize",
+                    "onAuthorized",
+                    "promptAuthorize",
+                    "callZoomApi",
+                    "onMessage",
+                    "postMessage",
+                    "showNotification",
+                    "sendMessageToChat",
+                    "openUrl",
+                    "onRunningContextChange"
+                ]
+            },
+            "guest_mode": {
+                "enable": true,
+                "enable_test_guest_mode": true
+            },
+            "in_client_oauth": {
+                "enable": true
+            },
+            "collaborate_mode": {
+                "enable": false,
+                "enable_screen_sharing": false,
+                "enable_play_together": false
+            }
+        },
+        "zoom_client_support": {
+            "mobile": {
+                "enable": false,
+                "apple_developer_program_team_id": ""
+            },
+            "zoom_room": {
+                "enable": false,
+                "enable_personal_zoom_room": false,
+                "enable_shared_zoom_room": false,
+                "enable_digital_signage": false,
+                "enable_zoom_rooms_controller": false
+            },
+            "pwa_client": {
+                "enable": false
+            }
+        },
+        "embed": {
+            "meeting_sdk": {
+                "enable": false,
+                "enable_device": false,
+                "devices": []
+            },
+            "contact_center_sdk": {
+                "enable": false
+            },
+            "phone_sdk": {
+                "enable": false,
+                "fcm_token": null
+            }
+        },
+        "team_chat_subscription": {
+            "enable": false
+        },
+        "event_subscription": {
+            "enable": true,
+            "events": [
+                {
+                    "subscription_name": "Arlo RTMS Events",
+                    "event_types": [
+                        "meeting.rtms_started",
+                        "meeting.rtms_stopped"
+                    ],
+                    "development_webhook_url": "https://your-ngrok-url.ngrok-free.app/api/rtms/webhook",
+                    "production_webhook_url": "https://your-ngrok-url.ngrok-free.app/api/rtms/webhook",
+                    "development_event_custom_header": null,
+                    "production_event_custom_header": null
+                }
+            ]
+        }
+    }
+}
