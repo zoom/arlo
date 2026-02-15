@@ -10,7 +10,7 @@
 
 Open-source Zoom Apps starter kit for building intelligent meeting assistants using RTMS (Real-Time Media Streams) — no meeting bot required.
 
-**Current state:** The v1.0 UI is feature-complete. The frontend has been decomposed from a monolithic component into a multi-view architecture with HashRouter, 10 views, 5 context providers, and a shared AppShell. All Figma Make designs have been ported into the CRA + plain CSS codebase. In-client OAuth PKCE is working, OS dark mode detection is implemented, and new API endpoints support the home dashboard. See [SPEC.md](../SPEC.md) for the full feature inventory.
+**Current state:** The v1.0 UI is feature-complete. The frontend has been decomposed from a monolithic component into a multi-view architecture with HashRouter, 10 views, 5 context providers, and a shared AppShell. All Figma Make designs have been ported into the CRA + plain CSS codebase. In-client OAuth PKCE is working, OS dark mode detection is implemented, and new API endpoints support the home dashboard. RTMS auto-start runs at the provider level (MeetingContext) so transcription begins as soon as the user is authenticated and in a meeting, regardless of which view is active. See [SPEC.md](../SPEC.md) for the full feature inventory.
 
 ---
 
@@ -89,6 +89,8 @@ Open-source Zoom Apps starter kit for building intelligent meeting assistants us
   - **Participant Timeline** — 5th tab in MeetingDetail with colored swimlane bars
   - **Settings View** — Transcription toggles, AI provider/model/API key config, test connection
   - **Pause/Resume RTMS** — Real `pauseRTMS`/`resumeRTMS` SDK calls, `rtmsPaused` state in MeetingContext
+- **Provider-level RTMS auto-start** — Auto-start logic moved from InMeetingView to MeetingContext so it fires regardless of which view is active. User lands on HomeView with LiveMeetingBanner linking to the live transcript. Context-aware routing via `getRunningContext()` guards InMeetingView.
+- **Chat notices for transcription lifecycle** — Automatic Zoom chat messages for start/pause/resume/stop/restart with per-event toggles and customizable templates
 
 ### Not Yet Done
 
