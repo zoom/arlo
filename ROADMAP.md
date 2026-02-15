@@ -19,7 +19,7 @@ This roadmap outlines what's been built, what's coming next, and where contribut
 - [x] **AI-powered home dashboard** — Home page features an AI-generated weekly digest, smart reminders extracted from action items across meetings, and cross-meeting insights (recurring topics, follow-up tracking).
 - [x] **Multi-source search** — Search now queries meeting titles, AI summaries (JSONB fields), and transcripts in parallel. Results are prioritized by source (titles first, summaries second, transcripts third) with section labels when multiple categories match. AppShell dropdown shows type badges and limits to 5 results.
 - [x] **Chat notices** — Automatic Zoom chat messages when transcription starts, pauses, resumes, stops, or restarts. Each event has an independent toggle and customizable message template with `[meeting-id]` placeholder support. Settings UI with progressive disclosure (master toggle, per-event toggles, editable templates, live preview). Preferences persisted via `/api/preferences` endpoint (`User.preferences` JSON field) with localStorage for zero-latency access during meetings.
-- [x] **Functional auto-start transcription** — The "Start transcription when you open this app" toggle in Settings is now functional. Preference is persisted to localStorage and the `/api/preferences` API (`autoStartRTMS` key). `InMeetingView` checks the preference before auto-starting RTMS (defaults to ON for backward compatibility). `ZoomSdkContext` listens for `onRunningContextChange` events, and `AppShell` auto-navigates to `InMeetingView` when the user joins a meeting.
+- [x] **Functional auto-start transcription** — The "Start transcription when you open this app" toggle in Settings is now functional. Preference is persisted to localStorage and the `/api/preferences` API (`autoStartRTMS` key). Auto-start logic lives in `MeetingContext` (provider level) so RTMS starts as soon as the user is authenticated and in a meeting, regardless of which view is active. User lands on HomeView with a `LiveMeetingBanner` linking to the live transcript. Defaults to ON for backward compatibility.
 
 ---
 
@@ -138,11 +138,7 @@ Create purpose-built views for specific use cases: **Healthcare** (HIPAA-aware t
 
 ## Known Issues
 
-- **RTMS restarts after user pauses/stops** — The auto-start timer only fires once per mount (guarded by `autoStartRef`), so it no longer re-triggers after stop. However, if the user navigates away and back to `InMeetingView`, the ref resets and auto-start fires again. A persistent "user stopped" flag could suppress this.
-
 - **Participant webhook events need audit** — `meeting.participant_joined` and `meeting.participant_left` webhooks may be firing but aren't currently used. These events are only relevant when the app is running as the meeting host. Audit whether these create unnecessary processing or noise, and either use them (for the timeline view) or unsubscribe.
-
-- **App loads in-meeting UI outside of meetings** — The app doesn't use `getRunningContext()` for routing decisions. When opened from the Zoom main client, users can see the InMeetingView (with transport controls and "Start Transcription") even though no meeting is active. The fix requires context-aware routing: `inMeeting` → InMeetingView, all other contexts → HomeView.
 
 ---
 
