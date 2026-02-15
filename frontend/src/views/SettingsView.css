@@ -8,6 +8,13 @@
 
 .settings-header {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-header-text {
+  display: flex;
   flex-direction: column;
   gap: 4px;
 }
