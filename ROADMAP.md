@@ -37,11 +37,6 @@ This roadmap outlines what's been built, what's coming next, and where contribut
 
 The current guest views are minimal CTAs. `GuestInMeetingView` should display the meeting summary and a read-only transcript when available. `GuestNoMeetingView` should include a feature overview explaining what Arlo does, not just a login button.
 
-### Handle auto-started but not opened state
-`intermediate` · `backend/src/routes/rtms.js`, `backend/src/routes/meetings.js`
-
-Meeting attribution via RTMS operator ID is implemented — orphaned meetings are reassigned when the real user opens Arlo. Remaining work: ensure the frontend detects the reassigned meeting and navigates to InMeetingView automatically, and handle edge cases where the operator ID is unavailable.
-
 ### README improvements
 `good-first-issue`
 
@@ -68,10 +63,25 @@ Implemented — `GET /api/auth/start`, `GET /api/auth/callback`, landing page, o
 
 Write deployment guides for platforms like Railway, Render, Fly.io, and bare Docker Compose. Cover production Docker builds, required environment variables, SSL termination, database provisioning, and Zoom Marketplace configuration for custom domains.
 
-### External transcription sources
-`advanced` · Major architecture expansion
+### Alternative transcription providers
+`advanced` · `rtms/src/index.js`, `backend/src/services/`, `frontend/src/views/SettingsView.js`
 
-Accept audio from non-Zoom sources and route it to a transcription service (Whisper, Deepgram, AssemblyAI) for live transcription. This would let Arlo work with any audio input, not just Zoom RTMS. Requires a new audio ingestion pipeline and transcription service abstraction.
+Zoom's built-in transcription (RTMS captions) is the default and requires no additional setup. This feature adds an opt-in mode to receive raw audio from RTMS and route it to an external transcription service instead — useful for developers who need different languages, higher accuracy, or provider-specific features.
+
+**How it works:** Switch the RTMS `startRTMS` call to request raw audio (`rawAudio: true`). RTMS then delivers PCM audio packets (`msg_type: 14`) — base64-encoded L16 at 16kHz mono — at configurable intervals (20ms default) instead of caption text. The RTMS service streams these packets over a persistent WebSocket to the provider's real-time transcription API.
+
+**Supported providers:** Deepgram, AssemblyAI, AWS Transcribe, Azure Speech-to-Text, Whisper (local). See [`zoom/rtms-samples/audio`](https://github.com/zoom/rtms-samples/tree/main/audio) for working integration examples covering all of these.
+
+**Speaker attribution:** Two approaches depending on the audio stream mode:
+- **Per-participant streams** — each audio packet includes `user_id`, `user_name`, and `timestamp`, giving implicit speaker diarization through stream isolation.
+- **Mixed stream** (`user_id: 0`) — use active speaker change events (`msg_type: 6`, `event_type: 2`) from the RTMS signaling channel to attribute speech segments.
+
+**Mute detection:** RTMS stops sending audio packets when a participant mutes. Use timestamp gaps to insert silence markers or skip empty intervals.
+
+**Implementation scope:**
+- RTMS service: conditionally request raw audio and forward PCM packets to the selected provider's streaming API.
+- Backend: transcription service abstraction layer to normalize external provider output into the existing `TranscriptSegment` format (speaker, text, timestamps).
+- Settings UI: provider selection dropdown and API key entry, extending the existing AI provider config pattern in SettingsView.
 
 ### Specialized UI modes
 `advanced` · Frontend views, AI prompt engineering, new export formats
