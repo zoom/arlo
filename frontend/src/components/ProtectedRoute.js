@@ -9,7 +9,7 @@ const isDevMode = window.location.search.includes('test=true');
 
 export default function ProtectedRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
-  const { isTestMode: isBrowser, runningContext } = useZoomSdk();
+  const { isTestMode: isBrowser, runningContext, isGuest, meetingContext } = useZoomSdk();
 
   // Dev mode: bypass auth for local development with ?test=true
   if (isDevMode) return children;
@@ -33,8 +33,19 @@ export default function ProtectedRoute({ children }) {
   }
 
   if (!isAuthenticated) {
-    // Browser → landing page, Zoom → in-client auth
-    return <Navigate to={isBrowser ? '/' : '/auth'} replace />;
+    if (isBrowser) {
+      return <Navigate to="/" replace />;
+    }
+    // Guest in Zoom — redirect to guest views instead of auth
+    if (isGuest) {
+      const inMeeting = runningContext === 'inMeeting';
+      const meetingUUID = meetingContext?.meetingUUID;
+      if (inMeeting && meetingUUID) {
+        return <Navigate to={`/guest/${encodeURIComponent(meetingUUID)}`} replace />;
+      }
+      return <Navigate to="/guest" replace />;
+    }
+    return <Navigate to="/auth" replace />;
   }
 
   return children;

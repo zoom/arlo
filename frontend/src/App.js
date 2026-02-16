@@ -34,21 +34,38 @@ import TestPage from './components/TestPage';
  * - Browser + unauthenticated: show marketing landing page
  */
 function RootView() {
-  const { isTestMode: isBrowser } = useZoomSdk();
+  const { isTestMode: isBrowser, isGuest, meetingContext, runningContext } = useZoomSdk();
   const { isAuthenticated, isLoading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!isBrowser) {
-      navigate('/auth', { replace: true });
+    if (isBrowser) {
+      if (!isLoading && isAuthenticated) {
+        navigate('/home', { replace: true });
+      }
       return;
     }
-    if (!isLoading && isAuthenticated) {
-      navigate('/home', { replace: true });
-    }
-  }, [isBrowser, isAuthenticated, isLoading, navigate]);
 
-  if (isLoading) {
+    // Inside Zoom: wait for SDK to determine guest status
+    if (isGuest === null) return; // SDK still loading
+
+    if (isGuest) {
+      // Guest user — route to guest views
+      const inMeeting = runningContext === 'inMeeting';
+      const meetingUUID = meetingContext?.meetingUUID;
+      if (inMeeting && meetingUUID) {
+        navigate(`/guest/${encodeURIComponent(meetingUUID)}`, { replace: true });
+      } else {
+        navigate('/guest', { replace: true });
+      }
+    } else {
+      // Authorized user — route to auth for token exchange
+      navigate('/auth', { replace: true });
+    }
+  }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate]);
+
+  // Show spinner while loading
+  if (isLoading || (!isBrowser && isGuest === null)) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <LoadingSpinner />

@@ -17,17 +17,22 @@ const DEFAULT_CHAT_NOTICES = {
 };
 
 export function MeetingProvider({ children }) {
-  const { zoomSdk, meetingContext } = useZoomSdk();
+  const { zoomSdk, meetingContext, isGuest, userContext } = useZoomSdk();
   const [rtmsActive, setRtmsActive] = useState(false);
   const [rtmsPaused, setRtmsPaused] = useState(false);
   const [rtmsLoading, setRtmsLoading] = useState(false);
   const [ws, setWs] = useState(null);
+  const [viewers, setViewers] = useState(null);
 
   const meetingStartTimeRef = useRef(null);
   const autoStartAttemptedRef = useRef(false);
   const titleSentRef = useRef(false);
   const hasBeenActiveRef = useRef(false);
   const shouldReconnectRef = useRef(true);
+  const isGuestRef = useRef(isGuest);
+  const userContextRef = useRef(userContext);
+  isGuestRef.current = isGuest;
+  userContextRef.current = userContext;
 
   const meetingId = meetingContext?.meetingUUID;
 
@@ -90,9 +95,11 @@ export function MeetingProvider({ children }) {
 
     socket.onopen = () => {
       console.log('WebSocket connected');
+      const ctx = userContextRef.current;
+      const participantName = ctx?.screenName || ctx?.firstName || null;
       socket.send(JSON.stringify({
         type: 'subscribe',
-        payload: { meetingId },
+        payload: { meetingId, participantName, isGuest: !!isGuestRef.current },
       }));
     };
 
@@ -115,6 +122,9 @@ export function MeetingProvider({ children }) {
             setRtmsActive(false);
             setRtmsPaused(false);
           }
+          break;
+        case 'meeting.presence':
+          setViewers(message.data);
           break;
         default:
           break;
@@ -139,6 +149,7 @@ export function MeetingProvider({ children }) {
 
     setWs(socket);
     return socket;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rtmsActive]);
 
   const startRTMS = useCallback(async (isAutoStart = false) => {
@@ -306,6 +317,7 @@ export function MeetingProvider({ children }) {
       meetingId,
       meetingStartTime: meetingStartTimeRef.current,
       autoStartAttemptedRef,
+      viewers,
       startRTMS,
       stopRTMS,
       pauseRTMS,

@@ -116,6 +116,39 @@ router.patch('/by-zoom-id/:zoomMeetingId/topic', optionalAuth, async (req, res) 
 });
 
 /**
+ * GET /api/meetings/by-zoom-id/:zoomMeetingId
+ * Get meeting details by Zoom meeting UUID (for guest views that only have the SDK meeting ID)
+ */
+router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
+  try {
+    const { zoomMeetingId } = req.params;
+
+    const meeting = await prisma.meeting.findFirst({
+      where: { zoomMeetingId },
+      include: {
+        speakers: {
+          select: { id: true, displayName: true, label: true },
+        },
+        highlights: true,
+        _count: {
+          select: { segments: true },
+        },
+      },
+      orderBy: { startTime: 'desc' },
+    });
+
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    res.json({ meeting });
+  } catch (error) {
+    console.error('Get meeting by zoom ID error:', error);
+    res.status(500).json({ error: 'Failed to fetch meeting' });
+  }
+});
+
+/**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId/transcript
  * Get transcript segments by Zoom meeting UUID (for InMeetingView before DB ID is known)
  */

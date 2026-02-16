@@ -97,11 +97,14 @@ function initWebSocketServer(server) {
         }
       }
 
-      // Remove from meeting connections
-      if (meeting_id && connections.has(meeting_id)) {
-        connections.get(meeting_id).delete(ws);
-        if (connections.get(meeting_id).size === 0) {
-          connections.delete(meeting_id);
+      // Remove from meeting connections and broadcast updated presence
+      const disconnectedMeetingId = ws.meetingId || meeting_id;
+      if (disconnectedMeetingId && connections.has(disconnectedMeetingId)) {
+        connections.get(disconnectedMeetingId).delete(ws);
+        if (connections.get(disconnectedMeetingId).size === 0) {
+          connections.delete(disconnectedMeetingId);
+        } else {
+          broadcastPresence(disconnectedMeetingId);
         }
       }
     });
@@ -149,9 +152,11 @@ async function handleWebSocketMessage(ws, data) {
   switch (type) {
     case 'subscribe':
       // Subscribe to a meeting
-      const { meetingId } = payload;
+      const { meetingId, participantName, isGuest } = payload || {};
       if (meetingId) {
         ws.meetingId = meetingId;
+        ws.participantName = participantName || null;
+        ws.isGuest = !!isGuest;
         if (!connections.has(meetingId)) {
           connections.set(meetingId, new Set());
         }
@@ -160,6 +165,9 @@ async function handleWebSocketMessage(ws, data) {
           type: 'subscribed',
           data: { meetingId },
         }));
+
+        // Broadcast updated presence to all viewers in this meeting
+        broadcastPresence(meetingId);
 
         // Check current meeting status and inform the subscriber
         prisma.meeting.findFirst({
@@ -210,6 +218,54 @@ async function handleWebSocketMessage(ws, data) {
     default:
       console.warn(`⚠️ Unknown WebSocket message type: ${type}`);
   }
+}
+
+/**
+ * Broadcast presence (viewer count + list) to all connections in a meeting.
+ * Deduplicates by userId so a user with multiple WS connections counts once.
+ */
+function broadcastPresence(meetingId) {
+  if (!connections.has(meetingId)) return;
+
+  const clients = connections.get(meetingId);
+  const viewers = [];
+  const seenUserIds = new Set();
+  let guestCount = 0;
+
+  clients.forEach((client) => {
+    if (client.readyState !== WebSocket.OPEN) return;
+
+    // Deduplicate authenticated users by userId
+    if (client.userId) {
+      if (seenUserIds.has(client.userId)) return;
+      seenUserIds.add(client.userId);
+    }
+
+    if (client.isGuest) {
+      guestCount++;
+    }
+    viewers.push({
+      name: client.participantName || (client.isGuest ? 'Guest' : 'User'),
+      isGuest: client.isGuest,
+    });
+  });
+
+  const message = JSON.stringify({
+    type: 'meeting.presence',
+    data: {
+      meetingId,
+      viewerCount: viewers.length,
+      guestCount,
+      viewers,
+      timestamp: new Date().toISOString(),
+    },
+  });
+
+  clients.forEach((client) => {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(message);
+    }
+  });
 }
 
 /**
@@ -332,6 +388,7 @@ module.exports = {
   initWebSocketServer,
   broadcastToMeeting,
   broadcastToUser,
+  broadcastPresence,
   broadcastTranscriptSegment,
   broadcastParticipantEvent,
   broadcastAiSuggestion,

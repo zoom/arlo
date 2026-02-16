@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, ScrollArea } from '@base-ui/react';
-import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff } from 'lucide-react';
+import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
+import { useToast } from '../contexts/ToastContext';
 import useZoomAuth from '../hooks/useZoomAuth';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -47,9 +48,9 @@ function InlineEventLabel({ eventType, name }) {
 export default function InMeetingView() {
   useParams(); // id available from route but meetingId comes from context
   const navigate = useNavigate();
-  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket } = useMeeting();
+  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
-  const { meetingContext, isTestMode, runningContext } = useZoomSdk();
+  const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
 
   // Context guard: redirect to home if not in a meeting
@@ -61,6 +62,7 @@ export default function InMeetingView() {
     }
   }, [isTestMode, runningContext, navigate]);
 
+  const { addToast } = useToast();
   const [segments, setSegments] = useState([]);
   const [participantEvents, setParticipantEvents] = useState([]);
   const [followLive, setFollowLive] = useState(true);
@@ -68,7 +70,10 @@ export default function InMeetingView() {
   const [notes, setNotes] = useState('');
   const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
+  const [inviteMenuOpen, setInviteMenuOpen] = useState(false);
+  const [inviteSent, setInviteSent] = useState(false);
   const transcriptRef = useRef(null);
+  const inviteDropdownRef = useRef(null);
 
   // Auto-authenticate when entering meeting without a session
   const authAttemptedRef = useRef(false);
@@ -199,6 +204,51 @@ export default function InMeetingView() {
     setNewTask('');
   };
 
+  // Invite handlers
+  const handleInviteAll = useCallback(async () => {
+    if (!zoomSdk?.sendAppInvitationToAllParticipants) return;
+    try {
+      await zoomSdk.sendAppInvitationToAllParticipants();
+      setInviteSent(true);
+      setInviteMenuOpen(false);
+      addToast('Invitation sent to all participants', 'success');
+      setTimeout(() => setInviteSent(false), 3000);
+    } catch (err) {
+      console.error('sendAppInvitationToAllParticipants failed:', err);
+      addToast('Failed to send invitation', 'error');
+    }
+  }, [zoomSdk, addToast]);
+
+  const handleInviteChoose = useCallback(() => {
+    if (!zoomSdk?.showAppInvitationDialog) return;
+    zoomSdk.showAppInvitationDialog().catch((err) => {
+      console.error('showAppInvitationDialog failed:', err);
+    });
+    setInviteMenuOpen(false);
+  }, [zoomSdk]);
+
+  // Close invite dropdown on click outside
+  useEffect(() => {
+    if (!inviteMenuOpen) return;
+    const handleClickOutside = (e) => {
+      if (inviteDropdownRef.current && !inviteDropdownRef.current.contains(e.target)) {
+        setInviteMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [inviteMenuOpen]);
+
+  // Register onSendAppInvitation listener for confirmation
+  useEffect(() => {
+    if (!zoomSdk?.onSendAppInvitation) return;
+    const handler = () => {
+      setInviteSent(true);
+      setTimeout(() => setInviteSent(false), 3000);
+    };
+    zoomSdk.onSendAppInvitation(handler);
+  }, [zoomSdk]);
+
   const handlePause = () => {
     pauseRTMS();
   };
@@ -259,6 +309,12 @@ export default function InMeetingView() {
         </div>
         {participants.length > 0 && (
           <p className="text-sans text-sm text-muted">{participants.join(', ')}</p>
+        )}
+        {viewers && viewers.guestCount > 0 && (
+          <span className="viewer-count text-sans text-xs text-muted">
+            <Users size={12} />
+            {viewers.guestCount} {viewers.guestCount === 1 ? 'guest' : 'guests'} viewing
+          </span>
         )}
       </div>
 
@@ -331,6 +387,32 @@ export default function InMeetingView() {
                           Stop
                         </Button>
                       </>
+                    )}
+                    {/* Invite participants — only show when others are in the meeting */}
+                    {viewers && viewers.viewerCount > 1 && (
+                    <div className="invite-dropdown-container" ref={inviteDropdownRef}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className={inviteSent ? 'invite-sent' : ''}
+                        onClick={() => setInviteMenuOpen(prev => !prev)}
+                      >
+                        {inviteSent ? <Check size={12} /> : <Share2 size={12} />}
+                        {inviteSent ? 'Sent' : 'Invite'}
+                      </Button>
+                      {inviteMenuOpen && (
+                        <div className="invite-dropdown">
+                          <button className="invite-dropdown-item" onClick={handleInviteAll}>
+                            <Users size={14} />
+                            Invite all participants
+                          </button>
+                          <button className="invite-dropdown-item" onClick={handleInviteChoose}>
+                            <Share2 size={14} />
+                            Choose participants...
+                          </button>
+                        </div>
+                      )}
+                    </div>
                     )}
                   </div>
                 </div>

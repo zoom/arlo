@@ -27,15 +27,11 @@ This roadmap outlines what's been built, what's coming next, and where contribut
 - [x] **AI-generated meeting titles** — Sparkle icon in `MeetingDetailView` calls `POST /api/meetings/:id/generate-title` to generate a concise title from transcript/summary. Generated title pre-fills the inline editor for review before saving.
 - [x] **Participant event tracking and timeline** — `ParticipantEvent` database model tracks join/leave events with millisecond timestamps. `ParticipantTimeline` component renders swimlane visualization with colored bars per participant. Inline participant events (joined/left, transcription lifecycle) shown in `InMeetingView` transcript. Initial roster vs. real join detection via `firstTranscriptReceived` flag to filter noise from Zoom's initial participant dump.
 - [x] **Meeting attribution via RTMS operator ID** — When RTMS auto-starts before the user opens the app, the meeting is created under a system user. When the real user later opens Arlo, the backend detects the orphaned meeting via the RTMS operator ID and reassigns ownership so the user sees their transcript.
+- [x] **Guest mode showcase** — Full guest mode implementation across 5 areas: (1) **Auto-detection** — `ZoomSdkContext` derives `isGuest` from `getUserContext().status`, `onMyUserContextChange` listener handles live elevation with SDK reconfiguration, `RootView` and `ProtectedRoute` auto-route guests to `/guest` or `/guest/:id`. (2) **GuestInMeetingView** (full rewrite) — live WebSocket-powered transcript streaming (anonymous connection, null token), chronological timeline merging segments + participant events, collapsible `<details>` summary card (overview, key decisions, action items), disabled AI chat teaser with `promptAuthorize` link, post-meeting CTA, dismissible sticky bottom CTA bar. (3) **GuestNoMeetingView** (full rewrite) — welcome page with "What is Arlo?" explainer, 3 feature cards (Mic, Sparkles, Bookmark), Guest vs Full Access comparison table, `promptAuthorize` CTA + "Continue as guest" button. (4) **Host invitation flow** — Invite dropdown in InMeetingView transport controls (`sendAppInvitationToAllParticipants` / `showAppInvitationDialog`), 3-second green check confirmation, toast notifications, conditionally shown when other participants present. (5) **Presence broadcast** — `broadcastPresence` in WebSocket server with userId deduplication, `meeting.presence` events, guest count in InMeetingView header, viewer count in GuestInMeetingView. Backend: `GET /api/meetings/by-zoom-id/:zoomMeetingId` endpoint with `optionalAuth`. Manifest: added 5 new SDK APIs (`onMyUserContextChange`, invitation APIs).
 
 ---
 
 ## Near-term (v1.0 Polish)
-
-### Polish guest mode views
-`intermediate` · `frontend/src/views/GuestInMeetingView.js`, `frontend/src/views/GuestNoMeetingView.js`
-
-The current guest views are minimal CTAs. `GuestInMeetingView` should display the meeting summary and a read-only transcript when available. `GuestNoMeetingView` should include a feature overview explaining what Arlo does, not just a login button.
 
 ### README improvements
 `good-first-issue`

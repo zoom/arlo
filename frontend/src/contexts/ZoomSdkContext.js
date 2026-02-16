@@ -13,6 +13,8 @@ export function ZoomSdkProvider({ children }) {
   const [runningContext, setRunningContext] = useState(isTestMode ? 'test' : null);
   const [meetingContext, setMeetingContext] = useState(null);
   const [userContext, setUserContext] = useState(null);
+  // null = SDK not loaded yet, true = guest, false = authorized user
+  const [isGuest, setIsGuest] = useState(isTestMode ? false : null);
 
   useEffect(() => {
     if (isTestMode) {
@@ -39,6 +41,11 @@ export function ZoomSdkProvider({ children }) {
             'sendMessageToChat',
             'openUrl',
             'onRunningContextChange',
+            'onMyUserContextChange',
+            'sendAppInvitationToAllParticipants',
+            'sendAppInvitation',
+            'showAppInvitationDialog',
+            'onSendAppInvitation',
           ],
           version: '0.16.0',
         });
@@ -52,8 +59,18 @@ export function ZoomSdkProvider({ children }) {
         setRunningContext(context);
 
         // Get user context
-        const user = await zoomSdk.getUserContext();
-        setUserContext(user);
+        let user = null;
+        try {
+          user = await zoomSdk.getUserContext();
+          setUserContext(user);
+        } catch (err) {
+          console.warn('getUserContext failed (may be guest):', err);
+          setUserContext({ status: 'unauthenticated' });
+        }
+
+        // Derive guest status: authorized = not guest, anything else = guest
+        const userStatus = user?.status;
+        setIsGuest(userStatus !== 'authorized');
 
         async function fetchMeetingContext() {
           let data = {};
@@ -107,6 +124,34 @@ export function ZoomSdkProvider({ children }) {
             setMeetingContext(null);
           }
         });
+
+        // Listen for user context changes (e.g. guest → authorized after promptAuthorize)
+        zoomSdk.onMyUserContextChange(async (event) => {
+          const newStatus = event.status;
+          console.log('User context changed:', newStatus);
+          setUserContext(prev => ({ ...prev, ...event }));
+          setIsGuest(newStatus !== 'authorized');
+
+          // When user becomes authorized, re-configure SDK and fetch meeting context
+          if (newStatus === 'authorized') {
+            try {
+              await zoomSdk.config({
+                capabilities: [
+                  'getMeetingContext', 'getMeetingUUID', 'getRunningContext',
+                  'getUserContext', 'getMeetingParticipants', 'authorize',
+                  'onAuthorized', 'promptAuthorize', 'callZoomApi',
+                  'onMessage', 'postMessage', 'showNotification',
+                  'sendMessageToChat', 'openUrl', 'onRunningContextChange',
+                  'onMyUserContextChange', 'sendAppInvitationToAllParticipants',
+                  'sendAppInvitation', 'showAppInvitationDialog', 'onSendAppInvitation',
+                ],
+                version: '0.16.0',
+              });
+            } catch (err) {
+              console.warn('Re-config after elevation failed:', err);
+            }
+          }
+        });
       } catch (error) {
         console.error('SDK Configuration Error:', error);
         setSdkError(error.message);
@@ -125,6 +170,8 @@ export function ZoomSdkProvider({ children }) {
       runningContext,
       meetingContext,
       userContext,
+      userContextStatus: userContext?.status || null,
+      isGuest,
       isTestMode,
     }}>
       {children}
