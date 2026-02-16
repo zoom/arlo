@@ -170,6 +170,48 @@
   line-height: 1.6;
 }
 
+/* Participant events in live transcript */
+.transcript-participant-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 12px 0;
+  border-left: 2px solid var(--border);
+}
+
+.transcript-event-icon {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+
+.transcript-event-text {
+  flex: 1;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.transcript-event-time {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.timeline-event-animate {
+  animation: timeline-fade-in 200ms ease-out;
+}
+
+@keyframes timeline-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Suggestion bubbles */
 .suggestion-bubbles {
   position: absolute;

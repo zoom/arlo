@@ -194,12 +194,19 @@ export function MeetingProvider({ children }) {
       await zoomSdk.callZoomApi('pauseRTMS');
       setRtmsPaused(true);
       sendChatNotice('pause');
+      // Notify backend for timeline event
+      fetch('/api/rtms/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ meetingId, status: 'rtms_paused' }),
+      }).catch(() => {});
     } catch (error) {
       console.error('pauseRTMS failed:', error);
     } finally {
       setRtmsLoading(false);
     }
-  }, [rtmsLoading, zoomSdk, sendChatNotice]);
+  }, [rtmsLoading, zoomSdk, sendChatNotice, meetingId]);
 
   const resumeRTMS = useCallback(async () => {
     if (rtmsLoading || !zoomSdk) return;
@@ -208,12 +215,19 @@ export function MeetingProvider({ children }) {
       await zoomSdk.callZoomApi('resumeRTMS');
       setRtmsPaused(false);
       sendChatNotice('resume');
+      // Notify backend for timeline event
+      fetch('/api/rtms/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ meetingId, status: 'rtms_resumed' }),
+      }).catch(() => {});
     } catch (error) {
       console.error('resumeRTMS failed:', error);
     } finally {
       setRtmsLoading(false);
     }
-  }, [rtmsLoading, zoomSdk, sendChatNotice]);
+  }, [rtmsLoading, zoomSdk, sendChatNotice, meetingId]);
 
   // Stable ref to startRTMS so the auto-start timer isn't cancelled
   // when the callback reference changes (sendChatNotice/meetingId stabilising)

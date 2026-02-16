@@ -35,6 +35,7 @@ export default function MeetingDetailView() {
   const [summary, setSummary] = useState(null);
   const [actionItems, setActionItems] = useState([]);
   const [highlights, setHighlights] = useState([]);
+  const [participantEvents, setParticipantEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryFailed, setSummaryFailed] = useState(false);
@@ -53,10 +54,11 @@ export default function MeetingDetailView() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [meetingRes, transcriptRes, highlightsRes] = await Promise.allSettled([
+        const [meetingRes, transcriptRes, highlightsRes, eventsRes] = await Promise.allSettled([
           fetch(`/api/meetings/${id}`, { credentials: 'include' }),
           fetch(`/api/meetings/${id}/transcript?limit=1000`, { credentials: 'include' }),
           fetch(`/api/highlights?meetingId=${id}`, { credentials: 'include' }),
+          fetch(`/api/meetings/${id}/participant-events`, { credentials: 'include' }),
         ]);
 
         if (meetingRes.status === 'fulfilled' && meetingRes.value.ok) {
@@ -72,6 +74,11 @@ export default function MeetingDetailView() {
         if (highlightsRes.status === 'fulfilled' && highlightsRes.value.ok) {
           const data = await highlightsRes.value.json();
           setHighlights(data.highlights || []);
+        }
+
+        if (eventsRes.status === 'fulfilled' && eventsRes.value.ok) {
+          const data = await eventsRes.value.json();
+          setParticipantEvents(data.events || []);
         }
       } catch {
         // Failed to fetch
@@ -517,8 +524,8 @@ export default function MeetingDetailView() {
         {/* Timeline tab */}
         <Tabs.Panel value="timeline" className="detail-tab-panel">
           <ParticipantTimeline
-            participants={speakers}
-            meetingDuration={duration ? parseInt(duration) : 0}
+            segments={segments}
+            participantEvents={participantEvents}
           />
         </Tabs.Panel>
       </Tabs.Root>
