@@ -91,6 +91,12 @@ async function handleRTMSStarted(payload) {
         console.log(`  Timestamp: ${timestamp}`);
         console.log(`  User:`, user);
 
+        // Record participant name from transcript for leave event lookup
+        if (user?.userId && user?.userName) {
+          const session = activeSessions.get(meeting_uuid);
+          if (session) session.participantNames.set(String(user.userId), user.userName);
+        }
+
         const transcriptData = {
           text,
           timestamp,
@@ -125,11 +131,63 @@ async function handleRTMSStarted(payload) {
     // Set up participant event handler — renamed from onUserUpdate in v1.0
     client.onParticipantEvent((event, timestamp, participants) => {
       console.log('Participant event:', event, timestamp, participants);
+
+      const session = activeSessions.get(meeting_uuid);
+
+      // Suppress leave events fired during RTMS shutdown — SDK teardown artifacts
+      if (session?.stopping && (event === 'leave' || event === 'user_leave')) {
+        console.log('Suppressing leave events during RTMS shutdown');
+        return;
+      }
+
+      const isJoin = event === 'join' || event === 'user_join';
+
+      // Always record participant names from join events for later lookup
+      if (isJoin && session) {
+        (participants || []).forEach(p => {
+          const pid = p.participantId ? String(p.participantId) : (p.userId ? String(p.userId) : null);
+          const name = p.userName || p.name;
+          if (pid && name) session.participantNames.set(pid, name);
+        });
+      }
+
+      // Suppress initial roster join events that fire when RTMS first connects.
+      // The SDK reports all existing participants as "join" on connect — not real joins.
+      if (isJoin && session) {
+        const elapsed = Date.now() - session.startTime.getTime();
+        if (elapsed < 5000) {
+          console.log('Suppressing initial roster join events (RTMS just connected)');
+          return;
+        }
+      }
+
+      // Forward participant events to backend for broadcast + storage
+      const events = (participants || []).map(p => {
+        const pid = p.participantId ? String(p.participantId) : (p.userId ? String(p.userId) : null);
+        // Look up display name: prefer SDK-provided name, fall back to stored name
+        const name = p.userName || p.name || session?.participantNames.get(pid) || `Participant ${pid || 'unknown'}`;
+        return {
+          eventType: isJoin ? 'joined'
+            : (event === 'leave' || event === 'user_leave') ? 'left'
+            : event,
+          participantName: name,
+          participantId: pid,
+          timestamp: Date.now(),
+        };
+      });
+
+      if (events.length > 0) {
+        broadcastParticipantEvents(meeting_uuid, events).catch(err => {
+          console.error('Error forwarding participant events:', err);
+        });
+      }
     });
 
     // Store session info BEFORE joining to prevent duplicate handling
     activeSessions.set(meeting_uuid, {
       client,
+      stopping: false,
+      participantNames: new Map(), // userId → displayName lookup
       streamId: rtms_stream_id,
       startTime: new Date(),
       operatorId: operator_id || null,
@@ -165,7 +223,8 @@ async function handleRTMSStopped(payload) {
   const session = activeSessions.get(meeting_uuid);
   if (session) {
     try {
-      // v1.0: call leave() on the per-meeting client instance
+      // Set stopping flag to suppress false leave events during teardown
+      session.stopping = true;
       session.client.leave();
       activeSessions.delete(meeting_uuid);
       console.log('RTMS session stopped');
@@ -341,6 +400,22 @@ async function broadcastSegment(meetingId, segment) {
   } catch (error) {
     // Non-critical, just log
     console.warn('Failed to broadcast segment:', error.message);
+  }
+}
+
+/**
+ * Broadcast participant events to frontend via backend
+ */
+async function broadcastParticipantEvents(meetingId, events) {
+  try {
+    const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
+    await axios.post(`${backendUrl}/api/rtms/participant-event`, {
+      meetingId,
+      events,
+    });
+    console.log(`Sent ${events.length} participant events to backend for broadcast`);
+  } catch (error) {
+    console.warn('Failed to broadcast participant events:', error.message);
   }
 }
 

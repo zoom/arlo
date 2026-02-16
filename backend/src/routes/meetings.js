@@ -241,6 +241,42 @@ router.get('/:id/transcript', optionalAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/meetings/:id/participant-events
+ * Get participant join/leave events for a meeting
+ */
+router.get('/:id/participant-events', optionalAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const meeting = await prisma.meeting.findFirst({
+      where: { id },
+    });
+
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    const events = await prisma.participantEvent.findMany({
+      where: { meetingId: id },
+      orderBy: { timestamp: 'asc' },
+    });
+
+    const serializedEvents = events.map(e => ({
+      id: e.id,
+      eventType: e.eventType,
+      participantName: e.participantName,
+      participantId: e.participantId,
+      timestamp: Number(e.timestamp),
+    }));
+
+    res.json({ events: serializedEvents });
+  } catch (error) {
+    console.error('Get participant events error:', error);
+    res.status(500).json({ error: 'Failed to fetch participant events' });
+  }
+});
+
+/**
  * PATCH /api/meetings/:id
  * Update meeting (rename, etc.)
  */

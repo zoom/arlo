@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 const router = express.Router();
 const config = require('../config');
-const { broadcastTranscriptSegment, broadcastMeetingStatus, getStats } = require('../services/websocket');
+const { broadcastTranscriptSegment, broadcastParticipantEvent, broadcastMeetingStatus, getStats } = require('../services/websocket');
 const { zoomGet } = require('../services/zoomApi');
 const { PrismaClient } = require('@prisma/client');
 
@@ -168,6 +168,40 @@ router.post('/status', async (req, res) => {
   const sentCount = broadcastMeetingStatus(meetingId, status);
   console.log(`📡 Broadcast status to ${sentCount} clients`);
 
+  // Also broadcast a transcription lifecycle event for the timeline
+  const lifecycleMap = {
+    rtms_started: 'transcription_started',
+    rtms_stopped: 'transcription_stopped',
+    rtms_paused: 'transcription_paused',
+    rtms_resumed: 'transcription_resumed',
+  };
+  const eventType = lifecycleMap[status];
+  if (eventType) {
+    const lifecycleEvent = {
+      eventType,
+      participantName: 'Arlo',
+      participantId: null,
+      timestamp: Date.now(),
+    };
+    broadcastParticipantEvent(meetingId, lifecycleEvent);
+
+    // Save to database
+    const dbMeetingId = meetingCache.get(meetingId);
+    if (dbMeetingId) {
+      prisma.participantEvent.create({
+        data: {
+          meetingId: dbMeetingId,
+          eventType,
+          participantName: 'Arlo',
+          participantId: null,
+          timestamp: BigInt(lifecycleEvent.timestamp),
+        },
+      }).catch(err => {
+        console.error('❌ Failed to save lifecycle event:', err.message);
+      });
+    }
+  }
+
   res.status(200).json({ received: true, broadcast: sentCount });
 });
 
@@ -266,6 +300,63 @@ async function saveTranscriptSegment(zoomMeetingId, segment) {
   });
 
   console.log(`💾 Saved transcript segment to database (${tStartMs}ms - ${tEndMs}ms)`);
+}
+
+/**
+ * POST /api/rtms/participant-event
+ * Receive participant join/leave events from RTMS service
+ */
+router.post('/participant-event', async (req, res) => {
+  const { meetingId, events } = req.body;
+
+  console.log(`👥 Participant event for meeting ${meetingId}:`, events);
+
+  // Broadcast each event to WebSocket clients immediately
+  let sentCount = 0;
+  for (const event of events) {
+    sentCount += broadcastParticipantEvent(meetingId, event);
+  }
+
+  // Save to database in the background
+  saveParticipantEvents(meetingId, events).catch(err => {
+    console.error('❌ Failed to save participant events:', err.message);
+  });
+
+  res.status(200).json({ received: true, broadcast: sentCount });
+});
+
+/**
+ * Save participant events to database
+ */
+async function saveParticipantEvents(zoomMeetingId, events) {
+  let dbMeetingId = meetingCache.get(zoomMeetingId);
+
+  if (!dbMeetingId) {
+    const dbMeeting = await prisma.meeting.findFirst({
+      where: { zoomMeetingId: zoomMeetingId },
+    });
+    if (dbMeeting) {
+      dbMeetingId = dbMeeting.id;
+      meetingCache.set(zoomMeetingId, dbMeetingId);
+    } else {
+      console.log('⚠️ No meeting record found for participant events, skipping save');
+      return;
+    }
+  }
+
+  for (const event of events) {
+    await prisma.participantEvent.create({
+      data: {
+        meetingId: dbMeetingId,
+        eventType: event.eventType,
+        participantName: event.participantName,
+        participantId: event.participantId || null,
+        timestamp: BigInt(event.timestamp),
+      },
+    });
+  }
+
+  console.log(`💾 Saved ${events.length} participant events to database`);
 }
 
 /**

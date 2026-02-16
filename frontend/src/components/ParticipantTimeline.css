@@ -1,11 +1,34 @@
-.timeline-card {
-  padding: 20px;
-}
+/* =============================================================================
+   ParticipantTimeline — Inline event timeline
+   ============================================================================= */
 
-.timeline-inner {
+/* Card wrapper */
+.timeline-card {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+/* Header bar */
+.timeline-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Scroll area */
+.timeline-scroll-root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.timeline-viewport {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 20px;
 }
 
 /* Empty state */
@@ -14,102 +37,139 @@
   text-align: center;
 }
 
-/* Time axis */
-.timeline-axis {
+/* =============================================================================
+   System Events (join/leave/meeting started)
+   ============================================================================= */
+
+.timeline-system-event {
   display: flex;
   align-items: center;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 8px;
+  gap: 8px;
+  padding: 6px 12px;
+  margin: 12px 0;
+  border-left: 2px solid var(--border);
 }
 
-.timeline-axis-label {
-  width: 128px;
+.timeline-meeting-started {
+  background: color-mix(in srgb, var(--muted) 30%, transparent);
+  border-radius: var(--radius);
+  border-left: 2px solid var(--accent);
+  padding: 8px 12px;
+}
+
+.timeline-event-icon {
   flex-shrink: 0;
-}
-
-.timeline-axis-ticks {
-  flex: 1;
-  display: flex;
-  justify-content: space-between;
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
   color: var(--muted-foreground);
 }
 
-/* Swimlanes */
-.timeline-swimlanes {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.timeline-swimlane {
-  display: flex;
-  align-items: center;
-  height: 32px;
-}
-
-.timeline-swimlane-name {
-  width: 128px;
-  flex-shrink: 0;
-  text-align: right;
-  padding-right: 16px;
-  font-family: var(--font-sans);
-  font-size: 0.875rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timeline-swimlane-track {
+.timeline-event-text {
   flex: 1;
-  position: relative;
-  height: 100%;
+  color: var(--muted-foreground);
+  font-size: 13px;
 }
 
-.timeline-swimlane-bg {
-  position: absolute;
-  inset: 0;
-  background: color-mix(in srgb, var(--muted) 20%, transparent);
-  border-radius: var(--radius-sm);
+.timeline-event-time {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
 }
 
-.timeline-swimlane-bar {
-  position: absolute;
-  left: 0;
-  height: 100%;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
+/* Fade-in animation for live events */
+.timeline-event-animate {
+  animation: timeline-fade-in 200ms ease-out;
+}
+
+@keyframes timeline-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =============================================================================
+   Transcript Entries
+   ============================================================================= */
+
+.timeline-transcript-entry {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.timeline-transcript-entry:last-child {
+  border-bottom: none;
+}
+
+.timeline-transcript-header {
   display: flex;
   align-items: center;
-  padding: 0 8px;
-  transition: opacity 0.15s;
+  gap: 8px;
+  margin-bottom: 4px;
 }
 
-.timeline-swimlane-bar:hover {
-  opacity: 0.8;
+.timeline-transcript-time {
+  font-size: 12px;
 }
 
-.timeline-duration {
-  font-family: var(--font-sans);
-  font-size: 0.75rem;
-  opacity: 0;
-  transition: opacity 0.15s;
+.timeline-transcript-speaker {
+  font-size: 14px;
 }
 
-.timeline-swimlane-bar:hover .timeline-duration {
-  opacity: 1;
+.timeline-transcript-text {
+  font-size: 15px;
+  line-height: 1.6;
+  margin: 0;
 }
 
-/* Color variants */
-.timeline-bar-blue { background: #bfdbfe; }
-.timeline-bar-purple { background: #ddd6fe; }
-.timeline-bar-green { background: #bbf7d0; }
-.timeline-bar-orange { background: #fed7aa; }
-.timeline-bar-pink { background: #fbcfe8; }
+/* =============================================================================
+   Jump to Bottom
+   ============================================================================= */
 
-.dark .timeline-bar-blue { background: rgba(59, 130, 246, 0.25); }
-.dark .timeline-bar-purple { background: rgba(139, 92, 246, 0.25); }
-.dark .timeline-bar-green { background: rgba(34, 197, 94, 0.25); }
-.dark .timeline-bar-orange { background: rgba(249, 115, 22, 0.25); }
-.dark .timeline-bar-pink { background: rgba(236, 72, 153, 0.25); }
+.timeline-jump-bottom {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+}
+
+/* =============================================================================
+   Responsive: 900px wide panel
+   ============================================================================= */
+
+@media (min-width: 600px) {
+  .timeline-viewport {
+    padding: 12px 20px;
+  }
+
+  .timeline-system-event {
+    max-width: 600px;
+  }
+
+  .timeline-transcript-header {
+    justify-content: flex-start;
+  }
+}
+
+/* =============================================================================
+   Responsive: 380px Zoom sidebar
+   ============================================================================= */
+
+@media (max-width: 420px) {
+  .timeline-viewport {
+    padding: 8px 12px;
+  }
+
+  .timeline-header {
+    padding: 10px 12px;
+  }
+
+  .timeline-transcript-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+}

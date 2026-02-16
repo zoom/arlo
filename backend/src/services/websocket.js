@@ -266,6 +266,20 @@ function broadcastTranscriptSegment(meetingId, segment) {
 }
 
 /**
+ * Broadcast participant event (join/leave)
+ */
+function broadcastParticipantEvent(meetingId, event) {
+  return broadcastToMeeting(meetingId, {
+    type: 'participant.event',
+    data: {
+      meetingId,
+      event,
+      timestamp: new Date().toISOString(),
+    },
+  });
+}
+
+/**
  * Broadcast AI suggestion
  */
 function broadcastAiSuggestion(meetingId, suggestion) {
@@ -310,6 +324,7 @@ module.exports = {
   broadcastToMeeting,
   broadcastToUser,
   broadcastTranscriptSegment,
+  broadcastParticipantEvent,
   broadcastAiSuggestion,
   broadcastMeetingStatus,
   getStats,
