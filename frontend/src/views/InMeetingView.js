@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, ScrollArea } from '@base-ui/react';
-import { ArrowDown, X, Sparkles, Pause, Play, Square } from 'lucide-react';
+import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
@@ -17,6 +17,31 @@ function formatTimestamp(ms) {
   const date = new Date(ms);
   if (isNaN(date.getTime()) || ms === 0) return '--:--';
   return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+
+function InlineEventIcon({ eventType }) {
+  const cls = "transcript-event-icon";
+  switch (eventType) {
+    case 'joined': return <LogIn size={14} className={cls} />;
+    case 'left': return <LogOut size={14} className={cls} />;
+    case 'transcription_started': return <Mic size={14} className={cls} />;
+    case 'transcription_stopped': return <MicOff size={14} className={cls} />;
+    case 'transcription_paused': return <Pause size={14} className={cls} />;
+    case 'transcription_resumed': return <Play size={14} className={cls} />;
+    default: return <Mic size={14} className={cls} />;
+  }
+}
+
+function InlineEventLabel({ eventType, name }) {
+  switch (eventType) {
+    case 'joined': return `${name} joined the meeting`;
+    case 'left': return `${name} left the meeting`;
+    case 'transcription_started': return 'Transcription started';
+    case 'transcription_stopped': return 'Transcription stopped';
+    case 'transcription_paused': return 'Transcription paused';
+    case 'transcription_resumed': return 'Transcription resumed';
+    default: return `${name} — ${eventType}`;
+  }
 }
 
 export default function InMeetingView() {
@@ -37,6 +62,7 @@ export default function InMeetingView() {
   }, [isTestMode, runningContext, navigate]);
 
   const [segments, setSegments] = useState([]);
+  const [participantEvents, setParticipantEvents] = useState([]);
   const [followLive, setFollowLive] = useState(true);
   const [suggestions, setSuggestions] = useState([]);
   const [notes, setNotes] = useState('');
@@ -103,6 +129,19 @@ export default function InMeetingView() {
         }
       }
 
+      if (message.type === 'participant.event') {
+        const evt = message.data.event;
+        setParticipantEvents((prev) => [...prev, evt]);
+
+        if (followLive && transcriptRef.current) {
+          requestAnimationFrame(() => {
+            if (transcriptRef.current) {
+              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+            }
+          });
+        }
+      }
+
       if (message.type === 'ai.suggestion') {
         setSuggestions((prev) => [...prev, message.data.suggestion].slice(-3));
       }
@@ -149,13 +188,27 @@ export default function InMeetingView() {
   };
 
   // Determine transcript state
+  const hasContent = segments.length > 0 || participantEvents.length > 0;
   const transcriptState = rtmsPaused
     ? 'paused'
-    : rtmsActive && segments.length > 0
+    : rtmsActive && hasContent
       ? 'live'
       : rtmsActive
         ? 'waiting'
         : 'not-started';
+
+  // Merge transcript segments and participant events into a chronological timeline
+  const timelineItems = useMemo(() => {
+    const items = [];
+    segments.forEach((seg, i) => {
+      items.push({ type: 'transcript', ...seg, _ts: seg.tStartMs, _key: `seg-${i}` });
+    });
+    participantEvents.forEach((evt, i) => {
+      items.push({ type: 'participant-event', ...evt, _ts: evt.timestamp, _key: `evt-${i}` });
+    });
+    items.sort((a, b) => a._ts - b._ts);
+    return items;
+  }, [segments, participantEvents]);
 
   // Early return while redirecting (after all hooks)
   if (!isTestMode && runningContext !== null && runningContext !== 'inMeeting') {
@@ -269,21 +322,37 @@ export default function InMeetingView() {
                     className="transcript-viewport"
                     onScroll={handleScroll}
                   >
-                    {segments.map((segment, index) => (
-                      <div key={index} className="transcript-entry">
-                        <div className="transcript-entry-header">
-                          <span className="transcript-timestamp text-mono text-xs text-muted">
-                            {formatTimestamp(segment.tStartMs)}
-                          </span>
-                          <span className="transcript-speaker text-sans text-sm font-medium">
-                            {segment.speakerLabel}
-                          </span>
+                    {timelineItems.map((item) => {
+                      if (item.type === 'participant-event') {
+                        return (
+                          <div key={item._key} className="transcript-participant-event timeline-event-animate">
+                            <InlineEventIcon eventType={item.eventType} />
+                            <span className="transcript-event-text text-sans text-sm">
+                              <InlineEventLabel eventType={item.eventType} name={item.participantName} />
+                            </span>
+                            <span className="transcript-event-time text-mono text-xs">
+                              {formatTimestamp(item.timestamp)}
+                            </span>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div key={item._key} className="transcript-entry">
+                          <div className="transcript-entry-header">
+                            <span className="transcript-timestamp text-mono text-xs text-muted">
+                              {formatTimestamp(item.tStartMs)}
+                            </span>
+                            <span className="transcript-speaker text-sans text-sm font-medium">
+                              {item.speakerLabel}
+                            </span>
+                          </div>
+                          <p className="transcript-text text-serif text-sm">
+                            {item.text}
+                          </p>
                         </div>
-                        <p className="transcript-text text-serif text-sm">
-                          {segment.text}
-                        </p>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </ScrollArea.Viewport>
                   <ScrollArea.Scrollbar orientation="vertical" className="scroll-area-scrollbar">
                     <ScrollArea.Thumb className="scroll-area-scrollbar-thumb" />

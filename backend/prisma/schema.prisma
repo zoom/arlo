@@ -74,10 +74,11 @@ model Meeting {
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  speakers  Speaker[]
-  segments  TranscriptSegment[]
-  highlights Highlight[]
-  vttFiles  VttFile[]
+  speakers          Speaker[]
+  segments          TranscriptSegment[]
+  highlights        Highlight[]
+  vttFiles          VttFile[]
+  participantEvents ParticipantEvent[]
 
   @@index([ownerId, startTime])
   @@index([zoomMeetingId])
@@ -143,6 +144,23 @@ model VttFile {
 
   @@index([meetingId])
   @@map("vtt_files")
+}
+
+// =============================================================================
+// PARTICIPANT EVENTS (Join/Leave tracking)
+// =============================================================================
+
+model ParticipantEvent {
+  id              String   @id @default(uuid())
+  meetingId       String   @map("meeting_id")
+  meeting         Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  eventType       String   @map("event_type") // 'joined' | 'left'
+  participantName String   @map("participant_name")
+  participantId   String?  @map("participant_id") // Zoom participant ID
+  timestamp       BigInt   // Epoch milliseconds
+
+  @@index([meetingId, timestamp])
+  @@map("participant_events")
 }
 
 // =============================================================================
