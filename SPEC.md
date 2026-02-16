@@ -154,35 +154,52 @@ When the user is in an active meeting (determined by Zoom Apps SDK meeting conte
 
 ### Route: `/guest` — Guest Mode (No Meeting Context)
 
-**Access:** Unauthenticated users not currently in a meeting with active Arlo data.
+**Access:** Guest users (unauthenticated or authenticated-but-not-authorized) not currently in a meeting. Auto-detected via `getUserContext().status` in `ZoomSdkContext`.
 
 **Rendering:**
-- Centered layout (min-height 600px) with OwlIcon (64px) at top.
-- Heading: **"Meet Arlo, your AI meeting assistant"** (serif, text-2xl).
-- Three feature cards (vertical stack, text-left), each with icon + title + description:
-  1. Mic icon (accent) + **"Live Transcription"** + "Capture every word without a meeting bot"
-  2. Sparkles icon (accent) + **"AI Summaries"** + "Get key points, action items, and insights"
-  3. Search icon (accent) + **"Searchable History"** + "Find anything across all your meetings"
-- CTA button: **"Connect with Zoom"** (accent, large, full-width) → triggers Zoom OAuth flow via `useZoomAuth`.
+- Centered layout (max-width 400px) with OwlIcon (64px) at top.
+- Heading: **"You've been invited to use Arlo"** (serif, text-2xl) + subtitle.
+- **"What is Arlo?" card** — Explanatory paragraph about live transcripts, AI summaries, and action items.
+- **Three feature cards** (vertical stack), each with icon + title + guest-specific description:
+  1. Mic icon (accent) + **"Live Transcript"** + "Follow along with a real-time transcript of the conversation. See who said what, with timestamps."
+  2. Sparkles icon (accent) + **"AI Summary"** + "Key takeaways, decisions, and action items — generated as the meeting progresses."
+  3. Bookmark icon (accent) + **"Highlights"** + "View moments the host has bookmarked as important."
+- **Comparison table** — Guest vs Full Access with Check/Minus icons showing read-only access for guests (Live transcript, AI summary, Highlights) and full access features for authorized users (Meeting history, Full-text search).
+- **Elevation CTA** — Two-button layout:
+  - Primary: **"Sign in to Zoom"** (unauthenticated) or **"Add Arlo to Your Account"** (authenticated) → calls `zoomSdk.promptAuthorize()`.
+  - Secondary: **"Continue as guest"** → navigates to `/guest/:meetingUUID` if in meeting.
 
-**Routing logic:** The app determines guest vs. auth state on load. If the user is unauthenticated and no `currentMeetingUUID` is available with active transcript data, render this route.
+**Routing logic:** `RootView` detects guest state via `isGuest` (derived from `getUserContext().status !== 'authorized'` in `ZoomSdkContext`). Guests not in a meeting auto-route here. `ProtectedRoute` also redirects unauthorized guests here instead of `/auth`.
 
 ---
 
 ### Route: `/guest/{currentMeetingUUID}` — Guest Mode (In Meeting)
 
-**Access:** Unauthenticated users who are in a meeting where the host (an authenticated Arlo user) has active transcript data.
+**Access:** Guest users (unauthenticated or authenticated-but-not-authorized) in a meeting where the host has active transcript data. Auto-detected via `getUserContext().status` + `runningContext === 'inMeeting'` in `ZoomSdkContext`.
 
 **Rendering:**
-- **Meeting header:** Title (serif, 2xl) + Live badge (green pulse dot + "Live" text) if meeting is live.
-- **Summary card:** Displays `meeting.summary` if available; skeleton placeholder with "Summary generating..." if live and no summary yet.
-- **Read-only transcript preview:** ScrollArea with last ~20 transcript segments, opacity 0.6.
-  - Gradient fade overlay at top (from card bg to transparent).
-  - Centered floating pill: **"Sign in to see full transcript"**.
-- **CTA card:** Accent-tinted background with "Install Arlo for full access" heading, 3-bullet feature list, **"Connect with Zoom"** button → triggers OAuth flow via `useZoomAuth`.
-- Read-only. No interactive features beyond reading and clicking install.
 
-**Data dependency:** Requires that the meeting's transcript data is accessible to the server and that an LLM summary has been generated or can be generated on demand.
+- **Compact header bar:** OwlIcon (20px) + "Arlo" branding (left), meeting title from `meetingContext.meetingTopic` or DB (center), Live/Ended badge (right). No navigation.
+
+- **Live transcript area** (~60% viewport): WebSocket-powered real-time transcript streaming via `connectWebSocket(null, meetingId)` (anonymous connection, no token required). Chronological timeline merging transcript segments and participant events (join/leave, transcription lifecycle). Speaker labels, timestamps, and text at full opacity. Auto-scroll with "Scroll to live" button. Uses Base UI `ScrollArea`.
+
+- **Collapsible summary card:** Native `<details>/<summary>` element. Collapsed: Sparkles icon + "Meeting Summary" + rotating chevron. Expanded: Overview paragraph + Key Decisions list + Key Points list + Action Items list. Skeleton loading state while live. Auto-expanded when meeting ends. Data from `GET /api/meetings/by-zoom-id/:zoomMeetingId` (uses `optionalAuth`, works without auth).
+
+- **Viewer count:** Subtle bar showing "N others viewing" when `viewerCount > 2` (subtracts self). Data from `meeting.presence` WebSocket events.
+
+- **Disabled AI chat teaser:** Lock icon + "Ask a follow-up question..." placeholder + "Sign in to Zoom / Add Arlo to chat" link → `zoomSdk.promptAuthorize()`.
+
+- **Post-meeting state:** When `meeting.status` → `rtms_stopped` via WebSocket, replaces Live badge with "Ended" muted badge. Shows full summary expanded. Prominent install CTA card with OwlIcon, heading, value prop, and `promptAuthorize` button.
+
+- **Sticky bottom CTA bar:** "Want to capture your own meetings?" + accent "Install Arlo" / "Sign in to Zoom" button (adapts to `userContextStatus`) + X dismiss. Dismissible via `sessionStorage`. Hidden when meeting ended (replaced by inline CTA card).
+
+**Read-only enforcement:** No transport controls, no AI chat, no highlights/bookmarks, no title editing, no settings.
+
+**Data dependencies:**
+- WebSocket anonymous connection for live transcript segments, participant events, meeting status, and presence.
+- `GET /api/meetings/by-zoom-id/:zoomMeetingId` for meeting title and cached summary (uses `optionalAuth`).
+- `GET /api/meetings/by-zoom-id/:zoomMeetingId/transcript` for historical segments on mount.
+- `GET /api/meetings/by-zoom-id/:zoomMeetingId/participant-events` for historical participant events.
 
 ---
 
@@ -331,6 +348,8 @@ When the user is in an active meeting (determined by Zoom Apps SDK meeting conte
 - **Follow-live mode:** On by default. Scrolling up detaches. **"Scroll to live" button** anchored at the bottom of the transcript area to re-attach.
 - **Suggestion bubbles:** Real-time LLM-generated nudges (e.g., "Summarize the last 5 minutes," "This sounds like a commitment — capture it?"). Render as small dismissible chips/bubbles overlaid at the bottom of the transcript area, above the "Scroll to live" button. Informational only — no action on tap beyond dismiss (X button). New suggestions push older ones out or stack with a limit (e.g., max 2–3 visible).
 - **Chat notices:** When transcription state changes (start, pause, resume, stop, restart), Arlo sends an automatic message to the Zoom meeting chat notifying participants. Each event type has an independent toggle and customizable message template with `[meeting-id]` placeholder support. Configured in Settings.
+- **Guest count indicator:** When guests are viewing via Arlo, shows Eye icon + "N guest(s) viewing" in the header area (below meeting title). Data from `meeting.presence` WebSocket events, only displayed when `guestCount > 0`.
+- **Invite button:** Share2 icon button in transport controls, conditionally shown when `viewers.viewerCount > 1` (other participants present). Dropdown with two options: "Invite all participants" (`sendAppInvitationToAllParticipants`) and "Choose participants..." (`showAppInvitationDialog`). 3-second green check confirmation state after sending. Toast notification on success. Click-outside dismiss.
 
 #### Tab 2: Arlo Assist
 - **Notes:** LLM-generated draft meeting notes, displayed as markdown-formatted bullets. User-editable (contenteditable or textarea).
@@ -464,9 +483,9 @@ On app load:
 │   │   │       │           ├── YES → "Start Transcription" prompt
 │   │   │       │           └── NO  → "Request Access" / "Waiting" state
 │   │   │       └── NO  → /home
-│   │   └── Guest mode:
-│   │       ├── In meeting with Arlo data? → /guest/{currentMeetingUUID}
-│   │       └── No meeting context → /guest
+│   │   └── Guest mode (getUserContext().status !== 'authorized'):
+│   │       ├── In meeting? → /guest/{currentMeetingUUID}
+│   │       └── Not in meeting → /guest
 │   └── NO (browser):
 │       ├── Authenticated? → /home
 │       └── Not authenticated → / (LandingPageView)

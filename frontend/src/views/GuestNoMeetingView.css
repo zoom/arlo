@@ -13,13 +13,23 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 32px;
+  gap: 24px;
 }
 
 .guest-heading {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* What is Arlo card */
+.guest-what-card {
+  text-align: left;
+}
+
+.guest-what-card p {
+  padding: 20px;
+  color: var(--muted-foreground);
 }
 
 /* Feature cards */
@@ -48,6 +58,59 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* Comparison table */
+.guest-comparison-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.guest-comparison-table th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.guest-comparison-table th:nth-child(2),
+.guest-comparison-table th:nth-child(3) {
+  text-align: center;
+}
+
+.guest-comparison-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.guest-comparison-table td:nth-child(2),
+.guest-comparison-table td:nth-child(3) {
+  text-align: center;
+}
+
+.guest-comparison-table tbody tr:nth-child(odd) {
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+.guest-check-icon {
+  color: #16a34a;
+}
+
+.dark .guest-check-icon {
+  color: #4ade80;
+}
+
+.guest-dash-icon {
+  color: var(--muted-foreground);
+}
+
+/* CTA buttons */
+.guest-cta-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
 }
 
 .guest-btn {

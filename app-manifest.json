@@ -67,7 +67,12 @@
                     "showNotification",
                     "sendMessageToChat",
                     "openUrl",
-                    "onRunningContextChange"
+                    "onRunningContextChange",
+                    "onMyUserContextChange",
+                    "sendAppInvitationToAllParticipants",
+                    "sendAppInvitation",
+                    "showAppInvitationDialog",
+                    "onSendAppInvitation"
                 ]
             },
             "guest_mode": {

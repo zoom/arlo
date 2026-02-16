@@ -370,3 +370,4 @@ arlo-meeting-assistant/
 - Pre-existing lint warning in `HighlightsPanel.js` (missing dep in useEffect) — not to be fixed unless asked
 - No automated tests exist yet (manual testing only)
 - Frontend uses CRA (react-scripts), NOT Next.js
+- If RTMS stream starts before the app is opened in a meeting, the "Start" chat notice is never sent. The disclaimer/notice should be sent when the app opens and detects RTMS is already active.
