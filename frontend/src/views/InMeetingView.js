@@ -388,8 +388,8 @@ export default function InMeetingView() {
                         </Button>
                       </>
                     )}
-                    {/* Invite participants — only show when others are in the meeting */}
-                    {viewers && viewers.viewerCount > 1 && (
+                    {/* Invite participants */}
+                    {(
                     <div className="invite-dropdown-container" ref={inviteDropdownRef}>
                       <Button
                         variant="outline"
