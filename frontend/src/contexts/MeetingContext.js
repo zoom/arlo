@@ -28,6 +28,7 @@ export function MeetingProvider({ children }) {
   const autoStartAttemptedRef = useRef(false);
   const titleSentRef = useRef(false);
   const hasBeenActiveRef = useRef(false);
+  const statusCheckRef = useRef(false);
   const shouldReconnectRef = useRef(true);
   const isGuestRef = useRef(isGuest);
   const userContextRef = useRef(userContext);
@@ -44,6 +45,7 @@ export function MeetingProvider({ children }) {
       autoStartAttemptedRef.current = false;
       titleSentRef.current = false;
       hasBeenActiveRef.current = false;
+      statusCheckRef.current = false;
       meetingStartTimeRef.current = null;
     } else {
       // Meeting ended — stop reconnecting, close WS, reset state
@@ -192,6 +194,12 @@ export function MeetingProvider({ children }) {
       }).catch(() => {});
     } catch (error) {
       if (error?.code === '10308') {
+        // 10308 = RTMS already running — treat as success
+        setRtmsActive(true);
+        hasBeenActiveRef.current = true;
+        if (!meetingStartTimeRef.current) {
+          meetingStartTimeRef.current = Date.now();
+        }
         setTimeout(() => sessionStorage.removeItem(startingKey), 2000);
         setRtmsLoading(false);
         return;
@@ -282,6 +290,31 @@ export function MeetingProvider({ children }) {
     const timer = setTimeout(() => startRTMSRef.current(true), 1500);
     return () => clearTimeout(timer);
   }, [isAuthenticated, meetingId, rtmsActive, rtmsLoading]);
+
+  // Fallback: if WS subscribe didn't detect RTMS status, check via REST API
+  // This covers edge cases where the WS status message is missed (timing, UUID mismatch, etc.)
+  useEffect(() => {
+    if (statusCheckRef.current || !isAuthenticated || !meetingId || rtmsActive) return;
+    statusCheckRef.current = true;
+    const timer = setTimeout(() => {
+      fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}`, {
+        credentials: 'include',
+      })
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          if (data?.meeting?.status === 'ongoing') {
+            console.log('Fallback status check: meeting is ongoing, setting rtmsActive');
+            setRtmsActive(true);
+            hasBeenActiveRef.current = true;
+            if (!meetingStartTimeRef.current) {
+              meetingStartTimeRef.current = Date.now();
+            }
+          }
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [isAuthenticated, meetingId, rtmsActive]);
 
   // Send Zoom meeting topic to backend to replace generic "Meeting M/D/YYYY" title
   // Wait for rtmsActive so the meeting record exists in the DB before patching

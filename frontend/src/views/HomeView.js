@@ -118,12 +118,8 @@ export default function HomeView() {
     );
   };
 
-  // Auto-navigate to InMeetingView when RTMS is actively transcribing
-  useEffect(() => {
-    if (rtmsActive && meetingId) {
-      navigate(`/meeting/${encodeURIComponent(meetingId)}`, { replace: true });
-    }
-  }, [rtmsActive, meetingId, navigate]);
+  // Note: LiveMeetingBanner (in AppShell) shows a banner when RTMS is active,
+  // letting the user tap "Return to live transcript" at their own pace.
 
   if (loading) {
     return (
