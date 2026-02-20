@@ -103,15 +103,22 @@ router.post('/status', async (req, res) => {
         });
       }
 
-      // Find an ongoing meeting with this UUID, or create a new record.
-      // If only a completed meeting exists (e.g. recurring/PMR reusing the same UUID),
-      // create a fresh record so old transcript segments stay with the old meeting.
-      let dbMeeting = await prisma.meeting.findFirst({
-        where: { zoomMeetingId: meetingId, status: 'ongoing' },
-        orderBy: { createdAt: 'desc' },
+      // Find existing meeting by UUID (unique per instance).
+      // Reuse it if found (reopen if completed), only create if none exists.
+      let dbMeeting = await prisma.meeting.findUnique({
+        where: { zoomMeetingId: meetingId },
       });
 
       if (dbMeeting) {
+        // Reopen completed meetings (same RTMS session, app was closed/reopened)
+        if (dbMeeting.status === 'completed') {
+          dbMeeting = await prisma.meeting.update({
+            where: { id: dbMeeting.id },
+            data: { status: 'ongoing', endTime: null },
+          });
+          console.log(`✅ Reopened completed meeting: ${dbMeeting.id}`);
+        }
+
         // If meeting exists under system user but we now have a real owner, reassign
         if (owner.zoomUserId !== 'system' && dbMeeting.ownerId !== owner.id) {
           const currentOwner = await prisma.user.findUnique({ where: { id: dbMeeting.ownerId } });
@@ -148,7 +155,16 @@ router.post('/status', async (req, res) => {
 
     } else if (status === 'rtms_stopped') {
       // Mark meeting as completed
-      const dbMeetingId = meetingCache.get(meetingId);
+      let dbMeetingId = meetingCache.get(meetingId);
+
+      // Fall back to DB lookup if cache misses
+      if (!dbMeetingId) {
+        const m = await prisma.meeting.findUnique({
+          where: { zoomMeetingId: meetingId },
+        });
+        if (m) dbMeetingId = m.id;
+      }
+
       if (dbMeetingId) {
         await prisma.meeting.update({
           where: { id: dbMeetingId },
@@ -239,11 +255,10 @@ async function saveTranscriptSegment(zoomMeetingId, segment) {
   // Get the database meeting ID from cache
   let dbMeetingId = meetingCache.get(zoomMeetingId);
 
-  // If not in cache, try to find the most recent meeting in the database
+  // If not in cache, look up the unique meeting by UUID
   if (!dbMeetingId) {
-    const dbMeeting = await prisma.meeting.findFirst({
+    const dbMeeting = await prisma.meeting.findUnique({
       where: { zoomMeetingId: zoomMeetingId },
-      orderBy: { createdAt: 'desc' },
     });
     if (dbMeeting) {
       dbMeetingId = dbMeeting.id;
@@ -336,9 +351,8 @@ async function saveParticipantEvents(zoomMeetingId, events) {
   let dbMeetingId = meetingCache.get(zoomMeetingId);
 
   if (!dbMeetingId) {
-    const dbMeeting = await prisma.meeting.findFirst({
+    const dbMeeting = await prisma.meeting.findUnique({
       where: { zoomMeetingId: zoomMeetingId },
-      orderBy: { createdAt: 'desc' },
     });
     if (dbMeeting) {
       dbMeetingId = dbMeeting.id;

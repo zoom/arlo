@@ -2,13 +2,11 @@ require('dotenv').config({ path: '../../.env' });
 const express = require('express');
 const rtmsModule = require('@zoom/rtms');
 const rtms = rtmsModule.default; // ES module default export
-const { PrismaClient } = require('@prisma/client');
 const axios = require('axios');
 
 // Logging is now configured via ZM_RTMS_LOG_LEVEL env var (e.g. "debug")
 
 const app = express();
-const prisma = new PrismaClient();
 
 // Middleware
 app.use(express.json());
@@ -239,29 +237,7 @@ async function handleRTMSStopped(payload) {
     }
   }
 
-  // Mark the most recent meeting as completed
-  try {
-    const meeting = await prisma.meeting.findFirst({
-      where: { zoomMeetingId: meeting_uuid },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (meeting) {
-      await prisma.meeting.update({
-        where: { id: meeting.id },
-        data: {
-          status: 'completed',
-          endTime: new Date(),
-          duration: new Date() - new Date(meeting.startTime),
-        },
-      });
-      console.log('Meeting marked as completed');
-    }
-  } catch (error) {
-    console.error('Error updating meeting:', error);
-  }
-
-  // Notify backend
+  // Notify backend (backend handles marking meeting as completed)
   await notifyBackend(meeting_uuid, 'rtms_stopped');
 }
 
@@ -284,113 +260,9 @@ async function handleTranscript(meetingId, transcript) {
     seqNo: now,
   };
 
-  // Broadcast to frontend immediately
+  // Broadcast to frontend immediately (backend handles DB persistence)
   await broadcastSegment(meetingId, segment);
   console.log(`Broadcast segment: "${(text || '').substring(0, 50)}..."`);
-
-  // Save to database
-  try {
-    // Find or create meeting — use operatorId from session to assign real owner
-    let meeting = await prisma.meeting.findFirst({
-      where: { zoomMeetingId: meetingId },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    if (!meeting) {
-      const session = activeSessions.get(meetingId);
-      const operatorId = session?.operatorId;
-      let ownerId;
-
-      // Try to find the real user by operator_id (Zoom user ID)
-      if (operatorId) {
-        const realUser = await prisma.user.findUnique({
-          where: { zoomUserId: operatorId },
-        });
-        if (realUser) {
-          ownerId = realUser.id;
-          console.log(`Matched operator ${operatorId} to user ${realUser.displayName}`);
-        }
-      }
-
-      // Fall back to system user if no operator match
-      if (!ownerId) {
-        const systemUser = await prisma.user.upsert({
-          where: { zoomUserId: 'system' },
-          update: {},
-          create: {
-            zoomUserId: 'system',
-            email: 'system@arlo.local',
-            displayName: 'System',
-          },
-        });
-        ownerId = systemUser.id;
-      }
-
-      meeting = await prisma.meeting.create({
-        data: {
-          zoomMeetingId: meetingId,
-          title: `Meeting ${new Date().toLocaleDateString()}`,
-          startTime: new Date(),
-          status: 'ongoing',
-          ownerId,
-        },
-      });
-      console.log(`Created meeting: ${meeting.id}`);
-    }
-
-    // Find or create speaker using zoomParticipantId (correct schema field)
-    const participantId = segment.speakerId || 'unknown';
-    let speaker = await prisma.speaker.findFirst({
-      where: {
-        meetingId: meeting.id,
-        zoomParticipantId: participantId,
-      },
-    });
-
-    if (!speaker) {
-      speaker = await prisma.speaker.create({
-        data: {
-          meetingId: meeting.id,
-          zoomParticipantId: participantId,
-          label: segment.speakerLabel || `Speaker`,
-          displayName: segment.speakerLabel || userName || `Speaker`,
-        },
-      });
-      console.log(`Created speaker: ${speaker.id}`);
-    }
-
-    // Save transcript segment
-    // tStartMs is Date.now() (epoch milliseconds), store directly
-    const tStartMs = segment.tStartMs || 0;
-    const tEndMs = segment.tEndMs || tStartMs;
-
-    // Use upsert to handle duplicates (both RTMS and backend may try to save)
-    await prisma.transcriptSegment.upsert({
-      where: {
-        meetingId_seqNo: {
-          meetingId: meeting.id,
-          seqNo: BigInt(segment.seqNo),
-        },
-      },
-      create: {
-        meetingId: meeting.id,
-        speakerId: speaker.id,
-        seqNo: BigInt(segment.seqNo),
-        text: segment.text,
-        tStartMs: tStartMs,
-        tEndMs: tEndMs,
-      },
-      update: {
-        text: segment.text,
-        tEndMs: tEndMs,
-      },
-    });
-    console.log(`Saved segment to database (${tStartMs}ms - ${tEndMs}ms)`);
-
-  } catch (dbError) {
-    console.error('Database save error:', dbError.message);
-    console.error('Stack:', dbError.stack);
-  }
 }
 
 /**

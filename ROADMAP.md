@@ -273,13 +273,31 @@ Create purpose-built views for specific use cases: **Healthcare** (HIPAA-aware t
 
 ## Documentation TODOs
 
-Improvements needed in the README and docs for developer onboarding.
+Improvements needed in the README, docs, and developer onboarding materials.
 
-### Setup and Configuration
+### Stale Docs (High Priority)
+- [ ] **Rewrite TROUBLESHOOTING.md** — Currently references the old "Zoom Consent RTMS App" (pre-v1.0). Still mentions Redis consent storage, Socket.IO, old routes (`/api/zoomapp/home`, `/api/consent/submit`), and phase numbers. Needs full rewrite for v1.0 architecture covering: OAuth flow issues, WebSocket connection, RTMS startup, font loading in Zoom WebView, auto-start edge cases, Docker rebuild gotchas.
+- [ ] **Update ARCHITECTURE.md** — Still shows a "Post-Meeting Web App (Next.js)" that was never built. Missing: v1.0 multi-view frontend architecture (14 views, 5 contexts, HashRouter, AppShell), ~10 new REST API endpoints (home, preferences, zoom-meetings, markdown export, generate-title, web OAuth), guest mode, participant events, upcoming meetings, auto-open, meeting attribution. Security section says AES-256 but code uses AES-128-CBC. SDK capabilities list is outdated.
+
+### README — Setup and Configuration
 - [ ] Document the exact SDK capabilities that need to be enabled in the Zoom Marketplace app configuration
 - [ ] Explain RTMS scope requirements (transcript scope now, audio scope when external transcription is added)
 - [ ] Note that Guest Mode and In-Client OAuth must both be enabled in the Marketplace app settings
 - [ ] Document that `appssdk.zoom.us` must be added to the domain allowlist
+- [ ] Add required OAuth scopes to Step 6 (manual Zoom app config) — currently only listed in the App Manifest section (`zoomapp:inmeeting`, `meeting:read:meeting`, `meeting:write:open_app`, `user:read`)
+- [ ] Expand environment variables documentation — Step 4 only shows 4 vars but `.env.example` has 30+. Key omissions: `ZOOM_APP_ID` (required for auto-open), `DEFAULT_MODEL`/`FALLBACK_MODEL` (AI config), `RTMS_WEBHOOK_SECRET`. Note that AI works without an API key.
+- [ ] Flesh out the non-Docker development path (requires running Postgres, applying migrations, understanding what `npm run dev` starts) or clearly label Docker as the primary supported method
+
+### README — Features and Security
+- [ ] Add guest mode to the Features list (auto-detection, dedicated views, invite flow, presence broadcast)
+- [ ] Add a brief Security section (encrypted token storage, httpOnly cookies, data isolation, no raw tokens in frontend) — important for developers evaluating the project
+- [ ] Add a brief data privacy note (what data is stored, where, retention policy) — relevant for a transcription app
+
+### README — General
+- [ ] Update the Documentation section to include ROADMAP.md
+- [ ] Clarify the `.claude/skills/zoom-apps/` link — external contributors may not understand Claude Code skills
+- [ ] Add more screenshots (HomeView, InMeetingView, MeetingDetail, dark mode, guest mode) — currently only 1 screenshot
+- [ ] Add README badges (license, version)
 
 ### Architecture and Flow
 - [ ] Explain how transcription starts, pauses, and stops during a meeting lifecycle
@@ -291,3 +309,5 @@ Improvements needed in the README and docs for developer onboarding.
 - [ ] Walk through the full build and dev setup flow (could be a separate `CONTRIBUTING.md`)
 - [ ] Explain `callZoomApi` usage — it's used for `startRTMS`/`stopRTMS`; document why and what it does
 - [ ] Link to Zoom's guide on auto-opening apps when a meeting starts
+- [ ] Add GitHub issue and PR templates
+- [ ] Create a demo video or GIF walkthrough
