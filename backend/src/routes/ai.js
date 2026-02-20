@@ -21,11 +21,10 @@ async function findMeeting(meetingId) {
     where: { id: meetingId },
   });
 
-  // If not found, try by Zoom meeting ID (raw) — use most recent match
+  // If not found, try by Zoom meeting ID (unique)
   if (!meeting) {
-    meeting = await prisma.meeting.findFirst({
+    meeting = await prisma.meeting.findUnique({
       where: { zoomMeetingId: meetingId },
-      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -35,9 +34,8 @@ async function findMeeting(meetingId) {
     try {
       const decoded = decodeURIComponent(meetingId);
       if (decoded !== meetingId) {
-        meeting = await prisma.meeting.findFirst({
+        meeting = await prisma.meeting.findUnique({
           where: { zoomMeetingId: decoded },
-          orderBy: { createdAt: 'desc' },
         });
       }
     } catch {

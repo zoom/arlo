@@ -2,7 +2,7 @@ FROM node:20-slim
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma and CA certificates for RTMS TLS
+# Install CA certificates for RTMS TLS
 # Install libstdc++6 from Debian Trixie for GLIBCXX_3.4.32 (required by @zoom/rtms v1.0 native binding)
 RUN echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list && \
     apt-get update && \
@@ -22,12 +22,6 @@ COPY package*.json ./
 
 # Install dependencies
 RUN npm install
-
-# Copy Prisma schema
-COPY prisma ./prisma/
-
-# Generate Prisma Client
-RUN npx prisma generate
 
 # Copy source code
 COPY . .

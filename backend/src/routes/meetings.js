@@ -80,9 +80,8 @@ router.patch('/by-zoom-id/:zoomMeetingId/topic', optionalAuth, async (req, res) 
       return res.status(401).json({ error: 'Authentication required for explicit rename' });
     }
 
-    const meeting = await prisma.meeting.findFirst({
+    const meeting = await prisma.meeting.findUnique({
       where: { zoomMeetingId },
-      orderBy: { startTime: 'desc' },
     });
 
     if (!meeting) {
@@ -133,7 +132,7 @@ router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
   try {
     const { zoomMeetingId } = req.params;
 
-    const meeting = await prisma.meeting.findFirst({
+    const meeting = await prisma.meeting.findUnique({
       where: { zoomMeetingId },
       include: {
         speakers: {
@@ -144,7 +143,6 @@ router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
           select: { segments: true },
         },
       },
-      orderBy: { startTime: 'desc' },
     });
 
     if (!meeting) {
@@ -167,9 +165,8 @@ router.get('/by-zoom-id/:zoomMeetingId/transcript', optionalAuth, async (req, re
     const { zoomMeetingId } = req.params;
     const { limit = 500 } = req.query;
 
-    const meeting = await prisma.meeting.findFirst({
+    const meeting = await prisma.meeting.findUnique({
       where: { zoomMeetingId },
-      orderBy: { startTime: 'desc' },
     });
 
     if (!meeting) {
@@ -207,9 +204,8 @@ router.get('/by-zoom-id/:zoomMeetingId/participant-events', optionalAuth, async 
   try {
     const { zoomMeetingId } = req.params;
 
-    const meeting = await prisma.meeting.findFirst({
+    const meeting = await prisma.meeting.findUnique({
       where: { zoomMeetingId },
-      orderBy: { startTime: 'desc' },
     });
 
     if (!meeting) {
