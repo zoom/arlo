@@ -170,9 +170,8 @@ async function handleWebSocketMessage(ws, data) {
         broadcastPresence(meetingId);
 
         // Check current meeting status and inform the subscriber
-        prisma.meeting.findFirst({
+        prisma.meeting.findUnique({
           where: { zoomMeetingId: meetingId },
-          orderBy: { createdAt: 'desc' },
         }).then(meeting => {
           if (meeting && ws.readyState === WebSocket.OPEN) {
             if (meeting.status === 'ongoing') {

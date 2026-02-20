@@ -159,7 +159,7 @@ export default function UpcomingMeetingsView() {
 
       <div className="upcoming-list">
         {meetings.map((meeting) => (
-          <div key={meeting.id} className="upcoming-card-group">
+          <div key={`${meeting.id}-${meeting.date}`} className="upcoming-card-group">
             <Card className="upcoming-card">
               <div className="upcoming-card-inner">
                 <div className="upcoming-card-content">
