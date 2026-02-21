@@ -5,9 +5,7 @@ const router = express.Router();
 const config = require('../config');
 const { broadcastTranscriptSegment, broadcastParticipantEvent, broadcastMeetingStatus, getStats } = require('../services/websocket');
 const { zoomGet } = require('../services/zoomApi');
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Cache for meeting IDs -> database meeting records
 const meetingCache = new Map();
@@ -74,6 +72,9 @@ router.post('/status', async (req, res) => {
 
   console.log(`📡 RTMS Status Update: ${status} for meeting ${meetingId}`);
   console.log(`📡 Operator ID: ${operatorId || 'not provided'}`);
+
+  // Track dbMeetingId across all processing steps
+  let dbMeetingId = null;
 
   try {
     if (status === 'rtms_started') {
@@ -145,6 +146,7 @@ router.post('/status', async (req, res) => {
 
       // Cache the meeting ID mapping
       meetingCache.set(meetingId, dbMeeting.id);
+      dbMeetingId = dbMeeting.id;
 
       // Enrich meeting metadata from Zoom API (non-blocking)
       if (owner.zoomUserId !== 'system') {
@@ -155,7 +157,7 @@ router.post('/status', async (req, res) => {
 
     } else if (status === 'rtms_stopped') {
       // Mark meeting as completed
-      let dbMeetingId = meetingCache.get(meetingId);
+      dbMeetingId = meetingCache.get(meetingId);
 
       // Fall back to DB lookup if cache misses
       if (!dbMeetingId) {
@@ -174,7 +176,7 @@ router.post('/status', async (req, res) => {
           },
         });
         console.log(`✅ Marked meeting ${dbMeetingId} as completed`);
-        meetingCache.delete(meetingId);
+        // Don't delete from cache yet — lifecycle event save below still needs it
       }
     }
   } catch (error) {
@@ -204,8 +206,7 @@ router.post('/status', async (req, res) => {
     };
     broadcastParticipantEvent(meetingId, lifecycleEvent);
 
-    // Save to database
-    const dbMeetingId = meetingCache.get(meetingId);
+    // Save to database using local dbMeetingId (not cache, which may be deleted)
     if (dbMeetingId) {
       prisma.participantEvent.create({
         data: {
@@ -219,6 +220,11 @@ router.post('/status', async (req, res) => {
         console.error('❌ Failed to save lifecycle event:', err.message);
       });
     }
+  }
+
+  // Clean up cache after all processing is complete
+  if (status === 'rtms_stopped') {
+    meetingCache.delete(meetingId);
   }
 
   res.status(200).json({ received: true, broadcast: sentCount });
@@ -272,23 +278,24 @@ async function saveTranscriptSegment(zoomMeetingId, segment) {
   // Find or create speaker
   let speaker = null;
   if (segment.speakerId && segment.speakerId !== 'unknown') {
-    speaker = await prisma.speaker.findFirst({
+    speaker = await prisma.speaker.upsert({
       where: {
+        meetingId_zoomParticipantId: {
+          meetingId: dbMeetingId,
+          zoomParticipantId: segment.speakerId,
+        },
+      },
+      create: {
         meetingId: dbMeetingId,
+        label: segment.speakerLabel || 'Speaker',
         zoomParticipantId: segment.speakerId,
+        displayName: segment.speakerLabel,
+      },
+      update: {
+        // Update display name if changed
+        displayName: segment.speakerLabel || undefined,
       },
     });
-
-    if (!speaker) {
-      speaker = await prisma.speaker.create({
-        data: {
-          meetingId: dbMeetingId,
-          label: segment.speakerLabel || `Speaker`,
-          zoomParticipantId: segment.speakerId,
-          displayName: segment.speakerLabel,
-        },
-      });
-    }
   }
 
   // RTMS service sends timestamps in milliseconds (Date.now())
@@ -378,29 +385,32 @@ async function saveParticipantEvents(zoomMeetingId, events) {
   console.log(`💾 Saved ${events.length} participant events to database`);
 }
 
-/**
- * GET /api/rtms/debug
- * Debug endpoint to check WebSocket connections
- */
-router.get('/debug', (req, res) => {
-  const stats = getStats();
-  console.log('🔍 WebSocket Debug Stats:', stats);
-  res.json(stats);
-});
+// Debug endpoints — only available in non-production environments
+if (process.env.NODE_ENV !== 'production') {
+  /**
+   * GET /api/rtms/debug
+   * Debug endpoint to check WebSocket connections
+   */
+  router.get('/debug', (req, res) => {
+    const stats = getStats();
+    console.log('🔍 WebSocket Debug Stats:', stats);
+    res.json(stats);
+  });
 
-/**
- * POST /api/rtms/debug-meeting
- * Debug endpoint to log what meeting ID the frontend is trying to connect with
- */
-router.post('/debug-meeting', (req, res) => {
-  const { meetingId, source, fullContext } = req.body;
-  console.log(`🔍 DEBUG: Meeting ID from ${source || 'unknown'}: "${meetingId}"`);
-  console.log(`🔍 DEBUG: Full meeting context:`, JSON.stringify(fullContext, null, 2));
-  if (fullContext) {
-    console.log(`🔍 DEBUG: Context keys:`, Object.keys(fullContext));
-  }
-  res.json({ received: meetingId, contextKeys: fullContext ? Object.keys(fullContext) : [] });
-});
+  /**
+   * POST /api/rtms/debug-meeting
+   * Debug endpoint to log what meeting ID the frontend is trying to connect with
+   */
+  router.post('/debug-meeting', (req, res) => {
+    const { meetingId, source, fullContext } = req.body;
+    console.log(`🔍 DEBUG: Meeting ID from ${source || 'unknown'}: "${meetingId}"`);
+    console.log(`🔍 DEBUG: Full meeting context:`, JSON.stringify(fullContext, null, 2));
+    if (fullContext) {
+      console.log(`🔍 DEBUG: Context keys:`, Object.keys(fullContext));
+    }
+    res.json({ received: meetingId, contextKeys: fullContext ? Object.keys(fullContext) : [] });
+  });
+}
 
 /**
  * Enrich a meeting record with metadata from Zoom REST API.

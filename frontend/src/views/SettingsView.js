@@ -190,11 +190,9 @@ export default function SettingsView() {
       .then((data) => {
         if (data?.meetings) {
           setSettingsUpcoming(data.meetings.slice(0, 3));
-        } else {
-          setSettingsUpcoming(MOCK_SETTINGS_UPCOMING);
         }
       })
-      .catch(() => setSettingsUpcoming(MOCK_SETTINGS_UPCOMING));
+      .catch(() => {});
   }, [autoOpen]);
 
   const toggleSettingsUpcoming = async (meetingId) => {

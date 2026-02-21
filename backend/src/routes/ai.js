@@ -1,7 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const config = require('../config');
+const { requireAuth, optionalAuth, devAuthBypass } = require('../middleware/auth');
 const {
   generateSummary,
   generateTitle,
@@ -9,22 +10,25 @@ const {
   chatWithTranscript,
 } = require('../services/openrouter');
 
-const prisma = new PrismaClient();
+// Apply dev auth bypass at router level (must run before requireAuth/optionalAuth)
+router.use(devAuthBypass);
 
 /**
  * Helper: Find meeting by database ID or Zoom meeting ID
  * Handles URL-encoded Zoom meeting UUIDs (e.g., %2F -> /, %3D -> =)
  */
-async function findMeeting(meetingId) {
+async function findMeeting(meetingId, ownerId) {
+  const ownerFilter = ownerId ? { ownerId } : {};
+
   // First try by database ID (UUID format)
-  let meeting = await prisma.meeting.findUnique({
-    where: { id: meetingId },
+  let meeting = await prisma.meeting.findFirst({
+    where: { id: meetingId, ...ownerFilter },
   });
 
   // If not found, try by Zoom meeting ID (unique)
   if (!meeting) {
-    meeting = await prisma.meeting.findUnique({
-      where: { zoomMeetingId: meetingId },
+    meeting = await prisma.meeting.findFirst({
+      where: { zoomMeetingId: meetingId, ...ownerFilter },
     });
   }
 
@@ -34,8 +38,8 @@ async function findMeeting(meetingId) {
     try {
       const decoded = decodeURIComponent(meetingId);
       if (decoded !== meetingId) {
-        meeting = await prisma.meeting.findUnique({
-          where: { zoomMeetingId: decoded },
+        meeting = await prisma.meeting.findFirst({
+          where: { zoomMeetingId: decoded, ...ownerFilter },
         });
       }
     } catch {
@@ -54,6 +58,7 @@ async function getTranscriptText(meetingId) {
     where: { meetingId },
     orderBy: { seqNo: 'asc' },
     include: { speaker: true },
+    take: 500,
   });
 
   if (segments.length === 0) {
@@ -73,7 +78,7 @@ async function getTranscriptText(meetingId) {
  * POST /api/ai/summary
  * Generate meeting summary
  */
-router.post('/summary', async (req, res) => {
+router.post('/summary', requireAuth, async (req, res) => {
   const { meetingId } = req.body;
 
   if (!config.aiEnabled) {
@@ -86,7 +91,7 @@ router.post('/summary', async (req, res) => {
 
   try {
     // Get meeting details (supports both database ID and Zoom meeting ID)
-    const meeting = await findMeeting(meetingId);
+    const meeting = await findMeeting(meetingId, req.user.id);
 
     if (!meeting) {
       return res.status(404).json({ error: 'Meeting not found' });
@@ -139,7 +144,7 @@ router.post('/summary', async (req, res) => {
  * POST /api/ai/action-items
  * Extract action items from meeting
  */
-router.post('/action-items', async (req, res) => {
+router.post('/action-items', requireAuth, async (req, res) => {
   const { meetingId } = req.body;
 
   if (!config.aiEnabled) {
@@ -152,7 +157,7 @@ router.post('/action-items', async (req, res) => {
 
   try {
     // Get meeting details (supports both database ID and Zoom meeting ID)
-    const meeting = await findMeeting(meetingId);
+    const meeting = await findMeeting(meetingId, req.user.id);
 
     if (!meeting) {
       return res.status(404).json({ error: 'Meeting not found' });
@@ -185,7 +190,7 @@ router.post('/action-items', async (req, res) => {
  * POST /api/ai/chat
  * Chat with transcripts (RAG-based Q&A)
  */
-router.post('/chat', async (req, res) => {
+router.post('/chat', requireAuth, async (req, res) => {
   const { meetingId, question } = req.body;
 
   if (!config.aiEnabled) {
@@ -202,7 +207,7 @@ router.post('/chat', async (req, res) => {
 
     if (meetingId) {
       // Chat about specific meeting (supports both database ID and Zoom meeting ID)
-      const meeting = await findMeeting(meetingId);
+      const meeting = await findMeeting(meetingId, req.user.id);
 
       if (!meeting) {
         return res.status(404).json({ error: 'Meeting not found' });
@@ -217,6 +222,7 @@ router.post('/chat', async (req, res) => {
     } else {
       // Chat across all meetings - get recent transcripts
       const recentMeetings = await prisma.meeting.findMany({
+        where: { ownerId: req.user.id },
         orderBy: { startTime: 'desc' },
         take: 5,
         include: {
@@ -267,7 +273,7 @@ router.post('/chat', async (req, res) => {
  * POST /api/ai/generate-title
  * Generate a descriptive meeting title from transcript or summary
  */
-router.post('/generate-title', async (req, res) => {
+router.post('/generate-title', requireAuth, async (req, res) => {
   const { meetingId } = req.body;
 
   if (!config.aiEnabled) {
@@ -279,7 +285,7 @@ router.post('/generate-title', async (req, res) => {
   }
 
   try {
-    const meeting = await findMeeting(meetingId);
+    const meeting = await findMeeting(meetingId, req.user.id);
 
     if (!meeting) {
       return res.status(404).json({ error: 'Meeting not found' });
@@ -317,7 +323,7 @@ const suggestRateLimit = new Map();
  * POST /api/ai/suggest
  * Get real-time AI suggestions during meeting (for in-meeting use)
  */
-router.post('/suggest', async (req, res) => {
+router.post('/suggest', optionalAuth, async (req, res) => {
   const { meetingId, recentTranscript } = req.body;
 
   if (!config.aiEnabled) {

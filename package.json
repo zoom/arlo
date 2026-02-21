@@ -2,6 +2,9 @@
   "name": "arlo-meeting-assistant",
   "version": "0.9.0",
   "description": "Arlo - Open-source Zoom Apps meeting assistant with RTMS and AI",
+  "engines": {
+    "node": ">=20"
+  },
   "private": true,
   "workspaces": [
     "backend",

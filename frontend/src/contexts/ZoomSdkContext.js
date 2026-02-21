@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 
 const ZoomSdkContext = createContext();
 
@@ -162,18 +162,20 @@ export function ZoomSdkProvider({ children }) {
     configureSdk();
   }, []);
 
+  const contextValue = useMemo(() => ({
+    zoomSdk,
+    sdkConfigured,
+    sdkError,
+    runningContext,
+    meetingContext,
+    userContext,
+    userContextStatus: userContext?.status || null,
+    isGuest,
+    isTestMode,
+  }), [sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest]);
+
   return (
-    <ZoomSdkContext.Provider value={{
-      zoomSdk,
-      sdkConfigured,
-      sdkError,
-      runningContext,
-      meetingContext,
-      userContext,
-      userContextStatus: userContext?.status || null,
-      isGuest,
-      isTestMode,
-    }}>
+    <ZoomSdkContext.Provider value={contextValue}>
       {children}
     </ZoomSdkContext.Provider>
   );

@@ -1,9 +1,22 @@
 const axios = require('axios');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { decryptToken, encryptToken } = require('./auth');
 const config = require('../config');
 
-const prisma = new PrismaClient();
+// Per-user refresh lock to prevent concurrent refresh race conditions
+const refreshLocks = new Map();
+
+async function withRefreshLock(userId, fn) {
+  if (refreshLocks.has(userId)) {
+    // Another refresh is in flight — wait for it to complete
+    return refreshLocks.get(userId);
+  }
+  const promise = fn().finally(() => {
+    refreshLocks.delete(userId);
+  });
+  refreshLocks.set(userId, promise);
+  return promise;
+}
 
 /**
  * Get a valid access token for the user, refreshing if needed.
@@ -18,43 +31,54 @@ async function getAccessToken(userId) {
     throw new Error('No token found for user');
   }
 
-  // Refresh if within 5 minutes of expiry
   const needsRefresh = new Date(userToken.expiresAt).getTime() - Date.now() < 5 * 60 * 1000;
 
   if (!needsRefresh) {
     return decryptToken(userToken.accessToken);
   }
 
-  // Refresh the token
-  const refreshToken = decryptToken(userToken.refreshToken);
-  const tokenResponse = await axios.post(
-    'https://zoom.us/oauth/token',
-    new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }),
-    {
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${config.zoomClientId}:${config.zoomClientSecret}`).toString('base64')}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
+  // Use refresh lock to prevent concurrent refreshes
+  return withRefreshLock(userId, async () => {
+    // Re-check after acquiring lock (another call may have already refreshed)
+    const latestToken = await prisma.userToken.findFirst({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (latestToken && new Date(latestToken.expiresAt).getTime() - Date.now() >= 5 * 60 * 1000) {
+      return decryptToken(latestToken.accessToken);
     }
-  );
 
-  const { access_token, refresh_token: newRefreshToken, expires_in, scope } = tokenResponse.data;
-  const expiresAt = new Date(Date.now() + expires_in * 1000);
+    const tokenToRefresh = latestToken || userToken;
+    const refreshToken = decryptToken(tokenToRefresh.refreshToken);
+    const tokenResponse = await axios.post(
+      'https://zoom.us/oauth/token',
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+      {
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${config.zoomClientId}:${config.zoomClientSecret}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+      }
+    );
 
-  await prisma.userToken.update({
-    where: { id: userToken.id },
-    data: {
-      accessToken: encryptToken(access_token),
-      refreshToken: encryptToken(newRefreshToken),
-      expiresAt,
-      scopes: scope.split(' '),
-    },
+    const { access_token, refresh_token: newRefreshToken, expires_in, scope } = tokenResponse.data;
+    const expiresAt = new Date(Date.now() + expires_in * 1000);
+
+    await prisma.userToken.update({
+      where: { id: tokenToRefresh.id },
+      data: {
+        accessToken: encryptToken(access_token),
+        refreshToken: encryptToken(newRefreshToken),
+        expiresAt,
+        scopes: scope.split(' '),
+      },
+    });
+
+    return access_token;
   });
-
-  return access_token;
 }
 
 /**

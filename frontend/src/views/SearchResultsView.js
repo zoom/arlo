@@ -62,10 +62,12 @@ export default function SearchResultsView() {
     setLoading(true);
     setSearched(true);
 
+    const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`, {
           credentials: 'include',
+          signal: controller.signal,
         });
         if (res.ok) {
           const data = await res.json();
@@ -73,14 +75,18 @@ export default function SearchResultsView() {
           setSummaryResults(data.summaryResults || []);
           setTranscriptResults(data.transcriptResults || []);
         }
-      } catch {
+      } catch (err) {
+        if (err.name === 'AbortError') return; // Ignore aborted requests
         // Search failed silently
       } finally {
         setLoading(false);
       }
     }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
   }, [query]);
 
   const handleSubmit = (e) => {

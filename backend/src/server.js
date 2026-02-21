@@ -7,6 +7,9 @@ const cookieParser = require('cookie-parser');
 const http = require('http');
 const { initWebSocketServer } = require('./services/websocket');
 const config = require('./config');
+const prisma = require('./lib/prisma');
+const { version } = require('../package.json');
+const rateLimit = require('express-rate-limit');
 
 // Initialize Express app
 const app = express();
@@ -56,6 +59,40 @@ if (config.nodeEnv !== 'test') {
 }
 
 // =============================================================================
+// RATE LIMITING
+// =============================================================================
+
+// Global rate limit
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // 1000 requests per 15 minutes
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
+});
+app.use('/api/', globalLimiter);
+
+// Stricter rate limit for auth endpoints
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication attempts' },
+});
+app.use('/api/auth/', authLimiter);
+
+// Stricter rate limit for AI endpoints
+const aiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many AI requests, please try again later' },
+});
+app.use('/api/ai/', aiLimiter);
+
+// =============================================================================
 // ROUTES
 // =============================================================================
 
@@ -65,7 +102,7 @@ app.get('/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     environment: config.nodeEnv,
-    version: '0.5.0',
+    version,
   });
 });
 
@@ -266,17 +303,25 @@ server.listen(PORT, () => {
 process.on('SIGTERM', () => {
   console.log('SIGTERM received. Closing server gracefully...');
   server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+    prisma.$disconnect().then(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
   });
 });
 
 process.on('SIGINT', () => {
   console.log('SIGINT received. Closing server gracefully...');
   server.close(() => {
-    console.log('Server closed');
-    process.exit(0);
+    prisma.$disconnect().then(() => {
+      console.log('Server closed');
+      process.exit(0);
+    });
   });
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 module.exports = { app, server };
