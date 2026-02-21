@@ -100,7 +100,9 @@ function verifyToken(token) {
       .replace(/\//g, '_')
       .replace(/=/g, '');
 
-    if (signature !== expectedSignature) {
+    const sigBuf = Buffer.from(signature);
+    const expectedBuf = Buffer.from(expectedSignature);
+    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
       throw new Error('Invalid signature');
     }
 

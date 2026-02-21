@@ -1,9 +1,8 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { requireAuth, optionalAuth, devAuthBypass } = require('../middleware/auth');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Apply auth middleware to all routes
 // IMPORTANT: devAuthBypass must run BEFORE requireAuth so it can set req.user in dev mode
@@ -240,8 +239,13 @@ router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
+    const where = { id };
+    if (req.user) {
+      where.ownerId = req.user.id;
+    }
+
     const meeting = await prisma.meeting.findFirst({
-      where: { id },
+      where,
       include: {
         speakers: true,
         highlights: true,
@@ -273,9 +277,14 @@ router.get('/:id/transcript', optionalAuth, async (req, res) => {
     const { id } = req.params;
     const { from_ms, to_ms, limit = 100, after_seq } = req.query;
 
-    // Verify meeting exists
+    // Verify meeting exists and user owns it
+    const meetingWhere = { id };
+    if (req.user) {
+      meetingWhere.ownerId = req.user.id;
+    }
+
     const meeting = await prisma.meeting.findFirst({
-      where: { id },
+      where: meetingWhere,
     });
 
     if (!meeting) {
@@ -324,8 +333,13 @@ router.get('/:id/participant-events', optionalAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
+    const where = { id };
+    if (req.user) {
+      where.ownerId = req.user.id;
+    }
+
     const meeting = await prisma.meeting.findFirst({
-      where: { id },
+      where,
     });
 
     if (!meeting) {
@@ -365,17 +379,23 @@ router.patch('/:id', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Title is required' });
     }
 
-    const meeting = await prisma.meeting.update({
-      where: { id },
+    // Verify ownership — users can only rename their own meetings
+    const meeting = await prisma.meeting.findFirst({
+      where: { id, ownerId: req.user.id },
+    });
+
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    const updated = await prisma.meeting.update({
+      where: { id: meeting.id },
       data: { title: title.trim() },
     });
 
-    res.json({ meeting });
+    res.json({ meeting: updated });
   } catch (error) {
     console.error('Update meeting error:', error);
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
     res.status(500).json({ error: 'Failed to update meeting' });
   }
 });
@@ -384,13 +404,13 @@ router.patch('/:id', requireAuth, async (req, res) => {
  * GET /api/meetings/:id/vtt
  * Export meeting transcript as WebVTT file
  */
-router.get('/:id/vtt', async (req, res) => {
+router.get('/:id/vtt', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Get meeting with segments
-    const meeting = await prisma.meeting.findUnique({
-      where: { id },
+    // Get meeting with segments (ownership check)
+    const meeting = await prisma.meeting.findFirst({
+      where: { id, ownerId: req.user.id },
       include: {
         segments: {
           orderBy: { seqNo: 'asc' },
@@ -447,12 +467,12 @@ function formatVTTTime(ms) {
  * GET /api/meetings/:id/export/markdown
  * Export meeting transcript as Markdown file
  */
-router.get('/:id/export/markdown', async (req, res) => {
+router.get('/:id/export/markdown', requireAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const meeting = await prisma.meeting.findUnique({
-      where: { id },
+    const meeting = await prisma.meeting.findFirst({
+      where: { id, ownerId: req.user.id },
       include: {
         speakers: true,
         highlights: true,

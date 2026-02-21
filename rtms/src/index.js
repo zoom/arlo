@@ -1,5 +1,6 @@
 require('dotenv').config({ path: '../../.env' });
 const express = require('express');
+const crypto = require('crypto');
 const rtmsModule = require('@zoom/rtms');
 const rtms = rtmsModule.default; // ES module default export
 const axios = require('axios');
@@ -7,6 +8,42 @@ const axios = require('axios');
 // Logging is now configured via ZM_RTMS_LOG_LEVEL env var (e.g. "debug")
 
 const app = express();
+
+/**
+ * Verify Zoom webhook HMAC signature
+ */
+function verifyWebhookSignature(req) {
+  const signature = req.headers['x-zm-signature'];
+  const timestamp = req.headers['x-zm-request-timestamp'];
+  const secret = process.env.ZOOM_CLIENT_SECRET || process.env.ZM_RTMS_SECRET;
+
+  if (!secret) {
+    console.warn('No webhook secret configured — skipping HMAC verification');
+    return true; // Allow if not configured (dev mode)
+  }
+
+  if (!signature || !timestamp) {
+    return false;
+  }
+
+  // Reject if timestamp is more than 5 minutes old (replay protection)
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
+    console.warn('Webhook timestamp too old — possible replay attack');
+    return false;
+  }
+
+  const message = `v0:${timestamp}:${JSON.stringify(req.body)}`;
+  const expectedSignature = 'v0=' + crypto
+    .createHmac('sha256', secret)
+    .update(message)
+    .digest('hex');
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  );
+}
 
 // Middleware
 app.use(express.json());
@@ -24,6 +61,14 @@ const activeSessions = new Map();
  */
 app.post('/webhook', async (req, res) => {
   const { event, payload } = req.body;
+
+  // Skip HMAC verification for URL validation (uses its own mechanism)
+  if (event !== 'endpoint.url_validation') {
+    if (!verifyWebhookSignature(req)) {
+      console.error('Webhook signature verification failed');
+      return res.status(401).send('Unauthorized');
+    }
+  }
 
   console.log('='.repeat(60));
   console.log(`RTMS Webhook Received: ${event}`);
@@ -195,6 +240,7 @@ async function handleRTMSStarted(payload) {
       streamId: rtms_stream_id,
       startTime: new Date(),
       operatorId: operator_id || null,
+      seqCounter: 0, // Atomic counter for transcript sequence numbers
     });
 
     // Join the RTMS session — v1.0 no longer uses pollInterval
@@ -245,22 +291,21 @@ async function handleRTMSStopped(payload) {
  * Handle individual transcript segment
  */
 async function handleTranscript(meetingId, transcript) {
-  console.log('Transcript:', transcript);
-
   const { text, timestamp, userId, userName } = transcript;
 
-  // FIRST: Broadcast immediately to frontend (don't wait for DB)
+  const session = activeSessions.get(meetingId);
+  const seqNo = session ? ++session.seqCounter : Date.now();
   const now = Date.now();
+
   const segment = {
     speakerId: userId ? String(userId) : 'unknown',
     speakerLabel: userName || (userId ? `Speaker ${userId}` : 'Speaker'),
     text: text || '',
-    tStartMs: now, // Use wall-clock time (RTMS SDK timestamp is relative, not epoch)
+    tStartMs: now,
     tEndMs: now,
-    seqNo: now,
+    seqNo: seqNo,
   };
 
-  // Broadcast to frontend immediately (backend handles DB persistence)
   await broadcastSegment(meetingId, segment);
   console.log(`Broadcast segment: "${(text || '').substring(0, 50)}..."`);
 }
@@ -304,7 +349,7 @@ async function broadcastParticipantEvents(meetingId, events) {
  */
 async function notifyBackend(meetingId, status, operatorId) {
   try {
-    const backendUrl = process.env.BACKEND_URL || 'http://localhost:3000';
+    const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await axios.post(`${backendUrl}/api/rtms/status`, {
       meetingId,
       status,
@@ -345,3 +390,22 @@ app.listen(PORT, () => {
   console.log('Waiting for RTMS webhooks from Zoom...');
   console.log('='.repeat(60));
 });
+
+// Graceful shutdown
+function shutdown(signal) {
+  console.log(`${signal} received. Closing RTMS sessions...`);
+  for (const [meetingId, session] of activeSessions) {
+    try {
+      session.stopping = true;
+      session.client.leave();
+      console.log(`Closed RTMS session for meeting: ${meetingId}`);
+    } catch (err) {
+      console.error(`Error closing session ${meetingId}:`, err.message);
+    }
+  }
+  activeSessions.clear();
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

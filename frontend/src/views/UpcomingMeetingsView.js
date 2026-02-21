@@ -43,12 +43,9 @@ export default function UpcomingMeetingsView() {
       if (res.ok) {
         const data = await res.json();
         setMeetings(data.meetings || []);
-      } else {
-        // Fall back to mock data if API isn't available
-        setMeetings(MOCK_MEETINGS);
       }
     } catch {
-      setMeetings(MOCK_MEETINGS);
+      // Fetch failed — keep empty defaults
     } finally {
       setLoading(false);
     }

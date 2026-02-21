@@ -268,6 +268,82 @@ Create purpose-built views for specific use cases: **Healthcare** (HIPAA-aware t
 
 - **Participant event initial roster noise** — Zoom fires a batch of `participant_joined` events when RTMS connects (initial roster). These are now filtered using a `firstTranscriptReceived` flag, but edge cases may remain when meetings have many participants or unusual join patterns.
 - **HomeView doesn't know RTMS status until WebSocket connects** — When RTMS auto-starts before the app is opened, HomeView shows a generic "Meeting in Progress / View Meeting" card because `rtmsActive` is false (the WebSocket only connects when InMeetingView mounts). The user must tap "View Meeting" to navigate to InMeetingView, where the WebSocket connects, detects the ongoing session, and loads historical segments. A future improvement could connect the WebSocket at the MeetingContext level (not just InMeetingView) so HomeView can detect RTMS status and auto-navigate.
+- **Guest transcript access too permissive** — Anyone with a Zoom meeting ID can access live transcripts via WebSocket or REST endpoints. Needs meeting-scoped guest tokens or Zoom WebView context verification to ensure the requester is actually in the meeting.
+- **WebSocket subscribe allows any meeting** — Any connected client can subscribe to any meeting ID with no ownership or participation check. Authenticated users should have meeting ownership verified; guests should prove meeting participation.
+- **Unbounded transcript arrays** — InMeetingView and GuestInMeetingView accumulate DOM nodes without virtualization. A 2-hour meeting creates ~6000 DOM nodes. Needs windowed rendering for long meetings.
+- **In-memory PKCE/OAuth stores** — `pkceStore` and `webOAuthStore` are in-memory Maps that don't survive server restarts. Acceptable for single-instance deployments with short TTLs but breaks multi-instance setups.
+- **Background transcript saves silently fail** — If the database is temporarily unavailable during a live meeting, transcript segments are permanently lost. Needs a retry queue with exponential backoff.
+- **InMeetingView route param ignored** — The URL `:id` param is unused; meeting ID comes from MeetingContext. Deep linking to a specific meeting's live view is broken.
+- **Zoom SDK event listeners never cleaned up** — `onRunningContextChange`, `onMyUserContextChange`, `onSendAppInvitation` are registered but never removed in ZoomSdkContext and InMeetingView.
+- **InMeetingView notes/tasks are ephemeral** — Arlo Assist tab notes and tasks reset on navigation. Already tracked under "Action item persistence."
+- **SettingsView AI config is non-functional** — AI provider/model/key fields are local state only. Test Connection is faked. Already tracked under "Direct AI provider support."
+- **HomeView mock data** — Weekly digest, action items, and recurring topics use hardcoded mock data. Already tracked under respective roadmap items.
+
+---
+
+## Code Quality & Technical Debt
+
+Near-term cleanup items identified during the February 2026 code audit.
+
+### Completed (v1.0 audit)
+- [x] **Consolidate PrismaClient to singleton** — 11 files each created `new PrismaClient()`, causing ~55 concurrent DB connections. Consolidated to `backend/src/lib/prisma.js`.
+- [x] **Add auth to AI routes** — All AI endpoints (`/summary`, `/action-items`, `/chat`, `/generate-title`) were accessible without authentication. Added `requireAuth` middleware and ownership checks.
+- [x] **Add auth to VTT/Markdown export** — Transcript downloads had no auth. Added `requireAuth` and ownership filters.
+- [x] **Add ownership checks to meeting routes** — `GET /meetings/:id`, `GET /meetings/:id/transcript`, `GET /meetings/:id/participant-events`, `PATCH /meetings/:id` allowed any authenticated user to access any meeting. Added `ownerId` filters.
+- [x] **Auth on token refresh endpoint** — `POST /api/auth/refresh` accepted `userId` in body with no auth. Now requires `requireAuth` and uses `req.user.id`.
+- [x] **Enforce OAuth state validation** — Web OAuth callback logged a warning on state mismatch but continued. Now rejects with redirect to error page.
+- [x] **Timing-safe JWT comparison** — JWT signature verification used `!==` (vulnerable to timing attacks). Changed to `crypto.timingSafeEqual`.
+- [x] **Token refresh mutex** — Concurrent requests could both attempt to refresh the same Zoom token, permanently invalidating the session. Added per-user Promise-based lock.
+- [x] **Speaker creation race condition** — Concurrent segments for a new speaker could create duplicate Speaker rows. Added `@@unique([meetingId, zoomParticipantId])` and changed to `upsert`.
+- [x] **Transcript seqNo collision** — `Date.now()` seqNo could lose segments arriving in the same millisecond. Changed to per-session atomic counter.
+- [x] **Highlight/AiCitation timestamp overflow** — `Int` fields for epoch milliseconds would overflow at ~2.1B. Changed to `BigInt`.
+- [x] **RTMS webhook HMAC verification** — Webhook endpoint accepted any POST without signature verification. Added HMAC-SHA256 validation with replay protection.
+- [x] **Gate debug endpoints** — `/api/rtms/debug` and `/api/rtms/debug-meeting` exposed internal state in all environments. Now gated behind `NODE_ENV !== 'production'`.
+- [x] **Sanitize error messages** — Several routes leaked `error.message` to clients. Changed to generic messages with server-side-only logging.
+- [x] **Rate limiting** — `express-rate-limit` was installed but never used. Applied global, auth, and AI rate limits.
+- [x] **RTMS BACKEND_URL inconsistency** — `broadcastSegment` and `notifyBackend` used different defaults. Unified to `http://backend:3000`.
+- [x] **Graceful RTMS shutdown** — No SIGTERM/SIGINT handlers in RTMS service. Added signal handlers that close active sessions before exiting.
+- [x] **meetingCache lifecycle race** — `rtms_stopped` handler deleted from cache before lifecycle event save. Restructured to delete after all processing.
+- [x] **WebSocket reconnect cleanup** — Rapid close/reconnect could accumulate orphaned sockets. Now closes existing socket and clears reconnect timer.
+- [x] **Stale closure on rtmsActive** — WebSocket `onmessage` handler captured `rtmsActive` in closure. Changed to use a ref.
+- [x] **Duplicate transcript segments (frontend)** — WebSocket handler appended segments blindly. Added seqNo deduplication.
+- [x] **Stale search results** — No AbortController on search fetches. Added abort on new search.
+- [x] **Context provider values not memoized** — Provider values created new objects on every render. Wrapped in `useMemo`.
+- [x] **Delete navigates on failure** — MeetingDetailView navigated to `/meetings` even on failed DELETE. Now only navigates on success.
+- [x] **Back button hardcoded** — Always navigated to `/home`. Now uses `navigate(-1)` with fallback.
+- [x] **Mock data on API failure** — API failures silently showed fake meetings. Changed to empty state.
+- [x] **Remove dead code** — Deleted unused LiveTranscript.js, AIPanel.js, HighlightsPanel.js, TestPage.js/css and removed `/test` route.
+- [x] **Docker --accept-data-loss** — `prisma db push --accept-data-loss` silently dropped columns. Changed to `--skip-generate`.
+- [x] **Health check version** — Reported `0.5.0` but project is v1.0. Now reads from `package.json`.
+- [x] **Remove deprecated crypto package** — `crypto` npm package is a deprecated shim for the built-in Node.js module. Removed from dependencies.
+- [x] **Add .dockerignore files** — `node_modules`, `.env`, `.git` were copied into Docker images.
+- [x] **Add engines field** — No Node.js version requirement specified. Added `"engines": { "node": ">=20" }`.
+- [x] **Unhandled rejection handler** — Added `process.on('unhandledRejection')` to backend server.
+- [x] **UserToken cleanup** — Every OAuth flow created a new UserToken without purging old ones. Now deletes previous tokens before creating new.
+- [x] **WebSocket subscribe cleanup** — Subscribing to a new meeting didn't remove the client from the old meeting's set.
+- [x] **broadcastToMeeting try/catch** — `ws.send()` could throw due to TOCTOU race between readyState check and send. Wrapped in try/catch.
+- [x] **Shared utility functions** — Created `frontend/src/utils/formatters.js` with `formatTimestamp`, `formatDuration`, `formatMeetingDate`.
+- [x] **Prisma disconnect on shutdown** — Added `prisma.$disconnect()` to graceful shutdown handlers.
+
+### Remaining
+- [ ] **Standardize auth middleware patterns** — Different routes apply `requireAuth`, `optionalAuth`, and `devAuthBypass` in different combinations and at different levels.
+- [ ] **Standardize error response format** — Some routes return `{ error }`, others `{ error, message }`, others include `stack`.
+- [ ] **Replace console.log with structured logger** — Emoji-prefixed `console.log` throughout backend, including sensitive data. Needs `pino` or similar.
+- [ ] **Unbounded transcript fetch in AI routes** — `getTranscriptText()` limited to 500 segments but may still need smarter truncation for very long meetings.
+- [ ] **Limit transcript array growth** — Frontend InMeetingView segments grow without bound. Consider windowed rendering for meetings > 1 hour.
+
+---
+
+## Accessibility
+
+Items identified during the February 2026 code audit. Medium-term priority.
+
+- [ ] **ARIA roles on clickable Cards** — HomeView, SearchResultsView, and MeetingsListView use clickable Cards without `role="button"` or proper `tabIndex`.
+- [ ] **Focus trap in DeleteMeetingDialog** — Dialog allows focus to escape to background elements.
+- [ ] **Keyboard navigation in dropdowns** — Invite dropdown and search suggestions dropdown lack arrow key navigation and `role="menu"`.
+- [ ] **aria-live on live transcript** — Screen readers not notified of new transcript segments during live meetings.
+- [ ] **Label associations on toggles** — Custom toggle switches in SettingsView lack proper `<label>` element associations.
+- [ ] **Keyboard support for custom dropdowns** — All custom dropdowns need `role="menu"`, `role="menuitem"`, `aria-expanded`, and Escape-to-close support.
 
 ---
 

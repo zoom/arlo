@@ -65,11 +65,9 @@ export default function HomeView() {
         if (upcomingRes.status === 'fulfilled' && upcomingRes.value.ok) {
           const data = await upcomingRes.value.json();
           setUpcomingMeetings((data.meetings || []).slice(0, 3));
-        } else {
-          setUpcomingMeetings(MOCK_UPCOMING);
         }
       } catch {
-        setUpcomingMeetings(MOCK_UPCOMING);
+        // Fetch failed — keep empty defaults
       } finally {
         setLoading(false);
       }

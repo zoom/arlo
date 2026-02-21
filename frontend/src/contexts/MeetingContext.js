@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useZoomSdk } from './ZoomSdkContext';
 import { useAuth } from './AuthContext';
 
@@ -31,10 +31,15 @@ export function MeetingProvider({ children }) {
   const statusCheckRef = useRef(false);
   const titleUserRenamedRef = useRef(false);
   const shouldReconnectRef = useRef(true);
+  const startNoticeSentRef = useRef(false);
+  const reconnectTimerRef = useRef(null);
+  const rtmsActiveRef = useRef(rtmsActive);
   const isGuestRef = useRef(isGuest);
   const userContextRef = useRef(userContext);
   isGuestRef.current = isGuest;
   userContextRef.current = userContext;
+
+  useEffect(() => { rtmsActiveRef.current = rtmsActive; }, [rtmsActive]);
 
   const meetingId = meetingContext?.meetingUUID;
 
@@ -48,10 +53,15 @@ export function MeetingProvider({ children }) {
       titleUserRenamedRef.current = false;
       hasBeenActiveRef.current = false;
       statusCheckRef.current = false;
+      startNoticeSentRef.current = false;
       meetingStartTimeRef.current = null;
     } else {
       // Meeting ended — stop reconnecting, close WS, reset state
       shouldReconnectRef.current = false;
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
       setRtmsActive(false);
       setRtmsPaused(false);
       setWs(prev => {
@@ -82,11 +92,23 @@ export function MeetingProvider({ children }) {
     }
   }, [zoomSdk, meetingId]);
 
+  // Stable ref so detection paths (WS handler, REST fallback) can send chat notices
+  const sendChatNoticeRef = useRef(sendChatNotice);
+  useEffect(() => { sendChatNoticeRef.current = sendChatNotice; }, [sendChatNotice]);
+
   const connectWebSocket = useCallback((token, meetingId) => {
     if (!meetingId || meetingId === 'undefined' || meetingId === 'null') {
       console.error('Cannot connect WebSocket without valid meeting ID');
       return null;
     }
+
+    // Close existing socket before creating new one
+    setWs(prev => {
+      if (prev && prev.readyState !== WebSocket.CLOSED) {
+        prev.close();
+      }
+      return prev;
+    });
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const hostname = window.location.hostname;
@@ -112,7 +134,7 @@ export function MeetingProvider({ children }) {
 
       switch (message.type) {
         case 'transcript.segment':
-          if (!rtmsActive) {
+          if (!rtmsActiveRef.current) {
             setRtmsActive(true);
             if (!meetingStartTimeRef.current) {
               meetingStartTimeRef.current = Date.now();
@@ -122,6 +144,11 @@ export function MeetingProvider({ children }) {
         case 'meeting.status':
           if (message.data.status === 'rtms_started') {
             setRtmsActive(true);
+            hasBeenActiveRef.current = true;
+            if (!startNoticeSentRef.current) {
+              startNoticeSentRef.current = true;
+              sendChatNoticeRef.current('start');
+            }
           } else if (message.data.status === 'rtms_stopped') {
             setRtmsActive(false);
             setRtmsPaused(false);
@@ -142,7 +169,11 @@ export function MeetingProvider({ children }) {
     socket.onclose = () => {
       console.log('WebSocket disconnected');
       if (shouldReconnectRef.current) {
-        setTimeout(() => {
+        // Clear any existing reconnect timer
+        if (reconnectTimerRef.current) {
+          clearTimeout(reconnectTimerRef.current);
+        }
+        reconnectTimerRef.current = setTimeout(() => {
           if (shouldReconnectRef.current) {
             const reconnected = connectWebSocket(token, meetingId);
             if (reconnected) setWs(reconnected);
@@ -154,7 +185,7 @@ export function MeetingProvider({ children }) {
     setWs(socket);
     return socket;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rtmsActive]);
+  }, []);
 
   const startRTMS = useCallback(async (isAutoStart = false) => {
     if (rtmsLoading || !zoomSdk) return;
@@ -188,6 +219,7 @@ export function MeetingProvider({ children }) {
         sendChatNotice('start');
         hasBeenActiveRef.current = true;
       }
+      startNoticeSentRef.current = true;
 
       zoomSdk.showNotification({
         type: 'success',
@@ -201,6 +233,10 @@ export function MeetingProvider({ children }) {
         hasBeenActiveRef.current = true;
         if (!meetingStartTimeRef.current) {
           meetingStartTimeRef.current = Date.now();
+        }
+        if (!startNoticeSentRef.current) {
+          startNoticeSentRef.current = true;
+          sendChatNotice('start');
         }
         setTimeout(() => sessionStorage.removeItem(startingKey), 2000);
         setRtmsLoading(false);
@@ -289,33 +325,53 @@ export function MeetingProvider({ children }) {
     if (autoStartAttemptedRef.current || !isAuthenticated || !meetingId || rtmsActive || rtmsLoading) return;
     if (localStorage.getItem('arlo-auto-start') === 'false') return;
     autoStartAttemptedRef.current = true;
-    const timer = setTimeout(() => startRTMSRef.current(true), 1500);
+    const timer = setTimeout(() => startRTMSRef.current(true), 500);
     return () => clearTimeout(timer);
   }, [isAuthenticated, meetingId, rtmsActive, rtmsLoading]);
 
-  // Fallback: if WS subscribe didn't detect RTMS status, check via REST API
-  // This covers edge cases where the WS status message is missed (timing, UUID mismatch, etc.)
+  // Check via REST API whether RTMS is already active.
+  // Runs immediately (no delay) with retries to handle the race where the meeting
+  // record hasn't been created yet (e.g. RTMS auto-started before app opened).
   useEffect(() => {
     if (statusCheckRef.current || !isAuthenticated || !meetingId || rtmsActive) return;
     statusCheckRef.current = true;
-    const timer = setTimeout(() => {
+
+    let cancelled = false;
+    let attempt = 0;
+    const maxAttempts = 3;
+
+    const checkStatus = () => {
       fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}`, {
         credentials: 'include',
       })
         .then(res => res.ok ? res.json() : null)
         .then(data => {
+          if (cancelled) return;
           if (data?.meeting?.status === 'ongoing') {
-            console.log('Fallback status check: meeting is ongoing, setting rtmsActive');
+            console.log('REST status check: meeting is ongoing, setting rtmsActive');
             setRtmsActive(true);
             hasBeenActiveRef.current = true;
             if (!meetingStartTimeRef.current) {
               meetingStartTimeRef.current = Date.now();
             }
+            if (!startNoticeSentRef.current) {
+              startNoticeSentRef.current = true;
+              sendChatNoticeRef.current('start');
+            }
+          } else if (++attempt < maxAttempts) {
+            // Meeting record may not exist yet — retry after 1s
+            setTimeout(() => { if (!cancelled) checkStatus(); }, 1000);
           }
         })
-        .catch(() => {});
-    }, 3000);
-    return () => clearTimeout(timer);
+        .catch(() => {
+          if (!cancelled && ++attempt < maxAttempts) {
+            setTimeout(() => { if (!cancelled) checkStatus(); }, 1000);
+          }
+        });
+    };
+
+    checkStatus();
+    return () => { cancelled = true; };
   }, [isAuthenticated, meetingId, rtmsActive]);
 
   // Send Zoom meeting topic to backend to replace generic "Meeting M/D/YYYY" title
@@ -347,24 +403,26 @@ export function MeetingProvider({ children }) {
     titleUserRenamedRef.current = true;
   }, []);
 
+  const contextValue = useMemo(() => ({
+    rtmsActive,
+    rtmsPaused,
+    rtmsLoading,
+    ws,
+    meetingId,
+    meetingStartTime: meetingStartTimeRef.current,
+    autoStartAttemptedRef,
+    viewers,
+    startRTMS,
+    stopRTMS,
+    pauseRTMS,
+    resumeRTMS,
+    connectWebSocket,
+    setWs,
+    setTitleUserRenamed,
+  }), [rtmsActive, rtmsPaused, rtmsLoading, ws, meetingId, viewers, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, connectWebSocket, setWs, setTitleUserRenamed]);
+
   return (
-    <MeetingContext.Provider value={{
-      rtmsActive,
-      rtmsPaused,
-      rtmsLoading,
-      ws,
-      meetingId,
-      meetingStartTime: meetingStartTimeRef.current,
-      autoStartAttemptedRef,
-      viewers,
-      startRTMS,
-      stopRTMS,
-      pauseRTMS,
-      resumeRTMS,
-      connectWebSocket,
-      setWs,
-      setTitleUserRenamed,
-    }}>
+    <MeetingContext.Provider value={contextValue}>
       {children}
     </MeetingContext.Provider>
   );

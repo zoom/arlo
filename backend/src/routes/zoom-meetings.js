@@ -1,11 +1,10 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const { requireAuth } = require('../middleware/auth');
 const { zoomGet, zoomPost, zoomDelete } = require('../services/zoomApi');
 const config = require('../config');
+const prisma = require('../lib/prisma');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 /**
  * GET /api/zoom-meetings
@@ -38,7 +37,6 @@ router.get('/', requireAuth, async (req, res) => {
     console.error('Error fetching upcoming meetings:', error.response?.data || error.message);
     res.status(error.response?.status || 500).json({
       error: 'Failed to fetch upcoming meetings',
-      message: error.response?.data?.message || error.message,
     });
   }
 });
@@ -87,10 +85,9 @@ router.post('/:meetingId/auto-open', requireAuth, async (req, res) => {
     console.log(`[auto-open] Enabled for meeting=${meetingId}`);
     res.json({ success: true, meetingId, autoOpenEnabled: true });
   } catch (error) {
-    console.error(`[auto-open] Failed: ${error.message}`);
+    console.error(`[auto-open] Failed:`, error);
     res.status(500).json({
       error: 'Failed to enable auto-open',
-      message: error.message,
     });
   }
 });
@@ -127,10 +124,9 @@ router.delete('/:meetingId/auto-open', requireAuth, async (req, res) => {
     console.log(`[auto-open] Disabled for meeting=${meetingId}`);
     res.json({ success: true, meetingId, autoOpenEnabled: false });
   } catch (error) {
-    console.error(`[auto-open] Failed: ${error.message}`);
+    console.error(`[auto-open] Failed:`, error);
     res.status(500).json({
       error: 'Failed to disable auto-open',
-      message: error.message,
     });
   }
 });
