@@ -102,6 +102,7 @@ model Speaker {
   // Relations
   segments TranscriptSegment[]
 
+  @@unique([meetingId, zoomParticipantId])
   @@index([meetingId])
   @@map("speakers")
 }
@@ -172,8 +173,8 @@ model Highlight {
   meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   userId    String   @map("user_id")
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tStartMs  Int      @map("t_start_ms") // Highlight start time
-  tEndMs    Int      @map("t_end_ms") // Highlight end time
+  tStartMs  BigInt   @map("t_start_ms") // Highlight start time
+  tEndMs    BigInt   @map("t_end_ms") // Highlight end time
   title     String
   notes     String?  @db.Text
   tags      String[] // Array of tags
@@ -221,8 +222,8 @@ model AiCitation {
   message    AiMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
   meetingId  String    @map("meeting_id")
   segmentId  String?   @map("segment_id")
-  tStartMs   Int       @map("t_start_ms")
-  tEndMs     Int       @map("t_end_ms")
+  tStartMs   BigInt    @map("t_start_ms")
+  tEndMs     BigInt    @map("t_end_ms")
   confidence Float?
 
   @@index([messageId])

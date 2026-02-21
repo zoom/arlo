@@ -170,15 +170,20 @@ export default function MeetingDetailView() {
 
   const handleConfirmDelete = async () => {
     try {
-      await fetch(`/api/meetings/${id}`, {
+      const response = await fetch(`/api/meetings/${id}`, {
         method: 'DELETE',
         credentials: 'include',
       });
+      setDeleteDialogOpen(false);
+      if (response.ok) {
+        navigate('/meetings');
+      } else {
+        console.error('Failed to delete meeting');
+      }
     } catch {
-      // Delete failed silently
+      setDeleteDialogOpen(false);
+      console.error('Failed to delete meeting');
     }
-    setDeleteDialogOpen(false);
-    navigate('/meetings');
   };
 
   const handleEditTitle = () => {

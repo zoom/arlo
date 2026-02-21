@@ -124,7 +124,10 @@ export default function GuestInMeetingView() {
 
       if (message.type === 'transcript.segment') {
         const { segment } = message.data;
-        setSegments(prev => [...prev, segment]);
+        setSegments(prev => {
+          if (prev.some(s => s.seqNo === segment.seqNo)) return prev;
+          return [...prev, segment];
+        });
 
         if (followLive && transcriptRef.current) {
           requestAnimationFrame(() => {

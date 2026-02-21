@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 
 const AuthContext = createContext();
 
@@ -42,8 +42,12 @@ export function AuthProvider({ children }) {
     setWsToken(null);
   }, []);
 
+  const contextValue = useMemo(() => ({
+    isAuthenticated, user, wsToken, isLoading, checkAuth, login, logout,
+  }), [isAuthenticated, user, wsToken, isLoading, checkAuth, login, logout]);
+
   return (
-    <AuthContext.Provider value={{ isAuthenticated, user, wsToken, isLoading, checkAuth, login, logout }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

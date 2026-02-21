@@ -25,7 +25,7 @@ import LandingPageView from './views/LandingPageView';
 import OnboardingView from './views/OnboardingView';
 import OAuthErrorView from './views/OAuthErrorView';
 import NotFoundView from './views/NotFoundView';
-import TestPage from './components/TestPage';
+
 
 /**
  * Root route handler — decides what to show at "/".
@@ -122,9 +122,6 @@ function App() {
                       <Route path="/settings" element={<SettingsView />} />
                       <Route path="/upcoming" element={<UpcomingMeetingsView />} />
                     </Route>
-
-                    {/* Dev */}
-                    <Route path="/test" element={<TestPage />} />
 
                     {/* 404 */}
                     <Route path="*" element={<NotFoundView />} />

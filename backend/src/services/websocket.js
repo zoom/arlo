@@ -1,9 +1,7 @@
 const WebSocket = require('ws');
 const url = require('url');
 const { verifyToken } = require('./auth');
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const prisma = require('../lib/prisma');
 
 // Store active connections
 const connections = new Map(); // meetingId -> Set of WebSocket connections
@@ -154,6 +152,13 @@ async function handleWebSocketMessage(ws, data) {
       // Subscribe to a meeting
       const { meetingId, participantName, isGuest } = payload || {};
       if (meetingId) {
+        // Remove from previous meeting if subscribed
+        if (ws.meetingId && ws.meetingId !== meetingId && connections.has(ws.meetingId)) {
+          connections.get(ws.meetingId).delete(ws);
+          if (connections.get(ws.meetingId).size === 0) {
+            connections.delete(ws.meetingId);
+          }
+        }
         ws.meetingId = meetingId;
         ws.participantName = participantName || null;
         ws.isGuest = !!isGuest;
@@ -170,26 +175,29 @@ async function handleWebSocketMessage(ws, data) {
         broadcastPresence(meetingId);
 
         // Check current meeting status and inform the subscriber
+        console.log(`📡 WS subscribe: looking up meeting by zoomMeetingId="${meetingId}"`);
         prisma.meeting.findUnique({
           where: { zoomMeetingId: meetingId },
         }).then(meeting => {
-          if (meeting && ws.readyState === WebSocket.OPEN) {
-            if (meeting.status === 'ongoing') {
-              ws.send(JSON.stringify({
-                type: 'meeting.status',
-                data: { meetingId, status: 'rtms_started', timestamp: new Date().toISOString() },
-              }));
-              console.log(`📡 Sent current meeting status (ongoing) to new subscriber for ${meetingId}`);
-            } else if (meeting.status === 'completed') {
-              ws.send(JSON.stringify({
-                type: 'meeting.status',
-                data: { meetingId, status: 'rtms_stopped', timestamp: new Date().toISOString() },
-              }));
-              console.log(`📡 Sent current meeting status (completed) to new subscriber for ${meetingId}`);
-            }
+          if (!meeting) {
+            console.log(`📡 WS subscribe: no meeting found for zoomMeetingId="${meetingId}"`);
+            return;
+          }
+          console.log(`📡 WS subscribe: found meeting id=${meeting.id}, status="${meeting.status}" for zoomMeetingId="${meetingId}"`);
+          if (ws.readyState !== WebSocket.OPEN) return;
+          if (meeting.status === 'ongoing') {
+            ws.send(JSON.stringify({
+              type: 'meeting.status',
+              data: { meetingId, status: 'rtms_started', timestamp: new Date().toISOString() },
+            }));
+          } else if (meeting.status === 'completed') {
+            ws.send(JSON.stringify({
+              type: 'meeting.status',
+              data: { meetingId, status: 'rtms_stopped', timestamp: new Date().toISOString() },
+            }));
           }
         }).catch(err => {
-          console.warn('⚠️ Failed to check meeting status on subscribe:', err.message);
+          console.warn(`⚠️ WS subscribe: failed to look up zoomMeetingId="${meetingId}":`, err.message);
         });
       }
       break;
@@ -282,8 +290,12 @@ function broadcastToMeeting(meetingId, message) {
 
   clients.forEach((ws) => {
     if (ws.readyState === WebSocket.OPEN) {
-      ws.send(messageStr);
-      sentCount++;
+      try {
+        ws.send(messageStr);
+        sentCount++;
+      } catch (err) {
+        console.error('WebSocket send error:', err.message);
+      }
     }
   });
 

@@ -1,11 +1,11 @@
 const express = require('express');
 const axios = require('axios');
-const { PrismaClient } = require('@prisma/client');
+const prisma = require('../lib/prisma');
 const { generatePKCE, generateState, encryptToken, decryptToken, generateToken } = require('../services/auth');
+const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
 
 const router = express.Router();
-const prisma = new PrismaClient();
 
 // Store PKCE challenges temporarily (in production, use Redis)
 const pkceStore = new Map();
@@ -60,14 +60,13 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${config.publicUrl}/#/auth-error?error=missing_code&message=${encodeURIComponent('No authorization code received')}`);
     }
 
-    // Validate state if present (Marketplace installs may not include state)
+    // Validate state — required when present (CSRF protection)
     if (state) {
       const storedState = webOAuthStore.get(state);
       if (!storedState) {
-        console.warn('Web OAuth state mismatch — may be a Marketplace install (no state)');
-      } else {
-        webOAuthStore.delete(state);
+        return res.redirect(`${config.publicUrl}/#/auth-error?error=invalid_state&message=${encodeURIComponent('Invalid OAuth state — possible CSRF attack')}`);
       }
+      webOAuthStore.delete(state);
     }
 
     // Exchange code for tokens (no PKCE — server-side flow)
@@ -129,8 +128,11 @@ router.get('/callback', async (req, res) => {
       },
     });
 
-    // Store encrypted tokens
+    // Store encrypted tokens (delete old tokens first)
     const expiresAt = new Date(Date.now() + expires_in * 1000);
+    await prisma.userToken.deleteMany({
+      where: { userId: user.id },
+    });
     await prisma.userToken.create({
       data: {
         userId: user.id,
@@ -273,8 +275,11 @@ router.post('/callback', async (req, res) => {
       },
     });
 
-    // Store encrypted tokens
+    // Store encrypted tokens (delete old tokens first)
     const expiresAt = new Date(Date.now() + expires_in * 1000);
+    await prisma.userToken.deleteMany({
+      where: { userId: user.id },
+    });
     await prisma.userToken.create({
       data: {
         userId: user.id,
@@ -316,10 +321,7 @@ router.post('/callback', async (req, res) => {
     });
   } catch (error) {
     console.error('OAuth callback error:', error.response?.data || error.message);
-    res.status(500).json({
-      error: 'Authentication failed',
-      message: error.response?.data?.message || error.message,
-    });
+    res.status(500).json({ error: 'Authentication failed' });
   }
 });
 
@@ -329,8 +331,6 @@ router.post('/callback', async (req, res) => {
  */
 router.get('/me', async (req, res) => {
   try {
-    const { requireAuth, devAuthBypass } = require('../middleware/auth');
-
     // Apply auth middleware
     await new Promise((resolve, reject) => {
       requireAuth(req, res, (err) => {
@@ -371,11 +371,15 @@ router.get('/me', async (req, res) => {
  */
 router.post('/refresh', async (req, res) => {
   try {
-    const { userId } = req.body;
+    // Apply auth middleware
+    await new Promise((resolve, reject) => {
+      requireAuth(req, res, (err) => {
+        if (err) return reject(err);
+        devAuthBypass(req, res, resolve);
+      });
+    });
 
-    if (!userId) {
-      return res.status(400).json({ error: 'Missing userId' });
-    }
+    const userId = req.user.id;
 
     // Get user token
     const userToken = await prisma.userToken.findFirst({
@@ -432,10 +436,10 @@ router.post('/refresh', async (req, res) => {
     });
   } catch (error) {
     console.error('Token refresh error:', error.response?.data || error.message);
-    res.status(500).json({
-      error: 'Failed to refresh token',
-      message: error.response?.data?.message || error.message,
-    });
+    if (error.message === 'Unauthorized') {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    res.status(500).json({ error: 'Failed to refresh token' });
   }
 });
 
@@ -445,8 +449,6 @@ router.post('/refresh', async (req, res) => {
  */
 router.post('/logout', async (req, res) => {
   try {
-    const { requireAuth, devAuthBypass } = require('../middleware/auth');
-
     // Apply auth middleware
     await new Promise((resolve, reject) => {
       requireAuth(req, res, (err) => {

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Search, Settings } from 'lucide-react';
 import OwlIcon from './OwlIcon';
@@ -13,6 +13,7 @@ export default function AppShell() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const searchRef = useRef(null);
+  const searchAbortRef = useRef(null);
 
   // Show back arrow on sub-pages (not /home)
   const showBack = location.pathname !== '/home' && location.pathname !== '/';
@@ -38,21 +39,36 @@ export default function AppShell() {
     }
 
     const timer = setTimeout(async () => {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+      }
+      searchAbortRef.current = new AbortController();
+
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}&limit=5`, {
           credentials: 'include',
+          signal: searchAbortRef.current.signal,
         });
         if (res.ok) {
           const data = await res.json();
           setSearchResults((data.results || []).slice(0, 5));
         }
-      } catch {
+      } catch (err) {
+        if (err.name === 'AbortError') return; // Ignore aborted requests
         // Search failed silently
       }
     }, 300);
 
     return () => clearTimeout(timer);
   }, [searchQuery]);
+
+  const handleBack = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate('/home');
+    }
+  }, [navigate]);
 
   const handleResultClick = (result) => {
     setSearchOpen(false);
@@ -66,7 +82,7 @@ export default function AppShell() {
       <header className="app-header">
         <div className="header-left">
           {showBack ? (
-            <Button variant="ghost" size="icon" onClick={() => navigate('/home')}>
+            <Button variant="ghost" size="icon" onClick={handleBack}>
               <ArrowLeft size={16} />
             </Button>
           ) : (
