@@ -1,0 +1,333 @@
+/* =============================================================================
+   PRIVILEGE MARKERS
+   Legal vertical — marks confidential/privileged sections
+   ============================================================================= */
+
+.privilege-markers {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Header */
+.privilege-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.privilege-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.privilege-icon {
+  color: var(--legal-accent, #b45309);
+}
+
+.privilege-alert-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+/* Tabs */
+.privilege-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+}
+
+.privilege-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.privilege-tab:hover {
+  color: var(--foreground);
+}
+
+.privilege-tab.active {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.privilege-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: var(--muted);
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.privilege-tab.active .privilege-tab-count {
+  background: var(--muted);
+}
+
+/* Content */
+.privilege-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.privilege-empty {
+  text-align: center;
+  padding: 20px;
+  font-style: italic;
+}
+
+/* Quick add buttons */
+.privilege-quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.privilege-quick-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--muted);
+  border: 1px dashed var(--type-color, var(--border));
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--type-color, var(--foreground));
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.privilege-quick-btn:hover {
+  background: color-mix(in srgb, var(--type-color, var(--muted)) 10%, transparent);
+  border-style: solid;
+}
+
+/* Privilege list */
+.privilege-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.privilege-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--muted);
+  border-left: 3px solid var(--type-color, var(--border));
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.privilege-item.challenged {
+  background: rgba(245, 158, 11, 0.05);
+}
+
+.privilege-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.privilege-type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.privilege-status-badge {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.privilege-item-times {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.privilege-time-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.privilege-time-btn:hover {
+  border-color: var(--legal-accent, #b45309);
+  color: var(--legal-accent, #b45309);
+}
+
+.privilege-time-sep {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.privilege-item-desc {
+  margin: 0;
+  color: var(--foreground);
+}
+
+.privilege-item-meta {
+  opacity: 0.7;
+}
+
+.privilege-challenge-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  background: rgba(245, 158, 11, 0.1);
+  border-radius: var(--radius-sm);
+  color: #f59e0b;
+}
+
+/* Objection quick add */
+.objection-quick-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.objection-quick-btn {
+  padding: 6px 12px;
+  background: var(--muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.objection-quick-btn:hover {
+  border-color: var(--legal-accent, #b45309);
+  color: var(--legal-accent, #b45309);
+}
+
+/* Objection list */
+.objection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.objection-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.objection-item:hover {
+  border-color: var(--border);
+  background: var(--card);
+}
+
+.objection-time {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+.objection-type {
+  padding: 2px 6px;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--legal-accent, #b45309);
+}
+
+.objection-basis {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.objection-speaker {
+  white-space: nowrap;
+}
+
+.objection-ruling {
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.objection-ruling.sustained {
+  background: rgba(5, 150, 105, 0.1);
+  color: #059669;
+}
+
+.objection-ruling.overruled {
+  background: rgba(220, 38, 38, 0.1);
+  color: #dc2626;
+}

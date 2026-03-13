@@ -8,6 +8,7 @@ const {
   generateTitle,
   extractActionItems,
   chatWithTranscript,
+  extractSOAPNotes,
 } = require('../services/openrouter');
 
 // Apply dev auth bypass at router level (must run before requireAuth/optionalAuth)
@@ -183,6 +184,34 @@ router.post('/action-items', requireAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Action items extraction error:', error.message);
     res.status(500).json({ error: 'Failed to extract action items' });
+  }
+});
+
+/**
+ * POST /api/ai/extract-soap
+ * Extract SOAP notes from healthcare transcript (healthcare vertical)
+ */
+router.post('/extract-soap', requireAuth, async (req, res) => {
+  const { meetingId, transcript, currentSoap } = req.body;
+
+  if (!config.aiEnabled) {
+    return res.status(503).json({ error: 'AI features are disabled' });
+  }
+
+  if (!transcript) {
+    return res.status(400).json({ error: 'transcript is required' });
+  }
+
+  try {
+    console.log(`🏥 Extracting SOAP notes for meeting: ${meetingId || 'live'}`);
+
+    // Extract SOAP notes using AI
+    const soapNotes = await extractSOAPNotes(transcript, currentSoap || {});
+
+    res.json(soapNotes);
+  } catch (error) {
+    console.error('❌ SOAP extraction error:', error.message);
+    res.status(500).json({ error: 'Failed to extract SOAP notes' });
   }
 });
 

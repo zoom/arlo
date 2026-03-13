@@ -1,12 +1,37 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, CheckCircle2, XCircle, MessageSquare, ExternalLink, Moon, Sun } from 'lucide-react';
+import {
+  Eye,
+  EyeOff,
+  CheckCircle2,
+  XCircle,
+  MessageSquare,
+  ExternalLink,
+  Moon,
+  Sun,
+  ChevronRight,
+  FileText,
+  Stethoscope,
+  Scale,
+  TrendingUp,
+  PieChart,
+} from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
+import { useVertical, VERTICALS } from '../contexts/VerticalContext';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Textarea from '../components/ui/Textarea';
 import './SettingsView.css';
+
+// Icon mapping for verticals
+const VERTICAL_ICONS = {
+  notes: FileText,
+  healthcare: Stethoscope,
+  legal: Scale,
+  sales: TrendingUp,
+  finance: PieChart,
+};
 
 const MODELS = {
   openrouter: [
@@ -54,6 +79,7 @@ const MOCK_SETTINGS_UPCOMING = [
 export default function SettingsView() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
+  const { vertical, clearVertical } = useVertical();
   const [autoOpen, setAutoOpen] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
   const [settingsUpcoming, setSettingsUpcoming] = useState([]);
@@ -246,6 +272,47 @@ export default function SettingsView() {
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </Button>
       </div>
+
+      {/* Current Experience / Vertical */}
+      {vertical && (
+        <section className="settings-section">
+          <h2 className="text-serif text-xl">Current Experience</h2>
+          <Card>
+            <div className="settings-card-inner">
+              <div className="settings-vertical-current">
+                <div className="settings-vertical-info">
+                  {(() => {
+                    const Icon = VERTICAL_ICONS[vertical.id];
+                    return (
+                      <div
+                        className="settings-vertical-icon"
+                        style={{ '--vertical-color': vertical.accentColor }}
+                      >
+                        <Icon size={20} />
+                      </div>
+                    );
+                  })()}
+                  <div>
+                    <p className="text-sans font-medium">{vertical.name}</p>
+                    <p className="text-sans text-sm text-muted">{vertical.tagline}</p>
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    clearVertical();
+                    navigate('/select-vertical', { replace: true });
+                  }}
+                >
+                  Switch
+                  <ChevronRight size={14} />
+                </Button>
+              </div>
+            </div>
+          </Card>
+        </section>
+      )}
 
       {/* Transcription Preferences */}
       <section className="settings-section">

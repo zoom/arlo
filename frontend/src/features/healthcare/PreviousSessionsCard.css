@@ -1,0 +1,145 @@
+/* =============================================================================
+   PREVIOUS SESSIONS CARD
+   Healthcare vertical — past appointment history
+   ============================================================================= */
+
+.previous-sessions-card {
+  overflow: hidden;
+}
+
+/* Header */
+.previous-sessions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.previous-sessions-header:hover {
+  background: var(--muted);
+}
+
+.previous-sessions-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.previous-sessions-icon {
+  color: var(--healthcare-accent, #0d9488);
+}
+
+.previous-sessions-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+/* Content */
+.previous-sessions-content {
+  padding: 0 16px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Individual session */
+.previous-session-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.previous-session-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.previous-session-summary:hover {
+  background: var(--muted);
+}
+
+.previous-session-date {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.previous-session-complaint {
+  flex: 1;
+  font-weight: 500;
+}
+
+.previous-session-flag {
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+/* Expanded details */
+.previous-session-details {
+  padding: 12px;
+  background: var(--muted);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.previous-session-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.previous-session-detail p {
+  line-height: 1.5;
+}
+
+.previous-session-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+}
+
+.previous-session-flag-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #d97706;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.dark .previous-session-flag-tag {
+  color: #fbbf24;
+}

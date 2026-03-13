@@ -1,0 +1,116 @@
+/* =============================================================================
+   PATIENT CONTEXT CARD
+   Healthcare vertical — patient information sidebar
+   ============================================================================= */
+
+.patient-context-card {
+  overflow: hidden;
+}
+
+/* Header (clickable) */
+.patient-context-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.patient-context-header:hover {
+  background: var(--muted);
+}
+
+.patient-context-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.patient-icon {
+  color: var(--healthcare-accent, #0d9488);
+}
+
+/* Content */
+.patient-context-content {
+  padding: 0 16px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.patient-context-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.patient-context-row > svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+.patient-context-row-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+/* Tags */
+.patient-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.patient-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.condition-tag {
+  background: color-mix(in srgb, var(--healthcare-accent, #0d9488) 12%, transparent);
+  color: var(--healthcare-accent, #0d9488);
+}
+
+.allergy-tag {
+  background: color-mix(in srgb, #ef4444 12%, transparent);
+  color: #dc2626;
+}
+
+.dark .allergy-tag {
+  color: #f87171;
+}
+
+.allergy-icon {
+  color: #dc2626;
+}
+
+.dark .allergy-icon {
+  color: #f87171;
+}
+
+.medication-tag {
+  background: color-mix(in srgb, #8b5cf6 12%, transparent);
+  color: #7c3aed;
+}
+
+.dark .medication-tag {
+  color: #a78bfa;
+}
+
+/* Empty state */
+.patient-context-empty {
+  font-style: italic;
+  padding: 8px 0;
+}
