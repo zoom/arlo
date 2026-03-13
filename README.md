@@ -52,7 +52,7 @@ Arlo is designed to help developers quickly prototype and deploy their own meeti
 - 📄 **Export Markdown** — Download meeting summary + transcript as MD
 - 🏗️ **Multi-View Architecture** — 14 views with HashRouter, shared AppShell
 - 🔐 **Secure** - Zoom OAuth, encrypted tokens, ownership-enforced data isolation, rate limiting, HMAC webhook verification
-- 🏥 **Industry Verticals** — Specialized modes for Healthcare, Legal, Sales, Finance, and general note-taking
+- 🏥 **Industry Verticals** — Specialized modes for Healthcare, Legal, Sales, Customer Support, and general note-taking
 
 ---
 
@@ -60,37 +60,58 @@ Arlo is designed to help developers quickly prototype and deploy their own meeti
 
 Arlo supports **industry-specific modes** that customize the AI prompts, features, terminology, and UI for different use cases. Select your vertical during first-run setup or change it anytime in Settings.
 
+### General (Default Note-Taker)
+
+The full-featured default mode for any meeting type — team syncs, 1:1s, project meetings, and more.
+
+- **Meeting Summary** — Collapsible AI-generated summary with key points, auto-refreshes as meeting progresses
+- **Key Moments** — Auto-detected highlights (announcements, agreements, concerns, insights, milestones) with star/favorite
+- **Participant Stats** — Talk time breakdown, visual participation chart, balance indicator
+- **Decisions Log** — Track decisions with who made them, auto-detected + manual entry
+- **Open Questions** — Capture unanswered questions with open/answered/all filters
+- **Smart Bookmarks** — Quick one-click bookmarking with categories (Important, Follow Up, Idea, Favorite)
+- **Notes** — Free-form meeting notes textarea
+- **Action Items** — Track tasks with owner assignment
+
 ### Healthcare (Clinical Documentation)
 
 Designed for doctors and clinicians who need to document patient encounters while staying present with their patients.
 
 - **SOAP Notes Panel** — Auto-populated Subjective, Objective, Assessment, and Plan sections
-- **Visit Templates** — Pre-configured templates for different encounter types
-- **ICD-10/CPT Codes** — AI-suggested diagnosis and procedure codes
 - **Patient Context** — Sidebar showing conditions, allergies, and medications
 - **Previous Sessions** — Quick access to past appointment notes
 - **Clinical Alerts** — Real-time warnings for drug interactions, contradictions, allergy mentions
 - **Quick Actions** — One-click lab orders, referrals, Rx templates, follow-up scheduling
-- **Patient Summary** — Generate plain-language handouts for patients
+- **Healthcare Tags** — Auto-extracted symptoms, diagnoses, medications, procedures
 
 ### Legal (Depositions & Testimony)
 
 Built for attorneys handling depositions, client interviews, and witness testimony.
 
 - **Contradiction Detector** — Flags conflicting statements with severity levels and side-by-side comparison
-- **Key Terms Panel** — Auto-extracts parties, dates, amounts, locations, documents, and legal citations
+- **Legal Terms Panel** — Auto-extracts parties, dates, amounts, locations, documents, and legal citations
 - **Exhibit Tracker** — Log and track document references with timestamps and context
 - **Privilege Markers** — Mark attorney-client, work product, and confidential sections
-- **Objection Log** — Quick-add common objections (leading, compound, relevance, assumes facts)
-- **Certified Timestamps** — All transcript segments include precise timestamps for the record
 
-### Notes (General Purpose)
+### Sales (Deal Tracking & Qualification)
 
-The default mode for general meeting notes, action items, and summaries.
+Built for sales professionals tracking deals, competitive intelligence, and buyer signals.
 
-### Sales & Finance
+- **Deal Tracker** — Opportunity details with pipeline stage visualization, value, close date, key contacts
+- **Deal Qualification** — Track Budget, Authority, Need, Timeline criteria with detected signals
+- **Competitor Mentions** — Real-time detection with sentiment analysis (positive/negative/neutral/mixed)
+- **Commitments Panel** — Track next steps with owner assignment (us vs them), due dates, completion status
+- **Call Notes** — Free-form notes for key takeaways and follow-ups
 
-Coming soon — specialized features for deal tracking, compliance documentation, and more.
+### Customer Support (Call Center)
+
+Built for support agents handling customer calls — aligned with Zoom's upcoming Call Center RTMS support.
+
+- **Sentiment Meter** — Live animated gauge showing customer mood (Angry → Frustrated → Neutral → Satisfied → Happy) with trend indicator
+- **Escalation Alerts** — Real-time detection of manager requests, churn risk, frustration signals with acknowledge/dismiss actions
+- **Resolution Tracker** — Visual workflow (Issue Identified → Solution Offered → Resolution Confirmed) with handle time tracking
+- **Agent Assist** — Contextual knowledge base suggestions + compliance checklist with progress tracking
+- **Quick Responses** — One-click copy for empathy, hold, clarify, and resolve templates
 
 ---
 
@@ -362,8 +383,11 @@ arlo-meeting-assistant/
 │       ├── views/           # 15 views (Auth, Home, MeetingsList, MeetingDetail, InMeeting, Search, Settings, Upcoming, Guest×2, Landing, Onboarding, OAuthError, NotFound, VerticalSelector)
 │       ├── contexts/        # 6 contexts (Auth, ZoomSdk, Meeting, Theme, Toast, Vertical)
 │       ├── features/        # Industry vertical components
+│       │   ├── general/     # Meeting summary, key moments, decisions, questions, participation, bookmarks
 │       │   ├── healthcare/  # SOAP notes, clinical alerts, patient context, quick actions
-│       │   └── legal/       # Contradiction detector, exhibit tracker, privilege markers
+│       │   ├── legal/       # Contradiction detector, exhibit tracker, privilege markers
+│       │   ├── sales/       # Deal tracker, qualification, competitor mentions, commitments
+│       │   └── support/     # Sentiment meter, escalation alerts, resolution tracker, agent assist
 │       ├── hooks/           # useZoomAuth (OAuth PKCE)
 │       ├── utils/           # Shared formatters (timestamps, durations, dates)
 │       ├── components/      # AppShell, ArloLogo, DeleteMeetingDialog, ParticipantTimeline, MeetingCard, etc.

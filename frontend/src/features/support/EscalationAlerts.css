@@ -1,0 +1,238 @@
+/* =============================================================================
+   ESCALATION ALERTS
+   Support vertical — Real-time escalation detection
+   ============================================================================= */
+
+.escalation-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Header */
+.escalation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.escalation-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.escalation-icon {
+  color: var(--support-accent, #2563eb);
+}
+
+.escalation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: #dc2626;
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: white;
+  animation: pulse-badge 2s ease-in-out infinite;
+}
+
+@keyframes pulse-badge {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+}
+
+.escalation-mute-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.escalation-mute-btn:hover {
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.escalation-mute-btn.muted {
+  background: color-mix(in srgb, #f97316 15%, transparent);
+  color: #f97316;
+}
+
+/* Active alerts */
+.escalation-active {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.escalation-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--alert-color) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--alert-color) 30%, transparent);
+  border-left: 3px solid var(--alert-color);
+  border-radius: var(--radius-md);
+  animation: alert-slide-in 0.3s ease-out;
+}
+
+@keyframes alert-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.escalation-alert.high {
+  animation: alert-slide-in 0.3s ease-out, alert-urgent 2s ease-in-out infinite;
+}
+
+@keyframes alert-urgent {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--alert-color) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--alert-color) 10%, transparent);
+  }
+}
+
+.escalation-alert-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.escalation-alert-type {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--alert-color);
+}
+
+.escalation-alert-time {
+  color: var(--muted-foreground);
+}
+
+.escalation-alert-phrase {
+  margin: 0;
+  color: var(--foreground);
+  font-style: italic;
+  line-height: 1.4;
+}
+
+.escalation-alert-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.escalation-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.escalation-action-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.escalation-action-btn.acknowledge {
+  background: color-mix(in srgb, #22c55e 10%, transparent);
+  border-color: color-mix(in srgb, #22c55e 30%, transparent);
+  color: #16a34a;
+}
+
+.escalation-action-btn.acknowledge:hover {
+  background: color-mix(in srgb, #22c55e 20%, transparent);
+}
+
+.escalation-action-btn.jump {
+  color: var(--support-accent, #2563eb);
+}
+
+.escalation-action-btn.dismiss {
+  padding: 4px;
+}
+
+.escalation-action-btn.dismiss:hover {
+  color: #dc2626;
+}
+
+/* Empty state */
+.escalation-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+}
+
+/* Acknowledged */
+.escalation-acknowledged {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.escalation-acknowledged-label {
+  flex-shrink: 0;
+}
+
+.escalation-acknowledged-dots {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.escalation-acknowledged-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  opacity: 0.5;
+}
+
+/* Hint */
+.escalation-hint {
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}

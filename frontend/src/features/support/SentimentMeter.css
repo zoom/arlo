@@ -1,0 +1,199 @@
+/* =============================================================================
+   SENTIMENT METER
+   Support vertical — Real-time customer sentiment visualization
+   ============================================================================= */
+
+.sentiment-meter {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+}
+
+/* Header */
+.sentiment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sentiment-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sentiment-icon {
+  color: var(--support-accent, #2563eb);
+}
+
+/* Trend indicator */
+.sentiment-trend {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+}
+
+.sentiment-trend.improving {
+  background: color-mix(in srgb, #22c55e 15%, transparent);
+  color: #16a34a;
+}
+
+.sentiment-trend.declining {
+  background: color-mix(in srgb, #ef4444 15%, transparent);
+  color: #dc2626;
+}
+
+.sentiment-trend.stable {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+/* Gauge */
+.sentiment-gauge {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sentiment-gauge-track {
+  position: relative;
+  height: 12px;
+  border-radius: 6px;
+  overflow: visible;
+}
+
+.sentiment-gauge-gradient {
+  position: absolute;
+  inset: 0;
+  border-radius: 6px;
+  background: linear-gradient(
+    to right,
+    #dc2626 0%,
+    #f97316 25%,
+    #6b7280 50%,
+    #22c55e 75%,
+    #10b981 100%
+  );
+  opacity: 0.3;
+}
+
+.sentiment-gauge-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  transition: left 1s ease-out;
+}
+
+.sentiment-gauge-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--indicator-color);
+  border: 3px solid var(--card);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  position: relative;
+  z-index: 2;
+}
+
+.sentiment-gauge-pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--indicator-color);
+  opacity: 0.4;
+  animation: sentiment-pulse 2s ease-out infinite;
+  z-index: 1;
+}
+
+@keyframes sentiment-pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.4;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(2.5);
+    opacity: 0;
+  }
+}
+
+.sentiment-gauge-labels {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+
+.sentiment-gauge-label {
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+/* Current sentiment */
+.sentiment-current {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--sentiment-color) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sentiment-color) 30%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.sentiment-current-label {
+  color: var(--muted-foreground);
+}
+
+.sentiment-current-value {
+  color: var(--sentiment-color);
+  font-size: 1.125rem;
+}
+
+/* History */
+.sentiment-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sentiment-history-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 500;
+}
+
+.sentiment-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sentiment-history-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.sentiment-history-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: 4px;
+  border-radius: 50%;
+}
+
+.sentiment-history-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}

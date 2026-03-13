@@ -1,0 +1,203 @@
+/* =============================================================================
+   SMART BOOKMARKS
+   General — Quick one-click bookmarking
+   ============================================================================= */
+
+.smart-bookmarks {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Header */
+.smart-bookmarks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.smart-bookmarks-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.smart-bookmarks-icon {
+  color: var(--accent);
+}
+
+.smart-bookmarks-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--muted);
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+/* Quick bookmark section */
+.smart-bookmarks-quick {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+}
+
+.smart-bookmarks-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  color: var(--foreground);
+}
+
+.smart-bookmarks-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.smart-bookmarks-input::placeholder {
+  color: var(--muted-foreground);
+}
+
+.smart-bookmarks-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.smart-bookmark-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.smart-bookmark-btn:hover {
+  border-color: var(--bookmark-color);
+  color: var(--bookmark-color);
+  background: color-mix(in srgb, var(--bookmark-color) 10%, transparent);
+}
+
+.smart-bookmark-label {
+  display: none;
+}
+
+@media (min-width: 400px) {
+  .smart-bookmark-label {
+    display: inline;
+  }
+}
+
+/* Bookmark list */
+.smart-bookmarks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.smart-bookmarks-empty {
+  text-align: center;
+  padding: 12px;
+  font-style: italic;
+}
+
+/* Bookmark item */
+.smart-bookmark-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--bookmark-color);
+}
+
+.smart-bookmark-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: color-mix(in srgb, var(--bookmark-color) 15%, transparent);
+  border-radius: var(--radius-sm);
+  color: var(--bookmark-color);
+  flex-shrink: 0;
+}
+
+.smart-bookmark-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.smart-bookmark-note {
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.smart-bookmark-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.smart-bookmark-jump,
+.smart-bookmark-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.smart-bookmark-item:hover .smart-bookmark-jump,
+.smart-bookmark-item:hover .smart-bookmark-remove {
+  opacity: 1;
+}
+
+.smart-bookmark-jump:hover {
+  background: var(--card);
+  color: var(--accent);
+}
+
+.smart-bookmark-remove:hover {
+  background: var(--card);
+  color: #ef4444;
+}

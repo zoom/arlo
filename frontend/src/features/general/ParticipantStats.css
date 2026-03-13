@@ -1,0 +1,195 @@
+/* =============================================================================
+   PARTICIPANT STATS
+   General — Talk time and participation breakdown
+   ============================================================================= */
+
+.participant-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Header */
+.participant-stats-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.participant-stats-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.participant-stats-icon {
+  color: var(--accent);
+}
+
+.participant-stats-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.participant-stats-dot {
+  width: 3px;
+  height: 3px;
+  background: var(--muted-foreground);
+  border-radius: 50%;
+}
+
+/* Visual bar */
+.participant-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.participant-bar-segment {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.participant-bar-segment:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.participant-bar-segment:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+/* Participant list */
+.participant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.participant-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.participant-rank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  background: var(--card);
+  border-radius: 50%;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.participant-item:first-child .participant-rank {
+  background: var(--accent);
+  color: white;
+}
+
+.participant-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.participant-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.participant-name {
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.participant-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.participant-time,
+.participant-segments {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.participant-percentage {
+  flex-shrink: 0;
+}
+
+/* Balance indicator */
+.participant-balance {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.participant-balance-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 500;
+}
+
+.participant-balance-indicator {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.balance-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--muted);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.balance-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.balance-bar.balanced .balance-fill {
+  background: #22c55e;
+}
+
+.balance-bar.unbalanced .balance-fill {
+  background: #f97316;
+}
+
+.balance-label {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.balance-label.balanced {
+  color: #22c55e;
+}
+
+.balance-label.unbalanced {
+  color: #f97316;
+}
