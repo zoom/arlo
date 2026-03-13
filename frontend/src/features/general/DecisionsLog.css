@@ -1,0 +1,206 @@
+/* =============================================================================
+   DECISIONS LOG
+   General — Track decisions made during meeting
+   ============================================================================= */
+
+.decisions-log {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Header */
+.decisions-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.decisions-log-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.decisions-log-icon {
+  color: var(--accent);
+}
+
+.decisions-log-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--muted);
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.decisions-log-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.decisions-log-add-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Add form */
+.decisions-log-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+}
+
+.decisions-log-add-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.decisions-add-btn,
+.decisions-cancel-btn {
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.decisions-add-btn {
+  background: var(--accent);
+  border: none;
+  color: white;
+}
+
+.decisions-add-btn:hover {
+  filter: brightness(1.1);
+}
+
+.decisions-cancel-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+
+.decisions-cancel-btn:hover {
+  background: var(--border);
+}
+
+/* List */
+.decisions-log-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.decisions-log-empty {
+  text-align: center;
+  padding: 16px;
+  font-style: italic;
+}
+
+/* Decision item */
+.decision-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--accent);
+}
+
+.decision-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.decision-text {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--foreground);
+}
+
+.decision-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.decision-auto {
+  padding: 1px 5px;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.decision-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.decision-jump,
+.decision-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.decision-item:hover .decision-jump,
+.decision-item:hover .decision-remove {
+  opacity: 1;
+}
+
+.decision-jump:hover {
+  background: var(--card);
+  color: var(--accent);
+}
+
+.decision-remove:hover {
+  background: var(--card);
+  color: #ef4444;
+}

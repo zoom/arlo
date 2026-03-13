@@ -1,0 +1,147 @@
+/* =============================================================================
+   KEY MOMENTS
+   General — Auto-detected important moments
+   ============================================================================= */
+
+.key-moments {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Header */
+.key-moments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.key-moments-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.key-moments-icon {
+  color: var(--accent);
+}
+
+.key-moments-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--muted);
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.key-moments-starred {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #eab308;
+}
+
+/* List */
+.key-moments-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+/* Moment item */
+.key-moment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.key-moment:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--muted));
+}
+
+.key-moment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.key-moment-type {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.key-moment-time {
+  color: var(--muted-foreground);
+}
+
+.key-moment-text {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--foreground);
+}
+
+.key-moment-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.key-moment-speaker {
+  font-style: italic;
+}
+
+.key-moment-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.key-moment-star {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+}
+
+.key-moment-star:hover {
+  background: var(--card);
+  color: #eab308;
+}
+
+.key-moment-star.starred {
+  color: #eab308;
+}
+
+.key-moment-link {
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.key-moment:hover .key-moment-link {
+  opacity: 1;
+}

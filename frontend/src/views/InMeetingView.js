@@ -30,6 +30,29 @@ import {
   ExhibitTracker,
   PrivilegeMarkers,
 } from '../features/legal';
+// Sales vertical features
+import {
+  DealTracker,
+  CompetitorMentions,
+  CommitmentsPanel,
+  QualificationSignals,
+} from '../features/sales';
+// Customer Support vertical features
+import {
+  SentimentMeter,
+  EscalationAlerts,
+  ResolutionTracker,
+  AgentAssist,
+} from '../features/support';
+// General meeting features (default note-taker)
+import {
+  MeetingSummary,
+  KeyMoments,
+  DecisionsLog,
+  OpenQuestions,
+  ParticipantStats,
+  SmartBookmarks,
+} from '../features/general';
 import './InMeetingView.css';
 
 function formatTimestamp(ms) {
@@ -75,6 +98,8 @@ export default function InMeetingView() {
   // Vertical-specific features
   const isHealthcare = verticalId === 'healthcare';
   const isLegal = verticalId === 'legal';
+  const isSales = verticalId === 'sales';
+  const isSupport = verticalId === 'support';
 
   // Context guard: redirect to home if not in a meeting
   useEffect(() => {
@@ -761,9 +786,180 @@ export default function InMeetingView() {
                 </div>
               </Card>
             </>
-          ) : (
-            /* Default: Notes + Action Items */
+          ) : isSales ? (
+            /* Sales vertical: Deal tracking and qualification */
             <>
+              {/* Deal Tracker - opportunity details */}
+              <DealTracker segments={segments} meetingId={meetingId} />
+
+              {/* Two-column layout for Qualification and Competitors */}
+              <div className="sales-context-row">
+                <QualificationSignals
+                  segments={segments}
+                  onJumpToSegment={(seqNo) => {
+                    if (transcriptRef.current) {
+                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        element.classList.add('highlight-flash');
+                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                      }
+                    }
+                  }}
+                />
+                <CompetitorMentions
+                  segments={segments}
+                  onJumpToSegment={(seqNo) => {
+                    if (transcriptRef.current) {
+                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        element.classList.add('highlight-flash');
+                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                      }
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Commitments / Next Steps */}
+              <CommitmentsPanel
+                segments={segments}
+                onJumpToSegment={(seqNo) => {
+                  if (transcriptRef.current) {
+                    const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                    if (element) {
+                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      element.classList.add('highlight-flash');
+                      setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                    }
+                  }
+                }}
+              />
+
+              {/* Call Notes */}
+              <Card className="assist-card">
+                <div className="assist-card-inner">
+                  <h3 className="text-serif font-medium">Call Notes</h3>
+                  <Textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Key takeaways, objections to address, follow-up items..."
+                    className="assist-notes"
+                  />
+                </div>
+              </Card>
+            </>
+          ) : isSupport ? (
+            /* Customer Support vertical: Sentiment, escalations, resolution */
+            <>
+              {/* Sentiment Meter - the visual showstopper */}
+              <SentimentMeter segments={segments} />
+
+              {/* Two-column layout for Escalations and Resolution */}
+              <div className="support-context-row">
+                <EscalationAlerts
+                  segments={segments}
+                  onJumpToSegment={(seqNo) => {
+                    if (transcriptRef.current) {
+                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        element.classList.add('highlight-flash');
+                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                      }
+                    }
+                  }}
+                />
+                <ResolutionTracker segments={segments} />
+              </div>
+
+              {/* Agent Assist - knowledge + compliance */}
+              <AgentAssist segments={segments} />
+
+              {/* Call Notes */}
+              <Card className="assist-card">
+                <div className="assist-card-inner">
+                  <h3 className="text-serif font-medium">Call Notes</h3>
+                  <Textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Issue summary, resolution steps, follow-up needed..."
+                    className="assist-notes"
+                  />
+                </div>
+              </Card>
+            </>
+          ) : (
+            /* Default: General meeting assistant */
+            <>
+              {/* AI-generated meeting summary */}
+              <MeetingSummary segments={segments} meetingId={meetingId} />
+
+              {/* Two-column layout for Key Moments and Participation */}
+              <div className="general-context-row">
+                <KeyMoments
+                  segments={segments}
+                  onJumpToSegment={(seqNo) => {
+                    if (transcriptRef.current) {
+                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        element.classList.add('highlight-flash');
+                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                      }
+                    }
+                  }}
+                />
+                <ParticipantStats segments={segments} />
+              </div>
+
+              {/* Two-column layout for Decisions and Questions */}
+              <div className="general-context-row">
+                <DecisionsLog
+                  segments={segments}
+                  onJumpToSegment={(seqNo) => {
+                    if (transcriptRef.current) {
+                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        element.classList.add('highlight-flash');
+                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                      }
+                    }
+                  }}
+                />
+                <OpenQuestions
+                  segments={segments}
+                  onJumpToSegment={(seqNo) => {
+                    if (transcriptRef.current) {
+                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        element.classList.add('highlight-flash');
+                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                      }
+                    }
+                  }}
+                />
+              </div>
+
+              {/* Smart Bookmarks */}
+              <SmartBookmarks
+                segments={segments}
+                onJumpToSegment={(seqNo) => {
+                  if (transcriptRef.current) {
+                    const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                    if (element) {
+                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      element.classList.add('highlight-flash');
+                      setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                    }
+                  }
+                }}
+              />
+
+              {/* Notes and Action Items */}
               <Card className="assist-card">
                 <div className="assist-card-inner">
                   <h3 className="text-serif font-medium">Notes</h3>

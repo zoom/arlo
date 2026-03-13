@@ -532,3 +532,115 @@
     background: transparent;
   }
 }
+
+/* =============================================================================
+   SALES VERTICAL STYLES
+   ============================================================================= */
+
+/* Sales accent color (set by VerticalContext, fallback here) */
+:root {
+  --sales-accent: #7c3aed;
+}
+
+/* Sales context cards row (Qualification + Competitors) */
+.sales-context-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 500px) {
+  .sales-context-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+}
+
+/* Make cards in the row equal height */
+.sales-context-row > * {
+  min-height: 0;
+}
+
+/* Sales-specific highlight flash (purple instead of teal) */
+.sales-context-row ~ .transcript-entry.highlight-flash,
+.in-meeting-tab-panel:has(.sales-context-row) .transcript-entry.highlight-flash {
+  animation: sales-highlight-flash 2s ease-out;
+}
+
+@keyframes sales-highlight-flash {
+  0% {
+    background: color-mix(in srgb, var(--sales-accent, #7c3aed) 25%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* =============================================================================
+   CUSTOMER SUPPORT VERTICAL STYLES
+   ============================================================================= */
+
+/* Support accent color (set by VerticalContext, fallback here) */
+:root {
+  --support-accent: #2563eb;
+}
+
+/* Support context cards row (Escalations + Resolution) */
+.support-context-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 500px) {
+  .support-context-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+}
+
+/* Make cards in the row equal height */
+.support-context-row > * {
+  min-height: 0;
+}
+
+/* Support-specific highlight flash (blue instead of teal) */
+.support-context-row ~ .transcript-entry.highlight-flash,
+.in-meeting-tab-panel:has(.support-context-row) .transcript-entry.highlight-flash {
+  animation: support-highlight-flash 2s ease-out;
+}
+
+@keyframes support-highlight-flash {
+  0% {
+    background: color-mix(in srgb, var(--support-accent, #2563eb) 25%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* =============================================================================
+   GENERAL MEETING ASSISTANT STYLES (Default Note-Taker)
+   ============================================================================= */
+
+/* General context cards row */
+.general-context-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 500px) {
+  .general-context-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+}
+
+/* Make cards in the row equal height */
+.general-context-row > * {
+  min-height: 0;
+}

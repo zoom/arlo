@@ -1,0 +1,316 @@
+/* =============================================================================
+   QUALIFICATION SIGNALS
+   Sales vertical — Deal qualification tracking
+   ============================================================================= */
+
+.qualification-signals {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+
+/* Header */
+.qualification-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.qualification-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qualification-icon {
+  color: var(--sales-accent, #7c3aed);
+}
+
+/* Score Ring */
+.qualification-score {
+  display: flex;
+  align-items: center;
+}
+
+.qualification-score-ring {
+  position: relative;
+  width: 44px;
+  height: 44px;
+}
+
+.qualification-score-ring svg {
+  transform: rotate(-90deg);
+}
+
+.qualification-score-bg {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 3;
+}
+
+.qualification-score-fill {
+  fill: none;
+  stroke: var(--score-color);
+  stroke-width: 3;
+  stroke-linecap: round;
+  transition: stroke-dasharray 0.5s ease;
+}
+
+.qualification-score-value {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--score-color);
+}
+
+/* Criteria */
+.qualification-criteria {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qualification-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.qualification-item.confirmed {
+  border-left: 3px solid #10b981;
+}
+
+.qualification-item.unclear {
+  border-left: 3px solid #f59e0b;
+}
+
+.qualification-item.missing {
+  border-left: 3px solid #ef4444;
+}
+
+.qualification-item.unknown {
+  border-left: 3px solid #6b7280;
+}
+
+.qualification-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.qualification-item-header:hover {
+  background: var(--muted);
+}
+
+.qualification-item-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qualification-criteria-icon {
+  color: var(--muted-foreground);
+}
+
+.qualification-criteria-label {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  color: var(--foreground);
+}
+
+.qualification-item-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qualification-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+}
+
+.qualification-signal-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--muted);
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+/* Content */
+.qualification-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  background: var(--muted);
+}
+
+/* Status selector */
+.qualification-status-selector {
+  display: flex;
+  gap: 6px;
+}
+
+.qualification-status-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.qualification-status-btn:hover {
+  border-color: var(--status-color);
+  color: var(--status-color);
+}
+
+.qualification-status-btn.active {
+  background: color-mix(in srgb, var(--status-color) 15%, transparent);
+  border-color: var(--status-color);
+  color: var(--status-color);
+}
+
+/* Signals list */
+.qualification-signals-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qualification-signals-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 500;
+}
+
+.qualification-signal {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.qualification-signal:hover {
+  border-color: var(--sales-accent, #7c3aed);
+}
+
+.qualification-signal-text {
+  color: var(--foreground);
+  font-family: var(--font-serif);
+  line-height: 1.4;
+}
+
+.qualification-signal-time {
+  color: var(--muted-foreground);
+}
+
+.qualification-signal-link {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.qualification-signal:hover .qualification-signal-link {
+  opacity: 1;
+}
+
+/* Notes */
+.qualification-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qualification-notes-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 500;
+}
+
+.qualification-notes-text {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  line-height: 1.4;
+}
+
+/* Questions */
+.qualification-questions-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.qualification-questions-toggle:hover {
+  border-color: var(--sales-accent, #7c3aed);
+  color: var(--sales-accent, #7c3aed);
+}
+
+.qualification-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+}
+
+.qualification-question {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-style: italic;
+  line-height: 1.4;
+}

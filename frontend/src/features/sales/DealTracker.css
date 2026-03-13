@@ -1,0 +1,331 @@
+/* =============================================================================
+   DEAL TRACKER
+   Sales vertical — track opportunity details during calls
+   ============================================================================= */
+
+.deal-tracker {
+  overflow: hidden;
+}
+
+/* Header */
+.deal-tracker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.deal-tracker-header:hover {
+  background: var(--muted);
+}
+
+.deal-tracker-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.deal-tracker-icon {
+  flex-shrink: 0;
+  color: var(--sales-accent, #7c3aed);
+}
+
+.deal-tracker-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.deal-tracker-info h3 {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deal-tracker-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.deal-stage-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.deal-value {
+  font-family: var(--font-mono);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--sales-accent, #7c3aed);
+}
+
+/* Content */
+.deal-tracker-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.deal-section-label {
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 500;
+}
+
+/* Pipeline */
+.deal-pipeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.deal-stages {
+  display: flex;
+  gap: 2px;
+}
+
+.deal-stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.deal-stage-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  border: 2px solid var(--border);
+  transition: all 0.15s;
+}
+
+.deal-stage.past .deal-stage-dot {
+  background: var(--stage-color);
+  border-color: var(--stage-color);
+}
+
+.deal-stage.active .deal-stage-dot {
+  background: var(--stage-color);
+  border-color: var(--stage-color);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--stage-color) 25%, transparent);
+}
+
+.deal-stage.lost .deal-stage-dot {
+  background: var(--muted);
+  border-color: var(--border);
+}
+
+.deal-stage-label {
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.deal-stage.active .deal-stage-label,
+.deal-stage.past .deal-stage-label {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.deal-stage:hover .deal-stage-dot {
+  border-color: var(--stage-color);
+}
+
+/* Metrics */
+.deal-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.deal-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+}
+
+.deal-metric-icon {
+  color: var(--sales-accent, #7c3aed);
+}
+
+.deal-metric-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: none;
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.deal-metric-value:hover {
+  color: var(--sales-accent, #7c3aed);
+}
+
+.deal-edit-icon {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.deal-metric-value:hover .deal-edit-icon {
+  opacity: 1;
+}
+
+.deal-metric-edit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.deal-metric-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  background: var(--card);
+  border: 1px solid var(--sales-accent, #7c3aed);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  color: var(--foreground);
+}
+
+.deal-metric-input:focus {
+  outline: none;
+}
+
+.deal-metric-save {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: var(--sales-accent, #7c3aed);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  cursor: pointer;
+}
+
+/* Probability */
+.deal-probability {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deal-probability-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--card);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.deal-probability-fill {
+  height: 100%;
+  background: var(--sales-accent, #7c3aed);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+.deal-probability-value {
+  flex-shrink: 0;
+  color: var(--sales-accent, #7c3aed);
+}
+
+/* Contacts */
+.deal-contacts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deal-contacts-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.deal-contacts-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deal-contact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+}
+
+.deal-contact.primary {
+  background: color-mix(in srgb, var(--sales-accent, #7c3aed) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sales-accent, #7c3aed) 30%, transparent);
+}
+
+.deal-contact-badge {
+  padding: 1px 5px;
+  background: var(--sales-accent, #7c3aed);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: white;
+}
+
+/* Notes */
+.deal-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  background: var(--muted);
+  border-radius: var(--radius-md);
+}
+
+.deal-notes-text {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--foreground);
+}
