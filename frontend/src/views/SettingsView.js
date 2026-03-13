@@ -14,7 +14,7 @@ import {
   Stethoscope,
   Scale,
   TrendingUp,
-  PieChart,
+  Headphones,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useVertical, VERTICALS } from '../contexts/VerticalContext';
@@ -30,7 +30,7 @@ const VERTICAL_ICONS = {
   healthcare: Stethoscope,
   legal: Scale,
   sales: TrendingUp,
-  finance: PieChart,
+  support: Headphones,
 };
 
 const MODELS = {

@@ -53,30 +53,30 @@ export const VERTICALS = {
   sales: {
     id: 'sales',
     name: 'Arlo for Sales',
-    tagline: 'Sales coaching & deal intelligence',
+    tagline: 'Deal tracking & qualification',
     icon: 'sales',
-    accentColor: '#059669', // Green
-    accentColorDark: '#10b981',
-    features: ['objections', 'talkRatio', 'sentiment', 'nextSteps', 'crmFields', 'coaching'],
-    aiPromptPrefix: 'You are Arlo, a sales coaching assistant that helps sales professionals improve their calls and close more deals. Focus on identifying objections, tracking sentiment, and suggesting next steps.',
+    accentColor: '#7c3aed', // Purple
+    accentColorDark: '#8b5cf6',
+    features: ['dealTracker', 'qualification', 'competitors', 'commitments', 'nextSteps'],
+    aiPromptPrefix: 'You are Arlo, a sales coaching assistant that helps sales professionals track deals, identify buyer signals, and close more deals. Focus on qualification criteria, competitive intelligence, and next steps.',
     terminology: {
       session: 'Call',
       participant: 'Prospect',
       actionItem: 'Next Step',
     },
   },
-  finance: {
-    id: 'finance',
-    name: 'Arlo for Finance',
-    tagline: 'Financial advisor compliance & insights',
-    icon: 'finance',
-    accentColor: '#7c3aed', // Purple
-    accentColorDark: '#8b5cf6',
-    features: ['compliance', 'clientGoals', 'riskTolerance', 'portfolioContext', 'secureExport'],
-    aiPromptPrefix: 'You are Arlo, a financial advisor assistant that helps capture client meetings while maintaining compliance. Focus on client goals, risk tolerance, and regulatory requirements.',
+  support: {
+    id: 'support',
+    name: 'Arlo for Support',
+    tagline: 'Customer support & call center',
+    icon: 'support',
+    accentColor: '#2563eb', // Blue
+    accentColorDark: '#3b82f6',
+    features: ['sentiment', 'escalation', 'resolution', 'agentAssist', 'compliance'],
+    aiPromptPrefix: 'You are Arlo, a customer support assistant that helps agents resolve issues efficiently and maintain high customer satisfaction. Focus on customer sentiment, escalation detection, and resolution tracking.',
     terminology: {
-      session: 'Client Meeting',
-      participant: 'Client',
+      session: 'Call',
+      participant: 'Customer',
       actionItem: 'Follow-up',
     },
   },
@@ -108,19 +108,18 @@ export const FEATURES = {
   export: { name: 'Legal Export', description: 'Formatted transcript export' },
 
   // Sales vertical
-  objections: { name: 'Objection Tracker', description: 'Real-time objection detection' },
-  talkRatio: { name: 'Talk-to-Listen Ratio', description: 'Speaking balance analysis' },
-  sentiment: { name: 'Sentiment Trend', description: 'Customer mood tracking' },
+  dealTracker: { name: 'Deal Tracker', description: 'Pipeline stage and opportunity details' },
+  qualification: { name: 'Deal Qualification', description: 'Budget, Authority, Need, Timeline tracking' },
+  competitors: { name: 'Competitor Mentions', description: 'Competitive intelligence with sentiment' },
+  commitments: { name: 'Commitments', description: 'Track next steps and ownership' },
   nextSteps: { name: 'Next Steps', description: 'Suggested follow-up actions' },
-  crmFields: { name: 'CRM Fields', description: 'Auto-populate CRM data' },
-  coaching: { name: 'Coaching Tips', description: 'Real-time selling suggestions' },
 
-  // Finance vertical
-  compliance: { name: 'Compliance Alerts', description: 'Regulatory violation flags' },
-  clientGoals: { name: 'Client Goals', description: 'Track financial objectives' },
-  riskTolerance: { name: 'Risk Assessment', description: 'Detect risk tolerance signals' },
-  portfolioContext: { name: 'Portfolio Context', description: 'Prior meeting investment data' },
-  secureExport: { name: 'Secure Export', description: 'Encrypted meeting records' },
+  // Support vertical
+  sentiment: { name: 'Sentiment Meter', description: 'Real-time customer mood tracking' },
+  escalation: { name: 'Escalation Alerts', description: 'Detect manager requests and churn risk' },
+  resolution: { name: 'Resolution Tracker', description: 'Issue to resolution workflow' },
+  agentAssist: { name: 'Agent Assist', description: 'Knowledge suggestions and compliance' },
+  compliance: { name: 'Compliance Checklist', description: 'Required disclosures tracking' },
 };
 
 const VerticalContext = createContext();

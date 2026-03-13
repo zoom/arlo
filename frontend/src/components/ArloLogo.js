@@ -4,7 +4,7 @@ import {
   Stethoscope,
   Scale,
   TrendingUp,
-  PieChart,
+  Headphones,
 } from 'lucide-react';
 import { useVertical } from '../contexts/VerticalContext';
 import OwlIcon from './OwlIcon';
@@ -16,7 +16,7 @@ const VERTICAL_ICONS = {
   healthcare: Stethoscope,
   legal: Scale,
   sales: TrendingUp,
-  finance: PieChart,
+  support: Headphones,
 };
 
 /**
