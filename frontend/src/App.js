@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ZoomSdkProvider, useZoomSdk } from './contexts/ZoomSdkContext';
 import { MeetingProvider } from './contexts/MeetingContext';
 import { ToastProvider } from './contexts/ToastContext';
+import { VerticalProvider, useVertical } from './contexts/VerticalContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -25,23 +26,30 @@ import LandingPageView from './views/LandingPageView';
 import OnboardingView from './views/OnboardingView';
 import OAuthErrorView from './views/OAuthErrorView';
 import NotFoundView from './views/NotFoundView';
+import VerticalSelectorView from './views/VerticalSelectorView';
 
 
 /**
  * Root route handler — decides what to show at "/".
  * - Inside Zoom: redirect to /auth (in-client PKCE flow)
- * - Browser + authenticated: redirect to /home
+ * - Browser + authenticated: redirect to /home (or /select-vertical if not selected)
  * - Browser + unauthenticated: show marketing landing page
  */
 function RootView() {
   const { isTestMode: isBrowser, isGuest, meetingContext, runningContext } = useZoomSdk();
   const { isAuthenticated, isLoading } = useAuth();
+  const { isVerticalSelected } = useVertical();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (isBrowser) {
       if (!isLoading && isAuthenticated) {
-        navigate('/home', { replace: true });
+        // Check if vertical is selected, if not go to selector
+        if (!isVerticalSelected) {
+          navigate('/select-vertical', { replace: true });
+        } else {
+          navigate('/home', { replace: true });
+        }
       }
       return;
     }
@@ -62,7 +70,7 @@ function RootView() {
       // Authorized user — route to auth for token exchange
       navigate('/auth', { replace: true });
     }
-  }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate]);
+  }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate, isVerticalSelected]);
 
   // Show spinner while loading
   if (isLoading || (!isBrowser && isGuest === null)) {
@@ -84,52 +92,88 @@ function RootView() {
   return <LandingPageView />;
 }
 
+/**
+ * Protected route that also requires vertical selection.
+ * Redirects to /select-vertical if no vertical is chosen.
+ */
+function VerticalProtectedRoute({ children }) {
+  const { isVerticalSelected } = useVertical();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isVerticalSelected) {
+      navigate('/select-vertical', { replace: true });
+    }
+  }, [isVerticalSelected, navigate]);
+
+  if (!isVerticalSelected) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+        <LoadingSpinner />
+      </div>
+    );
+  }
+
+  return children;
+}
+
 function App() {
   return (
     <ThemeProvider>
       <ZoomSdkProvider>
         <AuthProvider>
-          <MeetingProvider>
-            <ToastProvider>
-              <ErrorBoundary>
-                <HashRouter>
-                  <Routes>
-                    {/* Root: landing page (browser) or redirect to /auth (Zoom) */}
-                    <Route path="/" element={<RootView />} />
+          <VerticalProvider>
+            <MeetingProvider>
+              <ToastProvider>
+                <ErrorBoundary>
+                  <HashRouter>
+                    <Routes>
+                      {/* Root: landing page (browser) or redirect to /auth (Zoom) */}
+                      <Route path="/" element={<RootView />} />
 
-                    {/* In-client Zoom OAuth (PKCE) */}
-                    <Route path="/auth" element={<AuthView />} />
+                      {/* In-client Zoom OAuth (PKCE) */}
+                      <Route path="/auth" element={<AuthView />} />
 
-                    {/* Web OAuth flow */}
-                    <Route path="/welcome" element={<OnboardingView />} />
-                    <Route path="/auth-error" element={<OAuthErrorView />} />
+                      {/* Web OAuth flow */}
+                      <Route path="/welcome" element={<OnboardingView />} />
+                      <Route path="/auth-error" element={<OAuthErrorView />} />
 
-                    {/* Guest routes */}
-                    <Route path="/guest" element={<GuestNoMeetingView />} />
-                    <Route path="/guest/:id" element={<GuestInMeetingView />} />
+                      {/* Vertical selector (after auth, before main app) */}
+                      <Route path="/select-vertical" element={
+                        <ProtectedRoute>
+                          <VerticalSelectorView />
+                        </ProtectedRoute>
+                      } />
 
-                    {/* Authenticated routes (inside AppShell) */}
-                    <Route element={
-                      <ProtectedRoute>
-                        <AppShell />
-                      </ProtectedRoute>
-                    }>
-                      <Route path="/home" element={<HomeView />} />
-                      <Route path="/meetings" element={<MeetingsListView />} />
-                      <Route path="/meetings/:id" element={<MeetingDetailView />} />
-                      <Route path="/meeting/:id" element={<InMeetingView />} />
-                      <Route path="/search" element={<SearchResultsView />} />
-                      <Route path="/settings" element={<SettingsView />} />
-                      <Route path="/upcoming" element={<UpcomingMeetingsView />} />
-                    </Route>
+                      {/* Guest routes */}
+                      <Route path="/guest" element={<GuestNoMeetingView />} />
+                      <Route path="/guest/:id" element={<GuestInMeetingView />} />
 
-                    {/* 404 */}
-                    <Route path="*" element={<NotFoundView />} />
-                  </Routes>
-                </HashRouter>
-              </ErrorBoundary>
-            </ToastProvider>
-          </MeetingProvider>
+                      {/* Authenticated routes (inside AppShell, requires vertical selection) */}
+                      <Route element={
+                        <ProtectedRoute>
+                          <VerticalProtectedRoute>
+                            <AppShell />
+                          </VerticalProtectedRoute>
+                        </ProtectedRoute>
+                      }>
+                        <Route path="/home" element={<HomeView />} />
+                        <Route path="/meetings" element={<MeetingsListView />} />
+                        <Route path="/meetings/:id" element={<MeetingDetailView />} />
+                        <Route path="/meeting/:id" element={<InMeetingView />} />
+                        <Route path="/search" element={<SearchResultsView />} />
+                        <Route path="/settings" element={<SettingsView />} />
+                        <Route path="/upcoming" element={<UpcomingMeetingsView />} />
+                      </Route>
+
+                      {/* 404 */}
+                      <Route path="*" element={<NotFoundView />} />
+                    </Routes>
+                  </HashRouter>
+                </ErrorBoundary>
+              </ToastProvider>
+            </MeetingProvider>
+          </VerticalProvider>
         </AuthProvider>
       </ZoomSdkProvider>
     </ThemeProvider>

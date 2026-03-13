@@ -6,12 +6,30 @@ import { useMeeting } from '../contexts/MeetingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import { useToast } from '../contexts/ToastContext';
+import { useVertical } from '../contexts/VerticalContext';
 import useZoomAuth from '../hooks/useZoomAuth';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
 import Input from '../components/ui/Input';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+// Healthcare vertical features
+import {
+  SOAPNotesPanel,
+  PatientContextCard,
+  PreviousSessionsCard,
+  ClinicalAlerts,
+  QuickActions,
+  HealthcareTagsSummary,
+  highlightMedicalTerms,
+} from '../features/healthcare';
+// Legal vertical features
+import {
+  ContradictionDetector,
+  LegalTermsPanel,
+  ExhibitTracker,
+  PrivilegeMarkers,
+} from '../features/legal';
 import './InMeetingView.css';
 
 function formatTimestamp(ms) {
@@ -52,6 +70,11 @@ export default function InMeetingView() {
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
+  const { hasFeature, verticalId, getTerm } = useVertical();
+
+  // Vertical-specific features
+  const isHealthcare = verticalId === 'healthcare';
+  const isLegal = verticalId === 'legal';
 
   // Context guard: redirect to home if not in a meeting
   useEffect(() => {
@@ -534,6 +557,25 @@ export default function InMeetingView() {
                     <span className="text-sans text-xs text-muted">Transcript paused</span>
                   </div>
                 )}
+
+                {/* Healthcare: Show detected symptoms/medications */}
+                {isHealthcare && hasFeature('symptoms') && (
+                  <HealthcareTagsSummary
+                    segments={segments}
+                    onTagClick={(occurrence) => {
+                      // Scroll to the relevant segment
+                      if (transcriptRef.current) {
+                        const element = transcriptRef.current.querySelector(`[data-seq="${occurrence.segmentSeqNo}"]`);
+                        if (element) {
+                          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          element.classList.add('highlight-flash');
+                          setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                        }
+                      }
+                    }}
+                  />
+                )}
+
                 <ScrollArea.Root className="transcript-scroll-root">
                   <ScrollArea.Viewport
                     ref={transcriptRef}
@@ -556,7 +598,7 @@ export default function InMeetingView() {
                       }
 
                       return (
-                        <div key={item._key} className="transcript-entry">
+                        <div key={item._key} className="transcript-entry" data-seq={item.seqNo}>
                           <div className="transcript-entry-header">
                             <span className="transcript-timestamp text-mono text-xs text-muted">
                               {formatTimestamp(item.tStartMs)}
@@ -566,7 +608,7 @@ export default function InMeetingView() {
                             </span>
                           </div>
                           <p className="transcript-text text-serif text-sm">
-                            {item.text}
+                            {isHealthcare ? highlightMedicalTerms(item.text) : item.text}
                           </p>
                         </div>
                       );
@@ -609,42 +651,157 @@ export default function InMeetingView() {
         </Tabs.Panel>
 
         <Tabs.Panel value="assist" className="in-meeting-tab-panel">
-          <Card className="assist-card">
-            <div className="assist-card-inner">
-              <h3 className="text-serif font-medium">Notes</h3>
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Meeting notes..."
-                className="assist-notes"
-              />
-            </div>
-          </Card>
+          {isHealthcare ? (
+            /* Healthcare vertical: Full clinical documentation suite */
+            <>
+              {/* Clinical Alerts - show first for visibility */}
+              <ClinicalAlerts segments={segments} />
 
-          <Card className="assist-card">
-            <div className="assist-card-inner">
-              <h3 className="text-serif font-medium">Action Items</h3>
-
-              <div className="action-items-list">
-                {tasks.map((task) => (
-                  <div key={task.id} className="action-item">
-                    <p className="text-serif text-sm">{task.task}</p>
-                    <p className="text-sans text-xs text-muted">Owner: {task.owner}</p>
-                  </div>
-                ))}
+              {/* Patient Context + Previous Sessions side by side on larger screens */}
+              <div className="healthcare-context-row">
+                {hasFeature('patientContext') && (
+                  <PatientContextCard segments={segments} meetingId={meetingId} />
+                )}
+                <PreviousSessionsCard patientId={meetingId} />
               </div>
 
-              <div className="add-action-row">
-                <Input
-                  placeholder="Add action item..."
-                  value={newTask}
-                  onChange={(e) => setNewTask(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addTask()}
+              {/* SOAP Notes - main documentation */}
+              {hasFeature('soapNotes') && (
+                <SOAPNotesPanel
+                  segments={segments}
+                  meetingId={meetingId}
+                  isLive={rtmsActive && !rtmsPaused}
                 />
-                <Button size="sm" onClick={addTask}>Add</Button>
+              )}
+
+              {/* Quick Actions for time-saving */}
+              <QuickActions
+                soapData={{
+                  subjective: '',
+                  objective: '',
+                  assessment: '',
+                  plan: '',
+                }}
+                onAction={(action, option) => console.log('Quick action:', action, option)}
+              />
+            </>
+          ) : isLegal ? (
+            /* Legal vertical: Deposition/testimony assistance */
+            <>
+              {/* Contradiction Detector - flags conflicting statements */}
+              <ContradictionDetector
+                segments={segments}
+                onJumpToSegment={(seqNo) => {
+                  if (transcriptRef.current) {
+                    const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                    if (element) {
+                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      element.classList.add('highlight-flash');
+                      setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                    }
+                  }
+                }}
+              />
+
+              {/* Two-column layout for Legal Terms and Exhibits */}
+              <div className="legal-context-row">
+                <LegalTermsPanel
+                  segments={segments}
+                  onJumpToSegment={(seqNo) => {
+                    if (transcriptRef.current) {
+                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        element.classList.add('highlight-flash');
+                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                      }
+                    }
+                  }}
+                />
+                <ExhibitTracker
+                  segments={segments}
+                  onJumpToSegment={(seqNo) => {
+                    if (transcriptRef.current) {
+                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        element.classList.add('highlight-flash');
+                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                      }
+                    }
+                  }}
+                />
               </div>
-            </div>
-          </Card>
+
+              {/* Privilege & Objections tracking */}
+              <PrivilegeMarkers
+                segments={segments}
+                onJumpToSegment={(seqNo) => {
+                  if (transcriptRef.current) {
+                    const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+                    if (element) {
+                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      element.classList.add('highlight-flash');
+                      setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+                    }
+                  }
+                }}
+              />
+
+              {/* Notes section for attorney annotations */}
+              <Card className="assist-card">
+                <div className="assist-card-inner">
+                  <h3 className="text-serif font-medium">Deposition Notes</h3>
+                  <Textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Attorney notes, follow-up questions, impeachment points..."
+                    className="assist-notes"
+                  />
+                </div>
+              </Card>
+            </>
+          ) : (
+            /* Default: Notes + Action Items */
+            <>
+              <Card className="assist-card">
+                <div className="assist-card-inner">
+                  <h3 className="text-serif font-medium">Notes</h3>
+                  <Textarea
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="Meeting notes..."
+                    className="assist-notes"
+                  />
+                </div>
+              </Card>
+
+              <Card className="assist-card">
+                <div className="assist-card-inner">
+                  <h3 className="text-serif font-medium">{getTerm('actionItem')}s</h3>
+
+                  <div className="action-items-list">
+                    {tasks.map((task) => (
+                      <div key={task.id} className="action-item">
+                        <p className="text-serif text-sm">{task.task}</p>
+                        <p className="text-sans text-xs text-muted">Owner: {task.owner}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="add-action-row">
+                    <Input
+                      placeholder={`Add ${getTerm('actionItem').toLowerCase()}...`}
+                      value={newTask}
+                      onChange={(e) => setNewTask(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && addTask()}
+                    />
+                    <Button size="sm" onClick={addTask}>Add</Button>
+                  </div>
+                </div>
+              </Card>
+            </>
+          )}
         </Tabs.Panel>
       </Tabs.Root>
     </div>

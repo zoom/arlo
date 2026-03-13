@@ -1,0 +1,173 @@
+/* =============================================================================
+   CLINICAL ALERTS
+   Healthcare vertical — real-time warnings and notifications
+   ============================================================================= */
+
+.clinical-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* Header */
+.clinical-alerts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+}
+
+.clinical-alerts-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.clinical-alerts-icon {
+  color: #f59e0b;
+}
+
+.clinical-alerts-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #d97706;
+}
+
+.dark .clinical-alerts-count {
+  color: #fbbf24;
+}
+
+.clinical-alerts-dismiss-all {
+  background: none;
+  border: none;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  transition: all 0.15s;
+}
+
+.clinical-alerts-dismiss-all:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+/* Alerts list */
+.clinical-alerts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Individual alert */
+.clinical-alert {
+  border: 1px solid color-mix(in srgb, var(--alert-color) 30%, transparent);
+  border-left: 3px solid var(--alert-color);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--alert-color) 5%, transparent);
+  overflow: hidden;
+}
+
+.clinical-alert-main {
+  display: flex;
+  align-items: center;
+}
+
+.clinical-alert-summary {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.clinical-alert-summary:hover {
+  background: color-mix(in srgb, var(--alert-color) 8%, transparent);
+}
+
+.clinical-alert-severity-icon {
+  color: var(--alert-color);
+  flex-shrink: 0;
+}
+
+.clinical-alert-title {
+  flex: 1;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--foreground);
+}
+
+.clinical-alert-chevron {
+  color: var(--muted-foreground);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.clinical-alert-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.clinical-alert-dismiss {
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-left: 1px solid color-mix(in srgb, var(--alert-color) 20%, transparent);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.clinical-alert-dismiss:hover {
+  background: color-mix(in srgb, var(--alert-color) 10%, transparent);
+  color: var(--foreground);
+}
+
+/* Alert details (expanded) */
+.clinical-alert-details {
+  padding: 0 12px 12px 38px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.clinical-alert-message {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--foreground);
+}
+
+.clinical-alert-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Severity-specific styles */
+.clinical-alert-critical {
+  animation: alert-pulse 2s ease-in-out infinite;
+}
+
+@keyframes alert-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, #dc2626 20%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, #dc2626 10%, transparent);
+  }
+}

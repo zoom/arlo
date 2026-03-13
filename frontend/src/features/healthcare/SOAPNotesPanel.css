@@ -1,0 +1,392 @@
+/* =============================================================================
+   SOAP NOTES PANEL
+   Healthcare vertical — auto-populated clinical documentation
+   ============================================================================= */
+
+.soap-notes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Header */
+.soap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.soap-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.soap-header-icon {
+  color: var(--healthcare-accent, #0d9488);
+}
+
+.soap-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.soap-processing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.soap-processing .spin {
+  color: var(--healthcare-accent, #0d9488);
+}
+
+/* Template selector */
+.soap-template-selector {
+  position: relative;
+}
+
+.soap-template-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--muted);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.soap-template-btn:hover {
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+.soap-template-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 180px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  z-index: 50;
+  overflow: hidden;
+}
+
+.soap-template-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.soap-template-option:first-child {
+  border-top: none;
+}
+
+.soap-template-option:hover {
+  background: var(--muted);
+}
+
+.soap-template-option.selected {
+  background: color-mix(in srgb, var(--healthcare-accent) 10%, transparent);
+}
+
+/* Quality progress indicator */
+.soap-quality-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.soap-quality-indicator .quality-complete {
+  color: var(--healthcare-accent, #0d9488);
+}
+
+/* Error state */
+.soap-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--destructive) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--destructive) 30%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--destructive);
+}
+
+/* Sections container */
+.soap-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Individual section card */
+.soap-section-card {
+  overflow: hidden;
+}
+
+/* Section header (clickable) */
+.soap-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.soap-section-header:hover {
+  background: var(--muted);
+}
+
+.soap-section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.soap-section-letter {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--healthcare-accent, #0d9488) 12%, transparent);
+  color: var(--healthcare-accent, #0d9488);
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.soap-has-content {
+  color: var(--healthcare-accent, #0d9488);
+}
+
+.soap-edited-badge {
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
+  color: #d97706;
+}
+
+.dark .soap-edited-badge {
+  color: #fbbf24;
+}
+
+.soap-confidence-badge {
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Section content */
+.soap-section-content {
+  padding: 0 16px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.soap-section-description {
+  padding-left: 34px;
+}
+
+.soap-textarea {
+  min-height: 120px;
+  resize: vertical;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8125rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  tab-size: 2;
+}
+
+.soap-textarea::placeholder {
+  font-style: italic;
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+}
+
+.soap-revert-btn {
+  align-self: flex-start;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--healthcare-accent, #0d9488);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.soap-revert-btn:hover {
+  opacity: 0.8;
+}
+
+/* Empty state */
+.soap-empty-state {
+  text-align: center;
+  padding: 24px 16px;
+  font-style: italic;
+}
+
+/* =============================================================================
+   SUGGESTED CODES SECTION
+   ============================================================================= */
+
+.soap-codes-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--card);
+}
+
+.soap-codes-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.soap-codes-header:hover {
+  background: var(--muted);
+}
+
+.soap-codes-icon {
+  color: var(--healthcare-accent, #0d9488);
+}
+
+.soap-codes-count {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: var(--muted);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+
+.soap-codes-list {
+  border-top: 1px solid var(--border);
+}
+
+.soap-code-item {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--border);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.soap-code-item:first-child {
+  border-top: none;
+}
+
+.soap-code-item:hover {
+  background: var(--muted);
+}
+
+.soap-code-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+.soap-code-badge.icd-10 {
+  background: color-mix(in srgb, #8b5cf6 15%, transparent);
+  color: #7c3aed;
+}
+
+.dark .soap-code-badge.icd-10 {
+  color: #a78bfa;
+}
+
+.soap-code-badge.cpt {
+  background: color-mix(in srgb, var(--healthcare-accent) 15%, transparent);
+  color: var(--healthcare-accent);
+}
+
+.soap-code-value {
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--foreground);
+}
+
+.soap-code-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.soap-code-confidence {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+/* Spin animation */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}

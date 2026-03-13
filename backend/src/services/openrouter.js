@@ -249,6 +249,82 @@ Generate a better, more descriptive title:`;
   }
 }
 
+/**
+ * Extract SOAP notes from healthcare transcript
+ * @param {string} transcript - Full transcript text
+ * @param {object} currentSoap - Current SOAP data (for incremental updates)
+ * @returns {Promise<object>} SOAP notes object with subjective, objective, assessment, plan
+ */
+async function extractSOAPNotes(transcript, currentSoap = {}) {
+  const systemPrompt = `You are a clinical documentation assistant helping healthcare providers document patient encounters.
+Extract SOAP notes from the transcript. Be accurate and use clinical terminology.
+
+SOAP Format:
+- Subjective (S): Patient's own words about symptoms, concerns, history. Include chief complaint, history of present illness, and patient statements.
+- Objective (O): Observable, measurable findings discussed. Include vital signs, physical exam findings, test results mentioned.
+- Assessment (A): Clinical interpretation and diagnoses discussed. Include differential diagnoses if mentioned.
+- Plan (P): Treatment plan and next steps. Include medications, referrals, follow-up appointments, patient education.
+
+Format your response as JSON:
+{
+  "subjective": "text content or empty string",
+  "objective": "text content or empty string",
+  "assessment": "text content or empty string",
+  "plan": "text content or empty string",
+  "confidence": {
+    "subjective": 0.0-1.0,
+    "objective": 0.0-1.0,
+    "assessment": 0.0-1.0,
+    "plan": 0.0-1.0
+  }
+}
+
+Confidence scores indicate how certain you are about the extracted content (1.0 = very confident, 0.5 = moderate, 0.0 = guessing).
+Only output valid JSON, no markdown or explanation.`;
+
+  const prompt = `Extract SOAP notes from this clinical encounter transcript:
+
+${transcript}
+
+${Object.values(currentSoap).some(v => v) ? `
+Current SOAP notes (update or enhance these):
+S: ${currentSoap.subjective || '(empty)'}
+O: ${currentSoap.objective || '(empty)'}
+A: ${currentSoap.assessment || '(empty)'}
+P: ${currentSoap.plan || '(empty)'}
+` : ''}`;
+
+  try {
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1536 });
+
+    // Strip markdown code fences if present
+    const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+    try {
+      const parsed = JSON.parse(cleaned);
+      return {
+        subjective: parsed.subjective || '',
+        objective: parsed.objective || '',
+        assessment: parsed.assessment || '',
+        plan: parsed.plan || '',
+        confidence: parsed.confidence || {},
+      };
+    } catch {
+      console.warn('⚠️ Could not parse SOAP notes JSON');
+      return {
+        subjective: '',
+        objective: '',
+        assessment: '',
+        plan: '',
+        confidence: {},
+      };
+    }
+  } catch (error) {
+    console.error('❌ SOAP notes extraction failed:', error.message);
+    throw error;
+  }
+}
+
 module.exports = {
   callOpenRouter,
   generateSummary,
@@ -256,4 +332,5 @@ module.exports = {
   extractActionItems,
   chatWithTranscript,
   generateSuggestions,
+  extractSOAPNotes,
 };

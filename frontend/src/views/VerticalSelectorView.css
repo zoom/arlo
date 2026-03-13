@@ -1,0 +1,142 @@
+/* =============================================================================
+   VERTICAL SELECTOR VIEW
+   Choose your Arlo experience screen
+   ============================================================================= */
+
+.vertical-selector-view {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 2rem 1.5rem;
+  min-height: 100vh;
+  background: var(--background);
+}
+
+/* Header / Branding */
+.vertical-selector-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin-bottom: 2rem;
+  max-width: 400px;
+}
+
+.vertical-selector-brand {
+  margin-bottom: 1rem;
+  color: var(--foreground);
+}
+
+.vertical-selector-header h1 {
+  margin-bottom: 0.5rem;
+}
+
+.vertical-selector-header p {
+  line-height: 1.6;
+}
+
+/* Vertical cards grid */
+.vertical-selector-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 400px;
+}
+
+/* Individual vertical card */
+.vertical-card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+  width: 100%;
+}
+
+.vertical-card:hover {
+  border-color: var(--vertical-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+.vertical-card:active {
+  transform: translateY(0);
+}
+
+/* Icon container */
+.vertical-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background: var(--vertical-accent-bg);
+  color: var(--vertical-accent);
+  flex-shrink: 0;
+}
+
+/* Card content */
+.vertical-card-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.vertical-card-content h3 {
+  font-size: 1rem;
+  font-weight: 500;
+  margin-bottom: 0.125rem;
+  color: var(--foreground);
+}
+
+.vertical-card-content p {
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Arrow indicator */
+.vertical-card-arrow {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+
+.vertical-card:hover .vertical-card-arrow {
+  transform: translateX(2px);
+  color: var(--vertical-accent);
+}
+
+/* Footer */
+.vertical-selector-footer {
+  margin-top: 2rem;
+  text-align: center;
+}
+
+/* Dark mode adjustments */
+.dark .vertical-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Responsive: wider layout on larger screens */
+@media (min-width: 500px) {
+  .vertical-selector-view {
+    padding: 3rem 2rem;
+    justify-content: center;
+  }
+
+  .vertical-selector-header {
+    margin-bottom: 2.5rem;
+  }
+
+  .vertical-selector-grid {
+    max-width: 440px;
+  }
+}

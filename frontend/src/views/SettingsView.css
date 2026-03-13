@@ -348,3 +348,49 @@
   line-height: 1.5;
   white-space: pre-wrap;
 }
+
+/* =============================================================================
+   VERTICAL EXPERIENCE SECTION
+   ============================================================================= */
+
+.settings-vertical-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-vertical-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.settings-vertical-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--vertical-color) 10%, transparent);
+  color: var(--vertical-color);
+  flex-shrink: 0;
+}
+
+.settings-vertical-info > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-vertical-info p:first-child {
+  font-size: 0.9375rem;
+}
+
+/* Button with icon */
+.settings-vertical-current button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}

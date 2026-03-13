@@ -1,0 +1,51 @@
+/* =============================================================================
+   ARLO LOGO
+   Vertical-aware branding component
+   ============================================================================= */
+
+.arlo-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.arlo-logo-icon-container {
+  position: relative;
+  display: inline-flex;
+}
+
+.arlo-logo-name {
+  font-size: 1rem;
+}
+
+/* Vertical badge overlay */
+.arlo-logo-vertical-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  color: var(--badge-color, var(--accent));
+}
+
+/* Slightly larger badge for bigger logo sizes */
+.arlo-logo-icon-container:has(svg[width="24"]) .arlo-logo-vertical-badge,
+.arlo-logo-icon-container:has(svg[width="32"]) .arlo-logo-vertical-badge,
+.arlo-logo-icon-container:has(svg[width="48"]) .arlo-logo-vertical-badge {
+  width: 18px;
+  height: 18px;
+  bottom: -3px;
+  right: -5px;
+}
+
+/* Dark mode */
+.dark .arlo-logo-vertical-badge {
+  background: var(--card);
+  border-color: var(--border);
+}

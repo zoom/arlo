@@ -1,0 +1,119 @@
+/* =============================================================================
+   HEALTHCARE TAGS
+   Real-time symptom and medication detection
+   ============================================================================= */
+
+/* Tags summary bar */
+.healthcare-tags-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--healthcare-accent, #0d9488) 5%, transparent);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+
+.healthcare-tags-label {
+  flex-shrink: 0;
+}
+
+.healthcare-tags-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Individual tags */
+.healthcare-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.healthcare-tag:hover {
+  filter: brightness(0.95);
+  transform: translateY(-1px);
+}
+
+.healthcare-tag-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  margin-left: 2px;
+  border-radius: 9999px;
+  background: rgba(0, 0, 0, 0.1);
+  font-size: 0.625rem;
+  font-weight: 600;
+}
+
+/* Tag variants */
+.symptom-tag {
+  background: color-mix(in srgb, #f59e0b 15%, transparent);
+  color: #d97706;
+}
+
+.dark .symptom-tag {
+  color: #fbbf24;
+}
+
+.medication-tag {
+  background: color-mix(in srgb, #8b5cf6 15%, transparent);
+  color: #7c3aed;
+}
+
+.dark .medication-tag {
+  color: #a78bfa;
+}
+
+.vital-tag {
+  background: color-mix(in srgb, var(--healthcare-accent, #0d9488) 15%, transparent);
+  color: var(--healthcare-accent, #0d9488);
+}
+
+/* Inline highlights in transcript */
+.healthcare-highlight {
+  padding: 1px 3px;
+  border-radius: 3px;
+  font-weight: inherit;
+}
+
+.symptom-highlight {
+  background: color-mix(in srgb, #f59e0b 20%, transparent);
+  color: inherit;
+}
+
+.medication-highlight {
+  background: color-mix(in srgb, #8b5cf6 20%, transparent);
+  color: inherit;
+}
+
+.vital-highlight {
+  background: color-mix(in srgb, var(--healthcare-accent, #0d9488) 20%, transparent);
+  color: inherit;
+}
+
+/* Dark mode adjustments */
+.dark .symptom-highlight {
+  background: color-mix(in srgb, #f59e0b 25%, transparent);
+}
+
+.dark .medication-highlight {
+  background: color-mix(in srgb, #8b5cf6 25%, transparent);
+}
+
+.dark .vital-highlight {
+  background: color-mix(in srgb, var(--healthcare-accent, #0d9488) 25%, transparent);
+}

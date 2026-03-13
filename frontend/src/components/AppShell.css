@@ -29,6 +29,15 @@
   gap: 8px;
   text-decoration: none;
   color: var(--foreground);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
+.header-brand:hover {
+  opacity: 0.8;
 }
 
 .header-right {

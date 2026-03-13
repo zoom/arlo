@@ -100,6 +100,8 @@
   gap: 16px;
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
 }
 
 /* Transcript active container (controls + card) */
@@ -442,4 +444,91 @@
   display: flex;
   gap: 8px;
   padding-top: 8px;
+}
+
+/* =============================================================================
+   HEALTHCARE VERTICAL STYLES
+   ============================================================================= */
+
+/* Highlight flash animation for clicking on detected terms */
+.transcript-entry.highlight-flash {
+  animation: highlight-flash 2s ease-out;
+}
+
+@keyframes highlight-flash {
+  0% {
+    background: color-mix(in srgb, var(--healthcare-accent, #0d9488) 25%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* Healthcare accent color (set by VerticalContext, fallback here) */
+:root {
+  --healthcare-accent: #0d9488;
+}
+
+/* Healthcare context cards row */
+.healthcare-context-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 500px) {
+  .healthcare-context-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+}
+
+/* Make cards in the row equal height */
+.healthcare-context-row > * {
+  min-height: 0;
+}
+
+/* =============================================================================
+   LEGAL VERTICAL STYLES
+   ============================================================================= */
+
+/* Legal accent color (set by VerticalContext, fallback here) */
+:root {
+  --legal-accent: #b45309;
+}
+
+/* Legal context cards row (Key Terms + Exhibits) */
+.legal-context-row {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+@media (min-width: 500px) {
+  .legal-context-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+}
+
+/* Make cards in the row equal height */
+.legal-context-row > * {
+  min-height: 0;
+}
+
+/* Legal-specific highlight flash (amber instead of teal) */
+.legal-context-row ~ .transcript-entry.highlight-flash,
+.in-meeting-tab-panel:has(.legal-context-row) .transcript-entry.highlight-flash {
+  animation: legal-highlight-flash 2s ease-out;
+}
+
+@keyframes legal-highlight-flash {
+  0% {
+    background: color-mix(in srgb, var(--legal-accent, #b45309) 25%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
 }

@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Search, Settings } from 'lucide-react';
-import OwlIcon from './OwlIcon';
+import ArloLogo from './ArloLogo';
+import { useVertical } from '../contexts/VerticalContext';
 import Button from './ui/Button';
 import LiveMeetingBanner from './LiveMeetingBanner';
 import './AppShell.css';
@@ -9,6 +10,7 @@ import './AppShell.css';
 export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { clearVertical } = useVertical();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -17,6 +19,12 @@ export default function AppShell() {
 
   // Show back arrow on sub-pages (not /home)
   const showBack = location.pathname !== '/home' && location.pathname !== '/';
+
+  // Handle logo click — navigate to vertical selector
+  const handleLogoClick = useCallback(() => {
+    clearVertical();
+    navigate('/select-vertical');
+  }, [clearVertical, navigate]);
 
   // Close search on outside click
   useEffect(() => {
@@ -86,10 +94,13 @@ export default function AppShell() {
               <ArrowLeft size={16} />
             </Button>
           ) : (
-            <Link to="/home" className="header-brand">
-              <OwlIcon size={20} />
-              <span className="text-serif font-medium">Arlo</span>
-            </Link>
+            <button
+              className="header-brand"
+              onClick={handleLogoClick}
+              title="Switch experience"
+            >
+              <ArloLogo size={20} />
+            </button>
           )}
         </div>
 
