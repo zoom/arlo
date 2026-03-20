@@ -10,14 +10,15 @@ import './MeetingSummary.css';
  * Shows a collapsible summary that updates as the meeting progresses.
  */
 
-// Demo summary data
+// Demo summary data — Product team Q2 planning meeting
 const DEMO_SUMMARY = {
-  overview: "Discussion of Q2 product roadmap priorities, focusing on the new dashboard feature and API improvements. Team aligned on timeline and resource allocation.",
+  overview: "Product team Q2 planning session focused on mobile app launch, AI feature rollout, and infrastructure scalability. Team aligned on prioritizing mobile over web dashboard, with AI features slated for late Q2. Engineering flagged a potential delay risk around the payments integration.",
   keyPoints: [
-    "Dashboard redesign approved for Q2 launch",
-    "API rate limiting to be implemented by end of month",
-    "New hire starting next Monday - Sarah to onboard",
-    "Budget approved for additional cloud infrastructure",
+    "Mobile app v1.0 approved as Q2 top priority — targeting April 15 beta",
+    "AI-powered recommendations feature moved to late Q2 (dependency on mobile launch)",
+    "Payments integration at risk — 3rd party API delays, backup plan discussed",
+    "New senior engineer joining March 25 — will lead mobile backend work",
+    "Design team to deliver mobile specs by end of week",
   ],
   generatedAt: Date.now() - 2 * 60 * 1000, // 2 minutes ago
 };

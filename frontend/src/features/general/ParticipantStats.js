@@ -9,12 +9,13 @@ import './ParticipantStats.css';
  * Shows who spoke, for how long, and participation balance.
  */
 
-// Demo participant data
+// Demo participant data — Product team Q2 planning meeting
 const DEMO_PARTICIPANTS = [
-  { id: 1, name: 'Sarah Chen', talkTime: 480, segments: 28, color: '#8b5cf6' },
-  { id: 2, name: 'Mike Johnson', talkTime: 320, segments: 22, color: '#2563eb' },
-  { id: 3, name: 'Alex Rivera', talkTime: 180, segments: 15, color: '#0891b2' },
-  { id: 4, name: 'You', talkTime: 240, segments: 18, color: '#22c55e' },
+  { id: 1, name: 'Priya Sharma', talkTime: 520, segments: 32, color: '#8b5cf6', role: 'Product Director' },
+  { id: 2, name: 'Marcus Chen', talkTime: 380, segments: 28, color: '#2563eb', role: 'Lead Engineer' },
+  { id: 3, name: 'Jordan Kim', talkTime: 290, segments: 24, color: '#0891b2', role: 'Product Manager' },
+  { id: 4, name: 'Ava Martinez', talkTime: 210, segments: 18, color: '#ec4899', role: 'Lead Designer' },
+  { id: 5, name: 'You', talkTime: 150, segments: 12, color: '#22c55e', role: '' },
 ];
 
 export default function ParticipantStats({ segments }) {

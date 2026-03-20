@@ -10,25 +10,25 @@ import './ContradictionDetector.css';
  * and client interviews for impeachment or clarification.
  */
 
-// Demo contradictions for testing
+// Demo contradictions for testing — Employment discrimination case
 const DEMO_CONTRADICTIONS = [
   {
     id: 1,
     severity: 'high',
     category: 'Timeline',
-    description: 'Conflicting statements about when the meeting occurred',
+    description: 'Conflicting statements about when performance issues were first raised',
     statements: [
       {
-        speaker: 'Witness (John Smith)',
-        text: 'The meeting took place on March 15th, I remember because it was right after my birthday.',
-        timestamp: '10:23:45 AM',
-        seqNo: 42,
+        speaker: 'Witness (HR Director)',
+        text: 'We first discussed performance concerns with Mr. Thompson in January, during his annual review.',
+        timestamp: '10:18:22 AM',
+        seqNo: 35,
       },
       {
-        speaker: 'Witness (John Smith)',
-        text: 'We met sometime in early April, maybe the first week.',
-        timestamp: '10:47:12 AM',
-        seqNo: 89,
+        speaker: 'Witness (HR Director)',
+        text: 'The performance improvement plan was actually the first formal conversation we had about any issues, that was in March.',
+        timestamp: '10:52:17 AM',
+        seqNo: 94,
       },
     ],
     status: 'flagged', // flagged, noted, dismissed
@@ -37,64 +37,64 @@ const DEMO_CONTRADICTIONS = [
     id: 2,
     severity: 'high',
     category: 'Key Fact',
-    description: 'Inconsistent account of who was present',
+    description: 'Inconsistent account of who made the termination decision',
     statements: [
       {
-        speaker: 'Witness (John Smith)',
-        text: 'It was just me and Mr. Davis in the room when the document was signed.',
-        timestamp: '10:31:22 AM',
+        speaker: 'Witness (HR Director)',
+        text: 'The decision to terminate was made by the executive team. I was just implementing their decision.',
+        timestamp: '10:31:45 AM',
         seqNo: 58,
       },
       {
-        speaker: 'Witness (John Smith)',
-        text: 'Sarah was there too, she witnessed the whole thing.',
-        timestamp: '11:02:33 AM',
-        seqNo: 112,
+        speaker: 'Witness (HR Director)',
+        text: 'I recommended termination based on my assessment of the situation.',
+        timestamp: '11:08:33 AM',
+        seqNo: 118,
       },
     ],
     status: 'flagged',
   },
   {
     id: 3,
-    severity: 'medium',
-    category: 'Amount/Number',
-    description: 'Different figures cited for the contract value',
+    severity: 'high',
+    category: 'Key Fact',
+    description: 'Conflicting statements about awareness of protected status',
     statements: [
       {
-        speaker: 'Witness (John Smith)',
-        text: 'The contract was worth about fifty thousand dollars.',
-        timestamp: '10:15:08 AM',
-        seqNo: 28,
+        speaker: 'Witness (HR Director)',
+        text: 'I had no idea Mr. Thompson had filed an EEOC complaint until after he was terminated.',
+        timestamp: '10:42:08 AM',
+        seqNo: 78,
       },
       {
-        speaker: 'Witness (John Smith)',
-        text: 'We agreed on seventy-five thousand, that was the final number.',
-        timestamp: '10:52:41 AM',
-        seqNo: 98,
+        speaker: 'Witness (HR Director)',
+        text: 'Legal had informed HR about the complaint, but that didn\'t factor into our decision at all.',
+        timestamp: '11:22:41 AM',
+        seqNo: 142,
       },
     ],
-    status: 'noted',
+    status: 'flagged',
   },
   {
     id: 4,
-    severity: 'low',
-    category: 'Minor Detail',
-    description: 'Inconsistent description of location',
+    severity: 'medium',
+    category: 'Documentation',
+    description: 'Different accounts of when PIP documentation was created',
     statements: [
       {
-        speaker: 'Witness (John Smith)',
-        text: 'We met at the downtown office, the one on Main Street.',
-        timestamp: '10:12:55 AM',
-        seqNo: 22,
+        speaker: 'Witness (HR Director)',
+        text: 'The PIP was drafted in late February after several verbal warnings.',
+        timestamp: '10:25:12 AM',
+        seqNo: 48,
       },
       {
-        speaker: 'Witness (John Smith)',
-        text: 'The meeting was at the conference center near the airport.',
+        speaker: 'Witness (HR Director)',
+        text: 'We created the formal documentation in March, right before presenting it to him.',
         timestamp: '11:15:20 AM',
-        seqNo: 128,
+        seqNo: 132,
       },
     ],
-    status: 'dismissed',
+    status: 'noted',
   },
 ];
 

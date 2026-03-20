@@ -14,13 +14,13 @@ import './PatientContextCard.css';
  * - Follow-up reminders
  */
 
-// Demo data for testing UI
+// Demo data for testing UI — Chronic pain management scenario
 const DEMO_PATIENT_INFO = {
-  name: 'Sarah Mitchell',
-  lastVisit: 'February 15, 2026 — Follow-up for anxiety management',
-  conditions: ['Generalized Anxiety Disorder', 'Hypertension', 'Insomnia'],
-  allergies: ['Penicillin', 'Sulfa'],
-  medications: ['Lisinopril 10mg', 'Sertraline 50mg', 'Melatonin 5mg PRN'],
+  name: 'Maria Rodriguez',
+  lastVisit: 'February 28, 2026 — Chronic pain & diabetes check-in',
+  conditions: ['Chronic Lower Back Pain', 'Type 2 Diabetes', 'Hypertension', 'Mild Depression'],
+  allergies: ['NSAIDs (GI bleeding)', 'Codeine (severe nausea)'],
+  medications: ['Metformin 1000mg BID', 'Lisinopril 20mg daily', 'Gabapentin 300mg TID', 'Duloxetine 30mg daily'],
 };
 
 export default function PatientContextCard({ segments, meetingId }) {

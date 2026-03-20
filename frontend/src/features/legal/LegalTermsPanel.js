@@ -13,37 +13,44 @@ import './LegalTermsPanel.css';
  * - Copy individual terms or full list
  */
 
-// Demo extracted terms for testing
+// Demo extracted terms for testing — Employment discrimination case (Thompson v. Nexus Technologies)
 const DEMO_TERMS = {
   parties: [
-    { id: 1, term: 'John Smith', role: 'Witness/Deponent', mentions: 24, firstSeqNo: 1 },
-    { id: 2, term: 'Davis Corporation', role: 'Defendant', mentions: 12, firstSeqNo: 15 },
-    { id: 3, term: 'Sarah Mitchell', role: 'Additional Witness', mentions: 8, firstSeqNo: 42 },
-    { id: 4, term: 'Robert Chen', role: 'Plaintiff\'s Counsel', mentions: 6, firstSeqNo: 3 },
+    { id: 1, term: 'Patricia Hernandez', role: 'HR Director / Deponent', mentions: 32, firstSeqNo: 1 },
+    { id: 2, term: 'David Thompson', role: 'Plaintiff', mentions: 28, firstSeqNo: 8 },
+    { id: 3, term: 'Nexus Technologies Inc.', role: 'Defendant', mentions: 15, firstSeqNo: 12 },
+    { id: 4, term: 'Michael Chen', role: 'CEO (decision-maker)', mentions: 11, firstSeqNo: 42 },
+    { id: 5, term: 'Jennifer Walsh', role: 'Plaintiff\'s Counsel', mentions: 8, firstSeqNo: 3 },
+    { id: 6, term: 'Raj Patel', role: 'Plaintiff\'s Direct Supervisor', mentions: 6, firstSeqNo: 58 },
   ],
   dates: [
-    { id: 1, term: 'March 15, 2024', context: 'Alleged meeting date', mentions: 3, firstSeqNo: 28 },
-    { id: 2, term: 'January 2023', context: 'Contract execution', mentions: 2, firstSeqNo: 45 },
-    { id: 3, term: 'April 1, 2024', context: 'Alternative meeting date mentioned', mentions: 2, firstSeqNo: 89 },
-    { id: 4, term: 'December 2022', context: 'Initial negotiations began', mentions: 1, firstSeqNo: 67 },
+    { id: 1, term: 'January 15, 2025', context: 'Annual performance review', mentions: 4, firstSeqNo: 35 },
+    { id: 2, term: 'February 28, 2025', context: 'EEOC complaint filed', mentions: 3, firstSeqNo: 78 },
+    { id: 3, term: 'March 15, 2025', context: 'PIP issued to plaintiff', mentions: 5, firstSeqNo: 48 },
+    { id: 4, term: 'April 22, 2025', context: 'Termination date', mentions: 7, firstSeqNo: 98 },
+    { id: 5, term: 'October 2024', context: 'Plaintiff promoted to Senior Engineer', mentions: 2, firstSeqNo: 28 },
   ],
   amounts: [
-    { id: 1, term: '$50,000', context: 'Initial contract value stated', mentions: 2, firstSeqNo: 28 },
-    { id: 2, term: '$75,000', context: 'Final agreed amount (conflicting)', mentions: 1, firstSeqNo: 98 },
-    { id: 3, term: '$15,000', context: 'Down payment referenced', mentions: 1, firstSeqNo: 112 },
+    { id: 1, term: '$185,000', context: 'Plaintiff\'s annual salary', mentions: 2, firstSeqNo: 38 },
+    { id: 2, term: '$45,000', context: 'Severance offered', mentions: 2, firstSeqNo: 112 },
+    { id: 3, term: '18 years', context: 'Plaintiff\'s tenure at company', mentions: 4, firstSeqNo: 22 },
+    { id: 4, term: '52 years old', context: 'Plaintiff\'s age at termination', mentions: 3, firstSeqNo: 15 },
   ],
   locations: [
-    { id: 1, term: 'Downtown office, Main Street', context: 'Primary meeting location', mentions: 4, firstSeqNo: 22 },
-    { id: 2, term: 'Conference center near airport', context: 'Alternative location mentioned', mentions: 1, firstSeqNo: 128 },
+    { id: 1, term: 'Building C, Conference Room 4B', context: 'Termination meeting location', mentions: 3, firstSeqNo: 98 },
+    { id: 2, term: 'HR Office, 3rd Floor', context: 'PIP delivery location', mentions: 2, firstSeqNo: 48 },
   ],
   documents: [
-    { id: 1, term: 'Service Agreement', context: 'Primary contract at issue', mentions: 8, firstSeqNo: 34 },
-    { id: 2, term: 'Amendment No. 1', context: 'Modification to original agreement', mentions: 3, firstSeqNo: 56 },
-    { id: 3, term: 'Email dated 2/14/24', context: 'Communication re: terms', mentions: 2, firstSeqNo: 78 },
+    { id: 1, term: 'Performance Improvement Plan', context: 'Dated March 15, 2025', mentions: 12, firstSeqNo: 48 },
+    { id: 2, term: 'Annual Performance Review', context: 'January 2025 — "Meets Expectations"', mentions: 6, firstSeqNo: 35 },
+    { id: 3, term: 'EEOC Charge of Discrimination', context: 'Filed Feb 28, 2025 (age discrimination)', mentions: 5, firstSeqNo: 78 },
+    { id: 4, term: 'Termination Letter', context: 'Dated April 22, 2025', mentions: 4, firstSeqNo: 98 },
+    { id: 5, term: 'Email from M. Chen', context: 'Re: "Refreshing the team" — March 2, 2025', mentions: 3, firstSeqNo: 88 },
   ],
   citations: [
-    { id: 1, term: 'Cal. Civ. Code § 1542', context: 'General release provision', mentions: 1, firstSeqNo: 145 },
-    { id: 2, term: 'Smith v. Jones (2019)', context: 'Referenced by counsel', mentions: 1, firstSeqNo: 156 },
+    { id: 1, term: 'ADEA, 29 U.S.C. § 623', context: 'Age Discrimination in Employment Act', mentions: 2, firstSeqNo: 145 },
+    { id: 2, term: 'McDonnell Douglas burden-shifting', context: 'Framework for discrimination claims', mentions: 2, firstSeqNo: 156 },
+    { id: 3, term: 'Title VII, 42 U.S.C. § 2000e-3(a)', context: 'Retaliation provision', mentions: 1, firstSeqNo: 168 },
   ],
 };
 

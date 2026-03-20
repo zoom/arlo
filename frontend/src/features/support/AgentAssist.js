@@ -10,49 +10,59 @@ import './AgentAssist.css';
  * compliance disclosures during the call.
  */
 
-// Demo knowledge suggestions
+// Demo knowledge suggestions — API integration issue scenario
 const DEMO_SUGGESTIONS = [
   {
     id: 1,
-    title: 'Processing Refunds',
-    category: 'Billing',
-    snippet: 'Refunds are processed within 5-7 business days. For duplicate charges, offer a credit as goodwill...',
-    relevance: 95,
+    title: 'API Key Rotation & Authentication',
+    category: 'Technical',
+    snippet: 'API keys auto-rotate every 90 days. If integration fails after rotation, customer must regenerate key in Settings → API → Regenerate...',
+    relevance: 98,
     isNew: true,
   },
   {
     id: 2,
-    title: 'Subscription Cancellation Policy',
-    category: 'Account',
-    snippet: 'Customers can cancel anytime. Pro-rated refunds available within first 30 days...',
-    relevance: 82,
+    title: 'Webhook Troubleshooting Guide',
+    category: 'Technical',
+    snippet: 'Common causes: expired keys, incorrect endpoint URL, firewall blocking. Test with webhook.site first...',
+    relevance: 94,
     isNew: false,
   },
   {
     id: 3,
-    title: 'Escalation Procedures',
+    title: 'CRM Integration Setup (Salesforce/HubSpot)',
+    category: 'Integrations',
+    snippet: 'Step-by-step guide for connecting CRM. Ensure OAuth token is refreshed and field mappings are correct...',
+    relevance: 85,
+    isNew: false,
+  },
+  {
+    id: 4,
+    title: 'Handling Frustrated Enterprise Customers',
     category: 'Process',
-    snippet: 'If customer requests manager, acknowledge their concern and offer to resolve first...',
-    relevance: 68,
+    snippet: 'For enterprise accounts with ongoing issues: acknowledge impact, offer premium support call, consider service credit...',
+    relevance: 72,
     isNew: false,
   },
 ];
 
-// Demo compliance checklist
+// Demo compliance checklist — API integration issue scenario
 const DEMO_COMPLIANCE = [
-  { id: 1, text: 'Verify customer identity', required: true, completed: true },
-  { id: 2, text: 'State call may be recorded', required: true, completed: true },
-  { id: 3, text: 'Confirm account changes verbally', required: true, completed: false },
-  { id: 4, text: 'Offer confirmation email', required: false, completed: false },
-  { id: 5, text: 'Provide case/reference number', required: true, completed: false },
+  { id: 1, text: 'Verify customer identity (account email or last 4 of CC)', required: true, completed: true },
+  { id: 2, text: 'Confirm call recording disclosure', required: true, completed: true },
+  { id: 3, text: 'Document issue in case notes', required: true, completed: true },
+  { id: 4, text: 'Verify customer can see API key (never read it aloud)', required: true, completed: true },
+  { id: 5, text: 'Confirm integration is working before ending call', required: true, completed: true },
+  { id: 6, text: 'Offer follow-up email with documentation links', required: false, completed: false },
+  { id: 7, text: 'Create ticket for engineering if systemic issue', required: false, completed: false },
 ];
 
-// Demo quick responses
+// Demo quick responses — Technical support context
 const QUICK_RESPONSES = [
-  { id: 1, label: 'Empathy', text: "I completely understand how frustrating this must be. Let me help fix this right away." },
-  { id: 2, label: 'Hold', text: "Would you mind holding briefly while I look into this for you?" },
-  { id: 3, label: 'Clarify', text: "Just to make sure I understand correctly, you're saying that..." },
-  { id: 4, label: 'Resolve', text: "I've gone ahead and processed that for you. Is there anything else I can help with?" },
+  { id: 1, label: 'Empathy', text: "I completely understand how critical this integration is for your business. Let me get this resolved for you right away." },
+  { id: 2, label: 'Verify', text: "Before we proceed, can you confirm the email address on your account so I can pull up your API settings?" },
+  { id: 3, label: 'Screen Share', text: "Would it help if I walked you through this step-by-step? I can guide you through the settings panel." },
+  { id: 4, label: 'Test', text: "Perfect, the new API key is active. Can you try sending a test webhook so we can confirm it's working?" },
 ];
 
 export default function AgentAssist({ segments }) {

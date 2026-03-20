@@ -18,12 +18,13 @@ const SENTIMENT_LEVELS = [
   { id: 'happy', label: 'Happy', color: '#10b981', position: 100 },
 ];
 
-// Demo: Simulate sentiment changes over time
+// Demo: Simulate sentiment changes over time — API integration issue scenario
 const DEMO_SENTIMENT_HISTORY = [
-  { sentiment: 'frustrated', timestamp: '10:02:15 AM', trigger: 'Customer mentioned long wait time' },
-  { sentiment: 'angry', timestamp: '10:04:32 AM', trigger: '"This is ridiculous" detected' },
-  { sentiment: 'neutral', timestamp: '10:06:18 AM', trigger: 'Agent acknowledged the issue' },
-  { sentiment: 'satisfied', timestamp: '10:08:45 AM', trigger: 'Solution offered and accepted' },
+  { sentiment: 'frustrated', timestamp: '2:15:22 PM', trigger: '"Our integration has been broken for 3 days"' },
+  { sentiment: 'angry', timestamp: '2:18:45 PM', trigger: '"This is costing us thousands in lost revenue"' },
+  { sentiment: 'neutral', timestamp: '2:22:33 PM', trigger: 'Agent identified root cause (API key rotation)' },
+  { sentiment: 'satisfied', timestamp: '2:28:15 PM', trigger: 'Walkthrough completed, integration restored' },
+  { sentiment: 'happy', timestamp: '2:32:08 PM', trigger: '"That was incredibly helpful, thank you!"' },
 ];
 
 export default function SentimentMeter({ segments }) {

@@ -25,14 +25,14 @@ const ISSUE_CATEGORIES = [
   { id: 'other', label: 'Other', color: '#6b7280' },
 ];
 
-// Demo data
+// Demo data — API integration issue scenario
 const DEMO_STATE = {
-  currentStep: 'solution', // issue, solution, or confirmed
-  issueCategory: 'billing',
-  issueSummary: 'Customer charged twice for monthly subscription',
-  solutionOffered: 'Refund for duplicate charge + 1 month credit',
-  callStartTime: Date.now() - 8 * 60 * 1000, // 8 minutes ago
-  targetHandleTime: 10 * 60 * 1000, // 10 minute target
+  currentStep: 'confirmed', // issue, solution, or confirmed
+  issueCategory: 'technical',
+  issueSummary: 'API integration broken after Jan 15 update — webhook authentication failing, data not syncing to CRM',
+  solutionOffered: 'Identified expired API key from automatic rotation. Walked through key regeneration and updated webhook URL in settings. Test data now syncing successfully.',
+  callStartTime: Date.now() - 18 * 60 * 1000, // 18 minutes ago
+  targetHandleTime: 15 * 60 * 1000, // 15 minute target (slightly over for realistic demo)
 };
 
 export default function ResolutionTracker({ segments }) {
