@@ -10,30 +10,46 @@ import './DecisionsLog.css';
  * Auto-detects decisions and allows manual additions.
  */
 
-// Demo decisions
+// Demo decisions — Product team Q2 planning meeting
 const DEMO_DECISIONS = [
   {
     id: 1,
-    text: 'Move forward with dashboard redesign for Q2',
-    madeBy: 'Sarah Chen',
-    timestamp: '10:12:34 AM',
-    seqNo: 45,
+    text: 'Mobile app v1.0 is Q2 priority #1 — targeting April 15 beta release',
+    madeBy: 'Priya Sharma',
+    timestamp: '10:08:15 AM',
+    seqNo: 22,
     isAutoDetected: true,
   },
   {
     id: 2,
-    text: 'Prioritize API rate limiting over new features',
+    text: 'Launch with Apple Pay only; add full Stripe integration in May update',
     madeBy: 'Team consensus',
-    timestamp: '10:18:22 AM',
+    timestamp: '10:22:18 AM',
     seqNo: 62,
     isAutoDetected: true,
   },
   {
     id: 3,
-    text: 'Schedule follow-up meeting for next Tuesday',
-    madeBy: 'Mike Johnson',
-    timestamp: '10:35:18 AM',
-    seqNo: 98,
+    text: 'AI recommendations feature pushed to late Q2 (after mobile launch stabilizes)',
+    madeBy: 'Priya Sharma',
+    timestamp: '10:25:33 AM',
+    seqNo: 72,
+    isAutoDetected: true,
+  },
+  {
+    id: 4,
+    text: 'New engineer Raj starts March 25 — will lead mobile backend work',
+    madeBy: 'Marcus Chen',
+    timestamp: '10:32:18 AM',
+    seqNo: 88,
+    isAutoDetected: true,
+  },
+  {
+    id: 5,
+    text: 'Weekly mobile standup starting next Monday, 9am',
+    madeBy: 'Jordan Kim',
+    timestamp: '10:38:45 AM',
+    seqNo: 102,
     isAutoDetected: false,
   },
 ];

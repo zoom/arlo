@@ -13,35 +13,41 @@ import './CompetitorMentions.css';
  * - Add custom competitors to watch list
  */
 
-// Demo competitor data
+// Demo competitor data — Meridian Financial Group deal
 const DEMO_COMPETITORS = [
   {
     id: 1,
-    name: 'Competitor A',
+    name: 'Snowflake',
     mentions: [
       {
-        timestamp: '10:15:22 AM',
-        seqNo: 28,
-        text: 'We\'ve been evaluating Competitor A as well, but their pricing is quite high.',
-        sentiment: 'negative',
+        timestamp: '10:18:45 AM',
+        seqNo: 32,
+        text: 'Snowflake came in about 15% lower on their initial proposal, but their implementation timeline is longer.',
+        sentiment: 'mixed',
       },
       {
-        timestamp: '10:32:45 AM',
-        seqNo: 56,
-        text: 'Competitor A has a good reputation in the market.',
+        timestamp: '10:42:22 AM',
+        seqNo: 78,
+        text: 'The Snowflake team has been very responsive, I have to give them credit for that.',
         sentiment: 'positive',
+      },
+      {
+        timestamp: '11:05:33 AM',
+        seqNo: 112,
+        text: 'Our concern with Snowflake is the consumption-based pricing — it\'s hard to predict costs.',
+        sentiment: 'negative',
       },
     ],
     overallSentiment: 'mixed',
   },
   {
     id: 2,
-    name: 'Competitor B',
+    name: 'Databricks',
     mentions: [
       {
-        timestamp: '10:23:18 AM',
-        seqNo: 42,
-        text: 'We tried Competitor B last year but had issues with their support.',
+        timestamp: '10:28:15 AM',
+        seqNo: 52,
+        text: 'We looked at Databricks earlier but the learning curve for our team was too steep.',
         sentiment: 'negative',
       },
     ],
@@ -49,20 +55,26 @@ const DEMO_COMPETITORS = [
   },
   {
     id: 3,
-    name: 'Competitor C',
+    name: 'Legacy System',
     mentions: [
       {
-        timestamp: '10:45:33 AM',
-        seqNo: 78,
-        text: 'How do you compare to Competitor C in terms of features?',
+        timestamp: '10:08:22 AM',
+        seqNo: 15,
+        text: 'Our current Oracle setup is costing us a fortune in maintenance and it can\'t handle the real-time requirements.',
+        sentiment: 'negative',
+      },
+      {
+        timestamp: '10:55:18 AM',
+        seqNo: 98,
+        text: 'The Oracle contract is up in June, so that\'s driving some of the urgency here.',
         sentiment: 'neutral',
       },
     ],
-    overallSentiment: 'neutral',
+    overallSentiment: 'negative',
   },
 ];
 
-const WATCH_LIST = ['Competitor A', 'Competitor B', 'Competitor C', 'Competitor D', 'Legacy System'];
+const WATCH_LIST = ['Snowflake', 'Databricks', 'Legacy System', 'Azure Synapse', 'Google BigQuery', 'AWS Redshift'];
 
 const SENTIMENT_CONFIG = {
   positive: { icon: TrendingUp, color: '#10b981', label: 'Positive' },

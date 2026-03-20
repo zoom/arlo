@@ -14,13 +14,14 @@ const VISIT_TEMPLATES = [
   { id: 'chronic', label: 'Chronic Care', description: 'Chronic condition management' },
 ];
 
-// Demo ICD-10 codes based on assessment content
+// Demo ICD-10 codes based on assessment content — Chronic pain scenario
 const SUGGESTED_CODES = [
-  { code: 'G44.209', description: 'Tension-type headache, unspecified', type: 'ICD-10', confidence: 0.95 },
-  { code: 'R51.9', description: 'Headache, unspecified', type: 'ICD-10', confidence: 0.85 },
-  { code: 'G47.00', description: 'Insomnia, unspecified', type: 'ICD-10', confidence: 0.72 },
-  { code: 'R03.0', description: 'Elevated BP reading, w/o diagnosis of HTN', type: 'ICD-10', confidence: 0.68 },
-  { code: '99214', description: 'Office visit, established, moderate complexity', type: 'CPT', confidence: 0.90 },
+  { code: 'M54.5', description: 'Low back pain', type: 'ICD-10', confidence: 0.98 },
+  { code: 'E11.65', description: 'Type 2 diabetes with hyperglycemia', type: 'ICD-10', confidence: 0.95 },
+  { code: 'I10', description: 'Essential hypertension', type: 'ICD-10', confidence: 0.92 },
+  { code: 'F32.1', description: 'Major depressive disorder, moderate', type: 'ICD-10', confidence: 0.85 },
+  { code: 'M54.41', description: 'Lumbago with sciatica, left side', type: 'ICD-10', confidence: 0.78 },
+  { code: '99214', description: 'Office visit, established, moderate complexity', type: 'CPT', confidence: 0.94 },
 ];
 
 // Quality measures for the visit
@@ -73,35 +74,40 @@ const SOAP_SECTIONS = [
 ];
 
 export default function SOAPNotesPanel({ segments, meetingId, isLive }) {
-  // Demo data for testing UI - using bullet format for clarity
+  // Demo data for testing UI — Chronic pain management scenario for Maria Rodriguez
   const DEMO_SOAP_DATA = {
-    subjective: `• Chief Complaint: Persistent headaches × 2 weeks
-• Location: Right-sided, "throbbing pain"
-• Timing: Worse in morning, improves throughout day
-• Severity: 6/10 at worst
-• Denies: Nausea, vomiting, visual changes
-• Current Tx: Ibuprofen 400mg PRN — partial relief
-• Contributing factors: Increased work stress, difficulty sleeping
-• PMH: No history of migraines`,
-    objective: `• Vitals: BP 128/82 | HR 76 | Temp 98.4°F
-• General: Alert, oriented, no acute distress
-• HEENT: Normocephalic, no sinus/temporal tenderness
-• Neck: Supple, no meningeal signs
-• Neuro: CN II-XII intact, no focal deficits
-• Fundoscopic: No papilledema`,
-    assessment: `1. Tension-type headache
-   → Likely related to stress and poor sleep hygiene
-2. R/O migraine without aura
-3. Hypertension, borderline
-   → Will monitor`,
-    plan: `1. START: Amitriptyline 10mg QHS (preventive)
-2. CONTINUE: Ibuprofen PRN (limit 2-3×/week to avoid MOH)
-3. COUNSELING:
-   • Sleep hygiene — regular schedule, limit screens before bed
-   • Stress management techniques reviewed
-4. MONITOR: Headache diary for frequency, triggers, response
-5. FOLLOW-UP: 4 weeks to reassess
-6. IF NO IMPROVEMENT: Neurology referral`,
+    subjective: `• Chief Complaint: Chronic low back pain follow-up
+• Pain Level: Reports 5/10 today (baseline 6-7/10)
+• Location: Lower lumbar region, bilateral
+• Radiation: Occasional numbness down left leg
+• Function: Able to walk 20 min now (vs. 10 min last visit)
+• Sleep: Still waking 2-3×/night from pain
+• Mood: "Feeling a bit better overall"
+• Current Tx: Gabapentin helping, no side effects
+• Diabetes: Checking sugars daily, mostly 120-150 fasting`,
+    objective: `• Vitals: BP 134/86 | HR 72 | Temp 98.2°F | Weight 178 lbs (↓2 lbs)
+• General: Alert, pleasant, mild discomfort when sitting
+• Back: Tenderness L4-L5 paraspinal muscles, no midline tenderness
+• Neuro: Strength 5/5 bilateral LE, reflexes 2+ symmetric
+• Gait: Slightly antalgic, improved from prior visit
+• Recent A1c: 7.2% (Feb 2026) — improved from 7.8%`,
+    assessment: `1. Chronic low back pain — improving on current regimen
+   → Functional gains noted, continue multimodal approach
+2. Type 2 Diabetes — well-controlled (A1c 7.2%)
+   → Continue current Metformin dose
+3. Hypertension — borderline today (134/86)
+   → May need adjustment if persists
+4. Mild depression — stable on Duloxetine
+   → Dual benefit for pain and mood`,
+    plan: `1. CONTINUE: Current medication regimen (Gabapentin, Duloxetine, Metformin, Lisinopril)
+2. ADD: Physical therapy referral — core strengthening, 2×/week × 6 weeks
+3. CONSIDER: If pain not improving, may trial Gabapentin 400mg TID
+4. LIFESTYLE:
+   • Continue walking program — goal 30 min/day
+   • Weight loss discussed — target 5 lbs over next 3 months
+5. LABS: Recheck A1c in 3 months
+6. FOLLOW-UP: 6 weeks for pain reassessment
+7. PRECAUTION: Avoid NSAIDs — documented GI bleeding history`,
   };
 
   const [soapData, setSoapData] = useState(DEMO_SOAP_DATA);

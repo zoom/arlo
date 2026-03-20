@@ -89,47 +89,61 @@ const EXPORT_ACTIONS = [
   { id: 'instructions', icon: FileText, label: 'Patient Summary', description: 'Plain-language handout' },
 ];
 
-// Generate patient-friendly summary from SOAP data
+// Generate patient-friendly summary from SOAP data — Maria Rodriguez chronic pain scenario
 const generatePatientSummary = () => {
-  return `VISIT SUMMARY
+  return `VISIT SUMMARY — Maria Rodriguez
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 WHAT WE DISCUSSED TODAY:
-You came in because you've been having headaches for the past 2 weeks. You described the pain as throbbing, mostly on the right side of your head, and worse in the mornings.
+You came in for your chronic back pain follow-up. You reported your pain is improving — down to a 5 out of 10 from your usual 6-7. You're now able to walk for 20 minutes (up from 10 minutes). Your diabetes is also doing well.
 
 YOUR EXAM RESULTS:
-• Blood pressure: 128/82 (slightly elevated - we'll keep an eye on this)
-• Heart rate: 76 (normal)
-• Neurological exam: Normal
+• Blood pressure: 134/86 (a bit higher than goal — we'll monitor this)
+• Weight: 178 lbs (down 2 lbs — great progress!)
+• Back exam: Some muscle tenderness, but your nerve function is good
+• Recent A1c: 7.2% (improved from 7.8% — your diabetes control is better!)
 
-WHAT WE THINK IS HAPPENING:
-Your headaches are most likely tension-type headaches, related to stress and difficulty sleeping. We don't think this is anything more serious.
+GOOD NEWS:
+Your pain management plan is working. Your diabetes is better controlled. You're making progress with walking and weight loss.
 
-YOUR TREATMENT PLAN:
+YOUR CURRENT MEDICATIONS:
+Continue all your current medications as prescribed:
+• Gabapentin 300mg — Take 3 times daily for nerve pain
+• Duloxetine 30mg — Take once daily (helps pain and mood)
+• Metformin 1000mg — Take twice daily for diabetes
+• Lisinopril 20mg — Take once daily for blood pressure
 
-1. NEW MEDICATION:
-   Amitriptyline 10mg - Take one tablet at bedtime
-   This helps prevent headaches and may also help you sleep better.
+WHAT'S NEXT:
 
-2. CONTINUE:
-   Ibuprofen as needed for pain, but try to limit to 2-3 times per week
+1. PHYSICAL THERAPY REFERRAL:
+   We're sending you to PT for core strengthening exercises
+   • 2 sessions per week for 6 weeks
+   • This will help support your back
 
-3. LIFESTYLE CHANGES:
-   • Try to go to bed and wake up at the same time each day
-   • Avoid screens (phone, TV, computer) for 1 hour before bed
-   • Practice stress management - deep breathing, taking breaks
+2. KEEP UP THE WALKING:
+   • Goal: Work up to 30 minutes per day
+   • This helps your back AND your diabetes
 
-4. TRACK YOUR HEADACHES:
-   Keep a diary of when headaches happen and what might trigger them
+3. WEIGHT GOAL:
+   • Target: Lose 5 lbs over the next 3 months
+   • Every pound lost helps reduce back strain
+
+4. BLOOD WORK:
+   • We'll recheck your A1c in 3 months
+
+IMPORTANT REMINDERS:
+⚠️  DO NOT take ibuprofen, Advil, Motrin, Aleve, or aspirin
+    You had stomach bleeding from these in the past.
+    Use Tylenol (acetaminophen) if you need extra pain relief.
 
 FOLLOW-UP:
-Please schedule a follow-up appointment in 4 weeks so we can see how you're doing.
+Schedule your next appointment in 6 weeks.
 
-WHEN TO CALL US OR SEEK CARE:
-• Sudden severe headache ("worst headache of your life")
-• Headache with fever, stiff neck, or rash
-• Vision changes, confusion, or weakness
-• Headaches getting significantly worse
+WHEN TO CALL US:
+• Sudden severe back pain
+• Numbness, weakness, or tingling getting worse
+• Trouble with bladder or bowel control
+• Blood sugar readings above 300 or below 70
 
 Questions? Call our office at [PHONE NUMBER]
 

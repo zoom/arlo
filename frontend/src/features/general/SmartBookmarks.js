@@ -16,11 +16,12 @@ const BOOKMARK_TYPES = [
   { id: 'favorite', icon: Star, label: 'Favorite', color: '#8b5cf6' },
 ];
 
-// Demo bookmarks
+// Demo bookmarks — Product team Q2 planning meeting
 const DEMO_BOOKMARKS = [
-  { id: 1, type: 'important', note: 'Budget approval announcement', timestamp: '10:12:34 AM', seqNo: 45 },
-  { id: 2, type: 'idea', note: 'Consider async standups', timestamp: '10:22:18 AM', seqNo: 68 },
-  { id: 3, type: 'followup', note: 'Check with finance on timeline', timestamp: '10:28:55 AM', seqNo: 82 },
+  { id: 1, type: 'important', note: 'Mobile app officially Q2 priority #1', timestamp: '10:08:15 AM', seqNo: 22 },
+  { id: 2, type: 'followup', note: 'Check Stripe sandbox status with Marcus', timestamp: '10:15:42 AM', seqNo: 45 },
+  { id: 3, type: 'idea', note: 'Apple Pay first, Stripe later — phased approach', timestamp: '10:18:33 AM', seqNo: 52 },
+  { id: 4, type: 'favorite', note: 'Design specs shipping tomorrow!', timestamp: '10:28:45 AM', seqNo: 78 },
 ];
 
 export default function SmartBookmarks({ segments, onJumpToSegment, currentSeqNo }) {

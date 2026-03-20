@@ -21,56 +21,56 @@ const SEVERITY = {
   info: { icon: Info, color: '#0d9488', label: 'Info' },
 };
 
-// Demo alerts for testing
+// Demo alerts for testing — Maria Rodriguez chronic pain scenario
 const DEMO_ALERTS = [
   {
     id: 1,
-    type: 'contradiction',
-    severity: 'warning',
-    title: 'Symptom Timeline Discrepancy',
-    message: 'Patient previously reported headaches starting 2 weeks ago, but today mentioned "about a month." Clarify onset date.',
-    source: 'Current session vs. intake',
-    timestamp: Date.now() - 120000, // 2 min ago
+    type: 'allergy',
+    severity: 'critical',
+    title: 'NSAID Contraindication',
+    message: 'Patient has documented GI bleeding history with NSAIDs. Avoid ibuprofen, naproxen, aspirin for pain management.',
+    source: 'Allergy/adverse reaction record',
+    timestamp: Date.now() - 60000, // 1 min ago
     dismissed: false,
   },
   {
     id: 2,
     type: 'drug_interaction',
     severity: 'warning',
-    title: 'Potential Drug Interaction',
-    message: 'Amitriptyline + Sertraline: Monitor for serotonin syndrome symptoms (agitation, hyperthermia, tachycardia).',
-    source: 'Current plan + active medications',
-    timestamp: Date.now() - 60000, // 1 min ago
+    title: 'Serotonergic Interaction Risk',
+    message: 'Duloxetine + Gabapentin: Low risk, but monitor for increased sedation. Counsel patient about driving/operating machinery.',
+    source: 'Current medications',
+    timestamp: Date.now() - 120000, // 2 min ago
     dismissed: false,
   },
   {
     id: 3,
-    type: 'allergy',
-    severity: 'critical',
-    title: 'Allergy Alert',
-    message: 'Patient has documented Penicillin allergy. Verify before prescribing any beta-lactam antibiotics.',
-    source: 'Patient record',
-    timestamp: Date.now() - 300000, // 5 min ago
+    type: 'vital',
+    severity: 'warning',
+    title: 'Blood Pressure Above Target',
+    message: 'BP 134/86 today. Per ADA guidelines, target BP for diabetic patients is <130/80. Consider Lisinopril adjustment or adding second agent.',
+    source: 'Today\'s vitals + diabetes care guidelines',
+    timestamp: Date.now() - 180000,
     dismissed: false,
   },
   {
     id: 4,
-    type: 'vital',
+    type: 'screening',
     severity: 'info',
-    title: 'BP Trend',
-    message: 'Blood pressure has been borderline elevated for 3 consecutive visits (128-132 systolic). Consider lifestyle counseling or treatment.',
-    source: 'Vital sign history',
-    timestamp: Date.now() - 180000,
+    title: 'Diabetic Foot Exam Due',
+    message: 'Annual comprehensive foot exam overdue. Last completed: 13 months ago. Patient has neuropathic symptoms.',
+    source: 'Preventive care schedule',
+    timestamp: Date.now() - 240000,
     dismissed: false,
   },
   {
     id: 5,
     type: 'screening',
     severity: 'info',
-    title: 'Overdue Screening',
-    message: 'Annual depression screening (PHQ-9) due. Last completed: 14 months ago.',
+    title: 'Diabetic Eye Exam Reminder',
+    message: 'Annual dilated eye exam due in 2 months. Send referral to ophthalmology.',
     source: 'Preventive care schedule',
-    timestamp: Date.now() - 240000,
+    timestamp: Date.now() - 300000,
     dismissed: false,
   },
 ];

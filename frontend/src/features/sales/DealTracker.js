@@ -24,20 +24,21 @@ const DEAL_STAGES = [
   { id: 'closed-lost', label: 'Closed Lost', color: '#ef4444' },
 ];
 
-// Demo deal data
+// Demo deal data — Meridian Financial Group enterprise analytics deal
 const DEMO_DEAL = {
-  name: 'Acme Corp - Enterprise License',
-  company: 'Acme Corporation',
-  value: 75000,
-  stage: 'proposal',
-  probability: 65,
-  closeDate: '2024-04-15',
+  name: 'Meridian Financial — Analytics Platform',
+  company: 'Meridian Financial Group',
+  value: 248000,
+  stage: 'negotiation',
+  probability: 75,
+  closeDate: '2026-04-30',
   contacts: [
-    { name: 'Sarah Chen', role: 'VP of Engineering', isPrimary: true },
-    { name: 'Mike Johnson', role: 'CTO', isPrimary: false },
-    { name: 'Lisa Park', role: 'Procurement', isPrimary: false },
+    { name: 'James Whitfield', role: 'VP of Data Analytics', isPrimary: true },
+    { name: 'Rachel Torres', role: 'CTO', isPrimary: false },
+    { name: 'Kevin O\'Brien', role: 'Director of Procurement', isPrimary: false },
+    { name: 'Aisha Patel', role: 'Data Engineering Manager', isPrimary: false },
   ],
-  notes: 'Strong technical fit. Need to address security concerns before final approval.',
+  notes: 'Strong technical validation complete. Legal reviewing MSA. Competing against Snowflake on price. Need executive sponsor meeting with Rachel (CTO) before final sign-off.',
 };
 
 export default function DealTracker({ segments, meetingId }) {

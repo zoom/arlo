@@ -10,32 +10,41 @@ import './OpenQuestions.css';
  * Auto-detects questions that weren't answered and allows manual additions.
  */
 
-// Demo questions
+// Demo questions — Product team Q2 planning meeting
 const DEMO_QUESTIONS = [
   {
     id: 1,
-    text: 'What is the budget impact of the additional cloud infrastructure?',
-    askedBy: 'Mike Johnson',
-    timestamp: '10:15:42 AM',
-    seqNo: 52,
+    text: 'Do we have a backup vendor if Stripe continues to have sandbox issues?',
+    askedBy: 'Priya Sharma',
+    timestamp: '10:16:22 AM',
+    seqNo: 48,
     answered: false,
     isAutoDetected: true,
   },
   {
     id: 2,
-    text: 'When will the new hire have access to all systems?',
-    askedBy: 'Sarah Chen',
-    timestamp: '10:22:18 AM',
-    seqNo: 68,
+    text: 'What\'s the minimum iOS version we\'re supporting?',
+    askedBy: 'Ava Martinez',
+    timestamp: '10:20:15 AM',
+    seqNo: 58,
     answered: true,
     isAutoDetected: true,
   },
   {
     id: 3,
-    text: 'Who is responsible for the API documentation update?',
-    askedBy: 'Alex Rivera',
-    timestamp: '10:28:55 AM',
-    seqNo: 82,
+    text: 'Who is handling the App Store submission process?',
+    askedBy: 'Jordan Kim',
+    timestamp: '10:28:33 AM',
+    seqNo: 75,
+    answered: false,
+    isAutoDetected: true,
+  },
+  {
+    id: 4,
+    text: 'Should we do a soft launch in one market first or go global?',
+    askedBy: 'Marcus Chen',
+    timestamp: '10:35:18 AM',
+    seqNo: 95,
     answered: false,
     isAutoDetected: true,
   },

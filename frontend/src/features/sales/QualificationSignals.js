@@ -64,39 +64,41 @@ const STATUS_CONFIG = {
   unknown: { icon: HelpCircle, color: '#6b7280', label: 'Not Discussed' },
 };
 
-// Demo qualification data
+// Demo qualification data — Meridian Financial Group deal
 const DEMO_SIGNALS = {
   budget: {
     status: 'confirmed',
     signals: [
-      { text: '$50-75K budget range mentioned', timestamp: '10:23:45 AM', seqNo: 42, sentiment: 'positive' },
-      { text: 'Q2 budget approved for this initiative', timestamp: '10:35:12 AM', seqNo: 58, sentiment: 'positive' },
+      { text: 'We have $250K allocated for this project in FY26', timestamp: '10:28:45 AM', seqNo: 52, sentiment: 'positive' },
+      { text: 'Budget was pre-approved as part of our digital transformation initiative', timestamp: '10:35:12 AM', seqNo: 62, sentiment: 'positive' },
     ],
-    notes: 'Budget approved, within our typical deal size.',
+    notes: 'Strong budget position. Our $248K proposal fits within their allocation.',
   },
   authority: {
     status: 'unclear',
     signals: [
-      { text: 'VP of Engineering leading evaluation', timestamp: '10:15:22 AM', seqNo: 28, sentiment: 'positive' },
-      { text: 'CTO will need to sign off', timestamp: '10:42:33 AM', seqNo: 72, sentiment: 'neutral' },
+      { text: 'James (VP Data Analytics) is leading the evaluation and will make the recommendation', timestamp: '10:12:22 AM', seqNo: 22, sentiment: 'positive' },
+      { text: 'Rachel (CTO) has final sign-off authority on anything over $100K', timestamp: '10:55:33 AM', seqNo: 98, sentiment: 'neutral' },
+      { text: 'Kevin in procurement will handle the contract once we get technical approval', timestamp: '11:15:22 AM', seqNo: 128, sentiment: 'positive' },
     ],
-    notes: 'Sarah is champion but CTO approval needed. Need to meet CTO.',
+    notes: 'James is strong champion. Need executive meeting with Rachel (CTO) to close. Kevin (Procurement) is aligned.',
   },
   need: {
     status: 'confirmed',
     signals: [
-      { text: 'Current process is manual and error-prone', timestamp: '10:08:55 AM', seqNo: 15, sentiment: 'positive' },
-      { text: 'Team spending 20+ hours/week on this', timestamp: '10:18:33 AM', seqNo: 32, sentiment: 'positive' },
-      { text: 'Compliance requirements driving urgency', timestamp: '10:28:41 AM', seqNo: 48, sentiment: 'positive' },
+      { text: 'Our current Oracle system can\'t handle the real-time analytics requirements', timestamp: '10:08:22 AM', seqNo: 15, sentiment: 'positive' },
+      { text: 'We\'re losing competitive bids because we can\'t produce risk assessments fast enough', timestamp: '10:22:18 AM', seqNo: 42, sentiment: 'positive' },
+      { text: 'The data team is spending 30% of their time on manual data prep', timestamp: '10:38:45 AM', seqNo: 68, sentiment: 'positive' },
     ],
-    notes: 'Strong pain. Compliance deadline in Q3.',
+    notes: 'Critical business pain: slow analytics = lost deals. Oracle contract expiring June. Strong urgency.',
   },
   timeline: {
     status: 'confirmed',
     signals: [
-      { text: 'Need solution in place by end of Q2', timestamp: '10:51:18 AM', seqNo: 89, sentiment: 'positive' },
+      { text: 'Our Oracle contract expires June 30, so we need to be live by then', timestamp: '10:55:18 AM', seqNo: 98, sentiment: 'positive' },
+      { text: 'We want to start implementation by end of April to hit that June deadline', timestamp: '11:08:45 AM', seqNo: 118, sentiment: 'positive' },
     ],
-    notes: 'Hard deadline: compliance audit in July.',
+    notes: 'Hard deadline: Oracle contract expiration June 30. Decision needed by end of March to start April implementation.',
   },
 };
 

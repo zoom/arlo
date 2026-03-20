@@ -18,30 +18,30 @@ const ESCALATION_TYPES = {
   repeat: { label: 'Repeat Issue', color: '#8b5cf6', priority: 'medium' },
 };
 
-// Demo escalation alerts
+// Demo escalation alerts — API integration issue scenario
 const DEMO_ALERTS = [
   {
     id: 1,
-    type: 'frustration',
-    phrase: '"I\'ve been waiting for 20 minutes"',
-    timestamp: '10:02:15 AM',
-    seqNo: 12,
+    type: 'repeat',
+    phrase: '"This is the third time I\'ve called about this integration issue"',
+    timestamp: '2:15:22 PM',
+    seqNo: 8,
     acknowledged: true,
   },
   {
     id: 2,
-    type: 'manager',
-    phrase: '"I need to speak with a supervisor"',
-    timestamp: '10:04:32 AM',
-    seqNo: 28,
-    acknowledged: false,
+    type: 'frustration',
+    phrase: '"This is costing us thousands in lost revenue every day"',
+    timestamp: '2:18:45 PM',
+    seqNo: 22,
+    acknowledged: true,
   },
   {
     id: 3,
     type: 'churn',
-    phrase: '"I\'m thinking about canceling my subscription"',
-    timestamp: '10:05:18 AM',
-    seqNo: 35,
+    phrase: '"If we can\'t get this fixed, we\'ll have to look at other vendors"',
+    timestamp: '2:20:12 PM',
+    seqNo: 28,
     acknowledged: false,
   },
 ];
