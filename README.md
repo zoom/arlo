@@ -1,407 +1,294 @@
 <div align="center">
 
-<img src="./docs/assets/Screenshot.png" alt="Arlo the meeting assistant" width="720"/>
+# Arlo Meeting Assistant
 
-# Arlo Meeting Assistant 🦉
+**Build Real-Time Meeting Intelligence with Zoom RTMS**
 
-**Your intelligent meeting companion that lives inside Zoom**
+[Get Started](#-quick-start) · [Features](#-features) · [Documentation](#-documentation) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
 ---
 
-Arlo is a forkable, open-source **RTMS Meeting Assistant** that showcases how developers can build real-time, intelligent meeting experiences directly inside Zoom — **no meeting bot required!**
+## What is Arlo?
 
-This project was originally created as the "Meeting Assistant Starter Kit" and has evolved into **Arlo**, a lightweight example of how to:
-- Stream and display live meeting transcripts in real time
-- Save transcripts to a database for meeting history
-- Generate AI-powered summaries and action items
-- Search across past meetings
-- Extend functionality using Zoom's Real-Time Media Streams (RTMS) APIs
+Arlo is an **open-source reference implementation** that demonstrates the power of Zoom's RTMS (Real-Time Media Streams) APIs. It shows developers how to build meeting assistants that capture **live transcripts without requiring a bot in the meeting**.
 
-Arlo is designed to help developers quickly prototype and deploy their own meeting assistants as Zoom Apps.
+<div align="center">
+<img src="./docs/assets/Screenshot.png" alt="Arlo in action" width="720"/>
+</div>
 
----
+### Use This Project To:
 
-## ⚠️ **IMPORTANT: RTMS Access Required**
+- **Learn** how RTMS webhooks, WebSockets, and transcript streaming work
+- **Fork and customize** for your specific use case (healthcare, legal, sales, etc.)
+- **Prototype** your own meeting intelligence applications
+- **Understand** authentication, data flow, and Zoom Apps best practices
 
-> **This app requires RTMS (Real-Time Media Streams) access to function.** RTMS is Zoom's API for accessing live meeting audio and transcription data without requiring a bot in the meeting.
-
-**To get RTMS access:**
-
-1. **Fill out the RTMS access form** at [zoom.com/realtime-media-streams](https://www.zoom.com/en/realtime-media-streams/#form)
-2. **Describe your use case** - Mention you're building a meeting assistant
-3. **Wait for approval** - The Zoom team will review your request and enable RTMS on your account
-
-**Without RTMS access, this application will not work.** The entire purpose of this starter kit is to demonstrate the power of RTMS for building real-time meeting intelligence.
-
-✅ Once approved, you'll see **RTMS features** available in your Zoom App Marketplace settings.
+> **Note:** This is a starting point, not a finished product. The industry verticals (Legal, Healthcare, etc.) are illustrative examples showing what's possible with RTMS.
 
 ---
 
-## ✨ Features
+## Features
 
-- 📝 **Live Transcription** - Real-time captions via RTMS (< 1s latency)
-- 🤖 **AI Insights** - Summaries, action items, next steps (OpenRouter with free models)
-- 🔍 **Full-Text Search** - Search across all meeting transcripts
-- 💬 **Chat with Transcripts** - RAG-based Q&A over your meetings
-- 🎯 **Meeting Highlights** - Create bookmarks with timestamps
-- 📤 **Export VTT** - Download WebVTT files for video players
-- 🏠 **Home Dashboard** — AI highlights and reminders from recent meetings
-- 🌙 **Dark Mode** — OS detection with manual toggle, persisted preference
-- 📄 **Export Markdown** — Download meeting summary + transcript as MD
-- 🏗️ **Multi-View Architecture** — 14 views with HashRouter, shared AppShell
-- 🔐 **Secure** - Zoom OAuth, encrypted tokens, ownership-enforced data isolation, rate limiting, HMAC webhook verification
-- 🏥 **Industry Verticals** — Specialized modes for Healthcare, Legal, Sales, Customer Support, and general note-taking
+| Feature | Description |
+|---------|-------------|
+| **Live Transcription** | Real-time captions via RTMS (< 1 second latency) |
+| **AI Insights** | Summaries, action items, and next steps |
+| **Full-Text Search** | Search across all your meeting transcripts |
+| **Chat with Transcripts** | Ask questions about your meetings |
+| **Meeting Highlights** | Create bookmarks with timestamps |
+| **Export Options** | Download WebVTT files or Markdown summaries |
+| **Dark Mode** | Automatic OS detection with manual toggle |
+| **Industry Verticals** | Specialized modes for Healthcare, Legal, Sales, and Support |
 
 ---
 
-## 🏥 Industry Verticals
+## Prerequisites
 
-Arlo supports **industry-specific modes** that customize the AI prompts, features, terminology, and UI for different use cases. Select your vertical during first-run setup or change it anytime in Settings.
+Before you begin, make sure you have:
 
-### General (Default Note-Taker)
+| Requirement | Description |
+|-------------|-------------|
+| **Node.js 20+** | [Download here](https://nodejs.org/) |
+| **Docker Desktop** | [Download here](https://www.docker.com/products/docker-desktop/) |
+| **ngrok** | [Sign up free](https://ngrok.com/) - creates tunnels for webhooks |
+| **Zoom Account** | With access to [Zoom Marketplace](https://marketplace.zoom.us/) |
+| **RTMS Access** | **Required!** [Request access here](https://www.zoom.com/en/realtime-media-streams/#form) |
 
-The full-featured default mode for any meeting type — team syncs, 1:1s, project meetings, and more.
-
-- **Meeting Summary** — Collapsible AI-generated summary with key points, auto-refreshes as meeting progresses
-- **Key Moments** — Auto-detected highlights (announcements, agreements, concerns, insights, milestones) with star/favorite
-- **Participant Stats** — Talk time breakdown, visual participation chart, balance indicator
-- **Decisions Log** — Track decisions with who made them, auto-detected + manual entry
-- **Open Questions** — Capture unanswered questions with open/answered/all filters
-- **Smart Bookmarks** — Quick one-click bookmarking with categories (Important, Follow Up, Idea, Favorite)
-- **Notes** — Free-form meeting notes textarea
-- **Action Items** — Track tasks with owner assignment
-
-### Healthcare (Clinical Documentation)
-
-Designed for doctors and clinicians who need to document patient encounters while staying present with their patients.
-
-- **SOAP Notes Panel** — Auto-populated Subjective, Objective, Assessment, and Plan sections
-- **Patient Context** — Sidebar showing conditions, allergies, and medications
-- **Previous Sessions** — Quick access to past appointment notes
-- **Clinical Alerts** — Real-time warnings for drug interactions, contradictions, allergy mentions
-- **Quick Actions** — One-click lab orders, referrals, Rx templates, follow-up scheduling
-- **Healthcare Tags** — Auto-extracted symptoms, diagnoses, medications, procedures
-
-### Legal (Depositions & Testimony)
-
-Built for attorneys handling depositions, client interviews, and witness testimony.
-
-- **Contradiction Detector** — Flags conflicting statements with severity levels and side-by-side comparison
-- **Legal Terms Panel** — Auto-extracts parties, dates, amounts, locations, documents, and legal citations
-- **Exhibit Tracker** — Log and track document references with timestamps and context
-- **Privilege Markers** — Mark attorney-client, work product, and confidential sections
-
-### Sales (Deal Tracking & Qualification)
-
-Built for sales professionals tracking deals, competitive intelligence, and buyer signals.
-
-- **Deal Tracker** — Opportunity details with pipeline stage visualization, value, close date, key contacts
-- **Deal Qualification** — Track Budget, Authority, Need, Timeline criteria with detected signals
-- **Competitor Mentions** — Real-time detection with sentiment analysis (positive/negative/neutral/mixed)
-- **Commitments Panel** — Track next steps with owner assignment (us vs them), due dates, completion status
-- **Call Notes** — Free-form notes for key takeaways and follow-ups
-
-### Customer Support (Call Center)
-
-Built for support agents handling customer calls — aligned with Zoom's upcoming Call Center RTMS support.
-
-- **Sentiment Meter** — Live animated gauge showing customer mood (Angry → Frustrated → Neutral → Satisfied → Happy) with trend indicator
-- **Escalation Alerts** — Real-time detection of manager requests, churn risk, frustration signals with acknowledge/dismiss actions
-- **Resolution Tracker** — Visual workflow (Issue Identified → Solution Offered → Resolution Confirmed) with handle time tracking
-- **Agent Assist** — Contextual knowledge base suggestions + compliance checklist with progress tracking
-- **Quick Responses** — One-click copy for empathy, hold, clarify, and resolve templates
+> **Important:** RTMS access requires approval from Zoom. Without it, this app will not function. Apply early as approval may take a few days.
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### Prerequisites
-
-- **Node.js** 20+ ([Download](https://nodejs.org/))
-- **Docker** + Docker Compose ([Download](https://www.docker.com/))
-- **ngrok** account + CLI ([Sign up free](https://ngrok.com/)) - Exposes localhost to internet for webhooks
-- **Zoom Account** with Marketplace access
-- **🔴 RTMS Access** - **REQUIRED!** [Request access here](https://www.zoom.com/en/realtime-media-streams/#form)
-
-**💡 Recommended:** Create a free ngrok account to get a static domain - makes webhook testing much easier!
-
-### 1. Clone Repository
+### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/arlo-meeting-assistant.git
-cd arlo-meeting-assistant
+git clone https://github.com/zoom/arlo.git
+cd arlo
 ```
 
-### 2. Request RTMS Access (Critical!)
+### Step 2: Set Up ngrok
 
-**This step is required before you can use RTMS features:**
+ngrok creates a secure tunnel from the internet to your local server (required for Zoom webhooks).
 
-1. Go to [zoom.com/realtime-media-streams](https://www.zoom.com/en/realtime-media-streams/#form)
-2. Fill out the access request form with your details
-3. Describe your use case (e.g., "Building a real-time meeting assistant with live transcription")
-4. **Wait for approval** - The Zoom team will review and enable RTMS on your account
-5. Once approved, RTMS features will appear in your Zoom App settings
+**Option A: Static Domain (Recommended)**
 
-### 3. Create Zoom App
-
-1. Go to [Zoom App Marketplace](https://marketplace.zoom.us/)
-2. Click **Develop** → **Build App** → **General App**
-3. Name your app (e.g., "Arlo Meeting Assistant")
-4. Note your **Client ID** and **Client Secret**
-
-> **App Manifest (Beta):** If you have access to the Zoom App Manifest beta, you can upload `zoom-app-manifest.json` from this repo to pre-configure your app's scopes, SDK capabilities, event subscriptions, and more. See [App Manifest](#-app-manifest-beta) below for details.
-
-### 4. Configure Environment
-
-```bash
-# Copy example environment file
-cp .env.example .env
-
-# Generate secrets
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"  # SESSION_SECRET
-node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"  # REDIS_ENCRYPTION_KEY
-
-# Edit .env and add:
-# - ZOOM_CLIENT_ID
-# - ZOOM_CLIENT_SECRET
-# - SESSION_SECRET (generated above)
-# - REDIS_ENCRYPTION_KEY (generated above)
-```
-
-### 5. Set Up ngrok (Expose Local Server to Internet)
-
-ngrok creates a secure tunnel from the internet to your local development server, which is required for Zoom webhooks and OAuth callbacks.
-
-**First Time Setup:**
-
-1. **Create a free ngrok account** at [ngrok.com](https://ngrok.com/)
-2. **Install ngrok** (if not already installed):
-   ```bash
-   # macOS (Homebrew)
-   brew install ngrok
-
-   # Or download from https://ngrok.com/download
-   ```
-
-3. **Authenticate ngrok** with your account:
-   ```bash
-   ngrok config add-authtoken YOUR_AUTHTOKEN
-   ```
-   (Find your authtoken at https://dashboard.ngrok.com/get-started/your-authtoken)
-
-**🎯 Recommended: Use a Static Domain (FREE!)**
-
-ngrok now offers **free static domains** that don't change between restarts. This makes webhook configuration much easier since you won't need to update your Zoom App settings every time you restart ngrok.
-
-1. **Claim your free static domain:**
-   - Go to https://dashboard.ngrok.com/domains
-   - Click **"Create Domain"** or **"New Domain"**
-   - You'll get a permanent domain like: `yourname-arlo.ngrok-free.app`
-
-2. **Start ngrok with your static domain:**
+1. Create a free account at [ngrok.com](https://ngrok.com/)
+2. Go to [ngrok dashboard](https://dashboard.ngrok.com/domains) → **Create Domain**
+3. You'll get a permanent URL like: `yourname-arlo.ngrok-free.app`
+4. Start ngrok:
    ```bash
    ngrok http 3000 --domain=yourname-arlo.ngrok-free.app
    ```
 
-3. **Benefits:**
-   - ✅ Same URL every time you restart ngrok
-   - ✅ Configure Zoom webhooks once (no need to update)
-   - ✅ Easier testing workflow
-   - ✅ 100% free for development
-
-**Alternative: Use Random Domain (Changes Each Time)**
-
-If you prefer not to create an account or want a temporary setup:
+**Option B: Random Domain**
 
 ```bash
 ngrok http 3000
+# Copy the https:// URL (changes each restart)
 ```
 
-Copy the `https://` URL from the ngrok output (e.g., `https://abc123.ngrok-free.app`)
+> **Tip:** Static domains are free and save you from updating Zoom settings every time you restart ngrok.
 
-⚠️ **Note:** This URL changes every time you restart ngrok, requiring you to update all Zoom App webhook URLs each time.
+### Step 3: Create Your Zoom App
 
-**Verify ngrok is running:**
+1. Go to [Zoom Marketplace](https://marketplace.zoom.us/) → **Develop** → **Build App**
+2. Select **General App** and name it (e.g., "Arlo Meeting Assistant")
+3. Note your **Client ID** and **Client Secret**
 
-Open your ngrok URL in a browser - you should see the Arlo frontend once the app is running.
+### Step 4: Configure Environment Variables
 
-### 6. Update Zoom App Configuration
+```bash
+# Copy the example file
+cp .env.example .env
+```
 
-In Zoom Marketplace → Your App:
+Edit `.env` and fill in these values:
 
-**Replace `your-ngrok-url.ngrok-free.app` below with your actual ngrok domain:**
+```bash
+# Your Zoom app credentials (from Step 3)
+ZOOM_CLIENT_ID=your_client_id_here
+ZOOM_CLIENT_SECRET=your_client_secret_here
+
+# Your ngrok URL (from Step 2)
+PUBLIC_URL=https://yourname-arlo.ngrok-free.app
+
+# Generate these secrets (run each command and paste the output)
+# node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+SESSION_SECRET=paste_64_character_string_here
+
+# node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
+REDIS_ENCRYPTION_KEY=paste_32_character_string_here
+```
+
+### Step 5: Configure Your Zoom App
+
+In [Zoom Marketplace](https://marketplace.zoom.us/) → Your App, configure these settings:
 
 **Basic Information:**
-- OAuth Redirect URL: `https://your-ngrok-url.ngrok-free.app/api/auth/callback`
-- OAuth Allow List: `https://your-ngrok-url.ngrok-free.app`
+| Setting | Value |
+|---------|-------|
+| OAuth Redirect URL | `https://YOUR-NGROK-URL/api/auth/callback` |
+| OAuth Allow List | `https://YOUR-NGROK-URL` |
 
 **Features → Zoom App SDK:**
-- Add all required APIs (see [CLAUDE.md](./CLAUDE.md#required-capabilities))
-- ⚠️ **Enable RTMS → Transcripts** (requires RTMS access approval)
-- Optional: Enable RTMS → Audio (for advanced features)
+- Click **Add APIs** and enable all required capabilities
+- **Enable RTMS → Transcripts** (requires RTMS approval)
 
 **Features → Surface:**
-- Home URL: `https://your-ngrok-url.ngrok-free.app`
-- Add to Domain Allow List: `https://your-ngrok-url.ngrok-free.app`
+| Setting | Value |
+|---------|-------|
+| Home URL | `https://YOUR-NGROK-URL` |
+| Domain Allow List | Add `https://YOUR-NGROK-URL` |
 
-**Event Subscriptions (Important for RTMS!):**
-- Event notification endpoint URL: `https://your-ngrok-url.ngrok-free.app/api/rtms/webhook`
-- Subscribe to events:
-  - ✅ `meeting.rtms_started` - Notifies when RTMS successfully starts
-  - ✅ `meeting.rtms_stopped` - Notifies when RTMS ends
-- **Copy your webhook URL** from the "Event notification endpoint URL" field - you'll need this for testing
+**Features → Event Subscriptions:**
+| Setting | Value |
+|---------|-------|
+| Event notification endpoint | `https://YOUR-NGROK-URL/api/rtms/webhook` |
+| Events | `meeting.rtms_started`, `meeting.rtms_stopped` |
 
-**💡 Pro Tip:** If you're using a static ngrok domain, you only need to configure these webhooks once! With random domains, you'd need to update this URL every time you restart ngrok.
+> Replace `YOUR-NGROK-URL` with your actual ngrok domain (e.g., `yourname-arlo.ngrok-free.app`)
 
-**⚡ Optional: Auto-Start RTMS**
-
-To automatically start RTMS when meetings begin (without requiring users to click a button):
-
-1. In **Features → Event Subscriptions**, also subscribe to:
-   - `meeting.participant_joined` (to detect when you join a meeting)
-
-2. In your backend code (`backend/src/routes/rtms.js`), add a webhook handler:
-   ```javascript
-   // Auto-start RTMS when participant joins
-   if (event === 'meeting.participant_joined') {
-     const { meeting_uuid, participant } = payload;
-     // Check if this is the app user
-     if (participant.id === appUserId) {
-       await startRTMS(meeting_uuid);
-     }
-   }
-   ```
-
-3. **Trade-off:** Auto-start provides seamless UX but uses more RTMS quota. Manual start (current implementation) gives users control.
-
-**Note:** The current implementation uses manual start (user clicks "Start Arlo") for better control and transparency.
-
-### 7. Update .env with ngrok URL
+### Step 6: Start the Application
 
 ```bash
-# Edit .env
-PUBLIC_URL=https://your-ngrok-url.ngrok-free.app
-```
-
-### 8. Start Application
-
-```bash
-# Install root dependencies
-npm install
-
-# Start with Docker (recommended)
+# Start all services with Docker
 docker-compose up --build
-
-# OR start manually
-npm run setup     # Install all dependencies
-npm run db:migrate  # Run database migrations
-npm run dev       # Start all services
 ```
 
-### 9. Test in Zoom
+Wait for the services to start. You should see:
+- PostgreSQL database starting
+- Backend API starting on port 3000
+- Frontend starting on port 3001
+- RTMS service starting on port 3002
+
+### Step 7: Test in Zoom
 
 1. Start or join a Zoom meeting
-2. Click **Apps** → Find your app
-3. Click **Add App** (first time only)
-4. Authorize the app
-5. Click **"Start Arlo"**
-6. See live transcription appear!
+2. Click **Apps** in the Zoom toolbar
+3. Find and open your app
+4. Click **"Start Arlo"** to begin transcription
+5. See live transcripts appear!
 
 ---
 
-## 📚 Documentation
+## Troubleshooting
 
-Comprehensive guides available in [`/docs/`](./docs/):
+### Database / Prisma Errors
 
-- **[CLAUDE.md](./CLAUDE.md)** - Quick reference for Claude Code
-- **[Architecture](./docs/ARCHITECTURE.md)** - System design and data flow
-- **[Project Status](./docs/PROJECT_STATUS.md)** - Roadmap and phases
-- **[Specification](./SPEC.md)** - Feature spec and version milestones
-- **[Troubleshooting](./docs/TROUBLESHOOTING.md)** - Common issues
-- **[Zoom Apps Skills](./.claude/skills/zoom-apps/)** - SDK setup, RTMS guide, OAuth, security
+**"Cannot find module '.prisma/client'"**
 
----
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Zoom Meeting                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │  Arlo Meeting Assistant (React + Zoom SDK)       │   │
-│  └────────────────────┬─────────────────────────────┘   │
-└─────────────────────────┼──────────────────────────────┘
-                          │ HTTPS + WebSocket
-         ┌────────────────▼────────────────┐
-         │   Backend API (Express.js)      │
-         │   - OAuth 2.0 (PKCE)            │
-         │   - WebSocket Server            │
-         │   - RTMS Ingestion              │
-         └────┬───────────┬────────────────┘
-              │           │
-    ┌─────────▼───┐   ┌───▼──────────────┐
-    │  Postgres   │   │  OpenRouter      │
-    │  Database   │   │  (Free AI)       │
-    └─────────────┘   └──────────────────┘
+```bash
+# Regenerate Prisma client inside Docker
+docker-compose exec backend npx prisma generate
+docker-compose restart backend
 ```
 
-**Tech Stack:**
-- Frontend: React 18, Zoom Apps SDK 0.16, react-router-dom 6 (HashRouter), @base-ui/react, lucide-react
-- Fonts: Source Serif 4 + Inter (self-hosted WOFF2)
-- Backend: Node.js 20, Express, Prisma
-- Database: PostgreSQL 15
-- AI: OpenRouter (free models, no API key required)
-- Real-time: WebSocket + RTMS SDK
+**"Can't reach database server"**
+
+```bash
+# Wait for PostgreSQL to be healthy, then restart
+docker-compose restart postgres backend
+```
+
+**Tables don't exist**
+
+```bash
+# Push the schema to database
+docker-compose exec backend npx prisma db push
+```
+
+### Clean Restart
+
+If you're having persistent issues:
+
+```bash
+# Stop everything and remove volumes
+docker-compose down -v
+
+# Rebuild with fresh node_modules
+docker-compose up --build -V
+```
+
+### ngrok Issues
+
+**App stops working after restarting ngrok?**
+
+If using a random domain, you'll need to:
+1. Copy the new ngrok URL
+2. Update `PUBLIC_URL` in `.env`
+3. Update all URLs in Zoom Marketplace settings
+4. Restart: `docker-compose restart backend`
+
+> **Pro tip:** Use a static ngrok domain to avoid this!
+
+### More Help
+
+See the full [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for additional issues.
 
 ---
 
-## 🛠️ Development
+## Industry Verticals
+
+Arlo includes specialized modes that demonstrate RTMS capabilities for different industries:
+
+### General (Default)
+Full-featured note-taking for any meeting type.
+- Meeting summaries, key moments, decisions
+- Participant stats and talk time
+- Action items and open questions
+
+### Healthcare
+Clinical documentation for patient encounters.
+- SOAP notes auto-generation
+- Clinical alerts for drug interactions
+- Patient context sidebar
+
+### Legal
+Deposition and testimony assistance.
+- Contradiction detection
+- Billable time tracking
+- Exhibit and privilege markers
+
+### Sales
+Deal tracking and qualification.
+- BANT qualification tracking
+- Competitor mention detection
+- Commitment tracking
+
+### Customer Support
+Call center agent assistance.
+- Live sentiment meter
+- Escalation alerts
+- Resolution workflow tracking
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [CLAUDE.md](./CLAUDE.md) | Quick reference for AI assistants |
+| [Architecture](./docs/ARCHITECTURE.md) | System design and data flow |
+| [Project Status](./docs/PROJECT_STATUS.md) | Roadmap and current progress |
+| [Specification](./SPEC.md) | Feature spec and milestones |
+| [Troubleshooting](./docs/TROUBLESHOOTING.md) | Common issues and fixes |
+
+---
+
+## Development
 
 ### Project Structure
 
 ```
-arlo-meeting-assistant/
-├── backend/          # Express API server
-│   ├── src/
-│   │   ├── server.js       # Main server + rate limiting
-│   │   ├── config.js       # Environment config
-│   │   ├── lib/prisma.js   # Singleton PrismaClient
-│   │   ├── routes/         # API routes (9 modules)
-│   │   └── services/       # Business logic
-│   └── prisma/
-│       └── schema.prisma   # Database schema
-│
-├── frontend/         # React Zoom App
-│   ├── public/
-│   │   ├── index.html      # Loads Zoom SDK
-│   │   └── fonts/          # Self-hosted Source Serif 4 + Inter
-│   └── src/
-│       ├── App.js           # HashRouter, routes, provider hierarchy
-│       ├── index.css        # Design tokens, typography, themes
-│       ├── views/           # 15 views (Auth, Home, MeetingsList, MeetingDetail, InMeeting, Search, Settings, Upcoming, Guest×2, Landing, Onboarding, OAuthError, NotFound, VerticalSelector)
-│       ├── contexts/        # 6 contexts (Auth, ZoomSdk, Meeting, Theme, Toast, Vertical)
-│       ├── features/        # Industry vertical components
-│       │   ├── general/     # Meeting summary, key moments, decisions, questions, participation, bookmarks
-│       │   ├── healthcare/  # SOAP notes, clinical alerts, patient context, quick actions
-│       │   ├── legal/       # Contradiction detector, exhibit tracker, privilege markers
-│       │   ├── sales/       # Deal tracker, qualification, competitor mentions, commitments
-│       │   └── support/     # Sentiment meter, escalation alerts, resolution tracker, agent assist
-│       ├── hooks/           # useZoomAuth (OAuth PKCE)
-│       ├── utils/           # Shared formatters (timestamps, durations, dates)
-│       ├── components/      # AppShell, ArloLogo, DeleteMeetingDialog, ParticipantTimeline, MeetingCard, etc.
-│       └── components/ui/   # Button, Card, Badge, Input, Textarea, LoadingSpinner
-│
-├── rtms/             # RTMS transcript ingestion
-│   └── src/
-│       └── index.js        # Webhook handler + RTMS client
-│
-├── docs/             # 15 comprehensive guides
-├── .env.example      # Environment variables template
-├── zoom-app-manifest.json  # Zoom App Manifest (beta)
-├── docker-compose.yml
-└── README.md
+arlo/
+├── backend/           # Express API server + Prisma
+├── frontend/          # React Zoom App
+├── rtms/              # RTMS transcript ingestion service
+├── docs/              # Documentation
+└── docker-compose.yml # Development environment
 ```
 
 ### Common Commands
@@ -412,187 +299,73 @@ docker-compose up
 
 # View logs
 docker-compose logs -f backend
-docker-compose logs -f rtms
 
-# Restart service
+# Restart a service
 docker-compose restart backend
 
-# Database operations
-npm run db:migrate    # Run migrations
-npm run db:studio     # Open Prisma Studio GUI
-npm run db:reset      # Reset database (WARNING: deletes data)
+# Database GUI
+npm run db:studio
 
-# Clean restart
+# Clean restart (deletes data!)
 docker-compose down -v && docker-compose up --build
 ```
 
-### Database Migrations
+### Tech Stack
 
-```bash
-cd backend
-
-# Create migration after schema changes
-npx prisma migrate dev --name description_of_change
-
-# Generate Prisma Client
-npx prisma generate
-
-# Reset database (development only)
-npx prisma migrate reset
-```
+- **Frontend:** React 18, Zoom Apps SDK, Base UI
+- **Backend:** Node.js 20, Express, Prisma
+- **Database:** PostgreSQL 15
+- **AI:** OpenRouter (free models available)
+- **Real-time:** WebSocket + RTMS SDK
 
 ---
 
-## 🧪 Testing
-
-### Manual Testing Checklist
-
-- [ ] App loads in Zoom client
-- [ ] OAuth flow completes
-- [ ] "Start Arlo" button works
-- [ ] Live transcript appears within 1s
-- [ ] WebSocket connection stable
-- [ ] Segments save to database
-- [ ] Can scroll through transcript
-- [ ] "Resume Live" button works
-- [ ] Stop button ends RTMS
-
-### Debugging
-
-**Frontend (Zoom App):**
-- Right-click in app → **Inspect Element**
-- Check Console for errors
-- Network tab shows API calls
-
-**Backend:**
-```bash
-docker-compose logs -f backend | grep -i error
-curl http://localhost:3000/health
-```
-
-**Database:**
-```bash
-npm run db:studio
-# Opens GUI at http://localhost:5555
-```
-
-**RTMS:**
-```bash
-docker-compose logs -f rtms
-curl http://localhost:3002/health
-```
-
----
-
-## 🤝 Contributing
+## Contributing
 
 This is an open-source starter kit designed to be forked and customized!
 
-### How to Customize
+1. **Fork** this repository
+2. **Customize** for your use case
+3. **Share** improvements via pull request (optional)
 
-1. **Fork this repository**
-2. **Modify for your use case:**
-   - Add your own AI prompts
-   - Customize UI/styling
-   - Add new features
-   - Change AI provider
-3. **Share your improvements** (optional PR)
-
-### Feature Ideas
+### Ideas for Extension
 
 - Multi-language support
 - Custom AI models (local LLMs)
 - Team workspaces
 - Calendar integration
-- Video replay (like Fathom)
-- Risk/compliance signals
-- Background task extraction
-- Public sharing links
+- Video replay sync
 
 ---
 
-## 📦 App Manifest (Beta)
-
-Zoom App Manifests are JSON files that contain your app's configuration — scopes, SDK capabilities, event subscriptions, URLs, and more. This repo includes a pre-configured manifest at [`zoom-app-manifest.json`](./zoom-app-manifest.json) that you can upload to quickly configure your Zoom App.
-
-### Prerequisites
-
-- You must be accepted into the **Zoom App Manifest beta program** (request access from Zoom)
-- Your app must be a **General App** on the Zoom Marketplace
-- You must be the account owner, admin, or have the "Zoom for developers" role
-
-### Using the Manifest
-
-**Before uploading**, edit `zoom-app-manifest.json` and replace all instances of `your-ngrok-url.ngrok-free.app` with your actual ngrok domain (or production domain).
-
-**Upload to an existing app:**
-
-1. Log into [Zoom Marketplace](https://marketplace.zoom.us/) → **Manage** → select your app
-2. Open the manifest panel (persistent menu bar or Basic Information page)
-3. Click **Upload New Manifest** and select `zoom-app-manifest.json`
-4. Zoom validates the manifest and shows a green checkmark on success
-5. Close the manifest window, refresh your browser, and confirm changes
-
-**Download from an existing app:**
-
-1. In the manifest panel, click the **download icon** to save the current configuration
-2. Edit the JSON locally, then re-upload to apply changes
-
-### What's Included
-
-The manifest pre-configures:
-
-- **OAuth scopes:** `zoomapp:inmeeting`, `meeting:read:meeting`, `meeting:write:open_app` (optional), `user:read` (optional)
-- **SDK capabilities:** All 16 APIs used by Arlo (getMeetingContext, callZoomApi, authorize, showNotification, etc.)
-- **Event subscriptions:** `meeting.rtms_started`, `meeting.rtms_stopped`
-- **In-client OAuth:** Enabled (PKCE flow)
-- **Guest mode:** Enabled with test guest mode
-- **Domain allow list:** Your ngrok domain + `appssdk.zoom.us`
-
-### Limitations (Beta)
-
-- Manifests can only **update** existing apps, not create new ones
-- Only user-editable values are updated; the build-flow UX verifies completeness
-- Values are case-sensitive and must match Zoom's expected format
-- RTMS access still requires separate approval from Zoom (the manifest alone does not grant RTMS)
-
----
-
-## 📖 Learn More
+## Resources
 
 - [Zoom Apps Documentation](https://developers.zoom.us/docs/zoom-apps/)
 - [RTMS Documentation](https://developers.zoom.us/docs/rtms/)
 - [Zoom Apps SDK Reference](https://appssdk.zoom.us/classes/ZoomSdk.ZoomSdk.html)
-- [@zoom/rtms SDK](https://github.com/zoom/rtms)
 - [OpenRouter API](https://openrouter.ai/docs)
 
 ---
 
-## ⚖️ License
+## Support
 
-MIT License - See [LICENSE](./LICENSE) for details
-
----
-
-## 💬 Support
-
-- **Issues:** [GitHub Issues](https://github.com/your-org/arlo-meeting-assistant/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/your-org/arlo-meeting-assistant/discussions)
-- **RTMS Access Requests:** [zoom.com/realtime-media-streams](https://www.zoom.com/en/realtime-media-streams/#form)
-- **General Zoom Support:** [devforum.zoom.us](https://devforum.zoom.us/)
+- **Issues:** [GitHub Issues](https://github.com/zoom/arlo/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/zoom/arlo/discussions)
+- **RTMS Access:** [Request Form](https://www.zoom.com/en/realtime-media-streams/#form)
+- **Zoom Developer Forum:** [devforum.zoom.us](https://devforum.zoom.us/)
 
 ---
 
-## 🌟 Acknowledgments
+## License
 
-Built with:
-- [Zoom Apps SDK](https://developers.zoom.us/docs/zoom-apps/)
-- [Zoom RTMS](https://developers.zoom.us/docs/rtms/)
-- [React](https://react.dev/)
-- [Express.js](https://expressjs.com/)
-- [Prisma](https://www.prisma.io/)
-- [OpenRouter](https://openrouter.ai/)
+MIT License - See [LICENSE](./LICENSE) for details.
 
 ---
 
-**Ready to build your own meeting assistant?** Star this repo ⭐ and get started!
+<div align="center">
+
+**Ready to build your own meeting assistant?**
+
+[Get Started](#-quick-start) · [Star this repo](https://github.com/zoom/arlo) ⭐
+
+</div>

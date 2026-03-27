@@ -2,7 +2,9 @@
 // Database: PostgreSQL 15+
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // Include binary targets for both local development (Mac) and Docker (Linux)
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
