@@ -218,15 +218,19 @@ router.post('/callback', async (req, res) => {
     const { codeVerifier } = pkceData;
     pkceStore.delete(state);
 
+    // Build token request params
+    // NOTE: For in-client OAuth (PKCE flow), redirect_uri should NOT be included
+    // The code was issued for PKCE exchange, not browser redirect
+    const tokenParams = new URLSearchParams({
+      grant_type: 'authorization_code',
+      code,
+      code_verifier: codeVerifier,
+    });
+
     // Exchange code for token
     const tokenResponse = await axios.post(
       'https://zoom.us/oauth/token',
-      new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: config.redirectUri,
-        code_verifier: codeVerifier,
-      }),
+      tokenParams,
       {
         headers: {
           Authorization: `Basic ${Buffer.from(`${config.zoomClientId}:${config.zoomClientSecret}`).toString('base64')}`,
