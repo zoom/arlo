@@ -58,7 +58,9 @@ Before you begin, make sure you have:
 | **Zoom Account** | With access to [Zoom Marketplace](https://marketplace.zoom.us/) |
 | **RTMS Access** | **Required!** [Request access here](https://www.zoom.com/en/realtime-media-streams/#form) |
 
-> **Important:** RTMS access requires approval from Zoom. Without it, this app will not function. Apply early as approval may take a few days.
+> **⚠️ Important:** RTMS access requires approval from Zoom. Without it, this app will not function.
+>
+> **[Request RTMS Access Here](https://www.zoom.com/en/realtime-media-streams/#form)** — Apply early as approval may take a few days.
 
 ---
 
