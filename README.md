@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="./docs/assets/arlo-logo.png" alt="Arlo" width="200"/>
+
 # Arlo Meeting Assistant
 
 **Build Real-Time Meeting Intelligence with Zoom RTMS**
