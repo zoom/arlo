@@ -3,14 +3,18 @@ const config = require('../config');
 
 /**
  * Generate PKCE code verifier and challenge
+ *
+ * NOTE: For Zoom in-client OAuth (Zoom Apps), the SDK defaults to "plain" PKCE method,
+ * not S256. This means code_verifier === code_challenge.
+ * See: https://devforum.zoom.us/t/pkce-does-not-work-but-is-obligatory-while-using-sdk-v0-16-x/76414
  */
 function generatePKCE() {
   // Generate random code verifier (43-128 characters)
   const codeVerifier = base64URLEncode(crypto.randomBytes(32));
 
-  // Generate code challenge (SHA256 hash of verifier)
-  const hash = crypto.createHash('sha256').update(codeVerifier).digest();
-  const codeChallenge = base64URLEncode(hash);
+  // For Zoom in-client OAuth, use "plain" method: code_challenge = code_verifier
+  // The S256 method doesn't work with the Zoom SDK's authorize() for in-client apps
+  const codeChallenge = codeVerifier;
 
   return { codeVerifier, codeChallenge };
 }
