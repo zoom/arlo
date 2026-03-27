@@ -276,6 +276,83 @@ docker-compose logs frontend | grep "webpack"
 
 ---
 
+## Prisma / Database Issues
+
+### Issue: "Cannot find module '.prisma/client'" or "PrismaClientInitializationError"
+
+**Cause:** Prisma client wasn't generated or was generated for the wrong platform (Mac vs Linux).
+
+**Solutions:**
+
+1. **Regenerate Prisma client inside Docker:**
+   ```bash
+   docker-compose exec backend npx prisma generate
+   docker-compose restart backend
+   ```
+
+2. **Clean rebuild with fresh node_modules:**
+   ```bash
+   docker-compose down -v
+   docker-compose up --build -V
+   ```
+   The `-V` flag recreates anonymous volumes, ensuring fresh node_modules.
+
+3. **If running locally (without Docker):**
+   ```bash
+   cd backend
+   npx prisma generate
+   npx prisma db push
+   ```
+
+### Issue: "P1001: Can't reach database server" or connection refused
+
+**Cause:** Database isn't ready yet or connection string is wrong.
+
+**Solutions:**
+
+1. **Wait for PostgreSQL to be healthy:**
+   ```bash
+   docker-compose ps
+   # Ensure postgres shows "healthy" status
+   ```
+
+2. **Check DATABASE_URL in .env:**
+   - For Docker: `postgresql://postgres:postgres@postgres:5432/meeting_assistant`
+   - For local: `postgresql://postgres:postgres@localhost:5432/meeting_assistant`
+
+3. **Restart the services:**
+   ```bash
+   docker-compose restart postgres backend
+   ```
+
+### Issue: "P2021: Table does not exist" or missing tables
+
+**Cause:** Database schema wasn't applied.
+
+**Solutions:**
+
+1. **Push the schema to database:**
+   ```bash
+   docker-compose exec backend npx prisma db push
+   ```
+
+2. **Or reset and recreate (WARNING: deletes all data):**
+   ```bash
+   docker-compose exec backend npx prisma migrate reset --force
+   ```
+
+### Issue: Prisma schema changes not reflected
+
+**Solution:**
+```bash
+# After changing schema.prisma:
+docker-compose exec backend npx prisma generate
+docker-compose exec backend npx prisma db push
+docker-compose restart backend
+```
+
+---
+
 ## Docker Issues
 
 ### Issue: Port already in use
