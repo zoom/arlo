@@ -26,6 +26,7 @@ import {
 // Legal vertical features
 import {
   ContradictionDetector,
+  BillableTimeTracker,
   LegalTermsPanel,
   ExhibitTracker,
   PrivilegeMarkers,
@@ -713,6 +714,12 @@ export default function InMeetingView() {
           ) : isLegal ? (
             /* Legal vertical: Deposition/testimony assistance */
             <>
+              {/* Billable Time Tracker - auto-log billable segments */}
+              <BillableTimeTracker
+                meetingId={meetingId}
+                meetingStartTime={segments[0]?.timestamp}
+              />
+
               {/* Contradiction Detector - flags conflicting statements */}
               <ContradictionDetector
                 segments={segments}
