@@ -16,10 +16,6 @@
 
 Arlo is an **open-source reference implementation** that demonstrates the power of Zoom's RTMS (Real-Time Media Streams) APIs. It shows developers how to build meeting assistants that capture **live transcripts without requiring a bot in the meeting**.
 
-<div align="center">
-<img src="./docs/assets/Screenshot.png" alt="Arlo in action" width="720"/>
-</div>
-
 ### Use This Project To:
 
 - **Learn** how RTMS webhooks, WebSockets, and transcript streaming work
