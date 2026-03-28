@@ -12,6 +12,11 @@
 .arlo-logo-icon-container {
   position: relative;
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  background: #FFFFFF;
+  border-radius: 6px;
 }
 
 .arlo-logo-name {

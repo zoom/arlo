@@ -208,6 +208,7 @@
 .legal-term-context {
   margin: 0;
   padding-left: 2px;
+  font-family: var(--font-sans);
 }
 
 .legal-term-meta {

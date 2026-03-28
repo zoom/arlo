@@ -66,7 +66,9 @@ export default function AuthView() {
   return (
     <div className="auth-view">
       <div className="auth-content">
-        <OwlIcon size={64} />
+        <div className="auth-owl">
+          <OwlIcon size={64} />
+        </div>
 
         <div className="auth-text text-serif">
           <h1 className="text-3xl">Arlo</h1>

@@ -224,7 +224,7 @@
   align-items: flex-start;
   gap: 8px;
   margin: 0;
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   font-size: 0.875rem;
   line-height: 1.5;
   color: var(--foreground);
