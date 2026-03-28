@@ -325,6 +325,57 @@ P: ${currentSoap.plan || '(empty)'}
   }
 }
 
+/**
+ * Analyze sentiment of customer speech in a support call
+ * @param {string} text - The text to analyze
+ * @returns {Promise<object>} Sentiment analysis result
+ */
+async function analyzeSentiment(text) {
+  const systemPrompt = `You are an expert sentiment analyzer for customer support calls.
+Analyze the customer's emotional state from their speech.
+
+Return ONLY a JSON object with:
+- sentiment: one of "angry", "frustrated", "neutral", "satisfied", "happy"
+- confidence: number 0-100
+- reason: brief explanation (under 20 words)
+
+Consider:
+- Negation ("not happy" = negative, "not angry" = less negative)
+- Sarcasm and tone
+- Overall context and meaning
+- Intensity words ("very", "extremely", "a bit")
+
+Examples:
+"I am not happy with this" → frustrated or angry
+"Thanks, that's not bad" → satisfied
+"This is unacceptable!" → angry
+"I guess that works" → neutral/satisfied
+
+Output ONLY valid JSON, no markdown.`;
+
+  const prompt = `Analyze sentiment: "${text}"`;
+
+  try {
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 100 });
+    const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+    try {
+      const parsed = JSON.parse(cleaned);
+      return {
+        sentiment: parsed.sentiment || 'neutral',
+        confidence: parsed.confidence || 50,
+        reason: parsed.reason || '',
+      };
+    } catch {
+      // Fallback if JSON parsing fails
+      return { sentiment: 'neutral', confidence: 0, reason: 'Could not parse response' };
+    }
+  } catch (error) {
+    console.error('❌ Sentiment analysis failed:', error.message);
+    return { sentiment: 'neutral', confidence: 0, reason: 'Analysis failed' };
+  }
+}
+
 module.exports = {
   callOpenRouter,
   generateSummary,
@@ -333,4 +384,5 @@ module.exports = {
   chatWithTranscript,
   generateSuggestions,
   extractSOAPNotes,
+  analyzeSentiment,
 };
