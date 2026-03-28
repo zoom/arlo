@@ -158,10 +158,8 @@ export default function InMeetingView() {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [displayTitle, setDisplayTitle] = useState(null);
-  // Default to "assist" tab (features) - persist preference in localStorage
-  const [activeTab, setActiveTab] = useState(() => {
-    return localStorage.getItem('arlo-meeting-tab') || 'assist';
-  });
+  // Always default to "assist" tab (features page) when entering a meeting
+  const [activeTab, setActiveTab] = useState('assist');
   const transcriptRef = useRef(null);
   const inviteDropdownRef = useRef(null);
 
@@ -598,10 +596,7 @@ export default function InMeetingView() {
       {/* Tabs: Arlo Assist (default) | Transcript */}
       <Tabs.Root
         value={activeTab}
-        onValueChange={(value) => {
-          setActiveTab(value);
-          localStorage.setItem('arlo-meeting-tab', value);
-        }}
+        onValueChange={(value) => setActiveTab(value)}
         className="in-meeting-tabs"
       >
         <Tabs.List className="tabs-list" data-cols="2">
