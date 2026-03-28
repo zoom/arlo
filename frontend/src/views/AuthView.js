@@ -71,7 +71,7 @@ export default function AuthView() {
         <div className="auth-text text-serif">
           <h1 className="text-3xl">Arlo</h1>
           <p className="text-muted">
-            Your AI meeting assistant that captures context, generates summaries, and tracks action items in real-time.
+            In-meeting AI assistant — real-time transcripts, summaries, and action items.
           </p>
         </div>
 
