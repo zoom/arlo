@@ -44,7 +44,7 @@ export default function VerticalSelectorView() {
       {/* Header with branding */}
       <div className="vertical-selector-header">
         <div className="vertical-selector-brand">
-          <OwlIcon size={48} />
+          <OwlIcon size={62} />
         </div>
         <h1 className="text-serif text-2xl">Welcome to Arlo</h1>
         <p className="text-muted">
