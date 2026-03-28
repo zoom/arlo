@@ -53,7 +53,7 @@ export default function LandingPageView() {
 
         <div className="landing-hero-text">
           <h1 className="text-serif landing-hero-title">
-            Your AI Meeting Assistant, Built for Zoom
+            In-Meeting AI Assistant
           </h1>
           <p className="text-sans text-muted landing-hero-subtitle">
             Capture transcripts, generate summaries, and track action items in real-time — no meeting bot required.
@@ -124,7 +124,7 @@ export default function LandingPageView() {
       {/* Footer */}
       <footer className="landing-footer">
         <p className="text-sans text-sm text-muted">
-          Arlo Meeting Assistant &copy; 2026 &middot; Open Source
+          Arlo &copy; 2025
         </p>
       </footer>
     </div>
