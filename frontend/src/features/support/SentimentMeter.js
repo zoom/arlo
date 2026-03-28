@@ -37,6 +37,7 @@ const SENTIMENT_KEYWORDS = {
     'better', 'improving', 'progress', 'helpful',
   ],
   happy: [
+    'happy', 'very happy', 'so happy', 'extremely happy', 'really happy',
     'thank', 'thanks', 'awesome', 'amazing', 'fantastic', 'wonderful',
     'great', 'excellent', 'perfect', 'love', 'appreciate', 'grateful',
     'incredible', 'brilliant', 'best', 'exceeded', 'impressed',
@@ -68,6 +69,12 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
   const [isLiveDetecting, setIsLiveDetecting] = useState(false);
   const lastProcessedSeqNo = useRef(-1);
   const sentimentDecayTimeout = useRef(null);
+  const currentSentimentRef = useRef('neutral');
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    currentSentimentRef.current = currentSentiment;
+  }, [currentSentiment]);
 
   // Format timestamp from milliseconds
   const formatTime = (ms) => {
@@ -82,6 +89,8 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
 
   // Process new transcript segments for sentiment
   const processSegment = useCallback((segment) => {
+    if (!segment.text) return;
+
     const detection = detectSentiment(segment.text);
 
     if (detection) {
@@ -89,7 +98,7 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
       const ts = segment.tStartMs || segment.timestamp;
       const timestamp = formatTime(typeof ts === 'number' ? ts : Date.parse(ts));
 
-      setPreviousSentiment(currentSentiment);
+      setPreviousSentiment(currentSentimentRef.current);
       setCurrentSentiment(detection.sentiment);
       setIsLiveDetecting(true);
 
@@ -120,7 +129,7 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
         }
       }, 30000);
     }
-  }, [currentSentiment]);
+  }, []);
 
   // Watch for new transcript segments
   useEffect(() => {
@@ -129,14 +138,20 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
       return;
     }
 
-    // Process only new segments
-    const newSegments = segments.filter(s => s.seqNo > lastProcessedSeqNo.current);
+    // Process only new segments (handle string/number seqNo)
+    const newSegments = segments.filter(s => {
+      const seqNo = Number(s.seqNo);
+      return !isNaN(seqNo) && seqNo > lastProcessedSeqNo.current;
+    });
 
     if (newSegments.length > 0) {
-      // Process the most recent segment
-      const latestSegment = newSegments[newSegments.length - 1];
-      processSegment(latestSegment);
-      lastProcessedSeqNo.current = latestSegment.seqNo;
+      // Process each new segment for sentiment
+      newSegments.forEach(segment => {
+        processSegment(segment);
+      });
+      // Update last processed to the highest seqNo
+      const maxSeqNo = Math.max(...newSegments.map(s => Number(s.seqNo)));
+      lastProcessedSeqNo.current = maxSeqNo;
     }
   }, [segments, processSegment]);
 
