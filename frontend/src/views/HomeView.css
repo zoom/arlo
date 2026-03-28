@@ -287,3 +287,324 @@
   color: var(--muted-foreground);
   text-align: center;
 }
+
+/* Vertical label under greeting */
+.home-vertical-label {
+  margin-top: 4px;
+}
+
+/* =============================================================================
+   VERTICAL DASHBOARDS - Shared Stats Grid
+   ============================================================================= */
+
+.home-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  padding: 20px;
+}
+
+.home-stat-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.home-stat-icon {
+  color: var(--muted-foreground);
+}
+
+.home-stat-icon.legal {
+  color: var(--legal-accent, #6366f1);
+}
+
+.home-stat-icon.healthcare {
+  color: var(--healthcare-accent, #10b981);
+}
+
+.home-stat-icon.sales {
+  color: var(--sales-accent, #f59e0b);
+}
+
+.home-stat-icon.support {
+  color: var(--support-accent, #3b82f6);
+}
+
+.home-stat-number {
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 500;
+}
+
+.home-stat-label {
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  color: var(--muted-foreground);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* =============================================================================
+   LEGAL DASHBOARD
+   ============================================================================= */
+
+.home-matter-card {
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.home-matter-card:hover {
+  background: var(--muted);
+}
+
+.home-matter-inner {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-matter-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.home-matter-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.home-matter-meta {
+  display: flex;
+  gap: 6px;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.home-depo-card {
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-depo-icon {
+  color: var(--legal-accent, #6366f1);
+  flex-shrink: 0;
+}
+
+.home-depo-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* =============================================================================
+   HEALTHCARE DASHBOARD
+   ============================================================================= */
+
+.home-alert-card {
+  border-left: 3px solid var(--border);
+}
+
+.home-alert-card.high {
+  border-left-color: var(--destructive, #ef4444);
+  background: color-mix(in srgb, var(--destructive, #ef4444) 5%, var(--card));
+}
+
+.home-alert-card.medium {
+  border-left-color: var(--warning, #f59e0b);
+  background: color-mix(in srgb, var(--warning, #f59e0b) 5%, var(--card));
+}
+
+.home-alert-inner {
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.home-alert-icon {
+  flex-shrink: 0;
+}
+
+.home-alert-card.high .home-alert-icon {
+  color: var(--destructive, #ef4444);
+}
+
+.home-alert-card.medium .home-alert-icon {
+  color: var(--warning, #f59e0b);
+}
+
+.home-alert-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.home-patient-card {
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.home-patient-icon {
+  color: var(--healthcare-accent, #10b981);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.home-patient-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.home-patient-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* =============================================================================
+   SALES DASHBOARD
+   ============================================================================= */
+
+.home-deal-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.home-deal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.home-deal-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.home-deal-next {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.home-call-card {
+  padding: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-call-icon {
+  color: var(--sales-accent, #f59e0b);
+  flex-shrink: 0;
+}
+
+.home-call-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* =============================================================================
+   SUPPORT DASHBOARD
+   ============================================================================= */
+
+.home-support-call-card {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-support-call-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.home-support-call-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sentiment-positive {
+  color: var(--healthcare-accent, #10b981);
+}
+
+.sentiment-negative {
+  color: var(--destructive, #ef4444);
+}
+
+.home-escalation-card {
+  border-left: 3px solid var(--warning, #f59e0b);
+  background: color-mix(in srgb, var(--warning, #f59e0b) 3%, var(--card));
+}
+
+.home-escalation-inner {
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.home-escalation-icon {
+  color: var(--warning, #f59e0b);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.home-escalation-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.home-escalation-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* =============================================================================
+   RESPONSIVE ADJUSTMENTS
+   ============================================================================= */
+
+@media (max-width: 480px) {
+  .home-stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .home-stat-number {
+    font-size: 1.125rem;
+  }
+}

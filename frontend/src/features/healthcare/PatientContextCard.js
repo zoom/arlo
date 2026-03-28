@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Calendar, AlertTriangle, Pill, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './PatientContextCard.css';
 
 /**
@@ -23,9 +24,10 @@ const DEMO_PATIENT_INFO = {
   medications: ['Metformin 1000mg BID', 'Lisinopril 20mg daily', 'Gabapentin 300mg TID', 'Duloxetine 30mg daily'],
 };
 
-export default function PatientContextCard({ segments, meetingId }) {
-  const [patientInfo, setPatientInfo] = useState(DEMO_PATIENT_INFO);
-  const [isExpanded, setIsExpanded] = useState(true);
+export default function PatientContextCard({ segments, meetingId, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('patient-context');
+  const [patientInfo, setPatientInfo] = useState(showDemoData ? DEMO_PATIENT_INFO : null);
   const [isLoading, setIsLoading] = useState(false);
 
   // Try to detect patient info from transcript
@@ -121,10 +123,11 @@ export default function PatientContextCard({ segments, meetingId }) {
   }
 
   return (
-    <Card className="patient-context-card">
+    <Card className={`patient-context-card ${collapsed ? 'feature-collapsed' : ''}`}>
       <button
-        className="patient-context-header"
-        onClick={() => setIsExpanded(!isExpanded)}
+        className="patient-context-header feature-collapse-header"
+        onClick={() => toggleCollapsed('patient-context')}
+        aria-expanded={!collapsed}
       >
         <div className="patient-context-title">
           <User size={16} className="patient-icon" />
@@ -132,14 +135,14 @@ export default function PatientContextCard({ segments, meetingId }) {
             {patientInfo?.name || 'Patient Context'}
           </span>
         </div>
-        {isExpanded ? (
-          <ChevronUp size={16} className="text-muted" />
+        {collapsed ? (
+          <ChevronDown size={16} className="feature-chevron" />
         ) : (
-          <ChevronDown size={16} className="text-muted" />
+          <ChevronUp size={16} className="feature-chevron" />
         )}
       </button>
 
-      {isExpanded && (
+      {!collapsed && (
         <div className="patient-context-content">
           {/* Last visit */}
           {patientInfo?.lastVisit && (

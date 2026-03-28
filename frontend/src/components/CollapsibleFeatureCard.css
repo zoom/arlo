@@ -1,0 +1,141 @@
+/* =============================================================================
+   COLLAPSIBLE FEATURE CARD
+   Wrapper for feature cards with expand/collapse functionality
+   ============================================================================= */
+
+.collapsible-feature-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  transition: box-shadow 0.15s ease;
+}
+
+.collapsible-feature-card:hover {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* Header button */
+.collapsible-feature-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.collapsible-feature-header:hover {
+  background: var(--muted);
+}
+
+.collapsible-feature-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.collapsible-feature-header-right {
+  display: flex;
+  align-items: center;
+}
+
+/* Icon */
+.collapsible-feature-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--feature-accent, var(--accent));
+  background: color-mix(in srgb, var(--feature-accent, var(--accent)) 15%, transparent);
+  color: var(--feature-accent, var(--accent));
+}
+
+/* Title */
+.collapsible-feature-title {
+  font-size: 0.9375rem;
+  color: var(--foreground);
+}
+
+/* Live indicator */
+.collapsible-feature-live {
+  display: flex;
+  align-items: center;
+}
+
+.live-indicator-dot {
+  width: 8px;
+  height: 8px;
+  background: #22c55e;
+  border-radius: 50%;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.9);
+  }
+}
+
+/* Badge */
+.collapsible-feature-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  background: var(--feature-accent, var(--accent));
+  background: color-mix(in srgb, var(--feature-accent, var(--accent)) 15%, transparent);
+  border-radius: 10px;
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--feature-accent, var(--accent));
+}
+
+/* Chevron */
+.collapsible-feature-chevron {
+  color: var(--muted-foreground);
+  transition: transform 0.2s ease;
+}
+
+/* Content */
+.collapsible-feature-content {
+  border-top: 1px solid var(--border);
+  max-height: 2000px;
+  opacity: 1;
+  transition: max-height 0.3s ease, opacity 0.2s ease, padding 0.2s ease;
+  overflow: hidden;
+}
+
+.collapsible-feature-content.hidden {
+  max-height: 0;
+  opacity: 0;
+  border-top-color: transparent;
+}
+
+/* When collapsed, no border on header hover */
+.collapsible-feature-card.collapsed .collapsible-feature-header {
+  border-radius: var(--radius-lg);
+}
+
+/* Expanded state - subtle accent border */
+.collapsible-feature-card.expanded {
+  border-color: color-mix(in srgb, var(--feature-accent, var(--border)) 40%, var(--border));
+}
+
+/* Dark mode */
+.dark .collapsible-feature-card:hover {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}

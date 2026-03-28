@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { GitBranch, Plus, ExternalLink, X } from 'lucide-react';
+import { GitBranch, Plus, ExternalLink, X, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './DecisionsLog.css';
 
 /**
@@ -54,8 +55,10 @@ const DEMO_DECISIONS = [
   },
 ];
 
-export default function DecisionsLog({ segments, onJumpToSegment }) {
-  const [decisions, setDecisions] = useState(DEMO_DECISIONS);
+export default function DecisionsLog({ segments, onJumpToSegment, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('decisions-log');
+  const [decisions, setDecisions] = useState(showDemoData ? DEMO_DECISIONS : []);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newDecision, setNewDecision] = useState('');
 
@@ -79,22 +82,38 @@ export default function DecisionsLog({ segments, onJumpToSegment }) {
   };
 
   return (
-    <Card className="decisions-log">
-      <div className="decisions-log-header">
+    <Card className={`decisions-log ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="decisions-log-header feature-collapse-header"
+        onClick={() => toggleCollapsed('decisions-log')}
+        aria-expanded={!collapsed}
+      >
         <div className="decisions-log-title">
           <GitBranch size={18} className="decisions-log-icon" />
           <h3 className="text-serif font-medium">Decisions</h3>
           <span className="decisions-log-count">{decisions.length}</span>
         </div>
-        <button
-          className="decisions-log-add-btn"
-          onClick={() => setShowAddForm(!showAddForm)}
-        >
-          <Plus size={16} />
-        </button>
-      </div>
+        <div className="feature-header-right">
+          {!collapsed && (
+            <button
+              className="decisions-log-add-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAddForm(!showAddForm);
+              }}
+            >
+              <Plus size={16} />
+            </button>
+          )}
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
+        </div>
+      </button>
 
-      {showAddForm && (
+      {!collapsed && showAddForm && (
         <div className="decisions-log-add-form">
           <Input
             placeholder="Enter decision..."
@@ -110,6 +129,7 @@ export default function DecisionsLog({ segments, onJumpToSegment }) {
         </div>
       )}
 
+      {!collapsed && (
       <div className="decisions-log-list">
         {decisions.length === 0 ? (
           <p className="decisions-log-empty text-sm text-muted">
@@ -152,6 +172,7 @@ export default function DecisionsLog({ segments, onJumpToSegment }) {
           ))
         )}
       </div>
+      )}
     </Card>
   );
 }

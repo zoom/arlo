@@ -505,3 +505,48 @@
   font-style: italic;
   color: var(--muted-foreground);
 }
+
+/* Just Recorded state - highlight newly stopped entries */
+.billable-entry.just-recorded {
+  background: color-mix(in srgb, #16a34a 10%, var(--muted));
+  border-left-color: #16a34a;
+  animation: just-recorded-pulse 2s ease-out;
+}
+
+@keyframes just-recorded-pulse {
+  0% {
+    background: color-mix(in srgb, #16a34a 25%, var(--muted));
+  }
+  100% {
+    background: color-mix(in srgb, #16a34a 10%, var(--muted));
+  }
+}
+
+.billable-recorded-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 3px 8px;
+  background: color-mix(in srgb, #16a34a 15%, transparent);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: #16a34a;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.billable-recorded-dot {
+  width: 6px;
+  height: 6px;
+  background: #16a34a;
+  border-radius: 50%;
+  animation: recorded-dot-pulse 1s ease-in-out infinite;
+}
+
+@keyframes recorded-dot-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

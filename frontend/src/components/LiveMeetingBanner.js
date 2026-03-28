@@ -21,7 +21,7 @@ export default function LiveMeetingBanner() {
         </div>
         <span className="live-banner-text">Live meeting in progress</span>
       </div>
-      <span className="live-banner-link">Return to live transcript &rarr;</span>
+      <span className="live-banner-link">Return to meeting &rarr;</span>
     </div>
   );
 }

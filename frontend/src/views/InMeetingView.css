@@ -644,3 +644,345 @@
 .general-context-row > * {
   min-height: 0;
 }
+
+/* =============================================================================
+   ARLO ASSIST TRANSCRIPT STATUS BAR
+   ============================================================================= */
+
+.assist-transcript-status {
+  border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+  background: color-mix(in srgb, var(--accent) 3%, var(--card));
+}
+
+.assist-transcript-status-inner {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.assist-status-live {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.assist-transcript-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.paused-badge-sm {
+  background: var(--warning, #f59e0b);
+  color: white;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  font-weight: 500;
+  font-size: 0.75rem;
+}
+
+.live-dot-container.small {
+  transform: scale(0.75);
+  margin: -2px;
+}
+
+/* Compact button sizing for status bar */
+.assist-transcript-status .btn {
+  padding: 6px 12px;
+  font-size: 0.75rem;
+}
+
+/* =============================================================================
+   LIVE DETECTION INDICATORS
+   Shows which features are actively processing RTMS data
+   ============================================================================= */
+
+/* Live badge that can be added to any feature header */
+.feature-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: color-mix(in srgb, #22c55e 15%, transparent);
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: #16a34a;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.feature-live-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  background: #22c55e;
+  border-radius: 50%;
+  animation: feature-live-pulse 2s ease-in-out infinite;
+}
+
+/* Demo badge - shows when feature is showing demo animation */
+.feature-demo-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: color-mix(in srgb, #8b5cf6 15%, transparent);
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: #7c3aed;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.dark .feature-demo-badge {
+  background: color-mix(in srgb, #8b5cf6 20%, transparent);
+  color: #a78bfa;
+}
+
+@keyframes feature-live-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(0.8);
+  }
+}
+
+/* Dark mode */
+.dark .feature-live-badge {
+  background: color-mix(in srgb, #22c55e 20%, transparent);
+  color: #4ade80;
+}
+
+/* =============================================================================
+   JUST DETECTED ANIMATIONS
+   Highlight newly auto-detected items with a slide-in glow
+   ============================================================================= */
+
+/* Animation for newly detected items */
+@keyframes just-detected {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(0);
+    background: color-mix(in srgb, var(--accent) 15%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.just-detected {
+  animation: just-detected 1.5s ease-out;
+}
+
+/* New item indicator badge */
+.new-item-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  animation: new-badge-fade 3s ease-out forwards;
+}
+
+@keyframes new-badge-fade {
+  0%, 70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+/* =============================================================================
+   COLLAPSIBLE FEATURE CARDS
+   Common styles for all feature cards with collapse/expand functionality
+   ============================================================================= */
+
+/* Header button for collapsible features */
+.feature-collapse-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  text-align: left;
+}
+
+.feature-collapse-header:hover {
+  background: color-mix(in srgb, var(--muted) 50%, transparent);
+}
+
+.feature-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Chevron icon */
+.feature-chevron {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+/* When collapsed, card is more compact */
+.feature-collapsed {
+  border-color: var(--border);
+}
+
+.feature-collapsed .feature-collapse-header {
+  border-radius: var(--radius-lg);
+}
+
+/* Content that's hidden when collapsed should have smooth transition */
+.feature-collapsed .feature-content,
+.feature-collapsed > *:not(.feature-collapse-header):not(button) {
+  /* Content is controlled by conditional rendering in React */
+}
+
+/* =============================================================================
+   DRAG AND DROP FEATURE REORDERING
+   ============================================================================= */
+
+/* Feature reorder toolbar - shows when custom order is active */
+.feature-reorder-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+.reset-order-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.reset-order-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+  border-color: var(--muted-foreground);
+}
+
+/* Droppable container */
+.draggable-features {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: background 0.2s ease;
+  border-radius: var(--radius-lg);
+}
+
+.draggable-features.drag-over {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+/* Each draggable feature wrapper */
+.draggable-feature {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+/* The feature card takes up remaining space */
+.draggable-feature > *:not(.drag-handle) {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Drag handle */
+.drag-handle {
+  position: absolute;
+  left: -8px;
+  top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 32px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--muted-foreground);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+  z-index: 10;
+}
+
+.draggable-feature:hover .drag-handle {
+  opacity: 1;
+}
+
+.drag-handle:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Dragging state */
+.draggable-feature.is-dragging {
+  z-index: 100;
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.draggable-feature.is-dragging .drag-handle {
+  opacity: 1;
+  background: var(--accent);
+  color: white;
+  cursor: grabbing;
+}
+
+.dark .draggable-feature.is-dragging {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+/* Placeholder space when dragging */
+.draggable-features [data-rbd-placeholder-context-id] {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: 2px dashed color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: var(--radius-lg);
+}

@@ -61,7 +61,6 @@
                     "authorize",
                     "onAuthorized",
                     "promptAuthorize",
-                    "callZoomApi",
                     "onMessage",
                     "postMessage",
                     "showNotification",

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useVertical, VERTICALS } from '../contexts/VerticalContext';
+import { useDemoData } from '../hooks/useDemoData';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -80,6 +81,7 @@ export default function SettingsView() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const { vertical, clearVertical } = useVertical();
+  const { showDemoData, setShowDemoData } = useDemoData();
   const [autoOpen, setAutoOpen] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
   const [settingsUpcoming, setSettingsUpcoming] = useState([]);
@@ -313,6 +315,36 @@ export default function SettingsView() {
           </Card>
         </section>
       )}
+
+      {/* Demo Mode */}
+      <section className="settings-section">
+        <h2 className="text-serif text-xl">Demo Mode</h2>
+        <Card>
+          <div className="settings-card-inner">
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <label className="text-sans font-medium" htmlFor="demo-data">
+                  Show sample data
+                </label>
+                <p className="text-sans text-sm text-muted">
+                  Display example data throughout the app to demonstrate features.
+                  Turn off to only see real data from your meetings.
+                </p>
+              </div>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  id="demo-data"
+                  checked={showDemoData}
+                  onChange={(e) => setShowDemoData(e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+                <span className="settings-toggle-thumb" />
+              </label>
+            </div>
+          </div>
+        </Card>
+      </section>
 
       {/* Transcription Preferences */}
       <section className="settings-section">

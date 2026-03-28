@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { History, ChevronDown, ChevronUp, Calendar, FileText, AlertCircle } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './PreviousSessionsCard.css';
 
 /**
@@ -44,30 +45,32 @@ const DEMO_PREVIOUS_SESSIONS = [
   },
 ];
 
-export default function PreviousSessionsCard({ patientId }) {
-  const [isExpanded, setIsExpanded] = useState(true);
+export default function PreviousSessionsCard({ patientId, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('previous-sessions');
   const [expandedSession, setExpandedSession] = useState(null);
-  const sessions = DEMO_PREVIOUS_SESSIONS; // Would fetch from API in production
+  const sessions = showDemoData ? DEMO_PREVIOUS_SESSIONS : []; // Would fetch from API in production
 
   return (
-    <Card className="previous-sessions-card">
+    <Card className={`previous-sessions-card ${collapsed ? 'feature-collapsed' : ''}`}>
       <button
-        className="previous-sessions-header"
-        onClick={() => setIsExpanded(!isExpanded)}
+        className="previous-sessions-header feature-collapse-header"
+        onClick={() => toggleCollapsed('previous-sessions')}
+        aria-expanded={!collapsed}
       >
         <div className="previous-sessions-title">
           <History size={16} className="previous-sessions-icon" />
           <span className="text-sans font-medium">Previous Sessions</span>
           <span className="previous-sessions-count">{sessions.length}</span>
         </div>
-        {isExpanded ? (
-          <ChevronUp size={16} className="text-muted" />
+        {collapsed ? (
+          <ChevronDown size={16} className="feature-chevron" />
         ) : (
-          <ChevronDown size={16} className="text-muted" />
+          <ChevronUp size={16} className="feature-chevron" />
         )}
       </button>
 
-      {isExpanded && (
+      {!collapsed && (
         <div className="previous-sessions-content">
           {sessions.map((session) => (
             <div key={session.id} className="previous-session-item">

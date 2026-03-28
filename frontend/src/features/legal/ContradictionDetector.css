@@ -280,3 +280,73 @@
   border-color: var(--muted-foreground);
   color: var(--muted-foreground);
 }
+
+.contradiction-action.impeachment {
+  background: color-mix(in srgb, #6366f1 10%, transparent);
+  color: #6366f1;
+}
+
+.contradiction-action.impeachment:hover {
+  background: color-mix(in srgb, #6366f1 20%, transparent);
+  border-color: #6366f1;
+}
+
+/* Header actions */
+.contradiction-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.contradiction-alert-toggle,
+.contradiction-export {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.contradiction-alert-toggle:hover,
+.contradiction-export:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.contradiction-alert-toggle.active {
+  background: color-mix(in srgb, #16a34a 10%, transparent);
+  border-color: #16a34a;
+  color: #16a34a;
+}
+
+/* Live alert banner */
+.contradiction-live-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, #dc2626 8%, transparent);
+  border: 1px solid color-mix(in srgb, #dc2626 20%, transparent);
+  border-radius: var(--radius-sm);
+  color: #dc2626;
+}
+
+.contradiction-live-dot {
+  width: 8px;
+  height: 8px;
+  background: #dc2626;
+  border-radius: 50%;
+  animation: pulse-red 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.1); }
+}

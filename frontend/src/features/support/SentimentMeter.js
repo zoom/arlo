@@ -27,24 +27,34 @@ const DEMO_SENTIMENT_HISTORY = [
   { sentiment: 'happy', timestamp: '2:32:08 PM', trigger: '"That was incredibly helpful, thank you!"' },
 ];
 
-export default function SentimentMeter({ segments }) {
-  const [currentSentiment, setCurrentSentiment] = useState('satisfied');
+export default function SentimentMeter({ segments, showDemoData = true }) {
+  const [currentSentiment, setCurrentSentiment] = useState(showDemoData ? 'satisfied' : 'neutral');
   const [previousSentiment, setPreviousSentiment] = useState('neutral');
-  const [history] = useState(DEMO_SENTIMENT_HISTORY);
+  const [history] = useState(showDemoData ? DEMO_SENTIMENT_HISTORY : []);
+  const [isDemoAnimating, setIsDemoAnimating] = useState(false);
 
   // Demo: Cycle through sentiments to show the feature
+  // Only animates when showDemoData is true AND no real segments are coming in
   useEffect(() => {
-    const sentiments = ['neutral', 'frustrated', 'angry', 'frustrated', 'neutral', 'satisfied', 'happy', 'satisfied'];
-    let index = 4; // Start at satisfied
+    // If we have real transcript segments, don't run demo animation
+    const hasRealData = segments && segments.length > 0;
+    if (!showDemoData || hasRealData) {
+      setIsDemoAnimating(false);
+      return;
+    }
+
+    setIsDemoAnimating(true);
+    const sentiments = ['satisfied', 'happy', 'satisfied', 'neutral', 'frustrated', 'neutral', 'satisfied'];
+    let index = 0;
 
     const interval = setInterval(() => {
       setPreviousSentiment(sentiments[index]);
       index = (index + 1) % sentiments.length;
       setCurrentSentiment(sentiments[index]);
-    }, 8000);
+    }, 6000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [showDemoData, segments]);
 
   const currentLevel = SENTIMENT_LEVELS.find(l => l.id === currentSentiment) || SENTIMENT_LEVELS[2];
   const previousLevel = SENTIMENT_LEVELS.find(l => l.id === previousSentiment) || SENTIMENT_LEVELS[2];
@@ -63,6 +73,11 @@ export default function SentimentMeter({ segments }) {
         <div className="sentiment-title">
           <Activity size={18} className="sentiment-icon" />
           <h3 className="text-serif font-medium">Customer Sentiment</h3>
+          {isDemoAnimating ? (
+            <span className="feature-demo-badge">Demo</span>
+          ) : (
+            <span className="feature-live-badge">Live</span>
+          )}
         </div>
         <div className={`sentiment-trend ${trend}`}>
           {trend === 'improving' && <TrendingUp size={14} />}

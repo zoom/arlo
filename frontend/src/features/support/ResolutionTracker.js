@@ -35,8 +35,17 @@ const DEMO_STATE = {
   targetHandleTime: 15 * 60 * 1000, // 15 minute target (slightly over for realistic demo)
 };
 
-export default function ResolutionTracker({ segments }) {
-  const [state, setState] = useState(DEMO_STATE);
+const EMPTY_STATE = {
+  currentStep: 'issue',
+  issueCategory: null,
+  issueSummary: '',
+  solutionOffered: '',
+  callStartTime: Date.now(),
+  targetHandleTime: 15 * 60 * 1000,
+};
+
+export default function ResolutionTracker({ segments, showDemoData = true }) {
+  const [state, setState] = useState(showDemoData ? DEMO_STATE : EMPTY_STATE);
   const [showDetails, setShowDetails] = useState(true);
 
   const currentStepIndex = RESOLUTION_STEPS.findIndex(s => s.id === state.currentStep);

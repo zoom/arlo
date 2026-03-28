@@ -95,8 +95,8 @@ const DEMO_COMMITMENTS = [
   },
 ];
 
-export default function CommitmentsPanel({ segments, onJumpToSegment }) {
-  const [commitments, setCommitments] = useState(DEMO_COMMITMENTS);
+export default function CommitmentsPanel({ segments, onJumpToSegment, showDemoData = true }) {
+  const [commitments, setCommitments] = useState(showDemoData ? DEMO_COMMITMENTS : []);
   const [filter, setFilter] = useState('all'); // all, us, them, completed
   const [isAdding, setIsAdding] = useState(false);
   const [newCommitment, setNewCommitment] = useState({ text: '', owner: 'us', dueDate: '' });

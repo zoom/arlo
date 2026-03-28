@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Zap, ExternalLink, Star, StarOff } from 'lucide-react';
+import { Zap, ExternalLink, Star, StarOff, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './KeyMoments.css';
 
 /**
@@ -66,8 +67,10 @@ const DEMO_MOMENTS = [
   },
 ];
 
-export default function KeyMoments({ segments, onJumpToSegment }) {
-  const [moments, setMoments] = useState(DEMO_MOMENTS);
+export default function KeyMoments({ segments, onJumpToSegment, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('key-moments');
+  const [moments, setMoments] = useState(showDemoData ? DEMO_MOMENTS : []);
 
   const toggleStar = (momentId) => {
     setMoments(prev => prev.map(m =>
@@ -78,22 +81,35 @@ export default function KeyMoments({ segments, onJumpToSegment }) {
   const starredCount = moments.filter(m => m.starred).length;
 
   return (
-    <Card className="key-moments">
-      <div className="key-moments-header">
+    <Card className={`key-moments ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="key-moments-header feature-collapse-header"
+        onClick={() => toggleCollapsed('key-moments')}
+        aria-expanded={!collapsed}
+      >
         <div className="key-moments-title">
           <Zap size={18} className="key-moments-icon" />
           <h3 className="text-serif font-medium">Key Moments</h3>
+          <span className="feature-live-badge">Live</span>
           <span className="key-moments-count">{moments.length}</span>
         </div>
-        {starredCount > 0 && (
-          <span className="key-moments-starred text-xs">
-            <Star size={12} />
-            {starredCount} starred
-          </span>
-        )}
-      </div>
+        <div className="feature-header-right">
+          {starredCount > 0 && !collapsed && (
+            <span className="key-moments-starred text-xs">
+              <Star size={12} />
+              {starredCount} starred
+            </span>
+          )}
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
+        </div>
+      </button>
 
-      <div className="key-moments-list">
+      {!collapsed && (
+        <div className="key-moments-list">
         {moments.map(moment => {
           const config = MOMENT_TYPES[moment.type];
           return (
@@ -135,6 +151,7 @@ export default function KeyMoments({ segments, onJumpToSegment }) {
           );
         })}
       </div>
+      )}
     </Card>
   );
 }

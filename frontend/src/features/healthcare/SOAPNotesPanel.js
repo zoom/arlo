@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { FileText, ChevronDown, ChevronRight, Loader2, RefreshCw, Check, AlertCircle, Tag, ClipboardCheck, LayoutTemplate } from 'lucide-react';
+import { FileText, ChevronDown, ChevronRight, ChevronUp, Loader2, RefreshCw, Check, AlertCircle, Tag, ClipboardCheck, LayoutTemplate } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Textarea from '../../components/ui/Textarea';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './SOAPNotesPanel.css';
 
 // Visit templates for quick-start documentation
@@ -73,7 +74,10 @@ const SOAP_SECTIONS = [
   },
 ];
 
-export default function SOAPNotesPanel({ segments, meetingId, isLive }) {
+export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('soap-notes');
+
   // Demo data for testing UI — Chronic pain management scenario for Maria Rodriguez
   const DEMO_SOAP_DATA = {
     subjective: `• Chief Complaint: Chronic low back pain follow-up
@@ -110,7 +114,14 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive }) {
 7. PRECAUTION: Avoid NSAIDs — documented GI bleeding history`,
   };
 
-  const [soapData, setSoapData] = useState(DEMO_SOAP_DATA);
+  const EMPTY_SOAP_DATA = {
+    subjective: '',
+    objective: '',
+    assessment: '',
+    plan: '',
+  };
+
+  const [soapData, setSoapData] = useState(showDemoData ? DEMO_SOAP_DATA : EMPTY_SOAP_DATA);
   const [expandedSections, setExpandedSections] = useState({
     subjective: true,
     objective: true,
@@ -322,51 +333,71 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive }) {
   };
 
   return (
-    <div className="soap-notes-panel">
-      <div className="soap-header">
+    <Card className={`soap-notes-panel ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="soap-header feature-collapse-header"
+        onClick={() => toggleCollapsed('soap-notes')}
+        aria-expanded={!collapsed}
+      >
         <div className="soap-header-left">
           <FileText size={18} className="soap-header-icon" />
           <h3 className="text-serif font-medium">SOAP Notes</h3>
-
-          {/* Template selector */}
-          <div className="soap-template-selector">
-            <button
-              className="soap-template-btn"
-              onClick={() => setShowTemplateMenu(!showTemplateMenu)}
-            >
-              <LayoutTemplate size={12} />
-              <span className="text-xs">{VISIT_TEMPLATES.find(t => t.id === selectedTemplate)?.label}</span>
-              <ChevronDown size={12} />
-            </button>
-            {showTemplateMenu && (
-              <div className="soap-template-menu">
-                {VISIT_TEMPLATES.map(template => (
-                  <button
-                    key={template.id}
-                    className={`soap-template-option ${selectedTemplate === template.id ? 'selected' : ''}`}
-                    onClick={() => {
-                      setSelectedTemplate(template.id);
-                      setShowTemplateMenu(false);
-                    }}
-                  >
-                    <span className="text-sm font-medium">{template.label}</span>
-                    <span className="text-xs text-muted">{template.description}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {isLive && <span className="feature-live-badge">Live</span>}
         </div>
 
-        <div className="soap-header-right">
-          {/* Quality progress indicator */}
-          <div className="soap-quality-indicator" title={`${qualityProgress.completed}/${qualityProgress.total} required items complete`}>
-            <ClipboardCheck size={14} className={qualityProgress.percent === 100 ? 'quality-complete' : ''} />
-            <span className={`text-xs ${qualityProgress.percent === 100 ? 'quality-complete' : 'text-muted'}`}>
-              {qualityProgress.percent}%
-            </span>
-          </div>
+        <div className="feature-header-right">
+          {!collapsed && (
+            <>
+              {/* Quality progress indicator */}
+              <div className="soap-quality-indicator" title={`${qualityProgress.completed}/${qualityProgress.total} required items complete`}>
+                <ClipboardCheck size={14} className={qualityProgress.percent === 100 ? 'quality-complete' : ''} />
+                <span className={`text-xs ${qualityProgress.percent === 100 ? 'quality-complete' : 'text-muted'}`}>
+                  {qualityProgress.percent}%
+                </span>
+              </div>
+            </>
+          )}
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
+        </div>
+      </button>
 
+      {!collapsed && (
+      <>
+      {/* Template selector + toolbar */}
+      <div className="soap-toolbar">
+        <div className="soap-template-selector">
+          <button
+            className="soap-template-btn"
+            onClick={() => setShowTemplateMenu(!showTemplateMenu)}
+          >
+            <LayoutTemplate size={12} />
+            <span className="text-xs">{VISIT_TEMPLATES.find(t => t.id === selectedTemplate)?.label}</span>
+            <ChevronDown size={12} />
+          </button>
+          {showTemplateMenu && (
+            <div className="soap-template-menu">
+              {VISIT_TEMPLATES.map(template => (
+                <button
+                  key={template.id}
+                  className={`soap-template-option ${selectedTemplate === template.id ? 'selected' : ''}`}
+                  onClick={() => {
+                    setSelectedTemplate(template.id);
+                    setShowTemplateMenu(false);
+                  }}
+                >
+                  <span className="text-sm font-medium">{template.label}</span>
+                  <span className="text-xs text-muted">{template.description}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="soap-toolbar-right">
           {isProcessing && (
             <span className="soap-processing">
               <Loader2 size={14} className="spin" />
@@ -501,6 +532,8 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive }) {
           SOAP notes will auto-populate as the conversation progresses.
         </p>
       )}
-    </div>
+      </>
+      )}
+    </Card>
   );
 }

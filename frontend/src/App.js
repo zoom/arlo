@@ -6,6 +6,8 @@ import { ZoomSdkProvider, useZoomSdk } from './contexts/ZoomSdkContext';
 import { MeetingProvider } from './contexts/MeetingContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { VerticalProvider, useVertical } from './contexts/VerticalContext';
+import { DemoDataProvider } from './hooks/useDemoData';
+import { FeatureLayoutProvider } from './hooks/useFeatureLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -123,8 +125,10 @@ function App() {
       <ZoomSdkProvider>
         <AuthProvider>
           <VerticalProvider>
-            <MeetingProvider>
-              <ToastProvider>
+            <DemoDataProvider>
+              <FeatureLayoutProvider>
+                <MeetingProvider>
+                <ToastProvider>
                 <ErrorBoundary>
                   <HashRouter>
                     <Routes>
@@ -172,7 +176,9 @@ function App() {
                   </HashRouter>
                 </ErrorBoundary>
               </ToastProvider>
-            </MeetingProvider>
+                </MeetingProvider>
+              </FeatureLayoutProvider>
+            </DemoDataProvider>
           </VerticalProvider>
         </AuthProvider>
       </ZoomSdkProvider>

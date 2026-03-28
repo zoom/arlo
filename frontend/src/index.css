@@ -116,6 +116,26 @@ a:hover {
   text-decoration: underline;
 }
 
+/* Form elements - ensure proper dark mode inheritance */
+input,
+textarea,
+select,
+button {
+  color: inherit;
+  font-family: inherit;
+}
+
+select {
+  background-color: var(--input-background);
+  color: var(--foreground);
+  border: 1px solid var(--input);
+}
+
+select option {
+  background-color: var(--card);
+  color: var(--foreground);
+}
+
 /* =============================================================================
    SHARED UTILITY CLASSES
    ============================================================================= */
