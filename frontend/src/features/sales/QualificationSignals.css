@@ -236,7 +236,7 @@
 
 .qualification-signal-text {
   color: var(--foreground);
-  font-family: var(--font-serif);
+  font-family: var(--font-sans);
   line-height: 1.4;
 }
 
@@ -275,6 +275,7 @@
   padding: 8px 10px;
   background: var(--card);
   border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
   color: var(--foreground);
   line-height: 1.4;
 }

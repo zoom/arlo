@@ -38,7 +38,7 @@ const DEFAULT_FEATURE_ORDER = {
     'resolution-tracker',
     'agent-assist',
   ],
-  general: [
+  notes: [
     'meeting-summary',
     'key-moments',
     'decisions-log',

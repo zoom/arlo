@@ -23,8 +23,15 @@
 }
 
 .vertical-selector-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
   margin-bottom: 0.75rem;
-  color: var(--foreground);
+  background: #FFFFFF;
+  border-radius: 18px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .vertical-selector-header h1 {

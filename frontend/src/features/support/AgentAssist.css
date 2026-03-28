@@ -251,6 +251,7 @@
 
 .compliance-text {
   flex: 1;
+  font-family: var(--font-sans);
   color: var(--foreground);
 }
 

@@ -16,6 +16,16 @@
   gap: 32px;
 }
 
+.auth-owl {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: #FFFFFF;
+  border-radius: 18px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
 .auth-text {
   display: flex;
   flex-direction: column;

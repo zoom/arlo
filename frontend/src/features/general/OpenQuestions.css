@@ -197,6 +197,7 @@
 
 .question-text {
   margin: 0;
+  font-family: var(--font-sans);
   line-height: 1.5;
   color: var(--foreground);
 }

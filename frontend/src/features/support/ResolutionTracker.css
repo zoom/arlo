@@ -241,6 +241,7 @@
   background: var(--card);
   border-left: 3px solid var(--cat-color);
   border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
   line-height: 1.4;
 }
 
@@ -251,5 +252,6 @@
   background: color-mix(in srgb, #22c55e 10%, transparent);
   border-left: 3px solid #22c55e;
   border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
   line-height: 1.4;
 }
