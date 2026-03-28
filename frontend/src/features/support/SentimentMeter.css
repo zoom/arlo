@@ -219,3 +219,54 @@
   flex-direction: column;
   gap: 2px;
 }
+
+.sentiment-history-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sentiment-confidence {
+  padding: 1px 5px;
+  background: var(--card);
+  border-radius: var(--radius-sm);
+  color: var(--support-accent, #2563eb);
+  font-weight: 500;
+}
+
+.sentiment-reason {
+  font-style: italic;
+  opacity: 0.8;
+}
+
+/* Analyzing badge */
+.sentiment-analyzing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--support-accent, #2563eb) 15%, transparent);
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 500;
+  color: var(--support-accent, #2563eb);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  animation: analyzing-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes analyzing-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Analyzing state for gauge indicator */
+.sentiment-gauge-indicator.analyzing .sentiment-gauge-dot {
+  animation: analyzing-glow 1s ease-in-out infinite;
+}
+
+@keyframes analyzing-glow {
+  0%, 100% { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); }
+  50% { box-shadow: 0 2px 16px rgba(37, 99, 235, 0.5); }
+}

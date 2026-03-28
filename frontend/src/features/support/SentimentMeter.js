@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Activity, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Activity, TrendingUp, TrendingDown, Minus, Sparkles } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import './SentimentMeter.css';
 
 /**
- * SentimentMeter — Real-time customer sentiment visualization.
+ * SentimentMeter — Real-time AI-powered customer sentiment visualization.
  *
- * Analyzes live transcript segments for sentiment-indicating keywords
- * and updates the meter in real-time. Reacts to actual speech during demos.
+ * Uses AI to analyze customer speech for sentiment, handling:
+ * - Negation ("not happy" = negative)
+ * - Context and nuance
+ * - Sarcasm and tone
  */
 
 const SENTIMENT_LEVELS = [
@@ -18,58 +20,38 @@ const SENTIMENT_LEVELS = [
   { id: 'happy', label: 'Happy', emoji: '😊', color: '#10b981', position: 100 },
 ];
 
-// Keyword patterns for sentiment detection (case-insensitive)
-const SENTIMENT_KEYWORDS = {
-  angry: [
-    'unacceptable', 'angry', 'furious', 'ridiculous', 'outrageous',
-    'cancel', 'lawsuit', 'lawyer', 'sue', 'terrible', 'worst',
-    'hate', 'disgusted', 'appalling', 'inexcusable', 'demand',
-  ],
-  frustrated: [
-    'frustrated', 'frustrating', 'broken', 'not working', 'still waiting',
-    'days', 'weeks', 'again', 'another', 'keeps happening', 'still',
-    'annoying', 'annoyed', 'disappointed', 'waste of time', 'useless',
-    'nobody', 'no one', 'can\'t believe', 'seriously', 'come on',
-  ],
-  satisfied: [
-    'okay', 'ok', 'understand', 'got it', 'makes sense', 'I see',
-    'good', 'fine', 'alright', 'sounds good', 'that works',
-    'better', 'improving', 'progress', 'helpful',
-  ],
-  happy: [
-    'happy', 'very happy', 'so happy', 'extremely happy', 'really happy',
-    'thank', 'thanks', 'awesome', 'amazing', 'fantastic', 'wonderful',
-    'great', 'excellent', 'perfect', 'love', 'appreciate', 'grateful',
-    'incredible', 'brilliant', 'best', 'exceeded', 'impressed',
-    'so helpful', 'really helpful', 'incredibly helpful', 'solved',
-  ],
-};
+// Analyze sentiment using AI
+async function analyzeSentimentAI(text) {
+  try {
+    const response = await fetch('/api/ai/sentiment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ text }),
+    });
 
-// Detect sentiment from text
-function detectSentiment(text) {
-  const lowerText = text.toLowerCase();
-
-  // Check each sentiment level (most extreme first)
-  for (const sentiment of ['angry', 'happy', 'frustrated', 'satisfied']) {
-    const keywords = SENTIMENT_KEYWORDS[sentiment];
-    for (const keyword of keywords) {
-      if (lowerText.includes(keyword)) {
-        return { sentiment, trigger: keyword };
-      }
+    if (!response.ok) {
+      console.error('Sentiment API error:', response.status);
+      return null;
     }
-  }
 
-  return null; // No strong sentiment detected
+    return await response.json();
+  } catch (error) {
+    console.error('Sentiment analysis failed:', error);
+    return null;
+  }
 }
 
 export default function SentimentMeter({ segments, showDemoData = true }) {
   const [currentSentiment, setCurrentSentiment] = useState('neutral');
   const [previousSentiment, setPreviousSentiment] = useState('neutral');
   const [history, setHistory] = useState([]);
-  const [isLiveDetecting, setIsLiveDetecting] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const lastProcessedSeqNo = useRef(-1);
-  const sentimentDecayTimeout = useRef(null);
   const currentSentimentRef = useRef('neutral');
+  const analysisQueue = useRef([]);
+  const isProcessingQueue = useRef(false);
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -87,82 +69,86 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
     });
   };
 
-  // Process new transcript segments for sentiment
-  const processSegment = useCallback((segment) => {
-    if (!segment.text) return;
+  // Process queued segments with AI (debounced)
+  const processQueue = useCallback(async () => {
+    if (isProcessingQueue.current || analysisQueue.current.length === 0) return;
 
-    const detection = detectSentiment(segment.text);
+    isProcessingQueue.current = true;
+    setIsAnalyzing(true);
 
-    if (detection) {
-      // Handle both timestamp formats: tStartMs (number) or timestamp (ISO string)
-      const ts = segment.tStartMs || segment.timestamp;
-      const timestamp = formatTime(typeof ts === 'number' ? ts : Date.parse(ts));
+    // Get the most recent segment to analyze
+    const segment = analysisQueue.current.pop();
+    analysisQueue.current = []; // Clear queue, we'll analyze the latest
 
-      setPreviousSentiment(currentSentimentRef.current);
-      setCurrentSentiment(detection.sentiment);
-      setIsLiveDetecting(true);
+    if (segment && segment.text) {
+      const result = await analyzeSentimentAI(segment.text);
 
-      // Add to history
-      setHistory(prev => [
-        ...prev.slice(-4), // Keep last 4
-        {
-          sentiment: detection.sentiment,
-          timestamp,
-          trigger: `"${segment.text.slice(0, 60)}${segment.text.length > 60 ? '...' : ''}"`,
-        },
-      ]);
+      if (result && result.sentiment) {
+        // Handle timestamp
+        const ts = segment.tStartMs || segment.timestamp;
+        const timestamp = formatTime(typeof ts === 'number' ? ts : Date.parse(ts));
 
-      // Clear any existing decay timeout
-      if (sentimentDecayTimeout.current) {
-        clearTimeout(sentimentDecayTimeout.current);
+        setPreviousSentiment(currentSentimentRef.current);
+        setCurrentSentiment(result.sentiment);
+        setHasAnalyzed(true);
+
+        // Add to history with AI's reasoning
+        setHistory(prev => [
+          ...prev.slice(-4),
+          {
+            sentiment: result.sentiment,
+            timestamp,
+            trigger: `"${segment.text.slice(0, 50)}${segment.text.length > 50 ? '...' : ''}"`,
+            reason: result.reason,
+            confidence: result.confidence,
+          },
+        ]);
       }
+    }
 
-      // Decay back toward neutral after 30 seconds of no sentiment triggers
-      sentimentDecayTimeout.current = setTimeout(() => {
-        setPreviousSentiment(detection.sentiment);
-        // Decay one step toward neutral
-        const currentLevel = SENTIMENT_LEVELS.find(l => l.id === detection.sentiment);
-        if (currentLevel && currentLevel.position < 50) {
-          setCurrentSentiment('neutral'); // Was negative, go to neutral
-        } else if (currentLevel && currentLevel.position > 50) {
-          setCurrentSentiment('satisfied'); // Was very positive, settle to satisfied
-        }
-      }, 30000);
+    setIsAnalyzing(false);
+    isProcessingQueue.current = false;
+
+    // Process more if queue has items
+    if (analysisQueue.current.length > 0) {
+      setTimeout(processQueue, 500);
     }
   }, []);
+
+  // Queue new segments for AI analysis
+  const queueSegment = useCallback((segment) => {
+    if (!segment.text || segment.text.trim().length < 3) return;
+
+    analysisQueue.current.push(segment);
+
+    // Debounce: wait 1 second before processing to batch rapid speech
+    setTimeout(() => {
+      processQueue();
+    }, 1000);
+  }, [processQueue]);
 
   // Watch for new transcript segments
   useEffect(() => {
     if (!segments || segments.length === 0) {
-      setIsLiveDetecting(false);
       return;
     }
 
-    // Process only new segments (handle string/number seqNo)
+    // Process only new segments
     const newSegments = segments.filter(s => {
       const seqNo = Number(s.seqNo);
       return !isNaN(seqNo) && seqNo > lastProcessedSeqNo.current;
     });
 
     if (newSegments.length > 0) {
-      // Process each new segment for sentiment
+      // Queue each new segment for analysis
       newSegments.forEach(segment => {
-        processSegment(segment);
+        queueSegment(segment);
       });
-      // Update last processed to the highest seqNo
+      // Update last processed
       const maxSeqNo = Math.max(...newSegments.map(s => Number(s.seqNo)));
       lastProcessedSeqNo.current = maxSeqNo;
     }
-  }, [segments, processSegment]);
-
-  // Cleanup timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (sentimentDecayTimeout.current) {
-        clearTimeout(sentimentDecayTimeout.current);
-      }
-    };
-  }, []);
+  }, [segments, queueSegment]);
 
   const currentLevel = SENTIMENT_LEVELS.find(l => l.id === currentSentiment) || SENTIMENT_LEVELS[2];
   const previousLevel = SENTIMENT_LEVELS.find(l => l.id === previousSentiment) || SENTIMENT_LEVELS[2];
@@ -181,8 +167,13 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
         <div className="sentiment-title">
           <Activity size={18} className="sentiment-icon" />
           <h3 className="text-serif font-medium">Customer Sentiment</h3>
-          {isLiveDetecting ? (
-            <span className="feature-live-badge">Live</span>
+          {isAnalyzing ? (
+            <span className="sentiment-analyzing-badge">
+              <Sparkles size={10} />
+              Analyzing...
+            </span>
+          ) : hasAnalyzed ? (
+            <span className="feature-live-badge">AI</span>
           ) : (
             <span className="sentiment-waiting-badge">Listening...</span>
           )}
@@ -202,7 +193,7 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
         <div className="sentiment-gauge-track">
           <div className="sentiment-gauge-gradient" />
           <div
-            className="sentiment-gauge-indicator"
+            className={`sentiment-gauge-indicator ${isAnalyzing ? 'analyzing' : ''}`}
             style={{
               left: `${currentLevel.position}%`,
               '--indicator-color': currentLevel.color
@@ -245,12 +236,25 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
                   style={{ background: level?.color }}
                 />
                 <div className="sentiment-history-content">
-                  <span className="text-xs text-muted">{item.timestamp}</span>
+                  <div className="sentiment-history-meta">
+                    <span className="text-xs text-muted">{item.timestamp}</span>
+                    {item.confidence && (
+                      <span className="sentiment-confidence text-xs">{item.confidence}%</span>
+                    )}
+                  </div>
                   <span className="text-xs">{item.trigger}</span>
+                  {item.reason && (
+                    <span className="text-xs text-muted sentiment-reason">{item.reason}</span>
+                  )}
                 </div>
               </div>
             );
           })}
+          {history.length === 0 && (
+            <p className="text-xs text-muted" style={{ fontStyle: 'italic', padding: '8px 0' }}>
+              AI will analyze customer sentiment as they speak...
+            </p>
+          )}
         </div>
       </div>
     </Card>

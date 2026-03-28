@@ -9,6 +9,7 @@ const {
   extractActionItems,
   chatWithTranscript,
   extractSOAPNotes,
+  analyzeSentiment,
 } = require('../services/openrouter');
 
 // Apply dev auth bypass at router level (must run before requireAuth/optionalAuth)
@@ -396,6 +397,31 @@ router.get('/status', (req, res) => {
     defaultModel: config.defaultModel,
     fallbackModel: config.fallbackModel,
   });
+});
+
+/**
+ * POST /api/ai/sentiment
+ * Analyze sentiment of customer speech using AI
+ * Used for real-time customer sentiment tracking in support calls
+ */
+router.post('/sentiment', optionalAuth, async (req, res) => {
+  const { text } = req.body;
+
+  if (!config.aiEnabled) {
+    return res.status(503).json({ error: 'AI features are disabled' });
+  }
+
+  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    return res.status(400).json({ error: 'text is required' });
+  }
+
+  try {
+    const result = await analyzeSentiment(text.trim());
+    res.json(result);
+  } catch (error) {
+    console.error('❌ Sentiment analysis error:', error.message);
+    res.status(500).json({ error: 'Sentiment analysis failed' });
+  }
 });
 
 module.exports = router;
