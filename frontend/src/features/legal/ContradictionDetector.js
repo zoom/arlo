@@ -1,13 +1,27 @@
-import React, { useState, useMemo } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, Flag, Check, Clock, MessageSquare } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import { AlertTriangle, ChevronDown, ChevronUp, Flag, Check, Clock, MessageSquare, Download, Copy, Gavel, FileText, Bell } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './ContradictionDetector.css';
 
 /**
- * ContradictionDetector — Flags potentially conflicting statements in testimony.
+ * ContradictionDetector — Real-time flagging of conflicting statements during depositions and trials.
  *
- * Helps attorneys identify inconsistencies in depositions, witness statements,
- * and client interviews for impeachment or clarification.
+ * Demonstrates RTMS real-time capabilities for legal proceedings:
+ * - Live detection of contradictory statements as testimony unfolds
+ * - Side-by-side comparison with timestamps for transcript reference
+ * - Impeachment preparation with formatted outlines
+ * - Export functionality for case preparation and trial notebooks
+ * - Severity classification for prioritization
+ *
+ * Primary Use Cases:
+ * - Depositions: Flag inconsistencies for follow-up questioning
+ * - Trial Testimony: Real-time impeachment preparation
+ * - Witness Preparation: Identify potential vulnerabilities
+ * - Case Review: Post-proceeding analysis for appeals or motions
+ *
+ * Note: This is a reference implementation using demo data.
+ * Real implementations would integrate with AI analysis of transcript segments.
  */
 
 // Demo contradictions for testing — Employment discrimination case
@@ -104,10 +118,14 @@ const SEVERITY_CONFIG = {
   low: { color: '#6b7280', label: 'Low', bgColor: 'rgba(107, 114, 128, 0.1)' },
 };
 
-export default function ContradictionDetector({ segments, onJumpToSegment }) {
-  const [contradictions, setContradictions] = useState(DEMO_CONTRADICTIONS);
+export default function ContradictionDetector({ segments, onJumpToSegment, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('contradiction-detector');
+  const [contradictions, setContradictions] = useState(showDemoData ? DEMO_CONTRADICTIONS : []);
   const [expandedId, setExpandedId] = useState(null);
   const [filter, setFilter] = useState('all'); // all, flagged, noted, dismissed
+  const [copiedId, setCopiedId] = useState(null);
+  const [liveAlerts, setLiveAlerts] = useState(true);
 
   // Filter contradictions
   const filteredContradictions = useMemo(() => {
@@ -129,30 +147,138 @@ export default function ContradictionDetector({ segments, onJumpToSegment }) {
     );
   };
 
+  // Generate impeachment outline for a contradiction
+  const generateImpeachmentOutline = useCallback((contradiction) => {
+    const lines = [
+      `IMPEACHMENT OUTLINE`,
+      `${'='.repeat(50)}`,
+      ``,
+      `Category: ${contradiction.category}`,
+      `Severity: ${contradiction.severity.toUpperCase()}`,
+      ``,
+      `Issue: ${contradiction.description}`,
+      ``,
+      `PRIOR STATEMENT:`,
+      `  Speaker: ${contradiction.statements[0].speaker}`,
+      `  Time: ${contradiction.statements[0].timestamp}`,
+      `  Quote: "${contradiction.statements[0].text}"`,
+      ``,
+      `CONTRADICTORY STATEMENT:`,
+      `  Speaker: ${contradiction.statements[1].speaker}`,
+      `  Time: ${contradiction.statements[1].timestamp}`,
+      `  Quote: "${contradiction.statements[1].text}"`,
+      ``,
+      `SUGGESTED FOLLOW-UP QUESTIONS:`,
+      `  1. "Earlier today at ${contradiction.statements[0].timestamp}, you stated [read prior statement]. Is that correct?"`,
+      `  2. "And just now at ${contradiction.statements[1].timestamp}, you testified [read current statement]. Is that also your testimony?"`,
+      `  3. "Can you explain the discrepancy between these two statements?"`,
+      ``,
+      `${'='.repeat(50)}`,
+    ];
+    return lines.join('\n');
+  }, []);
+
+  // Copy impeachment outline to clipboard
+  const copyImpeachmentOutline = useCallback((contradiction) => {
+    const outline = generateImpeachmentOutline(contradiction);
+    navigator.clipboard?.writeText(outline);
+    setCopiedId(contradiction.id);
+    setTimeout(() => setCopiedId(null), 2000);
+  }, [generateImpeachmentOutline]);
+
+  // Export all flagged contradictions
+  const exportFlaggedContradictions = useCallback(() => {
+    const flagged = contradictions.filter(c => c.status === 'flagged');
+    if (flagged.length === 0) {
+      alert('No flagged contradictions to export.');
+      return;
+    }
+
+    const content = [
+      `CONTRADICTION ANALYSIS REPORT`,
+      `Generated: ${new Date().toLocaleString()}`,
+      `Total Flagged: ${flagged.length}`,
+      ``,
+      `${'='.repeat(60)}`,
+      ``,
+      ...flagged.map((c, i) => generateImpeachmentOutline(c)),
+    ].join('\n');
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `contradiction-report-${new Date().toISOString().split('T')[0]}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [contradictions, generateImpeachmentOutline]);
+
   return (
-    <div className="contradiction-detector">
-      <div className="contradiction-header">
+    <Card className={`contradiction-detector ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="contradiction-header feature-collapse-header"
+        onClick={() => toggleCollapsed('contradiction-detector')}
+        aria-expanded={!collapsed}
+      >
         <div className="contradiction-title">
           <AlertTriangle size={18} className="contradiction-icon" />
           <h3 className="text-serif font-medium">Contradictions</h3>
+          <span className="feature-live-badge">Live</span>
           {counts.flagged > 0 && (
             <span className="contradiction-badge flagged">{counts.flagged}</span>
           )}
         </div>
 
-        {/* Filter tabs */}
-        <div className="contradiction-filters">
-          {['all', 'flagged', 'noted', 'dismissed'].map(f => (
-            <button
-              key={f}
-              className={`contradiction-filter ${filter === f ? 'active' : ''}`}
-              onClick={() => setFilter(f)}
-            >
-              {f.charAt(0).toUpperCase() + f.slice(1)}
-              {counts[f] > 0 && <span className="filter-count">{counts[f]}</span>}
-            </button>
-          ))}
+        <div className="feature-header-right">
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
         </div>
+      </button>
+
+      {!collapsed && (
+      <>
+      {/* Actions */}
+      <div className="contradiction-header-actions">
+        <button
+          className={`contradiction-alert-toggle ${liveAlerts ? 'active' : ''}`}
+          onClick={() => setLiveAlerts(!liveAlerts)}
+          title={liveAlerts ? 'Live alerts on' : 'Live alerts off'}
+        >
+          <Bell size={14} />
+        </button>
+        <button
+          className="contradiction-export"
+          onClick={exportFlaggedContradictions}
+          title="Export flagged contradictions"
+        >
+          <Download size={14} />
+          <span className="text-xs">Export</span>
+        </button>
+      </div>
+
+      {/* Live Alert Banner */}
+      {liveAlerts && counts.flagged > 0 && (
+        <div className="contradiction-live-banner">
+          <span className="contradiction-live-dot" />
+          <span className="text-xs">Real-time detection active — {counts.flagged} contradiction{counts.flagged !== 1 ? 's' : ''} flagged</span>
+        </div>
+      )}
+
+      {/* Filter tabs */}
+      <div className="contradiction-filters">
+        {['all', 'flagged', 'noted', 'dismissed'].map(f => (
+          <button
+            key={f}
+            className={`contradiction-filter ${filter === f ? 'active' : ''}`}
+            onClick={() => setFilter(f)}
+          >
+            {f.charAt(0).toUpperCase() + f.slice(1)}
+            {counts[f] > 0 && <span className="filter-count">{counts[f]}</span>}
+          </button>
+        ))}
       </div>
 
       <div className="contradiction-list">
@@ -222,14 +348,31 @@ export default function ContradictionDetector({ segments, onJumpToSegment }) {
                         onClick={() => updateStatus(contradiction.id, 'flagged')}
                       >
                         <Flag size={14} />
-                        Flag for Follow-up
+                        Flag
+                      </button>
+                      <button
+                        className="contradiction-action impeachment"
+                        onClick={() => copyImpeachmentOutline(contradiction)}
+                        title="Copy impeachment outline to clipboard"
+                      >
+                        {copiedId === contradiction.id ? (
+                          <>
+                            <Check size={14} />
+                            Copied!
+                          </>
+                        ) : (
+                          <>
+                            <Gavel size={14} />
+                            Impeachment
+                          </>
+                        )}
                       </button>
                       <button
                         className={`contradiction-action ${contradiction.status === 'noted' ? 'active' : ''}`}
                         onClick={() => updateStatus(contradiction.id, 'noted')}
                       >
                         <Check size={14} />
-                        Mark as Noted
+                        Noted
                       </button>
                       <button
                         className={`contradiction-action dismiss ${contradiction.status === 'dismissed' ? 'active' : ''}`}
@@ -245,6 +388,8 @@ export default function ContradictionDetector({ segments, onJumpToSegment }) {
           })
         )}
       </div>
-    </div>
+      </>
+      )}
+    </Card>
   );
 }

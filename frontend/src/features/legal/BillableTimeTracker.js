@@ -107,8 +107,8 @@ function formatDate(timestamp) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-export default function BillableTimeTracker({ meetingId, meetingStartTime }) {
-  const [entries, setEntries] = useState(DEMO_ENTRIES);
+export default function BillableTimeTracker({ meetingId, meetingStartTime, showDemoData = true }) {
+  const [entries, setEntries] = useState(showDemoData ? DEMO_ENTRIES : []);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isAddingEntry, setIsAddingEntry] = useState(false);
   const [newEntry, setNewEntry] = useState({
@@ -217,10 +217,17 @@ export default function BillableTimeTracker({ meetingId, meetingStartTime }) {
             ...entry,
             status: 'completed',
             endTime: Date.now(),
-            finalDuration: (entry.accumulatedMs || 0) + (entry.status === 'active' ? Date.now() - entry.startTime : 0)
+            finalDuration: (entry.accumulatedMs || 0) + (entry.status === 'active' ? Date.now() - entry.startTime : 0),
+            justRecorded: true, // Flag for visual feedback
           }
         : entry
     ));
+    // Clear "just recorded" flag after 5 seconds
+    setTimeout(() => {
+      setEntries(prev => prev.map(entry =>
+        entry.id === id ? { ...entry, justRecorded: false } : entry
+      ));
+    }, 5000);
   }, []);
 
   // Delete entry
@@ -433,7 +440,13 @@ export default function BillableTimeTracker({ meetingId, meetingStartTime }) {
               const amount = hours * (activity?.rate || 0);
 
               return (
-                <div key={entry.id} className="billable-entry">
+                <div key={entry.id} className={`billable-entry ${entry.justRecorded ? 'just-recorded' : ''}`}>
+                  {entry.justRecorded && (
+                    <div className="billable-recorded-badge">
+                      <span className="billable-recorded-dot" />
+                      Recorded
+                    </div>
+                  )}
                   <div className="billable-entry-row">
                     <div className="billable-entry-left">
                       <span className="billable-entry-code">{entry.activityCode}</span>

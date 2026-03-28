@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { FileText, ChevronDown, ChevronUp, Sparkles, RefreshCw } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './MeetingSummary.css';
 
 /**
@@ -23,9 +24,18 @@ const DEMO_SUMMARY = {
   generatedAt: Date.now() - 2 * 60 * 1000, // 2 minutes ago
 };
 
-export default function MeetingSummary({ segments, meetingId }) {
-  const [summary, setSummary] = useState(DEMO_SUMMARY);
-  const [isExpanded, setIsExpanded] = useState(true);
+const EMPTY_SUMMARY = {
+  overview: '',
+  keyPoints: [],
+  decisions: [],
+  nextSteps: [],
+  generatedAt: Date.now(),
+};
+
+export default function MeetingSummary({ segments, meetingId, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('meeting-summary');
+  const [summary, setSummary] = useState(showDemoData ? DEMO_SUMMARY : EMPTY_SUMMARY);
   const [isGenerating, setIsGenerating] = useState(false);
 
   const regenerateSummary = () => {
@@ -40,10 +50,11 @@ export default function MeetingSummary({ segments, meetingId }) {
   const timeSinceGenerated = Math.floor((Date.now() - summary.generatedAt) / 60000);
 
   return (
-    <Card className="meeting-summary">
+    <Card className={`meeting-summary ${collapsed ? 'feature-collapsed' : ''}`}>
       <button
-        className="meeting-summary-header"
-        onClick={() => setIsExpanded(!isExpanded)}
+        className="meeting-summary-header feature-collapse-header"
+        onClick={() => toggleCollapsed('meeting-summary')}
+        aria-expanded={!collapsed}
       >
         <div className="meeting-summary-title">
           <FileText size={18} className="meeting-summary-icon" />
@@ -53,15 +64,17 @@ export default function MeetingSummary({ segments, meetingId }) {
             AI
           </span>
         </div>
-        <div className="meeting-summary-actions">
-          <span className="meeting-summary-time text-xs text-muted">
-            {timeSinceGenerated < 1 ? 'Just now' : `${timeSinceGenerated}m ago`}
-          </span>
-          {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+        <div className="feature-header-right">
+          {!collapsed && (
+            <span className="meeting-summary-time text-xs text-muted">
+              {timeSinceGenerated < 1 ? 'Just now' : `${timeSinceGenerated}m ago`}
+            </span>
+          )}
+          {collapsed ? <ChevronDown size={18} className="feature-chevron" /> : <ChevronUp size={18} className="feature-chevron" />}
         </div>
       </button>
 
-      {isExpanded && (
+      {!collapsed && (
         <div className="meeting-summary-content">
           <p className="meeting-summary-overview text-sm">
             {summary.overview}

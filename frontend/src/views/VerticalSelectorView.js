@@ -69,7 +69,7 @@ export default function VerticalSelectorView() {
               }}
             >
               <div className="vertical-card-icon">
-                <Icon size={24} />
+                <Icon size={20} />
               </div>
               <div className="vertical-card-content">
                 <h3 className="text-serif">{vertical.name}</h3>
@@ -83,7 +83,7 @@ export default function VerticalSelectorView() {
 
       {/* Footer note */}
       <p className="vertical-selector-footer text-muted text-sm">
-        You can change this anytime in Settings.
+        You can change this any time in Settings.
       </p>
     </div>
   );

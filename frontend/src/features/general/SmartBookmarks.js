@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Bookmark, Flag, AlertCircle, Lightbulb, Star, Clock, X, ExternalLink } from 'lucide-react';
+import { Bookmark, Flag, AlertCircle, Lightbulb, Star, Clock, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './SmartBookmarks.css';
 
 /**
@@ -24,8 +25,10 @@ const DEMO_BOOKMARKS = [
   { id: 4, type: 'favorite', note: 'Design specs shipping tomorrow!', timestamp: '10:28:45 AM', seqNo: 78 },
 ];
 
-export default function SmartBookmarks({ segments, onJumpToSegment, currentSeqNo }) {
-  const [bookmarks, setBookmarks] = useState(DEMO_BOOKMARKS);
+export default function SmartBookmarks({ segments, onJumpToSegment, currentSeqNo, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('smart-bookmarks');
+  const [bookmarks, setBookmarks] = useState(showDemoData ? DEMO_BOOKMARKS : []);
   const [quickNote, setQuickNote] = useState('');
 
   const addBookmark = (type) => {
@@ -45,15 +48,28 @@ export default function SmartBookmarks({ segments, onJumpToSegment, currentSeqNo
   };
 
   return (
-    <Card className="smart-bookmarks">
-      <div className="smart-bookmarks-header">
+    <Card className={`smart-bookmarks ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="smart-bookmarks-header feature-collapse-header"
+        onClick={() => toggleCollapsed('smart-bookmarks')}
+        aria-expanded={!collapsed}
+      >
         <div className="smart-bookmarks-title">
           <Bookmark size={18} className="smart-bookmarks-icon" />
           <h3 className="text-serif font-medium">Bookmarks</h3>
           <span className="smart-bookmarks-count">{bookmarks.length}</span>
         </div>
-      </div>
+        <div className="feature-header-right">
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
+        </div>
+      </button>
 
+      {!collapsed && (
+      <>
       {/* Quick bookmark buttons */}
       <div className="smart-bookmarks-quick">
         <input
@@ -128,6 +144,8 @@ export default function SmartBookmarks({ segments, onJumpToSegment, currentSeqNo
           })
         )}
       </div>
+      </>
+      )}
     </Card>
   );
 }

@@ -102,8 +102,15 @@ const DEMO_SIGNALS = {
   },
 };
 
-export default function QualificationSignals({ segments, onJumpToSegment }) {
-  const [signals, setSignals] = useState(DEMO_SIGNALS);
+const EMPTY_SIGNALS = {
+  budget: { status: 'unknown', signals: [], notes: '' },
+  authority: { status: 'unknown', signals: [], notes: '' },
+  need: { status: 'unknown', signals: [], notes: '' },
+  timeline: { status: 'unknown', signals: [], notes: '' },
+};
+
+export default function QualificationSignals({ segments, onJumpToSegment, showDemoData = true }) {
+  const [signals, setSignals] = useState(showDemoData ? DEMO_SIGNALS : EMPTY_SIGNALS);
   const [expandedId, setExpandedId] = useState('need');
   const [showQuestions, setShowQuestions] = useState(null);
 
@@ -130,6 +137,7 @@ export default function QualificationSignals({ segments, onJumpToSegment }) {
         <div className="qualification-title">
           <ClipboardCheck size={18} className="qualification-icon" />
           <h3 className="text-serif font-medium">Deal Qualification</h3>
+          <span className="feature-live-badge">Live</span>
         </div>
         <div className="qualification-score" style={{ '--score-color': getScoreColor() }}>
           <div className="qualification-score-ring">

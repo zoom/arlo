@@ -1,6 +1,6 @@
 # Arlo Meeting Assistant — Project Status
 
-**Last Updated:** 2026-03-13
+**Last Updated:** 2026-03-25
 **Version:** v1.0
 **Spec:** See [`/SPEC.md`](../SPEC.md) for the authoritative feature specification and version milestones.
 
@@ -8,7 +8,9 @@
 
 ## Overview
 
-Open-source Zoom Apps starter kit for building intelligent meeting assistants using RTMS (Real-Time Media Streams) — no meeting bot required.
+**Developer reference implementation** for building real-time meeting intelligence using Zoom's RTMS (Real-Time Media Streams) — no meeting bot required.
+
+> **Important framing:** Arlo is a reference implementation, not a product. Demos should emphasize what developers can build with RTMS rather than presenting Arlo as the end product. The industry verticals are illustrative examples showing real-time capabilities tailored for specific domains.
 
 **Current state:** The v1.0 UI is feature-complete. The frontend has been decomposed from a monolithic component into a multi-view architecture with HashRouter, 14 views, 5 context providers, and a shared AppShell. All Figma Make designs have been ported into the CRA + plain CSS codebase. In-client OAuth PKCE and browser-based web OAuth (Marketplace install) are both working. OS dark mode detection is implemented. New API endpoints support the home dashboard, upcoming meetings, user preferences, and participant event tracking. RTMS auto-start runs at the provider level (MeetingContext) so transcription begins as soon as the user is authenticated and in a meeting, regardless of which view is active. Upcoming meetings are fetched from Zoom's REST API with per-meeting auto-open toggles via the `open_apps` API. Participant events (join/leave) are tracked with an inline timeline in InMeetingView and a swimlane visualization in MeetingDetailView. Meetings started by RTMS before the user opens Arlo are automatically attributed to the real user via RTMS operator ID. See [SPEC.md](../SPEC.md) for the full feature inventory.
 
@@ -97,9 +99,20 @@ Open-source Zoom Apps starter kit for building intelligent meeting assistants us
 - **Participant event tracking + timeline** — `ParticipantEvent` DB model, swimlane timeline visualization (`ParticipantTimeline` component), inline events in InMeetingView. Initial roster filtering via `firstTranscriptReceived` flag.
 - **Meeting attribution via RTMS operator ID** — Orphaned meetings (created by system user during RTMS auto-start) are automatically reassigned to the real user when they open Arlo.
 - **Industry Verticals** (Mar 2026) — 5 specialized modes with custom UI components:
+- **Documentation reframing** (Mar 2026) — Repositioned Arlo as a developer reference implementation showcasing RTMS real-time capabilities, not a product. Added "What You Can Build with RTMS" section to README.
+- **Legal vertical enhancements** (Mar 2026):
+  - **BillableTimeTracker** — Auto-log billable segments with activity codes, matter association, running totals, and CSV export
+  - **ContradictionDetector enhancements** — Real-time flagging, impeachment outline generation, export for case preparation
+  - Industry adoption context noting focus on depositions/trials
+- **Developer infrastructure** (Mar 2026):
+  - GitHub issue templates (bug report, feature request, question)
+  - Smoke tests (`tests/smoke.test.js`, run with `npm test`)
+  - Fresh install checklist (`docs/FRESH_INSTALL_CHECKLIST.md`)
+  - Demo video script (`docs/DEMO_VIDEO_SCRIPT.md`) emphasizing RTMS capabilities
   - **General (Default)**: MeetingSummary, KeyMoments, DecisionsLog, OpenQuestions, ParticipantStats, SmartBookmarks
   - **Healthcare**: SOAPNotesPanel, PatientContextCard, ClinicalAlerts, QuickActions, PreviousSessionsCard, HealthcareTagsSummary
-  - **Legal**: ContradictionDetector, LegalTermsPanel, ExhibitTracker, PrivilegeMarkers
+  - **Legal**: ContradictionDetector, BillableTimeTracker, LegalTermsPanel, ExhibitTracker, PrivilegeMarkers
+    - *Industry context:* Focused on depositions/trials where recording is standard. Lawyers outside formal proceedings may be hesitant to record calls.
   - **Sales**: DealTracker, QualificationSignals, CompetitorMentions, CommitmentsPanel
   - **Support**: SentimentMeter, EscalationAlerts, ResolutionTracker, AgentAssist
   - VerticalContext provider with accent colors, terminology customization, feature flags
@@ -107,12 +120,9 @@ Open-source Zoom Apps starter kit for building intelligent meeting assistants us
 
 ### Not Yet Done
 
-- Automated tests (manual testing only)
-- CI pipeline
-- Demo video
+- CI pipeline (GitHub Actions)
+- Demo video recording
 - Security audit
-- GitHub issue templates
-- End-to-end fresh install test
 - Post-meeting standalone web app (v1.5 goal)
 - **Industry Vertical AI Integration** — Vertical components currently use demo data. Future work:
   - Real-time AI extraction for medical terms, legal terms, competitor mentions
@@ -124,12 +134,14 @@ Open-source Zoom Apps starter kit for building intelligent meeting assistants us
 
 ## Next Actions
 
-1. [ ] End-to-end testing on fresh install
-2. [ ] Add basic smoke tests
-3. [ ] Add GitHub issue templates
-4. [ ] Create demo video
-5. [ ] Security audit (OWASP checklist)
-6. [ ] Public launch
+1. [x] End-to-end testing checklist (`docs/FRESH_INSTALL_CHECKLIST.md`)
+2. [x] Add basic smoke tests (`tests/smoke.test.js`, run with `npm test`)
+3. [x] Add GitHub issue templates (`.github/ISSUE_TEMPLATE/`)
+4. [x] Create demo video script (`docs/DEMO_VIDEO_SCRIPT.md`)
+5. [ ] Record demo video
+6. [ ] Security audit (OWASP checklist)
+7. [ ] Set up CI pipeline (GitHub Actions)
+8. [ ] Public launch
 
 ---
 

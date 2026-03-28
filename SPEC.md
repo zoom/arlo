@@ -2,9 +2,19 @@
 
 ## Overview
 
-Arlo is an open-source AI meeting assistant that runs as an embedded web app inside Zoom meetings. It receives real-time transcripts via Zoom's Realtime Media Streams (RTMS) product, stores them in a database, and provides LLM-generated summaries, action items, and meeting intelligence. The app runs in Zoom's embedded browser panel (Zoom Apps SDK).
+**Arlo is a developer reference implementation** demonstrating how to build real-time meeting intelligence using Zoom's RTMS (Real-Time Media Streams) APIs. It showcases what's possible when developers have access to live meeting data — sub-second transcription, real-time AI analysis, participant tracking, and more — all without requiring a meeting bot.
 
-This document defines the target v1.0 implementation. Use it to audit the current codebase, identify gaps, and guide build-out.
+This is **not a product** — it's a learning resource and starting point for developers building their own RTMS-powered applications. The industry verticals (Healthcare, Legal, Sales, Support) are illustrative examples showing how real-time capabilities can be tailored for specific domains.
+
+### What This Reference Implementation Demonstrates
+
+- **RTMS Integration**: Webhook handlers, WebSocket streaming, transcript ingestion
+- **Real-Time Data Flow**: Sub-second latency from speech to UI
+- **Zoom Apps SDK**: In-client OAuth, meeting context, SDK APIs
+- **AI Orchestration**: Live summarization, suggestions, chat with transcripts
+- **Production Patterns**: Token encryption, rate limiting, ownership isolation
+
+This document defines the v1.0 implementation. Use it to understand the architecture, identify extension points, and guide your own build-out.
 
 ---
 

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { HelpCircle, Plus, Check, ExternalLink, X } from 'lucide-react';
+import { HelpCircle, Plus, Check, ExternalLink, X, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Input from '../../components/ui/Input';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './OpenQuestions.css';
 
 /**
@@ -50,8 +51,10 @@ const DEMO_QUESTIONS = [
   },
 ];
 
-export default function OpenQuestions({ segments, onJumpToSegment }) {
-  const [questions, setQuestions] = useState(DEMO_QUESTIONS);
+export default function OpenQuestions({ segments, onJumpToSegment, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('open-questions');
+  const [questions, setQuestions] = useState(showDemoData ? DEMO_QUESTIONS : []);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newQuestion, setNewQuestion] = useState('');
   const [filter, setFilter] = useState('open'); // 'open' | 'answered' | 'all'
@@ -91,8 +94,12 @@ export default function OpenQuestions({ segments, onJumpToSegment }) {
   const openCount = questions.filter(q => !q.answered).length;
 
   return (
-    <Card className="open-questions">
-      <div className="open-questions-header">
+    <Card className={`open-questions ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="open-questions-header feature-collapse-header"
+        onClick={() => toggleCollapsed('open-questions')}
+        aria-expanded={!collapsed}
+      >
         <div className="open-questions-title">
           <HelpCircle size={18} className="open-questions-icon" />
           <h3 className="text-serif font-medium">Questions</h3>
@@ -100,14 +107,28 @@ export default function OpenQuestions({ segments, onJumpToSegment }) {
             <span className="open-questions-badge">{openCount} open</span>
           )}
         </div>
-        <button
-          className="open-questions-add-btn"
-          onClick={() => setShowAddForm(!showAddForm)}
-        >
-          <Plus size={16} />
-        </button>
-      </div>
+        <div className="feature-header-right">
+          {!collapsed && (
+            <button
+              className="open-questions-add-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowAddForm(!showAddForm);
+              }}
+            >
+              <Plus size={16} />
+            </button>
+          )}
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
+        </div>
+      </button>
 
+      {!collapsed && (
+      <>
       {/* Filter tabs */}
       <div className="open-questions-filters">
         <button
@@ -196,6 +217,8 @@ export default function OpenQuestions({ segments, onJumpToSegment }) {
           ))
         )}
       </div>
+      </>
+      )}
     </Card>
   );
 }

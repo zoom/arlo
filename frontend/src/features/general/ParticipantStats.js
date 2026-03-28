@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { Users, Clock, MessageSquare } from 'lucide-react';
+import { Users, Clock, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './ParticipantStats.css';
 
 /**
@@ -18,8 +19,10 @@ const DEMO_PARTICIPANTS = [
   { id: 5, name: 'You', talkTime: 150, segments: 12, color: '#22c55e', role: '' },
 ];
 
-export default function ParticipantStats({ segments }) {
-  const [participants] = useState(DEMO_PARTICIPANTS);
+export default function ParticipantStats({ segments, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('participant-stats');
+  const [participants] = useState(showDemoData ? DEMO_PARTICIPANTS : []);
 
   const totalTalkTime = participants.reduce((sum, p) => sum + p.talkTime, 0);
   const totalSegments = participants.reduce((sum, p) => sum + p.segments, 0);
@@ -35,19 +38,34 @@ export default function ParticipantStats({ segments }) {
   const sortedParticipants = [...participants].sort((a, b) => b.talkTime - a.talkTime);
 
   return (
-    <Card className="participant-stats">
-      <div className="participant-stats-header">
+    <Card className={`participant-stats ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="participant-stats-header feature-collapse-header"
+        onClick={() => toggleCollapsed('participant-stats')}
+        aria-expanded={!collapsed}
+      >
         <div className="participant-stats-title">
           <Users size={18} className="participant-stats-icon" />
           <h3 className="text-serif font-medium">Participation</h3>
         </div>
-        <div className="participant-stats-summary text-xs text-muted">
-          <span>{participants.length} participants</span>
-          <span className="participant-stats-dot" />
-          <span>{formatTime(totalTalkTime)} total</span>
+        <div className="feature-header-right">
+          {!collapsed && (
+            <div className="participant-stats-summary text-xs text-muted">
+              <span>{participants.length} participants</span>
+              <span className="participant-stats-dot" />
+              <span>{formatTime(totalTalkTime)} total</span>
+            </div>
+          )}
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
         </div>
-      </div>
+      </button>
 
+      {!collapsed && (
+      <>
       {/* Visual bar representation */}
       <div className="participant-bar">
         {sortedParticipants.map(p => (
@@ -123,6 +141,8 @@ export default function ParticipantStats({ segments }) {
           })()}
         </div>
       </div>
+      </>
+      )}
     </Card>
   );
 }

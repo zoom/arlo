@@ -41,8 +41,8 @@ const DEMO_DEAL = {
   notes: 'Strong technical validation complete. Legal reviewing MSA. Competing against Snowflake on price. Need executive sponsor meeting with Rachel (CTO) before final sign-off.',
 };
 
-export default function DealTracker({ segments, meetingId }) {
-  const [deal, setDeal] = useState(DEMO_DEAL);
+export default function DealTracker({ segments, meetingId, showDemoData = true }) {
+  const [deal, setDeal] = useState(showDemoData ? DEMO_DEAL : null);
   const [isExpanded, setIsExpanded] = useState(true);
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
@@ -83,6 +83,18 @@ export default function DealTracker({ segments, meetingId }) {
       year: 'numeric',
     });
   };
+
+  if (!deal) {
+    return (
+      <Card className="deal-tracker">
+        <div className="deal-tracker-empty">
+          <Target size={24} className="text-muted" style={{ opacity: 0.5 }} />
+          <p className="text-serif text-sm text-muted">No deal linked to this meeting.</p>
+          <p className="text-xs text-muted">Deal information will appear here once configured.</p>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="deal-tracker">

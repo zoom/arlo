@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, ScrollArea } from '@base-ui/react';
-import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2 } from 'lucide-react';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import { useToast } from '../contexts/ToastContext';
 import { useVertical } from '../contexts/VerticalContext';
 import useZoomAuth from '../hooks/useZoomAuth';
+import { useDemoData } from '../hooks/useDemoData';
+import { useFeatureLayout } from '../hooks/useFeatureLayout';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
@@ -95,12 +98,41 @@ export default function InMeetingView() {
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
   const { hasFeature, verticalId, getTerm } = useVertical();
+  const { showDemoData } = useDemoData();
+  const { getFeatureOrder, updateFeatureOrder, hasCustomOrder, resetFeatureOrder } = useFeatureLayout();
 
   // Vertical-specific features
   const isHealthcare = verticalId === 'healthcare';
   const isLegal = verticalId === 'legal';
   const isSales = verticalId === 'sales';
   const isSupport = verticalId === 'support';
+
+  // Get current feature order for this vertical
+  const featureOrder = getFeatureOrder(verticalId);
+
+  // Shared jump-to-segment handler
+  const handleJumpToSegment = useCallback((seqNo) => {
+    if (transcriptRef.current) {
+      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.classList.add('highlight-flash');
+        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+      }
+    }
+  }, []);
+
+  // Handle drag end for feature reordering
+  const handleDragEnd = useCallback((result) => {
+    if (!result.destination) return;
+    if (result.source.index === result.destination.index) return;
+
+    const newOrder = Array.from(featureOrder);
+    const [removed] = newOrder.splice(result.source.index, 1);
+    newOrder.splice(result.destination.index, 0, removed);
+
+    updateFeatureOrder(verticalId, newOrder);
+  }, [featureOrder, updateFeatureOrder, verticalId]);
 
   // Context guard: redirect to home if not in a meeting
   useEffect(() => {
@@ -126,6 +158,10 @@ export default function InMeetingView() {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [displayTitle, setDisplayTitle] = useState(null);
+  // Default to "assist" tab (features) - persist preference in localStorage
+  const [activeTab, setActiveTab] = useState(() => {
+    return localStorage.getItem('arlo-meeting-tab') || 'assist';
+  });
   const transcriptRef = useRef(null);
   const inviteDropdownRef = useRef(null);
 
@@ -344,6 +380,89 @@ export default function InMeetingView() {
     return items;
   }, [segments, participantEvents]);
 
+  // Feature renderers for each vertical - maps feature ID to render function
+  const featureRenderers = useMemo(() => ({
+    // Healthcare features
+    'clinical-alerts': () => <ClinicalAlerts segments={segments} showDemoData={showDemoData} />,
+    'patient-context': () => hasFeature('patientContext') ? <PatientContextCard segments={segments} meetingId={meetingId} showDemoData={showDemoData} /> : null,
+    'previous-sessions': () => <PreviousSessionsCard patientId={meetingId} showDemoData={showDemoData} />,
+    'soap-notes': () => hasFeature('soapNotes') ? <SOAPNotesPanel segments={segments} meetingId={meetingId} isLive={rtmsActive && !rtmsPaused} showDemoData={showDemoData} /> : null,
+    'quick-actions': () => <QuickActions soapData={{ subjective: '', objective: '', assessment: '', plan: '' }} onAction={(action, option) => console.log('Quick action:', action, option)} showDemoData={showDemoData} />,
+
+    // Legal features
+    'contradiction-detector': () => <ContradictionDetector segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'legal-terms': () => <LegalTermsPanel segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'billable-time': () => <BillableTimeTracker meetingId={meetingId} meetingStartTime={segments[0]?.timestamp} showDemoData={showDemoData} />,
+    'exhibit-tracker': () => <ExhibitTracker segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'privilege-markers': () => <PrivilegeMarkers segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+
+    // Sales features
+    'qualification-signals': () => <QualificationSignals segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'competitor-mentions': () => <CompetitorMentions segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'commitments': () => <CommitmentsPanel segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'deal-tracker': () => <DealTracker segments={segments} meetingId={meetingId} showDemoData={showDemoData} />,
+
+    // Support features
+    'sentiment-meter': () => <SentimentMeter segments={segments} showDemoData={showDemoData} />,
+    'escalation-alerts': () => <EscalationAlerts segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'resolution-tracker': () => <ResolutionTracker segments={segments} showDemoData={showDemoData} />,
+    'agent-assist': () => <AgentAssist segments={segments} showDemoData={showDemoData} />,
+
+    // General features
+    'meeting-summary': () => <MeetingSummary segments={segments} meetingId={meetingId} showDemoData={showDemoData} />,
+    'key-moments': () => <KeyMoments segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'decisions-log': () => <DecisionsLog segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'open-questions': () => <OpenQuestions segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'smart-bookmarks': () => <SmartBookmarks segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
+    'participant-stats': () => <ParticipantStats segments={segments} showDemoData={showDemoData} />,
+  }), [segments, meetingId, showDemoData, rtmsActive, rtmsPaused, hasFeature, handleJumpToSegment]);
+
+  // Render draggable features for current vertical
+  const renderDraggableFeatures = useCallback(() => {
+    return (
+      <DragDropContext onDragEnd={handleDragEnd}>
+        <Droppable droppableId={`features-${verticalId}`}>
+          {(provided, snapshot) => (
+            <div
+              ref={provided.innerRef}
+              {...provided.droppableProps}
+              className={`draggable-features ${snapshot.isDraggingOver ? 'drag-over' : ''}`}
+            >
+              {featureOrder.map((featureId, index) => {
+                const renderer = featureRenderers[featureId];
+                if (!renderer) return null;
+                const content = renderer();
+                if (!content) return null;
+
+                return (
+                  <Draggable key={featureId} draggableId={featureId} index={index}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.draggableProps}
+                        className={`draggable-feature ${snapshot.isDragging ? 'is-dragging' : ''}`}
+                      >
+                        <div
+                          {...provided.dragHandleProps}
+                          className="drag-handle"
+                          title="Drag to reorder"
+                        >
+                          <GripVertical size={16} />
+                        </div>
+                        {content}
+                      </div>
+                    )}
+                  </Draggable>
+                );
+              })}
+              {provided.placeholder}
+            </div>
+          )}
+        </Droppable>
+      </DragDropContext>
+    );
+  }, [featureOrder, featureRenderers, handleDragEnd, verticalId]);
+
   // Early return while redirecting (after all hooks)
   if (!isTestMode && runningContext !== null && runningContext !== 'inMeeting') {
     return null;
@@ -476,11 +595,18 @@ export default function InMeetingView() {
         )}
       </div>
 
-      {/* Tabs: Transcript | Arlo Assist */}
-      <Tabs.Root defaultValue="transcript" className="in-meeting-tabs">
+      {/* Tabs: Arlo Assist (default) | Transcript */}
+      <Tabs.Root
+        value={activeTab}
+        onValueChange={(value) => {
+          setActiveTab(value);
+          localStorage.setItem('arlo-meeting-tab', value);
+        }}
+        className="in-meeting-tabs"
+      >
         <Tabs.List className="tabs-list" data-cols="2">
-          <Tabs.Tab value="transcript" className="tab-trigger">Transcript</Tabs.Tab>
           <Tabs.Tab value="assist" className="tab-trigger">Arlo Assist</Tabs.Tab>
+          <Tabs.Tab value="transcript" className="tab-trigger">Transcript</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="transcript" className="in-meeting-tab-panel">
@@ -677,333 +803,125 @@ export default function InMeetingView() {
         </Tabs.Panel>
 
         <Tabs.Panel value="assist" className="in-meeting-tab-panel">
-          {isHealthcare ? (
-            /* Healthcare vertical: Full clinical documentation suite */
-            <>
-              {/* Clinical Alerts - show first for visibility */}
-              <ClinicalAlerts segments={segments} />
-
-              {/* Patient Context + Previous Sessions side by side on larger screens */}
-              <div className="healthcare-context-row">
-                {hasFeature('patientContext') && (
-                  <PatientContextCard segments={segments} meetingId={meetingId} />
-                )}
-                <PreviousSessionsCard patientId={meetingId} />
-              </div>
-
-              {/* SOAP Notes - main documentation */}
-              {hasFeature('soapNotes') && (
-                <SOAPNotesPanel
-                  segments={segments}
-                  meetingId={meetingId}
-                  isLive={rtmsActive && !rtmsPaused}
-                />
+          {/* Compact transcription status bar on Arlo Assist tab */}
+          <Card className="assist-transcript-status">
+            <div className="assist-transcript-status-inner">
+              {transcriptState === 'not-started' ? (
+                <>
+                  <span className="text-sans text-sm text-muted">Transcription not started</span>
+                  <Button size="sm" onClick={() => startRTMS(false)} disabled={rtmsLoading}>
+                    <Mic size={14} />
+                    {rtmsLoading ? 'Starting...' : 'Start'}
+                  </Button>
+                </>
+              ) : transcriptState === 'waiting' ? (
+                <>
+                  <div className="assist-status-live">
+                    <LoadingSpinner size={14} />
+                    <span className="text-sans text-sm text-muted">Waiting for transcript...</span>
+                  </div>
+                </>
+              ) : transcriptState === 'paused' ? (
+                <>
+                  <span className="paused-badge-sm text-sans text-sm">Paused</span>
+                  <div className="assist-transcript-controls">
+                    <Button size="sm" onClick={handleResume} disabled={rtmsLoading}>
+                      <Play size={14} />
+                      Resume
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setActiveTab('transcript')}>
+                      View Transcript
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="assist-status-live">
+                    <div className="live-dot-container small">
+                      <div className="recording-dot" />
+                      <div className="recording-dot-ping" />
+                    </div>
+                    <span className="text-sans text-sm text-muted">Transcribing</span>
+                    <span className="text-sans text-xs text-muted">({segments.length} segments)</span>
+                  </div>
+                  <div className="assist-transcript-controls">
+                    <Button variant="outline" size="sm" onClick={handlePause} disabled={rtmsLoading}>
+                      <Pause size={14} />
+                      Pause
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setActiveTab('transcript')}>
+                      View Transcript
+                    </Button>
+                  </div>
+                </>
               )}
+            </div>
+          </Card>
 
-              {/* Quick Actions for time-saving */}
-              <QuickActions
-                soapData={{
-                  subjective: '',
-                  objective: '',
-                  assessment: '',
-                  plan: '',
-                }}
-                onAction={(action, option) => console.log('Quick action:', action, option)}
+          {/* Feature reorder toolbar */}
+          {hasCustomOrder(verticalId) && (
+            <div className="feature-reorder-toolbar">
+              <span className="text-xs text-muted">Custom order active</span>
+              <button
+                className="reset-order-btn"
+                onClick={() => resetFeatureOrder(verticalId)}
+                title="Reset to default order"
+              >
+                <RotateCcw size={14} />
+                <span className="text-xs">Reset Order</span>
+              </button>
+            </div>
+          )}
+
+          {/* Draggable feature cards */}
+          {renderDraggableFeatures()}
+
+          {/* Notes section (outside drag area) */}
+          <Card className="assist-card">
+            <div className="assist-card-inner">
+              <h3 className="text-serif font-medium">
+                {isLegal ? 'Deposition Notes' : isSales ? 'Call Notes' : isSupport ? 'Case Notes' : 'Notes'}
+              </h3>
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder={
+                  isLegal ? 'Attorney notes, follow-up questions, impeachment points...' :
+                  isSales ? 'Key takeaways, objections to address, follow-up items...' :
+                  isSupport ? 'Issue summary, troubleshooting steps, resolution notes...' :
+                  'Meeting notes...'
+                }
+                className="assist-notes"
               />
-            </>
-          ) : isLegal ? (
-            /* Legal vertical: Deposition/testimony assistance */
-            <>
-              {/* Billable Time Tracker - auto-log billable segments */}
-              <BillableTimeTracker
-                meetingId={meetingId}
-                meetingStartTime={segments[0]?.timestamp}
-              />
+            </div>
+          </Card>
 
-              {/* Contradiction Detector - flags conflicting statements */}
-              <ContradictionDetector
-                segments={segments}
-                onJumpToSegment={(seqNo) => {
-                  if (transcriptRef.current) {
-                    const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      element.classList.add('highlight-flash');
-                      setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                    }
-                  }
-                }}
-              />
+          {/* Action Items (General vertical only) */}
+          {!isHealthcare && !isLegal && !isSales && !isSupport && (
+            <Card className="assist-card">
+              <div className="assist-card-inner">
+                <h3 className="text-serif font-medium">{getTerm('actionItem')}s</h3>
 
-              {/* Two-column layout for Legal Terms and Exhibits */}
-              <div className="legal-context-row">
-                <LegalTermsPanel
-                  segments={segments}
-                  onJumpToSegment={(seqNo) => {
-                    if (transcriptRef.current) {
-                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        element.classList.add('highlight-flash');
-                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                      }
-                    }
-                  }}
-                />
-                <ExhibitTracker
-                  segments={segments}
-                  onJumpToSegment={(seqNo) => {
-                    if (transcriptRef.current) {
-                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        element.classList.add('highlight-flash');
-                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                      }
-                    }
-                  }}
-                />
-              </div>
+                <div className="action-items-list">
+                  {tasks.map((task) => (
+                    <div key={task.id} className="action-item">
+                      <p className="text-serif text-sm">{task.task}</p>
+                      <p className="text-sans text-xs text-muted">Owner: {task.owner}</p>
+                    </div>
+                  ))}
+                </div>
 
-              {/* Privilege & Objections tracking */}
-              <PrivilegeMarkers
-                segments={segments}
-                onJumpToSegment={(seqNo) => {
-                  if (transcriptRef.current) {
-                    const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      element.classList.add('highlight-flash');
-                      setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                    }
-                  }
-                }}
-              />
-
-              {/* Notes section for attorney annotations */}
-              <Card className="assist-card">
-                <div className="assist-card-inner">
-                  <h3 className="text-serif font-medium">Deposition Notes</h3>
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Attorney notes, follow-up questions, impeachment points..."
-                    className="assist-notes"
+                <div className="add-action-row">
+                  <Input
+                    placeholder={`Add ${getTerm('actionItem').toLowerCase()}...`}
+                    value={newTask}
+                    onChange={(e) => setNewTask(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addTask()}
                   />
+                  <Button size="sm" onClick={addTask}>Add</Button>
                 </div>
-              </Card>
-            </>
-          ) : isSales ? (
-            /* Sales vertical: Deal tracking and qualification */
-            <>
-              {/* Deal Tracker - opportunity details */}
-              <DealTracker segments={segments} meetingId={meetingId} />
-
-              {/* Two-column layout for Qualification and Competitors */}
-              <div className="sales-context-row">
-                <QualificationSignals
-                  segments={segments}
-                  onJumpToSegment={(seqNo) => {
-                    if (transcriptRef.current) {
-                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        element.classList.add('highlight-flash');
-                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                      }
-                    }
-                  }}
-                />
-                <CompetitorMentions
-                  segments={segments}
-                  onJumpToSegment={(seqNo) => {
-                    if (transcriptRef.current) {
-                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        element.classList.add('highlight-flash');
-                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                      }
-                    }
-                  }}
-                />
               </div>
-
-              {/* Commitments / Next Steps */}
-              <CommitmentsPanel
-                segments={segments}
-                onJumpToSegment={(seqNo) => {
-                  if (transcriptRef.current) {
-                    const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      element.classList.add('highlight-flash');
-                      setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                    }
-                  }
-                }}
-              />
-
-              {/* Call Notes */}
-              <Card className="assist-card">
-                <div className="assist-card-inner">
-                  <h3 className="text-serif font-medium">Call Notes</h3>
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Key takeaways, objections to address, follow-up items..."
-                    className="assist-notes"
-                  />
-                </div>
-              </Card>
-            </>
-          ) : isSupport ? (
-            /* Customer Support vertical: Sentiment, escalations, resolution */
-            <>
-              {/* Sentiment Meter - the visual showstopper */}
-              <SentimentMeter segments={segments} />
-
-              {/* Two-column layout for Escalations and Resolution */}
-              <div className="support-context-row">
-                <EscalationAlerts
-                  segments={segments}
-                  onJumpToSegment={(seqNo) => {
-                    if (transcriptRef.current) {
-                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        element.classList.add('highlight-flash');
-                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                      }
-                    }
-                  }}
-                />
-                <ResolutionTracker segments={segments} />
-              </div>
-
-              {/* Agent Assist - knowledge + compliance */}
-              <AgentAssist segments={segments} />
-
-              {/* Call Notes */}
-              <Card className="assist-card">
-                <div className="assist-card-inner">
-                  <h3 className="text-serif font-medium">Call Notes</h3>
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Issue summary, resolution steps, follow-up needed..."
-                    className="assist-notes"
-                  />
-                </div>
-              </Card>
-            </>
-          ) : (
-            /* Default: General meeting assistant */
-            <>
-              {/* AI-generated meeting summary */}
-              <MeetingSummary segments={segments} meetingId={meetingId} />
-
-              {/* Two-column layout for Key Moments and Participation */}
-              <div className="general-context-row">
-                <KeyMoments
-                  segments={segments}
-                  onJumpToSegment={(seqNo) => {
-                    if (transcriptRef.current) {
-                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        element.classList.add('highlight-flash');
-                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                      }
-                    }
-                  }}
-                />
-                <ParticipantStats segments={segments} />
-              </div>
-
-              {/* Two-column layout for Decisions and Questions */}
-              <div className="general-context-row">
-                <DecisionsLog
-                  segments={segments}
-                  onJumpToSegment={(seqNo) => {
-                    if (transcriptRef.current) {
-                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        element.classList.add('highlight-flash');
-                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                      }
-                    }
-                  }}
-                />
-                <OpenQuestions
-                  segments={segments}
-                  onJumpToSegment={(seqNo) => {
-                    if (transcriptRef.current) {
-                      const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        element.classList.add('highlight-flash');
-                        setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                      }
-                    }
-                  }}
-                />
-              </div>
-
-              {/* Smart Bookmarks */}
-              <SmartBookmarks
-                segments={segments}
-                onJumpToSegment={(seqNo) => {
-                  if (transcriptRef.current) {
-                    const element = transcriptRef.current.querySelector(`[data-seq="${seqNo}"]`);
-                    if (element) {
-                      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      element.classList.add('highlight-flash');
-                      setTimeout(() => element.classList.remove('highlight-flash'), 2000);
-                    }
-                  }
-                }}
-              />
-
-              {/* Notes and Action Items */}
-              <Card className="assist-card">
-                <div className="assist-card-inner">
-                  <h3 className="text-serif font-medium">Notes</h3>
-                  <Textarea
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Meeting notes..."
-                    className="assist-notes"
-                  />
-                </div>
-              </Card>
-
-              <Card className="assist-card">
-                <div className="assist-card-inner">
-                  <h3 className="text-serif font-medium">{getTerm('actionItem')}s</h3>
-
-                  <div className="action-items-list">
-                    {tasks.map((task) => (
-                      <div key={task.id} className="action-item">
-                        <p className="text-serif text-sm">{task.task}</p>
-                        <p className="text-sans text-xs text-muted">Owner: {task.owner}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="add-action-row">
-                    <Input
-                      placeholder={`Add ${getTerm('actionItem').toLowerCase()}...`}
-                      value={newTask}
-                      onChange={(e) => setNewTask(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && addTask()}
-                    />
-                    <Button size="sm" onClick={addTask}>Add</Button>
-                  </div>
-                </div>
-              </Card>
-            </>
+            </Card>
           )}
         </Tabs.Panel>
       </Tabs.Root>

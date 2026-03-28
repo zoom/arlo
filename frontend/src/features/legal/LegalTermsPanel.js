@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { BookOpen, ChevronDown, ChevronUp, Copy, Check, Search, ExternalLink } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './LegalTermsPanel.css';
 
 /**
@@ -63,19 +64,25 @@ const CATEGORY_CONFIG = {
   citations: { label: 'Legal Citations', icon: '⚖️', color: '#6366f1' },
 };
 
-export default function LegalTermsPanel({ segments, onJumpToSegment }) {
+const EMPTY_TERMS = { parties: [], dates: [], amounts: [], locations: [], documents: [], citations: [] };
+
+export default function LegalTermsPanel({ segments, onJumpToSegment, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('legal-terms');
   const [expandedCategories, setExpandedCategories] = useState(['parties', 'dates']);
   const [searchQuery, setSearchQuery] = useState('');
   const [copiedTerm, setCopiedTerm] = useState(null);
 
+  const termsData = showDemoData ? DEMO_TERMS : EMPTY_TERMS;
+
   // Filter terms by search
   const filteredTerms = useMemo(() => {
-    if (!searchQuery.trim()) return DEMO_TERMS;
+    if (!searchQuery.trim()) return termsData;
 
     const query = searchQuery.toLowerCase();
     const filtered = {};
 
-    Object.entries(DEMO_TERMS).forEach(([category, terms]) => {
+    Object.entries(termsData).forEach(([category, terms]) => {
       const matches = terms.filter(t =>
         t.term.toLowerCase().includes(query) ||
         (t.context && t.context.toLowerCase().includes(query)) ||
@@ -119,24 +126,38 @@ export default function LegalTermsPanel({ segments, onJumpToSegment }) {
   const totalTerms = Object.values(DEMO_TERMS).reduce((sum, terms) => sum + terms.length, 0);
 
   return (
-    <Card className="legal-terms-panel">
-      <div className="legal-terms-header">
+    <Card className={`legal-terms-panel ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="legal-terms-header feature-collapse-header"
+        onClick={() => toggleCollapsed('legal-terms')}
+        aria-expanded={!collapsed}
+      >
         <div className="legal-terms-title">
           <BookOpen size={18} className="legal-terms-icon" />
           <h3 className="text-serif font-medium">Key Terms</h3>
           <span className="legal-terms-count">{totalTerms}</span>
         </div>
 
-        <div className="legal-terms-actions">
-          <button
-            className="legal-terms-copy-all"
-            onClick={copyAllTerms}
-            title="Copy all terms"
-          >
-            {copiedTerm === 'all' ? <Check size={14} /> : <Copy size={14} />}
-            <span className="text-xs">{copiedTerm === 'all' ? 'Copied!' : 'Copy All'}</span>
-          </button>
+        <div className="feature-header-right">
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
         </div>
+      </button>
+
+      {!collapsed && (
+      <>
+      <div className="legal-terms-actions">
+        <button
+          className="legal-terms-copy-all"
+          onClick={copyAllTerms}
+          title="Copy all terms"
+        >
+          {copiedTerm === 'all' ? <Check size={14} /> : <Copy size={14} />}
+          <span className="text-xs">{copiedTerm === 'all' ? 'Copied!' : 'Copy All'}</span>
+        </button>
       </div>
 
       {/* Search */}
@@ -226,6 +247,8 @@ export default function LegalTermsPanel({ segments, onJumpToSegment }) {
           </p>
         )}
       </div>
+      </>
+      )}
     </Card>
   );
 }

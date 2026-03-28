@@ -112,9 +112,9 @@ const STATUS_CONFIG = {
   resolved: { label: 'Resolved', color: '#6b7280' },
 };
 
-export default function PrivilegeMarkers({ segments, onJumpToSegment }) {
-  const [markers, setMarkers] = useState(DEMO_MARKERS);
-  const [objections, setObjections] = useState(DEMO_OBJECTIONS);
+export default function PrivilegeMarkers({ segments, onJumpToSegment, showDemoData = true }) {
+  const [markers, setMarkers] = useState(showDemoData ? DEMO_MARKERS : []);
+  const [objections, setObjections] = useState(showDemoData ? DEMO_OBJECTIONS : []);
   const [activeTab, setActiveTab] = useState('privilege'); // privilege, objections
 
   // Counts

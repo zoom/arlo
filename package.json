@@ -26,7 +26,9 @@
     "db:migrate": "cd backend && npx prisma migrate dev",
     "db:reset": "cd backend && npx prisma migrate reset",
     "db:studio": "cd backend && npx prisma studio",
-    "db:generate": "cd backend && npx prisma generate"
+    "db:generate": "cd backend && npx prisma generate",
+    "test:smoke": "node tests/smoke.test.js",
+    "test": "npm run test:smoke"
   },
   "keywords": [
     "zoom",

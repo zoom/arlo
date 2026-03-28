@@ -12,8 +12,12 @@ import {
   Clock,
   Check,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import Button from '../../components/ui/Button';
+import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './QuickActions.css';
 
 /**
@@ -152,7 +156,9 @@ This summary is for your reference. It does not replace
 the conversation you had with your healthcare provider.`;
 };
 
-export default function QuickActions({ soapData, onAction }) {
+export default function QuickActions({ soapData, onAction, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('quick-actions');
   const [expandedAction, setExpandedAction] = useState(null);
   const [completedActions, setCompletedActions] = useState(new Set());
   const [recentlyCompleted, setRecentlyCompleted] = useState(null);
@@ -207,12 +213,25 @@ export default function QuickActions({ soapData, onAction }) {
   };
 
   return (
-    <div className="quick-actions">
-      <div className="quick-actions-header">
-        <Zap size={16} className="quick-actions-icon" />
-        <span className="text-sans font-medium">Quick Actions</span>
-      </div>
+    <Card className={`quick-actions ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="quick-actions-header feature-collapse-header"
+        onClick={() => toggleCollapsed('quick-actions')}
+        aria-expanded={!collapsed}
+      >
+        <div className="quick-actions-title">
+          <Zap size={16} className="quick-actions-icon" />
+          <span className="text-sans font-medium">Quick Actions</span>
+        </div>
+        {collapsed ? (
+          <ChevronDown size={16} className="feature-chevron" />
+        ) : (
+          <ChevronUp size={16} className="feature-chevron" />
+        )}
+      </button>
 
+      {!collapsed && (
+      <>
       {/* Main action buttons */}
       <div className="quick-actions-grid">
         {QUICK_ACTIONS.map(action => {
@@ -329,6 +348,8 @@ export default function QuickActions({ soapData, onAction }) {
           </div>
         </div>
       )}
-    </div>
+      </>
+      )}
+    </Card>
   );
 }

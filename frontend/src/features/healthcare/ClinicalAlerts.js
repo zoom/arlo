@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, AlertCircle, Info, X, ChevronRight, Pill, Activity, Clock } from 'lucide-react';
+import { AlertTriangle, AlertCircle, Info, X, ChevronRight, ChevronDown, ChevronUp, Pill, Activity, Clock } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './ClinicalAlerts.css';
 
 /**
@@ -88,8 +89,10 @@ function AlertIcon({ type }) {
   }
 }
 
-export default function ClinicalAlerts({ segments, patientInfo }) {
-  const [alerts, setAlerts] = useState(DEMO_ALERTS);
+export default function ClinicalAlerts({ segments, patientInfo, showDemoData = true }) {
+  const { isCollapsed, toggleCollapsed } = useFeatureLayout();
+  const collapsed = isCollapsed('clinical-alerts');
+  const [alerts, setAlerts] = useState(showDemoData ? DEMO_ALERTS : []);
   const [expandedAlert, setExpandedAlert] = useState(null);
 
   // Filter to show only non-dismissed alerts
@@ -118,20 +121,36 @@ export default function ClinicalAlerts({ segments, patientInfo }) {
   }
 
   return (
-    <div className="clinical-alerts">
-      <div className="clinical-alerts-header">
+    <Card className={`clinical-alerts ${collapsed ? 'feature-collapsed' : ''}`}>
+      <button
+        className="clinical-alerts-header feature-collapse-header"
+        onClick={() => toggleCollapsed('clinical-alerts')}
+        aria-expanded={!collapsed}
+      >
         <div className="clinical-alerts-title">
           <AlertTriangle size={16} className="clinical-alerts-icon" />
           <span className="text-sans font-medium">Clinical Alerts</span>
+          <span className="feature-live-badge">Live</span>
           <span className="clinical-alerts-count">{activeAlerts.length}</span>
         </div>
-        {activeAlerts.length > 1 && (
-          <button className="clinical-alerts-dismiss-all text-xs" onClick={dismissAll}>
-            Dismiss All
-          </button>
-        )}
-      </div>
+        <div className="feature-header-right">
+          {!collapsed && activeAlerts.length > 1 && (
+            <button
+              className="clinical-alerts-dismiss-all text-xs"
+              onClick={(e) => { e.stopPropagation(); dismissAll(); }}
+            >
+              Dismiss All
+            </button>
+          )}
+          {collapsed ? (
+            <ChevronDown size={16} className="feature-chevron" />
+          ) : (
+            <ChevronUp size={16} className="feature-chevron" />
+          )}
+        </div>
+      </button>
 
+      {!collapsed && (
       <div className="clinical-alerts-list">
         {/* Critical alerts first */}
         {criticalAlerts.map(alert => (
@@ -166,7 +185,8 @@ export default function ClinicalAlerts({ segments, patientInfo }) {
           />
         ))}
       </div>
-    </div>
+      )}
+    </Card>
   );
 }
 

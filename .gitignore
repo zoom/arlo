@@ -59,4 +59,7 @@ docker-compose.override.yml
 *.key
 .vercel
 
+# Internal docs (not for public repo)
+docs/DEMO_VIDEO_SCRIPT.md
+
 FIGMA

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Sparkles, BookOpen, Shield, ChevronRight, Check, AlertCircle, Copy, ExternalLink } from 'lucide-react';
+import { Sparkles, BookOpen, Shield, ChevronRight, Check, AlertCircle } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import './AgentAssist.css';
 
@@ -57,30 +57,15 @@ const DEMO_COMPLIANCE = [
   { id: 7, text: 'Create ticket for engineering if systemic issue', required: false, completed: false },
 ];
 
-// Demo quick responses — Technical support context
-const QUICK_RESPONSES = [
-  { id: 1, label: 'Empathy', text: "I completely understand how critical this integration is for your business. Let me get this resolved for you right away." },
-  { id: 2, label: 'Verify', text: "Before we proceed, can you confirm the email address on your account so I can pull up your API settings?" },
-  { id: 3, label: 'Screen Share', text: "Would it help if I walked you through this step-by-step? I can guide you through the settings panel." },
-  { id: 4, label: 'Test', text: "Perfect, the new API key is active. Can you try sending a test webhook so we can confirm it's working?" },
-];
-
-export default function AgentAssist({ segments }) {
-  const [suggestions] = useState(DEMO_SUGGESTIONS);
-  const [compliance, setCompliance] = useState(DEMO_COMPLIANCE);
+export default function AgentAssist({ segments, showDemoData = true }) {
+  const [suggestions] = useState(showDemoData ? DEMO_SUGGESTIONS : []);
+  const [compliance, setCompliance] = useState(showDemoData ? DEMO_COMPLIANCE : []);
   const [activeTab, setActiveTab] = useState('suggestions');
-  const [copiedId, setCopiedId] = useState(null);
 
   const toggleCompliance = (itemId) => {
     setCompliance(prev => prev.map(item =>
       item.id === itemId ? { ...item, completed: !item.completed } : item
     ));
-  };
-
-  const copyResponse = (id, text) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const completedRequired = compliance.filter(c => c.required && c.completed).length;
@@ -140,32 +125,6 @@ export default function AgentAssist({ segments }) {
             ))}
           </div>
 
-          {/* Quick responses */}
-          <div className="agent-assist-quick">
-            <span className="text-xs text-muted">Quick Responses</span>
-            <div className="agent-assist-quick-list">
-              {QUICK_RESPONSES.map(response => (
-                <button
-                  key={response.id}
-                  className="quick-response-btn"
-                  onClick={() => copyResponse(response.id, response.text)}
-                  title={response.text}
-                >
-                  {copiedId === response.id ? (
-                    <>
-                      <Check size={12} />
-                      Copied
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={12} />
-                      {response.label}
-                    </>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       )}
 
