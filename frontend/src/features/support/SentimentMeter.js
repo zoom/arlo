@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Activity, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import './SentimentMeter.css';
@@ -6,55 +6,148 @@ import './SentimentMeter.css';
 /**
  * SentimentMeter — Real-time customer sentiment visualization.
  *
- * Shows a dynamic meter that shifts based on detected sentiment in the conversation.
- * Includes trend indicator and sentiment history.
+ * Analyzes live transcript segments for sentiment-indicating keywords
+ * and updates the meter in real-time. Reacts to actual speech during demos.
  */
 
 const SENTIMENT_LEVELS = [
-  { id: 'angry', label: 'Angry', color: '#dc2626', position: 0 },
-  { id: 'frustrated', label: 'Frustrated', color: '#f97316', position: 25 },
-  { id: 'neutral', label: 'Neutral', color: '#6b7280', position: 50 },
-  { id: 'satisfied', label: 'Satisfied', color: '#22c55e', position: 75 },
-  { id: 'happy', label: 'Happy', color: '#10b981', position: 100 },
+  { id: 'angry', label: 'Angry', emoji: '😠', color: '#dc2626', position: 0 },
+  { id: 'frustrated', label: 'Frustrated', emoji: '😤', color: '#f97316', position: 25 },
+  { id: 'neutral', label: 'Neutral', emoji: '😐', color: '#6b7280', position: 50 },
+  { id: 'satisfied', label: 'Satisfied', emoji: '🙂', color: '#22c55e', position: 75 },
+  { id: 'happy', label: 'Happy', emoji: '😊', color: '#10b981', position: 100 },
 ];
 
-// Demo: Simulate sentiment changes over time — API integration issue scenario
-const DEMO_SENTIMENT_HISTORY = [
-  { sentiment: 'frustrated', timestamp: '2:15:22 PM', trigger: '"Our integration has been broken for 3 days"' },
-  { sentiment: 'angry', timestamp: '2:18:45 PM', trigger: '"This is costing us thousands in lost revenue"' },
-  { sentiment: 'neutral', timestamp: '2:22:33 PM', trigger: 'Agent identified root cause (API key rotation)' },
-  { sentiment: 'satisfied', timestamp: '2:28:15 PM', trigger: 'Walkthrough completed, integration restored' },
-  { sentiment: 'happy', timestamp: '2:32:08 PM', trigger: '"That was incredibly helpful, thank you!"' },
-];
+// Keyword patterns for sentiment detection (case-insensitive)
+const SENTIMENT_KEYWORDS = {
+  angry: [
+    'unacceptable', 'angry', 'furious', 'ridiculous', 'outrageous',
+    'cancel', 'lawsuit', 'lawyer', 'sue', 'terrible', 'worst',
+    'hate', 'disgusted', 'appalling', 'inexcusable', 'demand',
+  ],
+  frustrated: [
+    'frustrated', 'frustrating', 'broken', 'not working', 'still waiting',
+    'days', 'weeks', 'again', 'another', 'keeps happening', 'still',
+    'annoying', 'annoyed', 'disappointed', 'waste of time', 'useless',
+    'nobody', 'no one', 'can\'t believe', 'seriously', 'come on',
+  ],
+  satisfied: [
+    'okay', 'ok', 'understand', 'got it', 'makes sense', 'I see',
+    'good', 'fine', 'alright', 'sounds good', 'that works',
+    'better', 'improving', 'progress', 'helpful',
+  ],
+  happy: [
+    'thank', 'thanks', 'awesome', 'amazing', 'fantastic', 'wonderful',
+    'great', 'excellent', 'perfect', 'love', 'appreciate', 'grateful',
+    'incredible', 'brilliant', 'best', 'exceeded', 'impressed',
+    'so helpful', 'really helpful', 'incredibly helpful', 'solved',
+  ],
+};
+
+// Detect sentiment from text
+function detectSentiment(text) {
+  const lowerText = text.toLowerCase();
+
+  // Check each sentiment level (most extreme first)
+  for (const sentiment of ['angry', 'happy', 'frustrated', 'satisfied']) {
+    const keywords = SENTIMENT_KEYWORDS[sentiment];
+    for (const keyword of keywords) {
+      if (lowerText.includes(keyword)) {
+        return { sentiment, trigger: keyword };
+      }
+    }
+  }
+
+  return null; // No strong sentiment detected
+}
 
 export default function SentimentMeter({ segments, showDemoData = true }) {
-  const [currentSentiment, setCurrentSentiment] = useState(showDemoData ? 'satisfied' : 'neutral');
+  const [currentSentiment, setCurrentSentiment] = useState('neutral');
   const [previousSentiment, setPreviousSentiment] = useState('neutral');
-  const [history] = useState(showDemoData ? DEMO_SENTIMENT_HISTORY : []);
-  const [isDemoAnimating, setIsDemoAnimating] = useState(false);
+  const [history, setHistory] = useState([]);
+  const [isLiveDetecting, setIsLiveDetecting] = useState(false);
+  const lastProcessedSeqNo = useRef(-1);
+  const sentimentDecayTimeout = useRef(null);
 
-  // Demo: Cycle through sentiments to show the feature
-  // Only animates when showDemoData is true AND no real segments are coming in
+  // Format timestamp from milliseconds
+  const formatTime = (ms) => {
+    const date = new Date(ms);
+    if (isNaN(date.getTime()) || ms === 0) return '';
+    return date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  };
+
+  // Process new transcript segments for sentiment
+  const processSegment = useCallback((segment) => {
+    const detection = detectSentiment(segment.text);
+
+    if (detection) {
+      // Handle both timestamp formats: tStartMs (number) or timestamp (ISO string)
+      const ts = segment.tStartMs || segment.timestamp;
+      const timestamp = formatTime(typeof ts === 'number' ? ts : Date.parse(ts));
+
+      setPreviousSentiment(currentSentiment);
+      setCurrentSentiment(detection.sentiment);
+      setIsLiveDetecting(true);
+
+      // Add to history
+      setHistory(prev => [
+        ...prev.slice(-4), // Keep last 4
+        {
+          sentiment: detection.sentiment,
+          timestamp,
+          trigger: `"${segment.text.slice(0, 60)}${segment.text.length > 60 ? '...' : ''}"`,
+        },
+      ]);
+
+      // Clear any existing decay timeout
+      if (sentimentDecayTimeout.current) {
+        clearTimeout(sentimentDecayTimeout.current);
+      }
+
+      // Decay back toward neutral after 30 seconds of no sentiment triggers
+      sentimentDecayTimeout.current = setTimeout(() => {
+        setPreviousSentiment(detection.sentiment);
+        // Decay one step toward neutral
+        const currentLevel = SENTIMENT_LEVELS.find(l => l.id === detection.sentiment);
+        if (currentLevel && currentLevel.position < 50) {
+          setCurrentSentiment('neutral'); // Was negative, go to neutral
+        } else if (currentLevel && currentLevel.position > 50) {
+          setCurrentSentiment('satisfied'); // Was very positive, settle to satisfied
+        }
+      }, 30000);
+    }
+  }, [currentSentiment]);
+
+  // Watch for new transcript segments
   useEffect(() => {
-    // If we have real transcript segments, don't run demo animation
-    const hasRealData = segments && segments.length > 0;
-    if (!showDemoData || hasRealData) {
-      setIsDemoAnimating(false);
+    if (!segments || segments.length === 0) {
+      setIsLiveDetecting(false);
       return;
     }
 
-    setIsDemoAnimating(true);
-    const sentiments = ['satisfied', 'happy', 'satisfied', 'neutral', 'frustrated', 'neutral', 'satisfied'];
-    let index = 0;
+    // Process only new segments
+    const newSegments = segments.filter(s => s.seqNo > lastProcessedSeqNo.current);
 
-    const interval = setInterval(() => {
-      setPreviousSentiment(sentiments[index]);
-      index = (index + 1) % sentiments.length;
-      setCurrentSentiment(sentiments[index]);
-    }, 6000);
+    if (newSegments.length > 0) {
+      // Process the most recent segment
+      const latestSegment = newSegments[newSegments.length - 1];
+      processSegment(latestSegment);
+      lastProcessedSeqNo.current = latestSegment.seqNo;
+    }
+  }, [segments, processSegment]);
 
-    return () => clearInterval(interval);
-  }, [showDemoData, segments]);
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (sentimentDecayTimeout.current) {
+        clearTimeout(sentimentDecayTimeout.current);
+      }
+    };
+  }, []);
 
   const currentLevel = SENTIMENT_LEVELS.find(l => l.id === currentSentiment) || SENTIMENT_LEVELS[2];
   const previousLevel = SENTIMENT_LEVELS.find(l => l.id === previousSentiment) || SENTIMENT_LEVELS[2];
@@ -73,10 +166,10 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
         <div className="sentiment-title">
           <Activity size={18} className="sentiment-icon" />
           <h3 className="text-serif font-medium">Customer Sentiment</h3>
-          {isDemoAnimating ? (
-            <span className="feature-demo-badge">Demo</span>
-          ) : (
+          {isLiveDetecting ? (
             <span className="feature-live-badge">Live</span>
+          ) : (
+            <span className="sentiment-waiting-badge">Listening...</span>
           )}
         </div>
         <div className={`sentiment-trend ${trend}`}>
@@ -119,6 +212,7 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
 
       {/* Current sentiment display */}
       <div className="sentiment-current" style={{ '--sentiment-color': currentLevel.color }}>
+        <span className="sentiment-current-emoji">{currentLevel.emoji}</span>
         <span className="sentiment-current-label text-sm">Current:</span>
         <span className="sentiment-current-value font-medium">{currentLevel.label}</span>
       </div>
