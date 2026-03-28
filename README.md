@@ -6,7 +6,7 @@
 
 **Build Real-Time Meeting Intelligence with Zoom RTMS**
 
-[Get Started](#-quick-start) · [Features](#-features) · [Documentation](#-documentation) · [Troubleshooting](#-troubleshooting)
+[Get Started](#quick-start) · [Features](#features) · [Documentation](#documentation) · [Troubleshooting](#troubleshooting)
 
 </div>
 
