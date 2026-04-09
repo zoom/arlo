@@ -79,7 +79,7 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 | **Meeting Highlights** | Create bookmarks with timestamps for key moments |
 | **Export Options** | Download WebVTT files or Markdown summaries |
 | **Dark Mode** | Automatic OS detection with manual toggle |
-| **Industry Verticals** | Specialized modes for Healthcare, Legal, Sales, and Support |
+| **Industry Verticals** | Specialized modes: Arlo for Notes, Healthcare, Legal, Sales, and Support |
 
 > **AI features work out of the box** — no API key required! Arlo uses [OpenRouter](https://openrouter.ai/) with free models (Gemini, Llama). Optional: add your own `OPENROUTER_API_KEY` for higher rate limits.
 
@@ -252,18 +252,18 @@ Arlo includes specialized modes demonstrating RTMS capabilities for different in
 <tr>
 <td align="center" width="50%">
 
-### General
+### Arlo for Notes
 **Full-Featured Note-Taking**
 
 Meeting summaries, key decisions, action items, participant stats, and talk time analytics.
 
-<!-- Demo: docs/assets/demos/general-demo.mp4 -->
+<!-- Demo: docs/assets/demos/notes-demo.mp4 -->
 *Demo video coming soon*
 
 </td>
 <td align="center" width="50%">
 
-### Healthcare
+### Arlo for Healthcare
 **Clinical Documentation**
 
 SOAP notes auto-generation, clinical alerts for drug interactions, patient context sidebar.
@@ -276,7 +276,7 @@ SOAP notes auto-generation, clinical alerts for drug interactions, patient conte
 <tr>
 <td align="center" width="50%">
 
-### Legal
+### Arlo for Legal
 **Deposition Assistance**
 
 Contradiction detection, billable time tracking, exhibit markers, privilege flags.
@@ -287,7 +287,7 @@ Contradiction detection, billable time tracking, exhibit markers, privilege flag
 </td>
 <td align="center" width="50%">
 
-### Sales
+### Arlo for Sales
 **Deal Intelligence**
 
 BANT qualification tracking, competitor mention detection, commitment tracking.
@@ -300,7 +300,7 @@ BANT qualification tracking, competitor mention detection, commitment tracking.
 <tr>
 <td align="center" colspan="2">
 
-### Customer Support
+### Arlo for Support
 **Agent Assistance**
 
 Live sentiment meter, escalation alerts, resolution workflow tracking.
