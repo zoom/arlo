@@ -44,5 +44,5 @@ jobs:
           ZOOM_CLIENT_SECRET: test
           PUBLIC_URL: https://example.com
           DATABASE_URL: postgresql://postgres:postgres@postgres:5432/test
-          SESSION_SECRET: testsecrettestsecrettestsecrettestsecrettestsecrettest1234
+          SESSION_SECRET: testsecrettestsecrettestsecrettestsecrettestsecrettestsecret1234
           REDIS_ENCRYPTION_KEY: testkeytestkeytestkey12345678901
