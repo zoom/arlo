@@ -2,25 +2,48 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from '
 
 const ZoomSdkContext = createContext();
 
-const zoomSdk = window.zoomSdk;
+// Check if running outside Zoom - evaluated dynamically
+const checkIsTestMode = () => !window.zoomSdk || window.location.search.includes('test=true');
 
-// Check if running outside Zoom (for testing)
-export const isTestMode = !zoomSdk || window.location.search.includes('test=true');
+// Legacy export for backwards compatibility
+export const isTestMode = checkIsTestMode();
 
 export function ZoomSdkProvider({ children }) {
-  const [sdkConfigured, setSdkConfigured] = useState(isTestMode);
+  // Use state for isTestMode so it can update after SDK loads
+  const initialTestMode = checkIsTestMode();
+  console.log('ZoomSdkProvider init:', {
+    initialTestMode,
+    zoomSdkAvailable: !!window.zoomSdk,
+    hasTestParam: window.location.search.includes('test=true')
+  });
+
+  const [isTestModeState, setIsTestModeState] = useState(initialTestMode);
+  const [sdkConfigured, setSdkConfigured] = useState(initialTestMode);
   const [sdkError, setSdkError] = useState(null);
-  const [runningContext, setRunningContext] = useState(isTestMode ? 'test' : null);
+  const [runningContext, setRunningContext] = useState(initialTestMode ? 'test' : null);
   const [meetingContext, setMeetingContext] = useState(null);
   const [userContext, setUserContext] = useState(null);
   // null = SDK not loaded yet, true = guest, false = authorized user
-  const [isGuest, setIsGuest] = useState(isTestMode ? false : null);
+  const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
 
   useEffect(() => {
-    if (isTestMode) {
+    // Re-check if SDK is available now (might have loaded after initial render)
+    const sdkAvailable = !!window.zoomSdk;
+    const testModeNow = !sdkAvailable || window.location.search.includes('test=true');
+
+    console.log('useEffect check:', { testModeNow, isTestModeState, sdkAvailable });
+    if (!testModeNow && isTestModeState) {
+      // SDK became available - update state
+      console.log('SDK detected after initial render - updating isTestModeState to false');
+      setIsTestModeState(false);
+    }
+
+    if (testModeNow) {
       console.log('Running in test mode (outside Zoom)');
       return;
     }
+
+    const zoomSdk = window.zoomSdk;
 
     async function configureSdk() {
       try {
@@ -52,6 +75,7 @@ export function ZoomSdkProvider({ children }) {
 
         console.log('SDK Configured:', configResponse);
         setSdkConfigured(true);
+        setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
         // Get running context
         const contextResponse = await zoomSdk.getRunningContext();
@@ -160,7 +184,10 @@ export function ZoomSdkProvider({ children }) {
     }
 
     configureSdk();
-  }, []);
+  }, [isTestModeState]);
+
+  // Get current SDK reference for context value
+  const zoomSdk = window.zoomSdk;
 
   const contextValue = useMemo(() => ({
     zoomSdk,
@@ -171,8 +198,8 @@ export function ZoomSdkProvider({ children }) {
     userContext,
     userContextStatus: userContext?.status || null,
     isGuest,
-    isTestMode,
-  }), [sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest]);
+    isTestMode: isTestModeState,
+  }), [zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, isTestModeState]);
 
   return (
     <ZoomSdkContext.Provider value={contextValue}>

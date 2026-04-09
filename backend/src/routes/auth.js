@@ -42,9 +42,11 @@ router.get('/start', (req, res) => {
 
 /**
  * GET /api/auth/callback
- * Handle browser redirect from Zoom after OAuth consent (Marketplace install flow).
- * Exchanges code for tokens (no PKCE — server-side with client_secret),
- * creates/upserts user, sets session cookie, redirects to frontend.
+ * Handle browser redirect from Zoom after OAuth consent.
+ *
+ * Two flows arrive here:
+ * 1. Web OAuth (Marketplace install) — exchanges code with client_secret, redirects to frontend
+ * 2. In-client PKCE OAuth (from zoomSdk.authorize()) — stores code for frontend to retrieve, shows close page
  */
 router.get('/callback', async (req, res) => {
   try {
@@ -60,7 +62,49 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${config.publicUrl}/#/auth-error?error=missing_code&message=${encodeURIComponent('No authorization code received')}`);
     }
 
-    // Validate state — required when present (CSRF protection)
+    // Check if this is an in-client PKCE flow (state exists in pkceStore)
+    const pkceData = pkceStore.get(state);
+    if (pkceData) {
+      console.log('In-client PKCE OAuth detected, storing code for frontend retrieval');
+      // Store the code temporarily for the frontend to retrieve
+      // The code will be exchanged by the POST callback with the code_verifier
+      pkceData.code = code;
+      pkceData.receivedAt = Date.now();
+
+      // Return a page that tells the user to return to Zoom
+      // and tries to close the window
+      return res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>Authorization Complete</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                   display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0;
+                   background: #f5f5f5; }
+            .container { text-align: center; padding: 40px; background: white; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+            h1 { color: #333; margin-bottom: 16px; }
+            p { color: #666; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>✓ Authorization Complete</h1>
+            <p>You can close this window and return to Zoom.</p>
+            <p style="font-size: 14px; margin-top: 20px;">This window will close automatically...</p>
+          </div>
+          <script>
+            // Try to close the window after a short delay
+            setTimeout(function() {
+              window.close();
+            }, 1500);
+          </script>
+        </body>
+        </html>
+      `);
+    }
+
+    // Validate state for web OAuth if present (Marketplace installs may not include state)
     if (state) {
       const storedState = webOAuthStore.get(state);
       if (!storedState) {
@@ -169,6 +213,34 @@ router.get('/callback', async (req, res) => {
     const message = error.response?.data?.message || error.message || 'Authentication failed';
     res.redirect(`${config.publicUrl}/#/auth-error?error=token_exchange_failed&message=${encodeURIComponent(message)}`);
   }
+});
+
+/**
+ * GET /api/auth/poll-code
+ * Poll for authorization code after browser OAuth redirect (fallback for in-client OAuth)
+ * Used when onAuthorized event doesn't fire but browser callback completed
+ */
+router.get('/poll-code', (req, res) => {
+  const { state } = req.query;
+
+  if (!state) {
+    return res.status(400).json({ error: 'Missing state parameter' });
+  }
+
+  const pkceData = pkceStore.get(state);
+
+  if (!pkceData) {
+    return res.status(404).json({ error: 'State not found or expired', ready: false });
+  }
+
+  if (!pkceData.code) {
+    // Code not yet received from browser callback
+    return res.json({ ready: false });
+  }
+
+  // Code is ready - return it for the frontend to exchange
+  console.log('Poll-code: returning code for state', state);
+  return res.json({ ready: true, code: pkceData.code });
 });
 
 /**
