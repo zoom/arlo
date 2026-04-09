@@ -66,6 +66,7 @@ module.exports = {
   // Feature Flags
   extractionEnabled: process.env.EXTRACTION_ENABLED === 'true',
   publicLinksEnabled: process.env.PUBLIC_LINKS_ENABLED === 'true',
+  disableMeetingPersistence: process.env.DISABLE_MEETING_PERSISTENCE === 'true',
 
   // Server
   port: parseInt(process.env.PORT || '3000', 10),

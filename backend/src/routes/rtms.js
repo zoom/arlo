@@ -7,6 +7,12 @@ const { broadcastTranscriptSegment, broadcastParticipantEvent, broadcastMeetingS
 const { zoomGet } = require('../services/zoomApi');
 const prisma = require('../lib/prisma');
 
+// Check if meeting persistence is disabled (demo mode)
+const PERSISTENCE_DISABLED = config.disableMeetingPersistence;
+if (PERSISTENCE_DISABLED) {
+  console.log('⚠️ Meeting persistence DISABLED — transcripts will not be saved to database');
+}
+
 // Cache for meeting IDs -> database meeting records
 const meetingCache = new Map();
 
@@ -84,7 +90,21 @@ router.post('/status', async (req, res) => {
   let dbMeetingId = null;
 
   try {
-    if (status === 'rtms_started') {
+    if (PERSISTENCE_DISABLED) {
+      // Persistence disabled — skip all DB writes but still do cross-registration
+      console.log('💾 Persistence disabled — skipping meeting DB operations');
+
+      if (status === 'rtms_started' && operatorId) {
+        // Still need to find user for cross-registration
+        const owner = await prisma.user.findUnique({
+          where: { zoomUserId: operatorId },
+        });
+        if (owner) {
+          crossRegisterUser(owner.id, meetingId);
+          console.log(`✅ Cross-registered user ${owner.displayName} for meeting ${meetingId}`);
+        }
+      }
+    } else if (status === 'rtms_started') {
       // Resolve operator to a real user if possible
       let owner = null;
       if (operatorId) {
@@ -219,7 +239,8 @@ router.post('/status', async (req, res) => {
     broadcastParticipantEvent(meetingId, lifecycleEvent);
 
     // Save to database using local dbMeetingId (not cache, which may be deleted)
-    if (dbMeetingId) {
+    // Skip when persistence is disabled
+    if (dbMeetingId && !PERSISTENCE_DISABLED) {
       prisma.participantEvent.create({
         data: {
           meetingId: dbMeetingId,
@@ -270,6 +291,12 @@ router.post('/broadcast', async (req, res) => {
  * Save transcript segment to database
  */
 async function saveTranscriptSegment(zoomMeetingId, segment) {
+  // Skip DB writes when persistence is disabled
+  if (PERSISTENCE_DISABLED) {
+    console.log('💾 Persistence disabled — skipping transcript save');
+    return;
+  }
+
   // Get the database meeting ID from cache
   let dbMeetingId = meetingCache.get(zoomMeetingId);
 
@@ -367,6 +394,12 @@ router.post('/participant-event', async (req, res) => {
  * Save participant events to database
  */
 async function saveParticipantEvents(zoomMeetingId, events) {
+  // Skip DB writes when persistence is disabled
+  if (PERSISTENCE_DISABLED) {
+    console.log('💾 Persistence disabled — skipping participant events save');
+    return;
+  }
+
   let dbMeetingId = meetingCache.get(zoomMeetingId);
 
   if (!dbMeetingId) {

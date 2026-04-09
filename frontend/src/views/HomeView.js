@@ -21,6 +21,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useVertical } from '../contexts/VerticalContext';
+import { useServerSettings } from '../contexts/ServerSettingsContext';
 import { useDemoData } from '../hooks/useDemoData';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -138,6 +139,7 @@ export default function HomeView() {
   const { user } = useAuth();
   const { meetingId, rtmsActive } = useMeeting();
   const { verticalId, vertical } = useVertical();
+  const { showMeetingHistory } = useServerSettings();
   const { showDemoData } = useDemoData();
   const [highlights, setHighlights] = useState([]);
   const [reminders, setReminders] = useState([]);
@@ -341,13 +343,15 @@ export default function HomeView() {
       {/* Vertical-specific content */}
       {renderVerticalDashboard()}
 
-      <Button
-        variant="outline"
-        onClick={() => navigate('/meetings')}
-        className="home-view-all-btn"
-      >
-        View all meetings
-      </Button>
+      {showMeetingHistory && (
+        <Button
+          variant="outline"
+          onClick={() => navigate('/meetings')}
+          className="home-view-all-btn"
+        >
+          View all meetings
+        </Button>
+      )}
     </div>
   );
 }

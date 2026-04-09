@@ -33,7 +33,7 @@ const DEMO_DEAL = {
   probability: 75,
   closeDate: '2026-04-30',
   contacts: [
-    { name: 'James Whitfield', role: 'VP of Data Analytics', isPrimary: true },
+    { name: 'Jamie Whitfield', role: 'VP of Data Analytics', isPrimary: true },
     { name: 'Rachel Torres', role: 'CTO', isPrimary: false },
     { name: 'Kevin O\'Brien', role: 'Director of Procurement', isPrimary: false },
     { name: 'Aisha Patel', role: 'Data Engineering Manager', isPrimary: false },

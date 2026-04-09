@@ -20,8 +20,8 @@ const BOOKMARK_TYPES = [
 // Demo bookmarks — Product team Q2 planning meeting
 const DEMO_BOOKMARKS = [
   { id: 1, type: 'important', note: 'Mobile app officially Q2 priority #1', timestamp: '10:08:15 AM', seqNo: 22 },
-  { id: 2, type: 'followup', note: 'Check Stripe sandbox status with Marcus', timestamp: '10:15:42 AM', seqNo: 45 },
-  { id: 3, type: 'idea', note: 'Apple Pay first, Stripe later — phased approach', timestamp: '10:18:33 AM', seqNo: 52 },
+  { id: 2, type: 'followup', note: 'Check payment gateway sandbox status with Morgan', timestamp: '10:15:42 AM', seqNo: 45 },
+  { id: 3, type: 'idea', note: 'Basic checkout first, full payments later — phased approach', timestamp: '10:18:33 AM', seqNo: 52 },
   { id: 4, type: 'favorite', note: 'Design specs shipping tomorrow!', timestamp: '10:28:45 AM', seqNo: 78 },
 ];
 
