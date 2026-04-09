@@ -15,7 +15,6 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import Button from '../../components/ui/Button';
 import Card from '../../components/ui/Card';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './QuickActions.css';

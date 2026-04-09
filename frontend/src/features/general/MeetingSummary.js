@@ -80,7 +80,8 @@ export default function MeetingSummary({ segments, meetingId, showDemoData = tru
         generateSummary();
       }, 2000); // Small delay to batch rapid segments
     }
-  }, [segments, isGenerating]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments, isGenerating]); // generateSummary intentionally omitted to avoid circular deps
 
   // Watch for new segments
   useEffect(() => {

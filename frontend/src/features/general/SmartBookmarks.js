@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bookmark, Flag, AlertCircle, Lightbulb, Star, Clock, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
+import { Bookmark, Flag, Lightbulb, Star, Clock, X, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './SmartBookmarks.css';

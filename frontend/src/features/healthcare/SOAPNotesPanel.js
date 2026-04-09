@@ -221,6 +221,7 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoDa
     } finally {
       setIsProcessing(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments, meetingId, lastProcessedCount, soapData, editedSections]);
 
   // Generate mock SOAP data based on transcript content

@@ -94,7 +94,7 @@ export default function LegalTermsPanel({ segments, onJumpToSegment, showDemoDat
     });
 
     return filtered;
-  }, [searchQuery]);
+  }, [searchQuery, termsData]);
 
   const toggleCategory = (category) => {
     setExpandedCategories(prev =>

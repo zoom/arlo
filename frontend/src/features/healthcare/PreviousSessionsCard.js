@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { History, ChevronDown, ChevronUp, Calendar, FileText, AlertCircle } from 'lucide-react';
+import { History, ChevronDown, ChevronUp, Calendar, AlertCircle } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './PreviousSessionsCard.css';

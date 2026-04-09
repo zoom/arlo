@@ -7,17 +7,6 @@ import WarningBanner from '../components/WarningBanner';
 import { useToast } from '../contexts/ToastContext';
 import './UpcomingMeetingsView.css';
 
-const MOCK_MEETINGS = [
-  { id: 'u1', title: 'Weekly Product Sync', date: '2026-02-17T10:00:00Z', duration: 30, isRecurring: true, zoomMeetingId: '123-456-789', autoOpenEnabled: true },
-  { id: 'u2', title: 'Q1 Planning Review', date: '2026-02-17T14:00:00Z', duration: 60, isRecurring: false, zoomMeetingId: '234-567-890', autoOpenEnabled: false },
-  { id: 'u3', title: 'Engineering Standup', date: '2026-02-18T09:00:00Z', duration: 15, isRecurring: true, zoomMeetingId: '345-678-901', autoOpenEnabled: false },
-  { id: 'u4', title: 'Design Review - Mobile App', date: '2026-02-19T11:00:00Z', duration: 45, isRecurring: false, zoomMeetingId: '456-789-012', autoOpenEnabled: false },
-  { id: 'u5', title: 'Client Presentation', date: '2026-02-20T15:30:00Z', duration: 60, isRecurring: false, zoomMeetingId: '567-890-123', autoOpenEnabled: true },
-  { id: 'u6', title: 'Team Retrospective', date: '2026-02-21T16:00:00Z', duration: 45, isRecurring: false, zoomMeetingId: '678-901-234', autoOpenEnabled: false },
-  { id: 'u7', title: 'Marketing Strategy Session', date: '2026-02-24T13:00:00Z', duration: 90, isRecurring: false, zoomMeetingId: '789-012-345', autoOpenEnabled: false },
-  { id: 'u8', title: '1:1 with Engineering Lead', date: '2026-02-25T10:00:00Z', duration: 30, isRecurring: true, zoomMeetingId: '890-123-456', autoOpenEnabled: false },
-];
-
 function formatDateTime(dateStr, duration) {
   const date = new Date(dateStr);
   const dayName = date.toLocaleDateString('en-US', { weekday: 'long' });
