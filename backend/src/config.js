@@ -47,6 +47,12 @@ module.exports = {
   publicUrl: process.env.PUBLIC_URL,
   redirectUri: process.env.ZOOM_APP_REDIRECT_URI || `${process.env.PUBLIC_URL}/api/auth/callback`,
 
+  // Zoom for Government support
+  // Set ZOOM_HOST=zoomgov.com for ZfG deployments
+  zoomHost: process.env.ZOOM_HOST || 'zoom.us',
+  zoomOAuthUrl: `https://${process.env.ZOOM_HOST || 'zoom.us'}/oauth`,
+  zoomApiUrl: `https://api.${process.env.ZOOM_HOST || 'zoom.us'}/v2`,
+
   // Database
   databaseUrl: process.env.DATABASE_URL,
 

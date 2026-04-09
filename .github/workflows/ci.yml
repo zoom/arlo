@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build --workspace=frontend
+
+      - name: Check for security vulnerabilities
+        run: npm audit --audit-level=critical
+        continue-on-error: true
+
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker images
+        run: docker-compose build
+        env:
+          ZOOM_CLIENT_ID: test
+          ZOOM_CLIENT_SECRET: test
+          PUBLIC_URL: https://example.com
+          DATABASE_URL: postgresql://postgres:postgres@postgres:5432/test
+          SESSION_SECRET: testsecrettestsecrettestsecrettestsecrettestsecrettest1234
+          REDIS_ENCRYPTION_KEY: testkeytestkeytestkey12345678901

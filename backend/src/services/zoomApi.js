@@ -51,7 +51,7 @@ async function getAccessToken(userId) {
     const tokenToRefresh = latestToken || userToken;
     const refreshToken = decryptToken(tokenToRefresh.refreshToken);
     const tokenResponse = await axios.post(
-      'https://zoom.us/oauth/token',
+      `${config.zoomOAuthUrl}/token`,
       new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
@@ -86,7 +86,7 @@ async function getAccessToken(userId) {
  */
 async function zoomGet(userId, path, params = {}) {
   async function attempt(token) {
-    return axios.get(`https://api.zoom.us/v2${path}`, {
+    return axios.get(`${config.zoomApiUrl}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
       params,
     });
@@ -112,7 +112,7 @@ async function zoomGet(userId, path, params = {}) {
  */
 async function zoomPost(userId, path, data = {}) {
   async function attempt(token) {
-    return axios.post(`https://api.zoom.us/v2${path}`, data, {
+    return axios.post(`${config.zoomApiUrl}${path}`, data, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
@@ -142,7 +142,7 @@ async function zoomPost(userId, path, data = {}) {
  */
 async function zoomDelete(userId, path) {
   async function attempt(token) {
-    return axios.delete(`https://api.zoom.us/v2${path}`, {
+    return axios.delete(`${config.zoomApiUrl}${path}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
   }
