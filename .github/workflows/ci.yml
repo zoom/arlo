@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Build Docker images
-        run: docker-compose build
+        run: docker compose build
         env:
           ZOOM_CLIENT_ID: test
           ZOOM_CLIENT_SECRET: test
