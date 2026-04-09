@@ -338,6 +338,63 @@ This is an open-source starter kit designed to be forked and customized!
 
 ---
 
+## Zoom for Government
+
+This application supports Zoom for Government (ZfG) deployments. To use with ZfG:
+
+1. Set the `ZOOM_HOST` environment variable:
+   ```bash
+   ZOOM_HOST=zoomgov.com
+   ```
+
+2. Create your app in the [Zoom for Government Marketplace](https://marketplace.zoomgov.com/)
+
+3. Use ZfG-specific URLs in your app configuration
+
+> **Note:** RTMS availability on ZfG may differ from commercial Zoom. Contact your Zoom representative for ZfG-specific access.
+
+---
+
+## Production Deployment
+
+This reference implementation is designed for **learning and prototyping**. Before deploying to production, address these items:
+
+### Security Requirements
+
+| Item | Development | Production Recommendation |
+|------|-------------|---------------------------|
+| **Credential Storage** | `.env` file | Use a secrets manager (AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) |
+| **Token Storage** | PostgreSQL with AES encryption | Add row-level encryption, use managed database with encryption at rest |
+| **Session Management** | In-memory PKCE store | Use Redis or database-backed session store |
+| **HTTPS** | ngrok tunnel | Terminate TLS at load balancer with valid certificates |
+
+### Scalability Considerations
+
+- **WebSocket Connections:** Current implementation uses in-memory connection tracking. For multiple instances, use Redis pub/sub for WebSocket message distribution.
+- **Database:** PostgreSQL is suitable for production but consider connection pooling (PgBouncer) for high concurrency.
+- **Rate Limiting:** Adjust rate limits based on expected traffic. Consider using Redis-backed rate limiting for distributed deployments.
+
+### Demo Mode
+
+Set `DISABLE_MEETING_PERSISTENCE=true` to run in demo mode where transcripts are processed in real-time but not saved to the database. This is useful for demonstrations and reduces data storage requirements.
+
+---
+
+## Known Limitations
+
+This is a reference implementation with intentional simplifications:
+
+| Pattern | Current Behavior | Production Recommendation |
+|---------|------------------|---------------------------|
+| PKCE Challenge Storage | In-memory Map | Redis with TTL |
+| WebSocket Scaling | Single-instance | Redis pub/sub adapter |
+| Retry Logic | Basic 401 retry | Exponential backoff with jitter |
+| Error Handling | Generic messages | Structured error codes and logging |
+| Webhook Processing | Synchronous | Queue-based async processing |
+| Input Validation | Basic checks | Schema validation (Joi, Zod) |
+
+---
+
 ## Resources
 
 - [Zoom Apps Documentation](https://developers.zoom.us/docs/zoom-apps/)

@@ -33,7 +33,7 @@ router.get('/start', (req, res) => {
       state,
     });
 
-    res.redirect(`https://zoom.us/oauth/authorize?${params.toString()}`);
+    res.redirect(`${config.zoomOAuthUrl}/authorize?${params.toString()}`);
   } catch (error) {
     console.error('Error starting web OAuth:', error);
     res.redirect(`${config.publicUrl}/#/auth-error?error=server_error&message=${encodeURIComponent('Failed to start authentication')}`);
@@ -71,7 +71,7 @@ router.get('/callback', async (req, res) => {
 
     // Exchange code for tokens (no PKCE — server-side flow)
     const tokenResponse = await axios.post(
-      'https://zoom.us/oauth/token',
+      `${config.zoomOAuthUrl}/token`,
       new URLSearchParams({
         grant_type: 'authorization_code',
         code,
@@ -90,7 +90,7 @@ router.get('/callback', async (req, res) => {
     // Get user info — try API first, fall back to JWT decoding
     let zoomUser;
     try {
-      const userResponse = await axios.get('https://api.zoom.us/v2/users/me', {
+      const userResponse = await axios.get(`${config.zoomApiUrl}/users/me`, {
         headers: { Authorization: `Bearer ${access_token}` },
       });
       zoomUser = userResponse.data;
@@ -229,7 +229,7 @@ router.post('/callback', async (req, res) => {
 
     // Exchange code for token
     const tokenResponse = await axios.post(
-      'https://zoom.us/oauth/token',
+      `${config.zoomOAuthUrl}/token`,
       tokenParams,
       {
         headers: {
@@ -244,7 +244,7 @@ router.post('/callback', async (req, res) => {
     // Get user info — try API first, fall back to JWT decoding if scope is missing
     let zoomUser;
     try {
-      const userResponse = await axios.get('https://api.zoom.us/v2/users/me', {
+      const userResponse = await axios.get(`${config.zoomApiUrl}/users/me`, {
         headers: {
           Authorization: `Bearer ${access_token}`,
         },
@@ -407,7 +407,7 @@ router.post('/refresh', async (req, res) => {
 
     // Request new access token
     const tokenResponse = await axios.post(
-      'https://zoom.us/oauth/token',
+      `${config.zoomOAuthUrl}/token`,
       new URLSearchParams({
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
