@@ -16,6 +16,10 @@ updates:
         exclude-patterns:
           - "@types/*"
           - "typescript"
+    ignore:
+      # Express 5 requires migration - ignore major bumps
+      - dependency-name: "express"
+        update-types: ["version-update:semver-major"]
 
   # Frontend dependencies
   - package-ecosystem: "npm"
@@ -26,6 +30,18 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     open-pull-requests-limit: 10
+    ignore:
+      # React 19 requires migration - ignore major bumps
+      - dependency-name: "react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "react-dom"
+        update-types: ["version-update:semver-major"]
+      # react-router-dom v7 has breaking changes
+      - dependency-name: "react-router-dom"
+        update-types: ["version-update:semver-major"]
+      # lucide-react major versions often have breaking icon API changes
+      - dependency-name: "lucide-react"
+        update-types: ["version-update:semver-major"]
 
   # RTMS service dependencies
   - package-ecosystem: "npm"
@@ -36,6 +52,13 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     open-pull-requests-limit: 5
+    ignore:
+      # Express 5 requires migration - ignore major bumps
+      - dependency-name: "express"
+        update-types: ["version-update:semver-major"]
+      # dotenv v17+ has breaking changes
+      - dependency-name: "dotenv"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions
   - package-ecosystem: "github-actions"
