@@ -6,7 +6,11 @@
 
 **Build Real-Time Meeting Intelligence with Zoom RTMS**
 
-[Get Started](#quick-start) · [Features](#features) · [Documentation](#documentation) · [Troubleshooting](#troubleshooting)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
+[![Zoom RTMS](https://img.shields.io/badge/Zoom-RTMS-2D8CFF.svg)](https://www.zoom.com/en/realtime-media-streams/)
+
+[Get Started](#-quick-start) · [See Demos](#-see-it-in-action) · [Features](#-features) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -16,14 +20,51 @@
 
 Arlo is an **open-source reference implementation** that demonstrates the power of Zoom's RTMS (Real-Time Media Streams) APIs. It shows developers how to build meeting assistants that capture **live transcripts without requiring a bot in the meeting**.
 
-### Use This Project To:
+<table>
+<tr>
+<td width="50%">
+
+### Use This Project To
 
 - **Learn** how RTMS webhooks, WebSockets, and transcript streaming work
-- **Fork and customize** for your specific use case (healthcare, legal, sales, etc.)
-- **Prototype** your own meeting intelligence applications
-- **Understand** authentication, data flow, and Zoom Apps best practices
+- **Fork and customize** for your specific use case
+- **Prototype** meeting intelligence applications
+- **Understand** Zoom Apps authentication and best practices
 
-> **Note:** This is a starting point, not a finished product. The industry verticals (Legal, Healthcare, etc.) are illustrative examples showing what's possible with RTMS.
+</td>
+<td width="50%">
+
+### What You'll Build
+
+- Live transcription with < 1 second latency
+- AI-powered summaries and action items
+- Full-text search across meetings
+- Industry-specific modes (Healthcare, Legal, Sales)
+
+</td>
+</tr>
+</table>
+
+> **Note:** This is a starting point for developers. The industry verticals are illustrative examples showing what's possible with RTMS.
+
+---
+
+## See It In Action
+
+<div align="center">
+
+<!--
+  DEMO VIDEO PLACEHOLDER
+  Replace with: [![Arlo Demo](./docs/assets/demo-thumbnail.png)](https://youtube.com/watch?v=YOUR_VIDEO_ID)
+-->
+
+| | |
+|:---:|:---:|
+| **Live Demo Coming Soon** | |
+| We're preparing video walkthroughs showing Arlo in action. | |
+| Check back soon or [star this repo](https://github.com/zoom/arlo) to get notified! | |
+
+</div>
 
 ---
 
@@ -32,175 +73,274 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 | Feature | Description |
 |---------|-------------|
 | **Live Transcription** | Real-time captions via RTMS (< 1 second latency) |
-| **AI Insights** | Summaries, action items, and next steps |
-| **Full-Text Search** | Search across all your meeting transcripts |
-| **Chat with Transcripts** | Ask questions about your meetings |
-| **Meeting Highlights** | Create bookmarks with timestamps |
+| **AI Insights** | Summaries, action items, and next steps powered by OpenRouter |
+| **Full-Text Search** | Search across all your meeting transcripts instantly |
+| **Chat with Transcripts** | Ask questions about your meetings using AI |
+| **Meeting Highlights** | Create bookmarks with timestamps for key moments |
 | **Export Options** | Download WebVTT files or Markdown summaries |
 | **Dark Mode** | Automatic OS detection with manual toggle |
 | **Industry Verticals** | Specialized modes for Healthcare, Legal, Sales, and Support |
+
+> **AI features work out of the box** — no API key required! Arlo uses [OpenRouter](https://openrouter.ai/) with free models (Gemini, Llama). Optional: add your own `OPENROUTER_API_KEY` for higher rate limits.
 
 ---
 
 ## Prerequisites
 
-Before you begin, make sure you have:
+Before you begin, ensure you have:
 
-| Requirement | Description |
-|-------------|-------------|
-| **Node.js 20+** | [Download here](https://nodejs.org/) |
-| **Docker Desktop** | [Download here](https://www.docker.com/products/docker-desktop/) |
-| **ngrok** | [Sign up free](https://ngrok.com/) - creates tunnels for webhooks |
-| **Zoom Account** | With access to [Zoom Marketplace](https://marketplace.zoom.us/) |
-| **RTMS Access** | **Required!** [Request access here](https://www.zoom.com/en/realtime-media-streams/#form) |
+| Requirement | Why You Need It |
+|-------------|-----------------|
+| **[Node.js 20+](https://nodejs.org/)** | Runtime for backend services |
+| **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** | Runs PostgreSQL and all services |
+| **[ngrok](https://ngrok.com/)** | Creates secure tunnels for Zoom webhooks |
+| **[Zoom Account](https://marketplace.zoom.us/)** | To create and configure your Zoom App |
 
-> **⚠️ Important:** RTMS access requires approval from Zoom. Without it, this app will not function.
+### RTMS Access Required
+
+> **This app requires RTMS access from Zoom.** RTMS (Real-Time Media Streams) enables live transcript streaming.
 >
-> **[Request RTMS Access Here](https://www.zoom.com/en/realtime-media-streams/#form)** — Apply early as approval may take a few days.
+> **[Request RTMS Access](https://www.zoom.com/en/realtime-media-streams/#form)** — Apply early, approval may take a few days.
 
 ---
 
 ## Quick Start
 
-### Step 1: Clone the Repository
+### 1. Clone & Set Up ngrok
 
 ```bash
+# Clone the repository
 git clone https://github.com/zoom/arlo.git
 cd arlo
 ```
 
-### Step 2: Set Up ngrok
-
-ngrok creates a secure tunnel from the internet to your local server (required for Zoom webhooks).
-
-**Option A: Static Domain (Recommended)**
-
-1. Create a free account at [ngrok.com](https://ngrok.com/)
-2. Go to [ngrok dashboard](https://dashboard.ngrok.com/domains) → **Create Domain**
-3. You'll get a permanent URL like: `yourname-arlo.ngrok-free.app`
-4. Start ngrok:
-   ```bash
-   ngrok http 3000 --domain=yourname-arlo.ngrok-free.app
-   ```
-
-**Option B: Random Domain**
+Start ngrok to create a public URL for Zoom webhooks:
 
 ```bash
+# Option A: Static domain (recommended - free, doesn't change)
+ngrok http 3000 --domain=your-name.ngrok-free.app
+
+# Option B: Random domain (changes each restart)
 ngrok http 3000
-# Copy the https:// URL (changes each restart)
 ```
 
-> **Tip:** Static domains are free and save you from updating Zoom settings every time you restart ngrok.
+> **Tip:** Get a free static domain at [ngrok dashboard → Domains](https://dashboard.ngrok.com/domains) to avoid reconfiguring Zoom settings.
 
-### Step 3: Create Your Zoom App
+**Keep this terminal running** and note your URL (e.g., `https://your-name.ngrok-free.app`).
 
-1. Go to [Zoom Marketplace](https://marketplace.zoom.us/) → **Develop** → **Build App**
-2. Select **General App** and name it (e.g., "Arlo Meeting Assistant")
-3. Note your **Client ID** and **Client Secret**
+---
 
-### Step 4: Configure Environment Variables
+### 2. Create Your Zoom App
+
+1. Go to **[Zoom Marketplace](https://marketplace.zoom.us/)** → Develop → Build App
+2. Select **General App** → name it (e.g., "Arlo Meeting Assistant")
+3. Copy your **Client ID** and **Client Secret**
+
+---
+
+### 3. Configure Environment
 
 ```bash
-# Copy the example file
 cp .env.example .env
 ```
 
-Edit `.env` and fill in these values:
+Edit `.env` with your values:
 
 ```bash
-# Your Zoom app credentials (from Step 3)
-ZOOM_CLIENT_ID=your_client_id_here
-ZOOM_CLIENT_SECRET=your_client_secret_here
+# From Zoom Marketplace (Step 2)
+ZOOM_CLIENT_ID=your_client_id
+ZOOM_CLIENT_SECRET=your_client_secret
 
-# Your ngrok URL (from Step 2)
-PUBLIC_URL=https://yourname-arlo.ngrok-free.app
+# Your ngrok URL (Step 1)
+PUBLIC_URL=https://your-name.ngrok-free.app
 
-# Generate these secrets (run each command and paste the output)
-# node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-SESSION_SECRET=paste_64_character_string_here
-
-# node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
-REDIS_ENCRYPTION_KEY=paste_32_character_string_here
+# Generate secrets (run these commands, paste the output)
+SESSION_SECRET=       # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+REDIS_ENCRYPTION_KEY= # node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
 ```
 
-### Step 5: Configure Your Zoom App
+---
 
-In [Zoom Marketplace](https://marketplace.zoom.us/) → Your App, configure these settings:
+### 4. Configure Zoom App Settings
 
-**Basic Information:**
+In [Zoom Marketplace](https://marketplace.zoom.us/) → Your App:
+
+<details>
+<summary><strong>Basic Information</strong></summary>
+
 | Setting | Value |
 |---------|-------|
 | OAuth Redirect URL | `https://YOUR-NGROK-URL/api/auth/callback` |
 | OAuth Allow List | `https://YOUR-NGROK-URL` |
 
-**Features → Zoom App SDK:**
-- Click **Add APIs** and enable all required capabilities
+</details>
+
+<details>
+<summary><strong>Scopes</strong></summary>
+
+Add these OAuth scopes:
+- `meeting:read` — Read meeting details
+- `user:read` — Read user profile
+
+</details>
+
+<details>
+<summary><strong>Features → Zoom App SDK</strong></summary>
+
+- Click **Add APIs** and enable required capabilities
 - **Enable RTMS → Transcripts** (requires RTMS approval)
 
-**Features → Surface:**
+</details>
+
+<details>
+<summary><strong>Features → Surface</strong></summary>
+
 | Setting | Value |
 |---------|-------|
 | Home URL | `https://YOUR-NGROK-URL` |
-| Domain Allow List | Add `https://YOUR-NGROK-URL` |
+| Domain Allow List | `https://YOUR-NGROK-URL` |
 
-**Features → Event Subscriptions:**
+</details>
+
+<details>
+<summary><strong>Features → Event Subscriptions</strong></summary>
+
 | Setting | Value |
 |---------|-------|
 | Event notification endpoint | `https://YOUR-NGROK-URL/api/rtms/webhook` |
-| Events | `meeting.rtms_started`, `meeting.rtms_stopped` |
+| Events to subscribe | `meeting.rtms_started`, `meeting.rtms_stopped` |
 
-> Replace `YOUR-NGROK-URL` with your actual ngrok domain (e.g., `yourname-arlo.ngrok-free.app`)
+</details>
 
-### Step 6: Start the Application
+> Replace `YOUR-NGROK-URL` with your actual ngrok URL (e.g., `your-name.ngrok-free.app`)
+
+---
+
+### 5. Start the Application
 
 ```bash
-# Start all services with Docker
 docker-compose up --build
 ```
 
-Wait for the services to start. You should see:
-- PostgreSQL database starting
-- Backend API starting on port 3000
-- Frontend starting on port 3001
-- RTMS service starting on port 3002
+Wait for all services to start:
+- PostgreSQL database
+- Backend API (port 3000)
+- Frontend (port 3001)
+- RTMS service (port 3002)
 
-### Step 7: Test in Zoom
+---
+
+### 6. Test in Zoom
 
 1. Start or join a Zoom meeting
-2. Click **Apps** in the Zoom toolbar
+2. Click **Apps** in the toolbar
 3. Find and open your app
 4. Click **"Start Arlo"** to begin transcription
-5. See live transcripts appear!
+5. Watch live transcripts appear in the **Transcript** tab
+6. Switch to **Arlo Assist** to try AI features:
+   - Generate meeting summaries
+   - Extract action items
+   - Ask questions about your meeting
+
+---
+
+## Industry Verticals
+
+Arlo includes specialized modes demonstrating RTMS capabilities for different industries. Each vertical shows how real-time transcription can power domain-specific features.
+
+<table>
+<tr>
+<td align="center" width="50%">
+
+### General
+**Full-Featured Note-Taking**
+
+Meeting summaries, key decisions, action items, participant stats, and talk time analytics.
+
+<!-- Demo: docs/assets/demos/general-demo.mp4 -->
+*Demo video coming soon*
+
+</td>
+<td align="center" width="50%">
+
+### Healthcare
+**Clinical Documentation**
+
+SOAP notes auto-generation, clinical alerts for drug interactions, patient context sidebar.
+
+<!-- Demo: docs/assets/demos/healthcare-demo.mp4 -->
+*Demo video coming soon*
+
+</td>
+</tr>
+<tr>
+<td align="center" width="50%">
+
+### Legal
+**Deposition Assistance**
+
+Contradiction detection, billable time tracking, exhibit markers, privilege flags.
+
+<!-- Demo: docs/assets/demos/legal-demo.mp4 -->
+*Demo video coming soon*
+
+</td>
+<td align="center" width="50%">
+
+### Sales
+**Deal Intelligence**
+
+BANT qualification tracking, competitor mention detection, commitment tracking.
+
+<!-- Demo: docs/assets/demos/sales-demo.mp4 -->
+*Demo video coming soon*
+
+</td>
+</tr>
+<tr>
+<td align="center" colspan="2">
+
+### Customer Support
+**Agent Assistance**
+
+Live sentiment meter, escalation alerts, resolution workflow tracking.
+
+<!-- Demo: docs/assets/demos/support-demo.mp4 -->
+*Demo video coming soon*
+
+</td>
+</tr>
+</table>
+
+> **Building your own vertical?** Fork this repo and customize the frontend components in `frontend/src/features/` for your specific use case.
 
 ---
 
 ## Troubleshooting
 
-### Database / Prisma Errors
+<details>
+<summary><strong>Database / Prisma Errors</strong></summary>
 
 **"Cannot find module '.prisma/client'"**
-
 ```bash
-# Regenerate Prisma client inside Docker
 docker-compose exec backend npx prisma generate
 docker-compose restart backend
 ```
 
 **"Can't reach database server"**
-
 ```bash
-# Wait for PostgreSQL to be healthy, then restart
 docker-compose restart postgres backend
 ```
 
 **Tables don't exist**
-
 ```bash
-# Push the schema to database
 docker-compose exec backend npx prisma db push
 ```
 
-### Clean Restart
+</details>
+
+<details>
+<summary><strong>Clean Restart</strong></summary>
 
 If you're having persistent issues:
 
@@ -212,57 +352,29 @@ docker-compose down -v
 docker-compose up --build -V
 ```
 
-### ngrok Issues
+</details>
+
+<details>
+<summary><strong>ngrok Issues</strong></summary>
 
 **App stops working after restarting ngrok?**
 
-If using a random domain, you'll need to:
+If using a random domain:
 1. Copy the new ngrok URL
 2. Update `PUBLIC_URL` in `.env`
 3. Update all URLs in Zoom Marketplace settings
 4. Restart: `docker-compose restart backend`
 
-> **Pro tip:** Use a static ngrok domain to avoid this!
+> **Pro tip:** Use a [static ngrok domain](https://dashboard.ngrok.com/domains) (free) to avoid this!
 
-### More Help
+</details>
+
+<details>
+<summary><strong>More Help</strong></summary>
 
 See the full [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for additional issues.
 
----
-
-## Industry Verticals
-
-Arlo includes specialized modes that demonstrate RTMS capabilities for different industries:
-
-### General (Default)
-Full-featured note-taking for any meeting type.
-- Meeting summaries, key moments, decisions
-- Participant stats and talk time
-- Action items and open questions
-
-### Healthcare
-Clinical documentation for patient encounters.
-- SOAP notes auto-generation
-- Clinical alerts for drug interactions
-- Patient context sidebar
-
-### Legal
-Deposition and testimony assistance.
-- Contradiction detection
-- Billable time tracking
-- Exhibit and privilege markers
-
-### Sales
-Deal tracking and qualification.
-- BANT qualification tracking
-- Competitor mention detection
-- Commitment tracking
-
-### Customer Support
-Call center agent assistance.
-- Live sentiment meter
-- Escalation alerts
-- Resolution workflow tracking
+</details>
 
 ---
 
@@ -270,11 +382,11 @@ Call center agent assistance.
 
 | Document | Description |
 |----------|-------------|
-| [CLAUDE.md](./CLAUDE.md) | Quick reference for AI assistants |
 | [Architecture](./docs/ARCHITECTURE.md) | System design and data flow |
 | [Project Status](./docs/PROJECT_STATUS.md) | Roadmap and current progress |
 | [Specification](./SPEC.md) | Feature spec and milestones |
 | [Troubleshooting](./docs/TROUBLESHOOTING.md) | Common issues and fixes |
+| [CLAUDE.md](./CLAUDE.md) | Quick reference for AI assistants |
 
 ---
 
@@ -284,8 +396,8 @@ Call center agent assistance.
 
 ```
 arlo/
-├── backend/           # Express API server + Prisma
-├── frontend/          # React Zoom App
+├── backend/           # Express API server + Prisma ORM
+├── frontend/          # React Zoom App (CRA)
 ├── rtms/              # RTMS transcript ingestion service
 ├── docs/              # Documentation
 └── docker-compose.yml # Development environment
@@ -294,29 +406,22 @@ arlo/
 ### Common Commands
 
 ```bash
-# Start all services
-docker-compose up
-
-# View logs
-docker-compose logs -f backend
-
-# Restart a service
-docker-compose restart backend
-
-# Database GUI
-npm run db:studio
-
-# Clean restart (deletes data!)
-docker-compose down -v && docker-compose up --build
+docker-compose up                    # Start all services
+docker-compose logs -f backend       # View backend logs
+docker-compose restart backend       # Restart a service
+docker-compose down -v               # Stop and remove volumes
+npm run db:studio                    # Open Prisma database GUI
 ```
 
 ### Tech Stack
 
-- **Frontend:** React 18, Zoom Apps SDK, Base UI
-- **Backend:** Node.js 20, Express, Prisma
-- **Database:** PostgreSQL 15
-- **AI:** OpenRouter (free models available)
-- **Real-time:** WebSocket + RTMS SDK
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, Zoom Apps SDK, Base UI |
+| Backend | Node.js 20, Express, Prisma |
+| Database | PostgreSQL 15 |
+| AI | OpenRouter (free models available) |
+| Real-time | WebSocket + RTMS SDK |
 
 ---
 
@@ -326,57 +431,47 @@ This is an open-source starter kit designed to be forked and customized!
 
 1. **Fork** this repository
 2. **Customize** for your use case
-3. **Share** improvements via pull request (optional)
+3. **Share** improvements via pull request
 
 ### Ideas for Extension
 
-- Multi-language support
+- Multi-language transcription support
 - Custom AI models (local LLMs)
-- Team workspaces
+- Team workspaces and sharing
 - Calendar integration
-- Video replay sync
+- Video replay with transcript sync
 
 ---
 
 ## Zoom for Government
 
-This application supports Zoom for Government (ZfG) deployments. To use with ZfG:
+This application supports Zoom for Government (ZfG) deployments:
 
-1. Set the `ZOOM_HOST` environment variable:
-   ```bash
-   ZOOM_HOST=zoomgov.com
-   ```
+```bash
+# In your .env file
+ZOOM_HOST=zoomgov.com
+```
 
-2. Create your app in the [Zoom for Government Marketplace](https://marketplace.zoomgov.com/)
+1. Create your app in the [Zoom for Government Marketplace](https://marketplace.zoomgov.com/)
+2. Use ZfG-specific URLs in your configuration
 
-3. Use ZfG-specific URLs in your app configuration
-
-> **Note:** RTMS availability on ZfG may differ from commercial Zoom. Contact your Zoom representative for ZfG-specific access.
+> **Note:** RTMS availability on ZfG may differ. Contact your Zoom representative for ZfG-specific access.
 
 ---
 
 ## Production Deployment
 
-This reference implementation is designed for **learning and prototyping**. Before deploying to production, address these items:
+This reference implementation is designed for **learning and prototyping**. Before production deployment:
 
-### Security Requirements
-
-| Item | Development | Production Recommendation |
+| Area | Development | Production Recommendation |
 |------|-------------|---------------------------|
-| **Credential Storage** | `.env` file | Use a secrets manager (AWS Secrets Manager, HashiCorp Vault, Azure Key Vault) |
-| **Token Storage** | PostgreSQL with AES encryption | Add row-level encryption, use managed database with encryption at rest |
-| **Session Management** | In-memory PKCE store | Use Redis or database-backed session store |
-| **HTTPS** | ngrok tunnel | Terminate TLS at load balancer with valid certificates |
+| **Credentials** | `.env` file | Secrets manager (AWS, Vault, Azure) |
+| **Tokens** | PostgreSQL + AES | Add encryption at rest |
+| **Sessions** | In-memory | Redis or database-backed |
+| **HTTPS** | ngrok tunnel | Load balancer with TLS |
+| **WebSockets** | Single instance | Redis pub/sub for scaling |
 
-### Scalability Considerations
-
-- **WebSocket Connections:** Current implementation uses in-memory connection tracking. For multiple instances, use Redis pub/sub for WebSocket message distribution.
-- **Database:** PostgreSQL is suitable for production but consider connection pooling (PgBouncer) for high concurrency.
-- **Rate Limiting:** Adjust rate limits based on expected traffic. Consider using Redis-backed rate limiting for distributed deployments.
-
-### Demo Mode
-
-Set `DISABLE_MEETING_PERSISTENCE=true` to run in demo mode where transcripts are processed in real-time but not saved to the database. This is useful for demonstrations and reduces data storage requirements.
+See [Known Limitations](#known-limitations) for additional considerations.
 
 ---
 
@@ -384,14 +479,13 @@ Set `DISABLE_MEETING_PERSISTENCE=true` to run in demo mode where transcripts are
 
 This is a reference implementation with intentional simplifications:
 
-| Pattern | Current Behavior | Production Recommendation |
-|---------|------------------|---------------------------|
-| PKCE Challenge Storage | In-memory Map | Redis with TTL |
+| Pattern | Current | Production Recommendation |
+|---------|---------|---------------------------|
+| PKCE Storage | In-memory Map | Redis with TTL |
 | WebSocket Scaling | Single-instance | Redis pub/sub adapter |
-| Retry Logic | Basic 401 retry | Exponential backoff with jitter |
-| Error Handling | Generic messages | Structured error codes and logging |
-| Webhook Processing | Synchronous | Queue-based async processing |
-| Input Validation | Basic checks | Schema validation (Joi, Zod) |
+| Retry Logic | Basic 401 retry | Exponential backoff |
+| Webhook Processing | Synchronous | Queue-based async |
+| Input Validation | Basic checks | Schema validation (Zod) |
 
 ---
 
@@ -415,7 +509,7 @@ This is a reference implementation with intentional simplifications:
 
 ## License
 
-MIT License - See [LICENSE](./LICENSE) for details.
+MIT License — See [LICENSE](./LICENSE) for details.
 
 ---
 
@@ -423,6 +517,6 @@ MIT License - See [LICENSE](./LICENSE) for details.
 
 **Ready to build your own meeting assistant?**
 
-[Get Started](#-quick-start) · [Star this repo](https://github.com/zoom/arlo) ⭐
+[Get Started](#-quick-start) · [Star this repo](https://github.com/zoom/arlo)
 
 </div>
