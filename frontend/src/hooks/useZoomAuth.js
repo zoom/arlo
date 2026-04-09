@@ -36,14 +36,87 @@ export default function useZoomAuth() {
 
     try {
       // 1. Get PKCE challenge from backend
+      console.log('Fetching PKCE challenge from backend...');
       const response = await fetch('/api/auth/authorize');
       if (!response.ok) throw new Error('Failed to get auth challenge');
       const { codeChallenge, state } = await response.json();
+      console.log('Got PKCE challenge, state:', state);
+
+      // Helper to exchange code for session
+      const exchangeCode = async (code) => {
+        const callbackResponse = await fetch('/api/auth/callback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ code, state }),
+        });
+
+        if (!callbackResponse.ok) {
+          const data = await callbackResponse.json().catch(() => ({}));
+          throw new Error(data.error || `Auth callback failed (${callbackResponse.status})`);
+        }
+
+        const data = await callbackResponse.json();
+        login(data.user, data.wsToken);
+        return data;
+      };
 
       // 2. Register listener BEFORE calling authorize (SDK is configured by now)
+      console.log('Registering onAuthorized listener...');
       const authPromise = new Promise((resolve, reject) => {
+        let resolved = false;
+        let pollIntervalId = null;
+
+        // Poll for code as fallback (in case browser callback completes but onAuthorized doesn't fire)
+        const startPolling = () => {
+          console.log('Starting poll for authorization code...');
+          pollIntervalId = setInterval(async () => {
+            if (resolved) {
+              clearInterval(pollIntervalId);
+              return;
+            }
+            try {
+              const pollResponse = await fetch(`/api/auth/poll-code?state=${encodeURIComponent(state)}`);
+              const pollData = await pollResponse.json();
+              if (pollData.ready && pollData.code) {
+                console.log('Poll received code, exchanging...');
+                clearInterval(pollIntervalId);
+                if (!resolved) {
+                  resolved = true;
+                  zoomSdk.removeEventListener('onAuthorized', handler);
+                  cleanupRef.current = null;
+                  try {
+                    const result = await exchangeCode(pollData.code);
+                    resolve(result);
+                  } catch (err) {
+                    reject(err);
+                  }
+                }
+              }
+            } catch (err) {
+              // Polling error - continue trying
+              console.warn('Poll error:', err);
+            }
+          }, 1000); // Poll every second
+        };
+
+        // Timeout after 60 seconds
+        const timeoutId = setTimeout(() => {
+          if (!resolved) {
+            console.error('Authorization timeout after 60s');
+            clearInterval(pollIntervalId);
+            zoomSdk.removeEventListener('onAuthorized', handler);
+            cleanupRef.current = null;
+            reject(new Error('Authorization timed out'));
+          }
+        }, 60000);
+
         const handler = async (event) => {
-          // Self-clean immediately
+          if (resolved) return;
+          resolved = true;
+          clearTimeout(timeoutId);
+          clearInterval(pollIntervalId);
+          console.log('onAuthorized event received:', event);
           zoomSdk.removeEventListener('onAuthorized', handler);
           cleanupRef.current = null;
 
@@ -54,33 +127,35 @@ export default function useZoomAuth() {
           }
 
           try {
-            // Use state from our PKCE request — the SDK does not return it in the event
-            const callbackResponse = await fetch('/api/auth/callback', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              credentials: 'include',
-              body: JSON.stringify({ code, state }),
-            });
-
-            if (!callbackResponse.ok) {
-              const data = await callbackResponse.json().catch(() => ({}));
-              throw new Error(data.error || `Auth callback failed (${callbackResponse.status})`);
-            }
-
-            const data = await callbackResponse.json();
-            login(data.user, data.wsToken);
-            resolve(data);
+            const result = await exchangeCode(code);
+            resolve(result);
           } catch (err) {
             reject(err);
           }
         };
 
-        cleanupRef.current = () => zoomSdk.removeEventListener('onAuthorized', handler);
+        cleanupRef.current = () => {
+          clearTimeout(timeoutId);
+          clearInterval(pollIntervalId);
+          zoomSdk.removeEventListener('onAuthorized', handler);
+        };
+
         zoomSdk.addEventListener('onAuthorized', handler);
+
+        // Start polling after a short delay (give onAuthorized a chance to fire first)
+        setTimeout(startPolling, 2000);
       });
 
       // 3. Trigger Zoom OAuth (listener is already registered)
-      await zoomSdk.authorize({ codeChallenge, state });
+      console.log('Calling zoomSdk.authorize with challenge...');
+      try {
+        const authorizeResult = await zoomSdk.authorize({ codeChallenge, state });
+        console.log('zoomSdk.authorize returned:', authorizeResult);
+      } catch (authError) {
+        console.error('zoomSdk.authorize failed:', authError);
+        throw authError;
+      }
+      console.log('Waiting for onAuthorized event...');
 
       // 4. Wait for the onAuthorized handler to complete the exchange
       return await authPromise;

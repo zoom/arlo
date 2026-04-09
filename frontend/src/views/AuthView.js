@@ -39,11 +39,18 @@ export default function AuthView() {
   }, [login, navigate]);
 
   const handleConnect = async () => {
+    console.log('handleConnect called:', {
+      isBrowser,
+      runningContext,
+      zoomSdkAvailable: !!window.zoomSdk,
+    });
     if (isBrowser) {
       // Outside Zoom — redirect to web OAuth flow
+      console.log('Redirecting to web OAuth (isBrowser=true)');
       window.location.href = '/api/auth/start';
       return;
     }
+    console.log('Using in-client OAuth');
     try {
       await authorize();
       // Navigation handled by the useEffect above after login sets isAuthenticated
