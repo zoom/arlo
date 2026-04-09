@@ -376,6 +376,58 @@ Output ONLY valid JSON, no markdown.`;
   }
 }
 
+/**
+ * Extract key moments from recent transcript segments
+ * @param {string} text - Recent transcript text to analyze
+ * @returns {Promise<object|null>} Key moment object or null if no significant moment
+ */
+async function extractKeyMoment(text) {
+  const systemPrompt = `You are an expert at identifying key moments in meetings.
+Analyze the text and determine if it contains a significant moment worth highlighting.
+
+Key moment types:
+- announcement: Important news, decisions, or policy changes
+- agreement: Consensus reached, commitments made
+- concern: Risks, issues, or problems raised
+- insight: Valuable observations or creative ideas
+- milestone: Progress updates, completions, or achievements
+
+Return ONLY a JSON object if this is a key moment:
+{
+  "type": "announcement|agreement|concern|insight|milestone",
+  "text": "the significant quote (keep it concise, under 100 chars)",
+  "confidence": 0-100
+}
+
+Return {"skip": true} if the text is not significant enough to be a key moment.
+Examples of what to skip: small talk, filler phrases, routine updates, repetition.
+
+Output ONLY valid JSON, no markdown.`;
+
+  const prompt = `Is this a key moment? "${text}"`;
+
+  try {
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 150 });
+    const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (parsed.skip) return null;
+      if (!parsed.type || !parsed.text) return null;
+      return {
+        type: parsed.type,
+        text: parsed.text,
+        confidence: parsed.confidence || 50,
+      };
+    } catch {
+      return null;
+    }
+  } catch (error) {
+    console.error('❌ Key moment extraction failed:', error.message);
+    return null;
+  }
+}
+
 module.exports = {
   callOpenRouter,
   generateSummary,
@@ -385,4 +437,5 @@ module.exports = {
   generateSuggestions,
   extractSOAPNotes,
   analyzeSentiment,
+  extractKeyMoment,
 };

@@ -23,7 +23,7 @@ const DEMO_DECISIONS = [
   },
   {
     id: 2,
-    text: 'Launch with Apple Pay only; add full Stripe integration in May update',
+    text: 'Launch with basic checkout first; add full payment gateway integration in May update',
     madeBy: 'Team consensus',
     timestamp: '10:22:18 AM',
     seqNo: 62,
@@ -40,7 +40,7 @@ const DEMO_DECISIONS = [
   {
     id: 4,
     text: 'New engineer Raj starts March 25 — will lead mobile backend work',
-    madeBy: 'Marcus Chen',
+    madeBy: 'Morgan Chen',
     timestamp: '10:32:18 AM',
     seqNo: 88,
     isAutoDetected: true,

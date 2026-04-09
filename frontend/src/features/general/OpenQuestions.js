@@ -15,7 +15,7 @@ import './OpenQuestions.css';
 const DEMO_QUESTIONS = [
   {
     id: 1,
-    text: 'Do we have a backup vendor if Stripe continues to have sandbox issues?',
+    text: 'Do we have a backup plan if the payment gateway sandbox issues continue?',
     askedBy: 'Priya Sharma',
     timestamp: '10:16:22 AM',
     seqNo: 48,
@@ -43,7 +43,7 @@ const DEMO_QUESTIONS = [
   {
     id: 4,
     text: 'Should we do a soft launch in one market first or go global?',
-    askedBy: 'Marcus Chen',
+    askedBy: 'Morgan Chen',
     timestamp: '10:35:18 AM',
     seqNo: 95,
     answered: false,

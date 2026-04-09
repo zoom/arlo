@@ -22,7 +22,7 @@ const DEMO_ENTRIES = [
   {
     id: 1,
     activityCode: 'DEP',
-    description: 'Deposition of Patricia Hernandez (HR Director)',
+    description: 'Deposition of Patricia Johnson (HR Director)',
     startTime: Date.now() - 5832000, // 1h 37m 12s ago
     endTime: null,
     matter: 'Thompson v. Nexus Technologies',

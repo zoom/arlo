@@ -448,6 +448,17 @@ router.post('/refresh', async (req, res) => {
 });
 
 /**
+ * GET /api/auth/settings
+ * Return public server settings/feature flags (no auth required)
+ */
+router.get('/settings', (req, res) => {
+  res.json({
+    meetingPersistenceEnabled: !config.disableMeetingPersistence,
+    demoMode: config.disableMeetingPersistence,
+  });
+});
+
+/**
  * POST /api/auth/logout
  * Logout user (revoke token)
  */

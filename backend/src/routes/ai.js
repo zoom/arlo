@@ -10,6 +10,7 @@ const {
   chatWithTranscript,
   extractSOAPNotes,
   analyzeSentiment,
+  extractKeyMoment,
 } = require('../services/openrouter');
 
 // Apply dev auth bypass at router level (must run before requireAuth/optionalAuth)
@@ -421,6 +422,65 @@ router.post('/sentiment', optionalAuth, async (req, res) => {
   } catch (error) {
     console.error('❌ Sentiment analysis error:', error.message);
     res.status(500).json({ error: 'Sentiment analysis failed' });
+  }
+});
+
+/**
+ * POST /api/ai/summary-live
+ * Generate meeting summary from raw transcript text (for live meetings)
+ * Used when we have segments but the meeting isn't saved to DB yet
+ */
+router.post('/summary-live', optionalAuth, async (req, res) => {
+  const { transcript, title } = req.body;
+
+  if (!config.aiEnabled) {
+    return res.status(503).json({ error: 'AI features are disabled' });
+  }
+
+  if (!transcript || typeof transcript !== 'string' || transcript.trim().length < 50) {
+    return res.status(400).json({ error: 'transcript is required (min 50 chars)' });
+  }
+
+  try {
+    console.log(`🤖 Generating live summary (${transcript.length} chars)`);
+    const summary = await generateSummary(transcript.trim(), title || 'Live Meeting');
+
+    res.json({
+      summary,
+      generatedAt: Date.now(),
+    });
+  } catch (error) {
+    console.error('❌ Live summary generation error:', error.message);
+    res.status(500).json({ error: 'Failed to generate summary' });
+  }
+});
+
+/**
+ * POST /api/ai/key-moment
+ * Analyze a transcript segment to detect if it's a key moment
+ * Used for real-time key moment detection during meetings
+ */
+router.post('/key-moment', optionalAuth, async (req, res) => {
+  const { text } = req.body;
+
+  if (!config.aiEnabled) {
+    return res.status(503).json({ error: 'AI features are disabled' });
+  }
+
+  if (!text || typeof text !== 'string' || text.trim().length < 10) {
+    return res.status(400).json({ error: 'text is required (min 10 chars)' });
+  }
+
+  try {
+    const result = await extractKeyMoment(text.trim());
+    if (result) {
+      res.json(result);
+    } else {
+      res.json({ skip: true });
+    }
+  } catch (error) {
+    console.error('❌ Key moment extraction error:', error.message);
+    res.status(500).json({ error: 'Key moment extraction failed' });
   }
 });
 

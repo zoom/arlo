@@ -17,7 +17,7 @@ import './LegalTermsPanel.css';
 // Demo extracted terms for testing — Employment discrimination case (Thompson v. Nexus Technologies)
 const DEMO_TERMS = {
   parties: [
-    { id: 1, term: 'Patricia Hernandez', role: 'HR Director / Deponent', mentions: 32, firstSeqNo: 1 },
+    { id: 1, term: 'Patricia Johnson', role: 'HR Director / Deponent', mentions: 32, firstSeqNo: 1 },
     { id: 2, term: 'David Thompson', role: 'Plaintiff', mentions: 28, firstSeqNo: 8 },
     { id: 3, term: 'Nexus Technologies Inc.', role: 'Defendant', mentions: 15, firstSeqNo: 12 },
     { id: 4, term: 'Michael Chen', role: 'CEO (decision-maker)', mentions: 11, firstSeqNo: 42 },

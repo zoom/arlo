@@ -146,3 +146,44 @@
 .key-moment:hover .key-moment-link {
   opacity: 1;
 }
+
+/* AI status badges */
+.key-moments-analyzing-badge,
+.key-moments-waiting-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-family: var(--font-sans);
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.key-moments-analyzing-badge {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.key-moments-analyzing-badge svg {
+  animation: spin 1s linear infinite;
+}
+
+.key-moments-waiting-badge {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+/* Empty state */
+.key-moments-empty {
+  padding: 16px;
+  text-align: center;
+  font-style: italic;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

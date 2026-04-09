@@ -3,15 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import MeetingCard from '../components/MeetingCard';
 import DeleteMeetingDialog from '../components/DeleteMeetingDialog';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
+import { useServerSettings } from '../contexts/ServerSettingsContext';
 import './MeetingsListView.css';
 
 export default function MeetingsListView() {
   const navigate = useNavigate();
+  const { showMeetingHistory, demoMode } = useServerSettings();
   const [meetings, setMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   useEffect(() => {
+    // Skip fetching if persistence is disabled
+    if (!showMeetingHistory) {
+      setLoading(false);
+      return;
+    }
+
     async function fetchMeetings() {
       try {
         const res = await fetch('/api/meetings', { credentials: 'include' });
@@ -26,7 +34,7 @@ export default function MeetingsListView() {
       }
     }
     fetchMeetings();
-  }, []);
+  }, [showMeetingHistory]);
 
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
@@ -48,6 +56,20 @@ export default function MeetingsListView() {
     return (
       <div className="meetings-loading">
         <LoadingSpinner />
+      </div>
+    );
+  }
+
+  // Show message when demo mode is enabled
+  if (demoMode) {
+    return (
+      <div className="meetings-list-view">
+        <div className="meetings-empty">
+          <p className="text-serif text-muted">Demo Mode</p>
+          <p className="text-muted text-sm">
+            Meeting history is disabled in demo mode. Real-time transcription still works during active meetings.
+          </p>
+        </div>
       </div>
     );
   }
