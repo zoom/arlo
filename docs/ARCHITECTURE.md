@@ -318,6 +318,13 @@ A standalone web app for browsing meeting history outside of Zoom is planned for
 
 The application supports **5 industry-specific modes** that customize the UI, terminology, and AI prompts for different use cases. Each vertical is a collection of React components rendered in the "Arlo Assist" tab during live meetings.
 
+**Available Verticals:**
+- **Arlo for Notes** — Full-featured meeting note-taker (default)
+- **Arlo for Healthcare** — Clinical documentation with SOAP notes
+- **Arlo for Legal** — Deposition and testimony assistance
+- **Arlo for Sales** — Deal tracking and qualification
+- **Arlo for Support** — Customer support agent assistance
+
 **Architecture:**
 
 ```
@@ -329,7 +336,7 @@ VerticalContext (React Context)
 └── aiPromptPrefix: string (AI system prompt modifier)
 
 /features/
-├── general/          # Default note-taker (6 components)
+├── general/          # Arlo for Notes (6 components)
 │   ├── MeetingSummary.js     # AI-generated summary with key points
 │   ├── KeyMoments.js         # Auto-detected highlights (announcements, decisions)
 │   ├── DecisionsLog.js       # Track decisions with attribution
@@ -337,7 +344,7 @@ VerticalContext (React Context)
 │   ├── ParticipantStats.js   # Talk time and participation balance
 │   └── SmartBookmarks.js     # Quick categorized bookmarking
 │
-├── healthcare/       # Clinical documentation (6 components)
+├── healthcare/       # Arlo for Healthcare (6 components)
 │   ├── SOAPNotesPanel.js     # Subjective/Objective/Assessment/Plan
 │   ├── PatientContextCard.js # Conditions, allergies, medications
 │   ├── ClinicalAlerts.js     # Drug interactions, contradictions
@@ -345,19 +352,19 @@ VerticalContext (React Context)
 │   ├── PreviousSessionsCard.js
 │   └── HealthcareTagsSummary.js
 │
-├── legal/            # Depositions & testimony (4 components)
+├── legal/            # Arlo for Legal (4 components)
 │   ├── ContradictionDetector.js  # Flag conflicting statements
 │   ├── LegalTermsPanel.js        # Parties, dates, amounts, citations
 │   ├── ExhibitTracker.js         # Document references with timestamps
 │   └── PrivilegeMarkers.js       # Attorney-client privilege flags
 │
-├── sales/            # Deal tracking & qualification (4 components)
+├── sales/            # Arlo for Sales (4 components)
 │   ├── DealTracker.js           # Pipeline stage, value, contacts
 │   ├── QualificationSignals.js  # Budget/Authority/Need/Timeline
 │   ├── CompetitorMentions.js    # Competitive intel with sentiment
 │   └── CommitmentsPanel.js      # Next steps with ownership
 │
-└── support/          # Customer support & call center (4 components)
+└── support/          # Arlo for Support (4 components)
     ├── SentimentMeter.js       # Live customer mood gauge
     ├── EscalationAlerts.js     # Manager requests, churn risk
     ├── ResolutionTracker.js    # Issue → Solution → Confirmed

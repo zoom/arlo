@@ -1,351 +1,223 @@
 # Troubleshooting Guide
 
-Common issues and solutions when running the Zoom Consent RTMS App.
+Common issues and solutions when running Arlo Meeting Assistant.
 
 ---
 
-## App Not Loading in Zoom Client
+## Quick Fixes
 
-### Issue: Shows "Zoom App Home - OAuth will be implemented in Phase 6"
+Most issues can be resolved with these commands:
 
-**Cause:** Old routing that returned text instead of serving the React app.
-
-**Solution:**
-1. Restart Docker services with the latest code:
-   ```bash
-   docker-compose down
-   docker-compose up --build
-   ```
-
-2. Verify backend is proxying to frontend:
-   ```bash
-   docker-compose logs backend | grep "Proxying to frontend"
-   ```
-
-3. Check Home URL in Zoom Marketplace points to: `https://your-ngrok-url.ngrok-free.app/api/zoomapp/home`
-
-### Issue: "403 Forbidden, domain or scheme is not allowed: http://frontend:3000"
-
-**Cause:** Backend was redirecting to Docker internal address instead of proxying content.
-
-**Why this happens:**
-- `http://frontend:3000` is a Docker internal network address
-- Zoom's embedded browser runs on your machine, not inside Docker
-- It can only access public URLs (ngrok) or localhost
-- Redirecting to Docker internal addresses violates CORS/OWASP requirements
-
-**Solution:**
-- The `/api/zoomapp/home` route now **proxies** content from frontend instead of redirecting
-- The Zoom client only communicates with the backend via ngrok
-- The backend fetches content from frontend internally and serves it back
-
-**Fixed in:** `backend/src/routes/zoomapp.js` (no redirect, uses proxy middleware)
-
-### Issue: "Invalid Host header" in Zoom App browser
-
-**Cause:** Webpack dev server (frontend) rejects requests with ngrok Host header for security.
-
-**Why this happens:**
-- When backend proxies to frontend, the Host header is your ngrok domain (e.g., `mdh.ngrok.dev`)
-- Webpack dev server only allows `localhost` by default
-- This is a Create React App security feature to prevent DNS rebinding attacks
-
-**Solution:**
-- Added `DANGEROUSLY_DISABLE_HOST_CHECK=true` to frontend environment in `docker-compose.yml`
-- This disables the host check for development (safe for local testing)
-- In production, this won't apply since we serve built files, not webpack dev server
-
-**How to verify the fix:**
 ```bash
-docker-compose restart frontend
-docker-compose logs frontend | grep "webpack"
+# Restart services
+docker-compose restart backend
+
+# Clean restart (keeps data)
+docker-compose down && docker-compose up --build
+
+# Full reset (deletes database!)
+docker-compose down -v && docker-compose up --build
 ```
 
-**Fixed in:** `docker-compose.yml` (frontend environment variables)
-
-### Issue: Blank screen when app loads
-
-**Check:**
-1. Frontend container is running:
-   ```bash
-   docker ps | grep frontend
-   ```
-
-2. Backend can reach frontend:
-   ```bash
-   docker exec -it zoom-consent-backend curl http://frontend:3000
-   ```
-
-3. Check browser console for errors (Right-click in Zoom → Inspect Element)
-
 ---
 
-## WebSocket Not Connecting
+## App Not Loading in Zoom
 
-### Issue: "Connecting to server..." never goes away
-
-**Symptoms:**
-- Yellow alert: "Connecting to server..."
-- Console shows: `WebSocket connection error`
+### Issue: Blank screen or app won't load
 
 **Solutions:**
 
-1. **Check backend is running:**
+1. **Verify backend is running:**
    ```bash
    curl http://localhost:3000/health
+   # Should return: {"status":"ok",...}
    ```
 
-2. **Check CORS settings:**
-   ```bash
-   docker-compose logs backend | grep CORS
-   ```
-
-3. **Verify Socket.IO is initialized:**
-   ```bash
-   docker-compose logs backend | grep "WebSocket server"
-   ```
-
-4. **Restart services:**
-   ```bash
-   docker-compose restart backend
-   ```
-
-5. **Check ngrok is running:**
+2. **Check ngrok is running:**
    ```bash
    curl https://your-ngrok-url.ngrok-free.app/health
    ```
 
----
+3. **Verify Home URL in Zoom Marketplace:**
+   - Go to Zoom Marketplace → Your App → Features → Surface
+   - Home URL should be: `https://YOUR-NGROK-URL` (no path, just the base URL)
 
-## Redis Connection Failed
-
-### Issue: Backend logs show "Failed to connect to Redis"
-
-**Solutions:**
-
-1. **Check Redis is running:**
-   ```bash
-   docker ps | grep redis
-   ```
-
-2. **Restart Redis:**
-   ```bash
-   docker-compose restart redis
-   ```
-
-3. **Check Redis logs:**
-   ```bash
-   docker-compose logs redis
-   ```
-
-4. **Test Redis connection:**
-   ```bash
-   docker exec -it zoom-consent-redis redis-cli ping
-   # Should return: PONG
-   ```
-
-5. **If Redis container won't start:**
-   ```bash
-   docker-compose down -v  # Remove volumes
-   docker-compose up --build redis
-   ```
-
----
-
-## Consent Not Saving
-
-### Issue: Click "I Agree" but nothing happens
-
-**Symptoms:**
-- Button shows loading spinner
-- No success confirmation
-- Backend shows no logs
-
-**Solutions:**
-
-1. **Check browser console for errors:**
-   - Right-click in Zoom app → Inspect Element
+4. **Check browser console for errors:**
+   - In Zoom, right-click on the app → Inspect Element
    - Look for red errors in Console tab
 
-2. **Check network requests:**
-   - In DevTools, go to Network tab
-   - Click "I Agree" again
-   - Look for `POST /api/consent/submit` request
-   - Check if it's successful (200) or failed (4xx/5xx)
-
-3. **Check backend is receiving request:**
+5. **Restart services:**
    ```bash
-   docker-compose logs backend | grep "CONSENT SUBMISSION"
+   docker-compose restart backend frontend
    ```
 
-4. **Test API directly:**
-   ```bash
-   curl -X POST http://localhost:3000/api/consent/submit \
-     -H "Content-Type: application/json" \
-     -d '{
-       "meetingId": "test-meeting",
-       "participantId": "test-user-123",
-       "participantName": "Test User",
-       "consentStatus": "agreed"
-     }'
-   ```
+### Issue: "403 Forbidden" or CORS errors
 
----
-
-## Participants Not Syncing
-
-### Issue: Participant list is empty or not updating
+**Cause:** Domain not in allow list or CORS misconfigured.
 
 **Solutions:**
 
-1. **Check initial sync ran:**
+1. **Add domain to Zoom Marketplace allow lists:**
+   - OAuth Allow List: `https://YOUR-NGROK-URL`
+   - Domain Allow List: `YOUR-NGROK-URL` (without https://)
+
+2. **Check PUBLIC_URL in .env matches your ngrok URL exactly**
+
+3. **Restart backend after .env changes:**
    ```bash
-   docker-compose logs backend | grep "INITIAL PARTICIPANT SYNC"
-   ```
-
-2. **Verify SDK has participant access:**
-   - Check browser console for `getMeetingParticipants` errors
-   - Verify SDK capability is enabled in Zoom Marketplace
-
-3. **Check if you're in a meeting:**
-   - App must be opened in an active Zoom meeting
-   - Won't work in Zoom client outside of meeting
-
-4. **Force refresh participant list:**
-   - Close and reopen the app in the meeting
-
----
-
-## New Participant Join Not Detected
-
-### Issue: Join a meeting but app doesn't detect new participant
-
-**Solutions:**
-
-1. **Check participant tracking is running:**
-   ```bash
-   docker-compose logs backend | grep "PARTICIPANT JOINED"
-   ```
-
-2. **Verify onParticipantChange event listener:**
-   - Check browser console for participant change logs
-
-3. **Check if app is open for new participant:**
-   - New participant must open the app
-   - SDK events only fire when app is running
-
-4. **Check webhook as backup (if configured):**
-   ```bash
-   docker-compose logs backend | grep "participant_joined"
-   ```
-
----
-
-## RTMS Not Starting
-
-### Issue: All users consent but RTMS doesn't start
-
-**Symptoms:**
-- All participants show "Agreed"
-- RTMS Status still shows "Stopped"
-- No "Unanimous Consent" log in backend
-
-**Solutions:**
-
-1. **Check unanimous consent detection:**
-   ```bash
-   docker-compose logs backend | grep "UNANIMOUS CONSENT"
-   ```
-
-2. **Verify all participants are tracked:**
-   - Check participant list in UI
-   - Ensure no participants with "Pending" status
-
-3. **Check Redis state:**
-   ```bash
-   docker exec -it zoom-consent-redis redis-cli
-   > GET consent:[your-meeting-uuid]
-   ```
-   Verify `unanimousConsent: true`
-
-4. **Note:** In Phase 2, RTMS is simulated. Backend logs will show:
-   ```
-   ✅ Would call startRTMS() here (Phase 4)
-   ```
-   This is expected! Actual RTMS will be implemented in Phase 4.
-
----
-
-## Prisma / Database Issues
-
-### Issue: "Cannot find module '.prisma/client'" or "PrismaClientInitializationError"
-
-**Cause:** Prisma client wasn't generated or was generated for the wrong platform (Mac vs Linux).
-
-**Solutions:**
-
-1. **Regenerate Prisma client inside Docker:**
-   ```bash
-   docker-compose exec backend npx prisma generate
    docker-compose restart backend
    ```
 
-2. **Clean rebuild with fresh node_modules:**
+---
+
+## Authentication Issues
+
+### Issue: "Connect with Zoom" button doesn't work
+
+**Solutions:**
+
+1. **Check OAuth Redirect URL in Zoom Marketplace:**
+   - Must be exactly: `https://YOUR-NGROK-URL/api/auth/callback`
+
+2. **Verify client credentials in .env:**
    ```bash
-   docker-compose down -v
-   docker-compose up --build -V
+   # Check these are set correctly
+   ZOOM_CLIENT_ID=your_actual_client_id
+   ZOOM_CLIENT_SECRET=your_actual_client_secret
    ```
-   The `-V` flag recreates anonymous volumes, ensuring fresh node_modules.
 
-3. **If running locally (without Docker):**
+3. **Check backend logs for OAuth errors:**
    ```bash
-   cd backend
-   npx prisma generate
-   npx prisma db push
+   docker-compose logs backend | grep -i "oauth\|auth"
    ```
 
-### Issue: "P1001: Can't reach database server" or connection refused
+### Issue: "Invalid state" or "CSRF" error
 
-**Cause:** Database isn't ready yet or connection string is wrong.
+**Cause:** OAuth state mismatch, usually from stale session.
+
+**Solutions:**
+
+1. **Clear browser/Zoom app cache:**
+   - Close and reopen the Zoom app
+   - Or restart Zoom client entirely
+
+2. **Restart backend to clear PKCE store:**
+   ```bash
+   docker-compose restart backend
+   ```
+
+### Issue: Logged in but redirected back to auth screen
+
+**Cause:** Session cookie not being set or sent.
+
+**Solutions:**
+
+1. **Check cookie settings in .env:**
+   ```bash
+   # For development
+   NODE_ENV=development
+   ```
+
+2. **Verify PUBLIC_URL matches where you're accessing the app**
+
+---
+
+## WebSocket / Live Transcript Issues
+
+### Issue: "Connecting to server..." never resolves
+
+**Solutions:**
+
+1. **Check WebSocket endpoint is accessible:**
+   ```bash
+   # Backend should log WebSocket connections
+   docker-compose logs backend | grep -i "websocket\|ws"
+   ```
+
+2. **Verify you're authenticated:**
+   - WebSocket requires valid session
+   - Try logging out and back in
+
+3. **Check for proxy issues:**
+   - ngrok should support WebSocket by default
+   - If using custom proxy, ensure WS upgrade is allowed
+
+### Issue: Transcripts not appearing during meeting
+
+**Causes:**
+- RTMS not started
+- RTMS access not approved
+- WebSocket not connected
+
+**Solutions:**
+
+1. **Verify RTMS is started:**
+   - Check for "Start Arlo" button in the app
+   - Look for RTMS status indicator
+
+2. **Check RTMS service logs:**
+   ```bash
+   docker-compose logs rtms
+   ```
+
+3. **Verify RTMS webhooks are configured:**
+   - Event endpoint: `https://YOUR-NGROK-URL/api/rtms/webhook`
+   - Events: `meeting.rtms_started`, `meeting.rtms_stopped`
+
+4. **Confirm RTMS access is approved:**
+   - RTMS requires approval from Zoom
+   - Check your Zoom Marketplace app status
+
+---
+
+## Database / Prisma Issues
+
+### Issue: "Cannot find module '.prisma/client'"
+
+**Cause:** Prisma client not generated for the correct platform.
+
+**Solution:**
+```bash
+docker-compose exec backend npx prisma generate
+docker-compose restart backend
+```
+
+### Issue: "Can't reach database server"
+
+**Cause:** PostgreSQL not ready or connection string wrong.
 
 **Solutions:**
 
 1. **Wait for PostgreSQL to be healthy:**
    ```bash
    docker-compose ps
-   # Ensure postgres shows "healthy" status
+   # postgres should show "healthy"
    ```
 
 2. **Check DATABASE_URL in .env:**
-   - For Docker: `postgresql://postgres:postgres@postgres:5432/meeting_assistant`
-   - For local: `postgresql://postgres:postgres@localhost:5432/meeting_assistant`
+   ```bash
+   # For Docker
+   DATABASE_URL=postgresql://postgres:postgres@postgres:5432/meeting_assistant
+   ```
 
-3. **Restart the services:**
+3. **Restart services:**
    ```bash
    docker-compose restart postgres backend
    ```
 
-### Issue: "P2021: Table does not exist" or missing tables
+### Issue: "Table does not exist"
 
-**Cause:** Database schema wasn't applied.
-
-**Solutions:**
-
-1. **Push the schema to database:**
-   ```bash
-   docker-compose exec backend npx prisma db push
-   ```
-
-2. **Or reset and recreate (WARNING: deletes all data):**
-   ```bash
-   docker-compose exec backend npx prisma migrate reset --force
-   ```
-
-### Issue: Prisma schema changes not reflected
+**Cause:** Database schema not applied.
 
 **Solution:**
 ```bash
-# After changing schema.prisma:
+docker-compose exec backend npx prisma db push
+```
+
+### Issue: Schema changes not reflected
+
+**Solution:**
+```bash
 docker-compose exec backend npx prisma generate
 docker-compose exec backend npx prisma db push
 docker-compose restart backend
@@ -361,18 +233,12 @@ docker-compose restart backend
 
 **Solutions:**
 
-1. **Find process using port:**
-   ```bash
-   lsof -ti:3000
-   ```
-
-2. **Kill the process:**
+1. **Find and kill process using port:**
    ```bash
    lsof -ti:3000 | xargs kill -9
    ```
 
-3. **Or use different port:**
-   Edit `.env`:
+2. **Or change port in .env:**
    ```bash
    PORT=3001
    ```
@@ -383,7 +249,9 @@ docker-compose restart backend
 
 1. **Check container logs:**
    ```bash
-   docker-compose logs [service-name]
+   docker-compose logs backend
+   docker-compose logs frontend
+   docker-compose logs rtms
    ```
 
 2. **Rebuild containers:**
@@ -392,10 +260,9 @@ docker-compose restart backend
    docker-compose up --build
    ```
 
-3. **Remove all containers and volumes:**
+3. **Full reset (removes volumes):**
    ```bash
    docker-compose down -v
-   docker system prune -a
    docker-compose up --build
    ```
 
@@ -403,18 +270,19 @@ docker-compose restart backend
 
 **Solutions:**
 
-1. **For frontend changes:**
-   - Hot reload should work automatically
-   - If not, restart: `docker-compose restart frontend`
-
-2. **For backend changes:**
-   - Nodemon should auto-restart
-   - If not, restart: `docker-compose restart backend`
-
-3. **For package.json changes:**
+1. **Frontend changes:** Hot reload should work. If not:
    ```bash
-   docker-compose down
-   docker-compose up --build
+   docker-compose restart frontend
+   ```
+
+2. **Backend changes:** Nodemon should auto-restart. If not:
+   ```bash
+   docker-compose restart backend
+   ```
+
+3. **Package.json changes:** Requires rebuild:
+   ```bash
+   docker-compose up --build -V
    ```
 
 ---
@@ -423,43 +291,26 @@ docker-compose restart backend
 
 ### Issue: App stops working after restarting ngrok
 
-**Cause:** ngrok gives you a new URL each time it restarts (free tier).
+**Cause:** Random ngrok URLs change each restart.
 
 **Solutions:**
 
-1. **Get new ngrok URL:**
-   ```bash
-   ngrok http 3000
-   ```
-   Copy the new HTTPS URL
+1. **Use a static ngrok domain (recommended):**
+   - Get free static domain at [ngrok dashboard](https://dashboard.ngrok.com/domains)
+   - Start with: `ngrok http 3000 --domain=your-static-domain.ngrok-free.app`
 
-2. **Update `.env`:**
-   ```bash
-   PUBLIC_URL=https://new-ngrok-url.ngrok-free.app
-   ZOOM_APP_REDIRECT_URI=https://new-ngrok-url.ngrok-free.app/api/zoomapp/auth
-   ```
+2. **If using random domain, update everything:**
+   - Update `PUBLIC_URL` in `.env`
+   - Update URLs in Zoom Marketplace (OAuth, Home URL, Webhooks)
+   - Restart backend: `docker-compose restart backend`
 
-3. **Update Zoom Marketplace:**
-   - Go to your app settings
-   - Update **Home URL**: `https://new-ngrok-url.ngrok-free.app/api/zoomapp/home`
-   - Update **Redirect URL**: `https://new-ngrok-url.ngrok-free.app/api/zoomapp/auth`
+### Issue: ngrok tunnel expired
 
-4. **Restart backend:**
-   ```bash
-   docker-compose restart backend
-   ```
+**Cause:** Free ngrok tunnels expire after 2 hours of inactivity.
 
-5. **Reinstall app in Zoom:**
-   - Go to Zoom Marketplace
-   - Remove app
-   - Install again
-
-### Issue: ngrok shows "ERR_NGROK_108"
-
-**Solutions:**
-- Free ngrok tunnels expire after 2 hours
+**Solution:**
 - Restart ngrok: `ngrok http 3000`
-- Update URLs as above
+- Update URLs if using random domain
 
 ---
 
@@ -467,116 +318,70 @@ docker-compose restart backend
 
 ### Issue: "zoomSdk is not defined"
 
+**Cause:** SDK only works inside Zoom client.
+
 **Solutions:**
 
-1. **Check SDK script is loaded:**
+1. **Verify app is running in Zoom:**
+   - SDK won't work in regular browser
+   - Must be opened via Apps menu in Zoom meeting
+
+2. **Check SDK script is loaded:**
    - View page source in Zoom app
    - Look for: `<script src="https://appssdk.zoom.us/sdk.min.js"></script>`
 
-2. **Verify app is running in Zoom client:**
-   - SDK only works inside Zoom
-   - Won't work in regular browser
+### Issue: "API not supported" errors
 
-3. **Check User-Agent:**
-   ```javascript
-   console.log(navigator.userAgent);
-   // Should contain "ZoomApps"
-   ```
-
-### Issue: SDK API not supported / Permission error
-
-**Error:** `API not supported` or `Method not supported in current context`
-
-**Enhanced Debugging (NEW):**
-
-The app now includes detailed logging to show exactly which APIs are failing:
-
-1. **Check browser console for API support logs:**
-   - Look for `📋 Supported APIs:` - shows all available APIs
-   - Look for `⚠️ UNSUPPORTED APIs` - shows which requested APIs are not available
-   - Look for `❌ [API name] failed:` - shows exactly which API call failed
-
-2. **Example console output:**
-   ```
-   ✅ SDK Configuration Response: {...}
-   📋 Supported APIs: {apis: ["getMeetingContext", "getUserContext", ...]}
-   ⚠️ UNSUPPORTED APIs: ["startRTMS", "stopRTMS"]
-   ❌ getMeetingParticipants failed: API not supported
-      Make sure "getMeetingParticipants" is enabled in Zoom Marketplace > Features > Zoom Apps SDK
-   ```
-
-3. **Enable the missing API in Zoom Marketplace:**
-   - Go to Zoom Marketplace → Your App → Features
-   - Click "Add APIs"
-   - Search for the missing API name (shown in error logs)
-   - Enable it and save changes
-   - Reinstall the app in Zoom
-
-**Common Missing APIs:**
-- `getMeetingParticipants` - Required for participant list
-- `onParticipantChange` - Required for real-time participant tracking
-- `getMeetingContext` - Required for meeting info
-- `startRTMS` / `stopRTMS` - Required for RTMS control (Phase 4)
+**Cause:** SDK capability not enabled in Zoom Marketplace.
 
 **Solutions:**
 
-1. **Check capability is enabled:**
-   - Go to Zoom Marketplace → Your App → Features
-   - Verify ALL SDK APIs from the console warning are in the list
-   - The app requests these APIs:
-     - getMeetingContext, getMeetingUUID, getMeetingParticipants
-     - getUserContext, getRunningContext
-     - onParticipantChange
-     - startRTMS, stopRTMS (for Phase 4)
-     - connect, postMessage, onMessage
-     - showNotification
-
-2. **Check running context:**
-   ```javascript
-   const { context } = await zoomSdk.getRunningContext();
-   console.log('Running context:', context);
+1. **Check console for which API failed:**
    ```
-   Some methods only work `inMeeting`
-
-3. **Check SDK version:**
-   ```javascript
-   // In App.js
-   version: '0.16.0'  // Make sure this matches
+   ❌ getMeetingParticipants failed: API not supported
    ```
 
-4. **Use getSupportedJsApis() to debug:**
-   The app automatically calls this and logs results. Check console for:
-   - `📋 Supported APIs:` to see what's available
-   - `⚠️ UNSUPPORTED APIs` to see what's missing
+2. **Enable the API in Zoom Marketplace:**
+   - Go to Your App → Features → Zoom App SDK
+   - Click "Add APIs"
+   - Enable the missing API
+   - Save and reinstall app
+
+**Common APIs to enable:**
+- `getMeetingContext`
+- `getMeetingUUID`
+- `getUserContext`
+- `authorize` / `onAuthorized`
+- `callZoomApi` (for RTMS)
 
 ---
 
-## Common Error Messages
+## AI Features Not Working
 
-### "Meeting context not available"
+### Issue: Summaries/suggestions fail
 
-**Cause:** App opened before SDK initialized
+**Cause:** Usually rate limiting or network issues.
 
-**Solution:** Wait for SDK to initialize, or refresh app
+**Solutions:**
 
-### "Failed to submit consent"
+1. **Check if using free models (no API key needed):**
+   ```bash
+   # .env should have:
+   DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
+   ```
 
-**Causes:**
-- Backend not running
-- Network issue
-- Invalid meeting ID
+2. **Check backend logs for AI errors:**
+   ```bash
+   docker-compose logs backend | grep -i "openrouter\|ai"
+   ```
 
-**Solution:** Check backend logs and network connection
-
-### "Invalid participant UUID"
-
-**Cause:** Participant tracking not initialized
-
-**Solution:** Restart app, check initial sync logs
+3. **Wait for rate limit reset:**
+   - Free tier: 10 requests/minute
+   - Add `OPENROUTER_API_KEY` for higher limits
 
 ---
 
-## Debugging Commands Reference
+## Debugging Commands
 
 ```bash
 # Health checks
@@ -588,70 +393,53 @@ docker-compose logs -f
 # View specific service
 docker-compose logs -f backend
 docker-compose logs -f frontend
-docker-compose logs -f redis
+docker-compose logs -f rtms
 
-# Check containers
+# Check running containers
 docker ps
 
-# Restart service
+# Restart specific service
 docker-compose restart backend
 
 # Rebuild everything
-docker-compose down
-docker-compose up --build
+docker-compose down && docker-compose up --build
 
-# Check Redis
-docker exec -it zoom-consent-redis redis-cli
-> KEYS *
-> GET consent:[meeting-uuid]
-> MONITOR
+# Check database
+docker-compose exec backend npx prisma studio
 
-# Check ports
-lsof -ti:3000
-
-# Backend API tests
-curl http://localhost:3000/health
-curl "http://localhost:3000/api/consent/status?meetingId=test"
+# Check ports in use
+lsof -i :3000
+lsof -i :3001
+lsof -i :3002
 ```
 
 ---
 
 ## Still Having Issues?
 
-1. **Check all prerequisites:**
-   - Docker running
-   - ngrok running with correct URL
-   - Redis container healthy
-   - All environment variables set
-
-2. **Fresh start:**
+1. **Enable debug logging:**
    ```bash
-   # Stop everything
-   docker-compose down -v
-
-   # Rebuild
-   docker-compose up --build
-
-   # Check logs
-   docker-compose logs -f
+   # In .env
+   LOG_LEVEL=debug
    ```
 
-3. **Enable debug logging:**
-   Edit `.env`:
+2. **Check all prerequisites:**
+   - Docker running
+   - ngrok running with correct URL
+   - All environment variables set
+   - RTMS access approved by Zoom
+
+3. **Fresh start:**
    ```bash
-   LOG_LEVEL=debug
-   DEBUG=true
+   docker-compose down -v
+   docker-compose up --build
    ```
 
 4. **Check documentation:**
-   - [README.md](../README.md) - Quick start
-   - [SETUP.md](./SETUP.md) - Detailed setup
-   - [ARCHITECTURE.md](../ARCHITECTURE.md) - System architecture
+   - [README.md](../README.md) — Quick start guide
+   - [ARCHITECTURE.md](./ARCHITECTURE.md) — System architecture
 
----
-
-**If you find a bug, please note:**
-- Exact error message
-- Steps to reproduce
-- Browser console logs
-- Backend logs: `docker-compose logs backend`
+5. **Get help:**
+   - [GitHub Issues](https://github.com/zoom/arlo/issues)
+   - [GitHub Discussions](https://github.com/zoom/arlo/discussions)
+   - [Zoom Developer Forum](https://devforum.zoom.us/)
