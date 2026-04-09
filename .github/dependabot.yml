@@ -39,9 +39,9 @@ updates:
       # react-router-dom v7 has breaking changes
       - dependency-name: "react-router-dom"
         update-types: ["version-update:semver-major"]
-      # lucide-react major versions often have breaking icon API changes
+      # lucide-react 0.x versions can have breaking changes in minor/major
       - dependency-name: "lucide-react"
-        update-types: ["version-update:semver-major"]
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   # RTMS service dependencies
   - package-ecosystem: "npm"
