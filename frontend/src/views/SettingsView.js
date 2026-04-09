@@ -17,7 +17,7 @@ import {
   Headphones,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
-import { useVertical, VERTICALS } from '../contexts/VerticalContext';
+import { useVertical } from '../contexts/VerticalContext';
 import { useDemoData } from '../hooks/useDemoData';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -62,20 +62,6 @@ const DEFAULT_MESSAGES = {
   stop: 'Transcription stopped. Transcript will be available shortly.',
   restart: 'Transcription restarted.',
 };
-
-const DEFAULT_EVENTS = {
-  start: true,
-  pause: true,
-  resume: true,
-  stop: false,
-  restart: false,
-};
-
-const MOCK_SETTINGS_UPCOMING = [
-  { id: 'u1', title: 'Weekly Product Sync', date: '2026-02-17T10:00:00Z', duration: 30, autoOpenEnabled: true },
-  { id: 'u2', title: 'Q1 Planning Review', date: '2026-02-17T14:00:00Z', duration: 60, autoOpenEnabled: false },
-  { id: 'u3', title: 'Engineering Standup', date: '2026-02-18T09:00:00Z', duration: 15, autoOpenEnabled: false },
-];
 
 export default function SettingsView() {
   const navigate = useNavigate();

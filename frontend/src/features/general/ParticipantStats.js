@@ -25,7 +25,6 @@ export default function ParticipantStats({ segments, showDemoData = true }) {
   const [participants] = useState(showDemoData ? DEMO_PARTICIPANTS : []);
 
   const totalTalkTime = participants.reduce((sum, p) => sum + p.talkTime, 0);
-  const totalSegments = participants.reduce((sum, p) => sum + p.segments, 0);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);

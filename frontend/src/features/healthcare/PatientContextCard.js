@@ -28,7 +28,6 @@ export default function PatientContextCard({ segments, meetingId, showDemoData =
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('patient-context');
   const [patientInfo, setPatientInfo] = useState(showDemoData ? DEMO_PATIENT_INFO : null);
-  const [isLoading, setIsLoading] = useState(false);
 
   // Try to detect patient info from transcript
   useEffect(() => {
@@ -97,24 +96,6 @@ export default function PatientContextCard({ segments, meetingId, showDemoData =
         lastVisit: prev?.lastVisit || null,
         medications: prev?.medications || [],
       }));
-    }
-  };
-
-  // Load patient context from backend (if we have patient ID)
-  const loadPatientContext = async (patientId) => {
-    setIsLoading(true);
-    try {
-      const res = await fetch(`/api/healthcare/patient-context/${patientId}`, {
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPatientInfo(data);
-      }
-    } catch (err) {
-      console.error('Error loading patient context:', err);
-    } finally {
-      setIsLoading(false);
     }
   };
 

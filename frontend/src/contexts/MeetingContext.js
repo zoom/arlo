@@ -397,7 +397,7 @@ export function MeetingProvider({ children }) {
       }).catch(() => {});
     };
     sendTitle();
-  }, [rtmsActive, meetingId, meetingContext?.meetingTopic]);
+  }, [rtmsActive, meetingId, meetingContext?.meetingTopic, meetingContext?.meetingID]);
 
   const setTitleUserRenamed = useCallback(() => {
     titleUserRenamedRef.current = true;

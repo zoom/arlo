@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CheckCircle2, Circle, Clock, User, Building2, Plus, ExternalLink, Calendar } from 'lucide-react';
+import { CheckCircle2, Circle, User, Building2, Plus, ExternalLink, Calendar } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import './CommitmentsPanel.css';
 

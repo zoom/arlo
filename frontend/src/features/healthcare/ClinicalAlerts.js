@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { AlertTriangle, AlertCircle, Info, X, ChevronRight, ChevronDown, ChevronUp, Pill, Activity, Clock } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { AlertTriangle, AlertCircle, Info, X, ChevronRight, ChevronDown, ChevronUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './ClinicalAlerts.css';
@@ -75,19 +75,6 @@ const DEMO_ALERTS = [
     dismissed: false,
   },
 ];
-
-function AlertIcon({ type }) {
-  switch (type) {
-    case 'drug_interaction':
-      return <Pill size={14} />;
-    case 'vital':
-      return <Activity size={14} />;
-    case 'screening':
-      return <Clock size={14} />;
-    default:
-      return null;
-  }
-}
 
 export default function ClinicalAlerts({ segments, patientInfo, showDemoData = true }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();

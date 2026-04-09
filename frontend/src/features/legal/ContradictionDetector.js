@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, Flag, Check, Clock, MessageSquare, Download, Copy, Gavel, FileText, Bell } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronUp, Flag, Check, Clock, MessageSquare, Download, Gavel, Bell } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './ContradictionDetector.css';

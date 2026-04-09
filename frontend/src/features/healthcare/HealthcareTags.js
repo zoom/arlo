@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { Activity, Pill, ThermometerSun, Heart, Brain, Stethoscope } from 'lucide-react';
 import './HealthcareTags.css';
 
