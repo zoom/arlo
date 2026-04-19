@@ -26,10 +26,49 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
+// Detect placeholder values from .env.example that weren't replaced
+const placeholderPatterns = [
+  /^your_.*_here$/i,
+  /^your-.*-here$/i,
+  /^your_\d+_character.*$/i,
+  /^https:\/\/your-ngrok/i,
+  /^https:\/\/.*\.ngrok-free\.app$/i, // Generic ngrok placeholder
+];
+
+const placeholderVars = requiredEnvVars.filter((varName) => {
+  const value = process.env[varName];
+  if (!value) return false;
+  return placeholderPatterns.some(pattern => pattern.test(value));
+});
+
+if (placeholderVars.length > 0) {
+  console.error('❌ Environment variables contain placeholder values:');
+  placeholderVars.forEach((varName) => {
+    console.error(`   - ${varName}="${process.env[varName]}"`);
+  });
+  console.error('\nReplace these with real values in your .env file.');
+  process.exit(1);
+}
+
+// Validate SESSION_SECRET is not a placeholder
+const sessionSecret = process.env.SESSION_SECRET;
+if (sessionSecret && /^your_.*_here$/i.test(sessionSecret)) {
+  console.error('❌ SESSION_SECRET contains a placeholder value');
+  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+
 // Support new TOKEN_ENCRYPTION_KEY with REDIS_ENCRYPTION_KEY as fallback
 const encryptionKey = process.env.TOKEN_ENCRYPTION_KEY || process.env.REDIS_ENCRYPTION_KEY;
 if (!encryptionKey) {
   console.error('❌ Missing TOKEN_ENCRYPTION_KEY (or legacy REDIS_ENCRYPTION_KEY)');
+  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+
+// Check for placeholder encryption key
+if (/^your_.*_here$/i.test(encryptionKey)) {
+  console.error('❌ TOKEN_ENCRYPTION_KEY contains a placeholder value');
   console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
 }
