@@ -257,16 +257,23 @@ app.use((req, res) => {
   });
 });
 
-// Global error handler
+// Global error handler - logs full error server-side, returns sanitized response
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  // Always log the full error server-side for debugging
+  console.error('Error:', err.stack || err);
 
-  const statusCode = err.statusCode || 500;
-  const message = err.message || 'Internal Server Error';
+  const statusCode = err.statusCode || err.status || 500;
+
+  // In production, hide error details to prevent information leakage
+  const isProduction = config.nodeEnv === 'production';
+  const message = isProduction && statusCode >= 500
+    ? 'Internal Server Error'
+    : (err.message || 'Internal Server Error');
 
   res.status(statusCode).json({
-    error: err.name || 'Error',
+    error: isProduction ? 'Error' : (err.name || 'Error'),
     message: message,
+    // Only include stack trace in development
     ...(config.nodeEnv === 'development' && { stack: err.stack }),
   });
 });

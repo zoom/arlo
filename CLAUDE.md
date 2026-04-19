@@ -95,7 +95,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 3. Frontend: zoomSdk.authorize({ codeChallenge, state })
 4. Zoom fires onAuthorized → { code } (NOTE: SDK does NOT return state — use closure from step 1)
 5. Frontend: POST /api/auth/callback { code, state } (credentials: 'include')
-6. Backend: Exchanges code for tokens, stores AES-128-CBC encrypted in Postgres, creates session cookie
+6. Backend: Exchanges code for tokens, stores AES-256-GCM encrypted in Postgres, creates session cookie
 7. Frontend: login(user, wsToken) → navigate to /home
 ```
 
@@ -223,8 +223,10 @@ Tabs (MeetingDetailView, InMeetingView), ScrollArea (MeetingDetailView, InMeetin
 
 ## WebSocket Protocol
 
+**Security:** JWT token is required for all WebSocket connections. Anonymous access is not allowed.
+
 ```
-Connection: ws://host/ws?meeting_id={uuid}&token={jwt}
+Connection: ws://host/ws?meeting_id={uuid}&token={jwt}  # token is REQUIRED
 Client → Server: { type: 'subscribe', meetingId: 'uuid' }
 Server → Client: { type: 'transcript.segment', data: { meetingId, segment: {...} } }
 Server → Client: { type: 'ai.suggestion', data: { meetingId, suggestion: {...} } }
@@ -242,9 +244,10 @@ ZOOM_APP_ID=...                 # Marketplace App ID (for open_apps API, differe
 PUBLIC_URL=https://...          # ngrok HTTPS URL
 DATABASE_URL=postgresql://...   # Postgres connection string
 SESSION_SECRET=...              # 64 chars: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-REDIS_ENCRYPTION_KEY=...        # 32 chars: node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
+TOKEN_ENCRYPTION_KEY=...        # 64 chars (AES-256): node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 OPENROUTER_API_KEY=...          # Optional — free models work without it
 DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
+LOG_LEVEL=info                  # Set to 'debug' to enable transcript/PII logging
 ```
 
 ## Common Development Workflows
@@ -284,15 +287,18 @@ DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
 
 ## Security
 
-- Access tokens stored **encrypted** (AES-128-CBC, 16-byte key from `REDIS_ENCRYPTION_KEY`) in Postgres, auto-refresh before expiry
+- Access tokens stored **encrypted** (AES-256-GCM authenticated encryption, 32-byte key from `TOKEN_ENCRYPTION_KEY`) in Postgres, auto-refresh before expiry
 - httpOnly session cookies, never expose tokens to frontend
 - All API calls from frontend use `fetch` with `credentials: 'include'`
 - HTTP headers required by Zoom Apps: `Strict-Transport-Security`, `X-Content-Type-Options`, `Content-Security-Policy`, `Referrer-Policy`
 - **Rate limiting:** Global (1000/15min), auth endpoints (30/15min), AI endpoints (20/1min) via `express-rate-limit`
 - **Ownership checks:** All meeting routes enforce `ownerId: req.user.id` — users can only access their own data
-- **Timing-safe JWT comparison:** `crypto.timingSafeEqual` in `services/auth.js`
-- **RTMS webhook HMAC:** `x-zm-signature` verification with replay protection in RTMS service
+- **WebSocket auth:** JWT token required for all WebSocket connections — anonymous access not allowed
+- **Timing-safe comparisons:** `crypto.timingSafeEqual` with length checks in signature verification
+- **RTMS webhook HMAC:** `x-zm-signature` verification on backend before forwarding, with 5-minute replay protection
 - **Token refresh mutex:** Per-user lock prevents concurrent Zoom token refresh race conditions
+- **PII logging gated:** Transcript content and user data only logged when `LOG_LEVEL=debug`
+- **RTMS service not exposed:** Port 3002 is internal-only (Docker network), not mapped to host
 
 ## Documentation Reference
 
@@ -305,7 +311,7 @@ DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
 ## Known Issues
 
 - No automated tests exist yet (manual testing only)
-- Frontend uses CRA (react-scripts), NOT Next.js
+- Frontend uses CRA (react-scripts), NOT Next.js — migration to Vite planned
 - If RTMS stream starts before the app is opened in a meeting, the "Start" chat notice is never sent. The disclaimer/notice should be sent when the app opens and detects RTMS is already active.
-- Guest transcript access is permissive — anyone with a Zoom meeting ID can read transcripts via WebSocket or REST. See ROADMAP.md for planned mitigation.
 - HomeView weekly digest, action items, and recurring topics sections use hardcoded mock data (API endpoints planned)
+- In-memory PKCE store does not survive restart or scale to replicas (use Redis for production)

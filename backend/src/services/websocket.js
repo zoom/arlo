@@ -21,26 +21,23 @@ function initWebSocketServer(server) {
     const { meeting_id, token } = queryParams;
 
     console.log('📡 New WebSocket connection attempt at', req.url);
-    console.log('📡 Meeting ID from query:', meeting_id);
 
-    // Verify token if provided, otherwise allow anonymous meeting subscription
+    // Security: Require a valid JWT token for all WebSocket connections
+    // Anonymous access is no longer allowed to prevent meeting enumeration
     let userId = null;
-    if (token) {
-      try {
-        const payload = await verifyToken(token);
-        userId = payload.userId;
-        console.log(`✅ WebSocket authenticated: User ${userId}`);
-      } catch (error) {
-        console.error('⚠️ WebSocket token verification failed:', error.message);
-        // Allow connection but mark as anonymous
-        console.log('📡 Allowing anonymous WebSocket connection for meeting streaming');
-      }
-    } else if (meeting_id) {
-      // Allow token-less connections for in-meeting transcript streaming
-      console.log(`📡 Anonymous WebSocket connection for meeting: ${meeting_id}`);
-    } else {
-      console.error('❌ WebSocket requires either token or meeting_id');
+    if (!token) {
+      console.error('❌ WebSocket connection rejected: Missing authentication token');
       ws.close(1008, 'Authentication required');
+      return;
+    }
+
+    try {
+      const payload = verifyToken(token);
+      userId = payload.userId;
+      console.log(`✅ WebSocket authenticated: User ${userId}`);
+    } catch (error) {
+      console.error('❌ WebSocket token verification failed:', error.message);
+      ws.close(1008, 'Invalid authentication token');
       return;
     }
 

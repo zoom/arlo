@@ -15,7 +15,6 @@ const requiredEnvVars = [
   'PUBLIC_URL',
   'DATABASE_URL',
   'SESSION_SECRET',
-  'REDIS_ENCRYPTION_KEY',
 ];
 
 // Validate required variables
@@ -27,11 +26,24 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-// Validate encryption key length (must be 32 characters for AES-256)
-if (process.env.REDIS_ENCRYPTION_KEY.length !== 32) {
-  console.error('❌ REDIS_ENCRYPTION_KEY must be exactly 32 characters');
-  console.error(`   Current length: ${process.env.REDIS_ENCRYPTION_KEY.length}`);
-  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(16).toString(\'hex\'))"');
+// Support new TOKEN_ENCRYPTION_KEY with REDIS_ENCRYPTION_KEY as fallback
+const encryptionKey = process.env.TOKEN_ENCRYPTION_KEY || process.env.REDIS_ENCRYPTION_KEY;
+if (!encryptionKey) {
+  console.error('❌ Missing TOKEN_ENCRYPTION_KEY (or legacy REDIS_ENCRYPTION_KEY)');
+  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+
+// Validate encryption key length
+// AES-256-GCM requires 32 bytes = 64 hex characters
+// Legacy AES-128-CBC used 16 bytes = 32 hex characters (still supported for migration)
+if (encryptionKey.length === 32) {
+  console.warn('⚠️ Using legacy 32-char encryption key (AES-128). Upgrade to 64-char key for AES-256-GCM:');
+  console.warn('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+} else if (encryptionKey.length !== 64) {
+  console.error('❌ TOKEN_ENCRYPTION_KEY must be exactly 64 characters (32 bytes hex-encoded for AES-256)');
+  console.error(`   Current length: ${encryptionKey.length}`);
+  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
 }
 
@@ -58,7 +70,7 @@ module.exports = {
 
   // Security
   sessionSecret: process.env.SESSION_SECRET,
-  encryptionKey: process.env.REDIS_ENCRYPTION_KEY,
+  encryptionKey: encryptionKey,
 
   // Redis
   redisUrl: process.env.REDIS_URL || null,

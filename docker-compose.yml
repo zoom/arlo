@@ -103,8 +103,12 @@ services:
       ZM_RTMS_SECRET: ${ZOOM_CLIENT_SECRET}
       # RTMS SDK v1.0 logging (replaces configureLogger())
       ZM_RTMS_LOG_LEVEL: debug
-    ports:
-      - "3002:3002"
+      # Log level for PII gating
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    # Note: Port 3002 is NOT exposed to host — RTMS service is only accessible
+    # from the Docker internal network via http://rtms:3002 (from backend)
+    expose:
+      - "3002"
     volumes:
       - ./rtms/src:/app/src
       - /app/node_modules

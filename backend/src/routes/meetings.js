@@ -149,13 +149,17 @@ router.patch('/by-zoom-id/:zoomMeetingId/topic', optionalAuth, async (req, res) 
 
 /**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId
- * Get meeting details by Zoom meeting UUID (for guest views that only have the SDK meeting ID)
+ * Get meeting details by Zoom meeting UUID
+ *
+ * Security: Requires authentication. Only the meeting owner can access meeting data.
+ * For in-meeting access, guests should use the WebSocket with a valid meeting token.
  */
-router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
+router.get('/by-zoom-id/:zoomMeetingId', requireAuth, async (req, res) => {
   try {
     const { zoomMeetingId } = req.params;
 
-    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id, {
+    // Only return meetings owned by the authenticated user
+    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user.id, {
       include: {
         speakers: {
           select: { id: true, displayName: true, label: true },
@@ -171,6 +175,11 @@ router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
       return res.status(404).json({ error: 'Meeting not found' });
     }
 
+    // Verify ownership
+    if (meeting.ownerId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+
     res.json({ meeting });
   } catch (error) {
     console.error('Get meeting by zoom ID error:', error);
@@ -181,16 +190,23 @@ router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
 /**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId/transcript
  * Get transcript segments by Zoom meeting UUID (for InMeetingView before DB ID is known)
+ *
+ * Security: Requires authentication. Only the meeting owner can access transcript data.
  */
-router.get('/by-zoom-id/:zoomMeetingId/transcript', optionalAuth, async (req, res) => {
+router.get('/by-zoom-id/:zoomMeetingId/transcript', requireAuth, async (req, res) => {
   try {
     const { zoomMeetingId } = req.params;
     const { limit = 500 } = req.query;
 
-    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id);
+    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user.id);
 
     if (!meeting) {
       return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    // Verify ownership
+    if (meeting.ownerId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
     }
 
     const segments = await prisma.transcriptSegment.findMany({
@@ -219,15 +235,22 @@ router.get('/by-zoom-id/:zoomMeetingId/transcript', optionalAuth, async (req, re
 /**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId/participant-events
  * Get participant events by Zoom meeting UUID (for InMeetingView before DB ID is known)
+ *
+ * Security: Requires authentication. Only the meeting owner can access participant data.
  */
-router.get('/by-zoom-id/:zoomMeetingId/participant-events', optionalAuth, async (req, res) => {
+router.get('/by-zoom-id/:zoomMeetingId/participant-events', requireAuth, async (req, res) => {
   try {
     const { zoomMeetingId } = req.params;
 
-    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id);
+    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user.id);
 
     if (!meeting) {
       return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    // Verify ownership
+    if (meeting.ownerId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied' });
     }
 
     const events = await prisma.participantEvent.findMany({

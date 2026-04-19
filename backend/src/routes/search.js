@@ -5,6 +5,17 @@ const { requireAuth, devAuthBypass } = require('../middleware/auth');
 
 const router = express.Router();
 
+/**
+ * Sanitize search query for use with PostgreSQL full-text search.
+ * Removes tsquery operators that could be exploited for DoS.
+ */
+function sanitizeSearchQuery(query) {
+  if (!query) return '';
+  // Remove tsquery operators: & | ! < > ( ) : * \
+  // Replace with spaces to preserve word boundaries
+  return query.replace(/[&|!<>():*\\]/g, ' ').trim();
+}
+
 // Apply auth middleware to all routes
 // IMPORTANT: devAuthBypass must run BEFORE requireAuth so it can set req.user in dev mode
 router.use(devAuthBypass); // Allow dev mode query param bypass
@@ -57,10 +68,17 @@ function getSummarySnippet(summary, query) {
  */
 router.get('/', async (req, res) => {
   try {
-    const { q, meeting_id, from, to, limit = 20 } = req.query;
+    const { q: rawQuery, meeting_id, from, to, limit = 20 } = req.query;
+
+    if (!rawQuery) {
+      return res.status(400).json({ error: 'Missing search query (q parameter)' });
+    }
+
+    // Sanitize query to prevent tsquery operator injection
+    const q = sanitizeSearchQuery(rawQuery);
 
     if (!q) {
-      return res.status(400).json({ error: 'Missing search query (q parameter)' });
+      return res.status(400).json({ error: 'Invalid search query' });
     }
 
     console.log(`🔍 Searching for: "${q}"`);

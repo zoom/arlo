@@ -11,8 +11,11 @@ const app = express();
 
 /**
  * Verify Zoom webhook HMAC signature
+ * @param {object} req - Express request object
+ * @param {string|Buffer} rawBody - Raw request body (string or buffer)
+ * @returns {boolean} - True if signature is valid
  */
-function verifyWebhookSignature(req) {
+function verifyWebhookSignature(req, rawBody) {
   const signature = req.headers['x-zm-signature'];
   const timestamp = req.headers['x-zm-request-timestamp'];
   const secret = process.env.ZOOM_CLIENT_SECRET || process.env.ZM_RTMS_SECRET;
@@ -23,21 +26,30 @@ function verifyWebhookSignature(req) {
   }
 
   if (!signature || !timestamp) {
+    console.warn('Missing signature or timestamp headers');
     return false;
   }
 
   // Reject if timestamp is more than 5 minutes old (replay protection)
   const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - parseInt(timestamp, 10)) > 300) {
-    console.warn('Webhook timestamp too old — possible replay attack');
+  const reqTimestamp = parseInt(timestamp, 10);
+  if (isNaN(reqTimestamp) || Math.abs(now - reqTimestamp) > 300) {
+    console.warn('Webhook timestamp too old or invalid — possible replay attack');
     return false;
   }
 
-  const message = `v0:${timestamp}:${JSON.stringify(req.body)}`;
+  // Use raw body string for signature computation
+  const bodyStr = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
+  const message = `v0:${timestamp}:${bodyStr}`;
   const expectedSignature = 'v0=' + crypto
     .createHmac('sha256', secret)
     .update(message)
     .digest('hex');
+
+  // Length check before timing-safe comparison (prevents timingSafeEqual from throwing)
+  if (signature.length !== expectedSignature.length) {
+    return false;
+  }
 
   return crypto.timingSafeEqual(
     Buffer.from(signature),
@@ -45,8 +57,12 @@ function verifyWebhookSignature(req) {
   );
 }
 
-// Middleware
-app.use(express.json());
+// Middleware - capture raw body for signature verification
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
 
 // Store active RTMS sessions — each meeting gets its own Client instance
 const activeSessions = new Map();
@@ -57,25 +73,30 @@ const activeSessions = new Map();
 
 /**
  * POST /webhook
- * Receive RTMS webhooks from Zoom
+ * Receive RTMS webhooks from Zoom (or forwarded from backend)
  */
 app.post('/webhook', async (req, res) => {
   const { event, payload } = req.body;
 
   // Skip HMAC verification for URL validation (uses its own mechanism)
-  // Also skip for internally forwarded requests from the backend (already verified)
-  const isInternal = req.headers['x-arlo-internal'] === 'true';
-  if (event !== 'endpoint.url_validation' && !isInternal) {
-    if (!verifyWebhookSignature(req)) {
+  if (event !== 'endpoint.url_validation') {
+    // Use raw body for signature verification (captured by verify callback in express.json)
+    const rawBody = req.rawBody || JSON.stringify(req.body);
+    if (!verifyWebhookSignature(req, rawBody)) {
       console.error('Webhook signature verification failed');
       return res.status(401).send('Unauthorized');
     }
   }
 
   console.log('='.repeat(60));
-  console.log(`RTMS Webhook Received: ${event}`);
+  console.log(`RTMS Webhook Received: ${event} (signature verified)`);
   console.log('='.repeat(60));
-  console.log(JSON.stringify(payload, null, 2));
+  // Only log payload details in debug mode to avoid PII exposure
+  if (process.env.LOG_LEVEL === 'debug' || process.env.ZM_RTMS_LOG_LEVEL === 'debug') {
+    console.log(JSON.stringify(payload, null, 2));
+  } else {
+    console.log(`Meeting UUID: ${payload?.meeting_uuid || 'N/A'}`);
+  }
 
   // Acknowledge webhook immediately
   res.status(200).send('OK');
@@ -126,15 +147,20 @@ async function handleRTMSStarted(payload) {
     const client = new rtms.Client();
 
     // Set up transcript data handler BEFORE joining
-    // v1.0 callback signature: (data, timestamp, metadata, user)
-    // user: { userId, userName }
-    client.onTranscriptData((data, timestamp, metadata, user) => {
+    // v1.0 callback signature: (data, size, timestamp, metadata)
+    // metadata: { userId, userName }
+    client.onTranscriptData((data, size, timestamp, metadata) => {
       try {
         const text = data.toString('utf-8');
-        console.log('Raw transcript event:');
-        console.log(`  Text: ${text}`);
-        console.log(`  Timestamp: ${timestamp}`);
-        console.log(`  User:`, user);
+        // Only log PII (transcript text, user info) in debug mode
+        const isDebug = process.env.LOG_LEVEL === 'debug' || process.env.ZM_RTMS_LOG_LEVEL === 'debug';
+        if (isDebug) {
+          console.log('Raw transcript event:');
+          console.log(`  Text: ${text}`);
+          console.log(`  Size: ${size}`);
+          console.log(`  Timestamp: ${timestamp}`);
+          console.log(`  Metadata:`, metadata);
+        }
 
         // Mark first transcript received — boundary between initial roster and real joins
         const session = activeSessions.get(meeting_uuid);
@@ -144,15 +170,15 @@ async function handleRTMSStarted(payload) {
         }
 
         // Record participant name from transcript for leave event lookup
-        if (user?.userId && user?.userName) {
-          if (session) session.participantNames.set(String(user.userId), user.userName);
+        if (metadata?.userId && metadata?.userName) {
+          if (session) session.participantNames.set(String(metadata.userId), metadata.userName);
         }
 
         const transcriptData = {
           text,
-          timestamp,
-          userId: user?.userId,
-          userName: user?.userName,
+          timestamp, // Use real Zoom-provided timestamp
+          userId: metadata?.userId,
+          userName: metadata?.userName,
         };
 
         handleTranscript(meeting_uuid, transcriptData).catch(err => {
@@ -297,19 +323,25 @@ async function handleTranscript(meetingId, transcript) {
 
   const session = activeSessions.get(meetingId);
   const seqNo = session ? ++session.seqCounter : Date.now();
-  const now = Date.now();
+
+  // Use Zoom-provided timestamp if available, fallback to Date.now()
+  const tStartMs = typeof timestamp === 'number' ? timestamp : Date.now();
 
   const segment = {
     speakerId: userId ? String(userId) : 'unknown',
     speakerLabel: userName || (userId ? `Speaker ${userId}` : 'Speaker'),
     text: text || '',
-    tStartMs: now,
-    tEndMs: now,
+    tStartMs: tStartMs,
+    tEndMs: tStartMs,
     seqNo: seqNo,
   };
 
   await broadcastSegment(meetingId, segment);
-  console.log(`Broadcast segment: "${(text || '').substring(0, 50)}..."`);
+  // Only log transcript content in debug mode to avoid PII exposure
+  const isDebug = process.env.LOG_LEVEL === 'debug' || process.env.ZM_RTMS_LOG_LEVEL === 'debug';
+  if (isDebug) {
+    console.log(`Broadcast segment: "${(text || '').substring(0, 50)}..."`);
+  }
 }
 
 /**

@@ -17,22 +17,76 @@ if (PERSISTENCE_DISABLED) {
 const meetingCache = new Map();
 
 /**
+ * Verify Zoom webhook HMAC signature
+ * @param {Buffer} rawBody - Raw request body bytes
+ * @param {string} timestamp - x-zm-request-timestamp header
+ * @param {string} signature - x-zm-signature header
+ * @returns {boolean} - True if signature is valid
+ */
+function verifyWebhookSignature(rawBody, timestamp, signature) {
+  const secret = config.zoomClientSecret;
+
+  if (!secret) {
+    console.warn('⚠️ No webhook secret configured — skipping HMAC verification (dev mode)');
+    return true;
+  }
+
+  if (!signature || !timestamp) {
+    console.warn('⚠️ Missing signature or timestamp headers');
+    return false;
+  }
+
+  // Reject if timestamp is more than 5 minutes old (replay protection)
+  const now = Math.floor(Date.now() / 1000);
+  const reqTimestamp = parseInt(timestamp, 10);
+  if (isNaN(reqTimestamp) || Math.abs(now - reqTimestamp) > 300) {
+    console.warn('⚠️ Webhook timestamp too old or invalid — possible replay attack');
+    return false;
+  }
+
+  // Compute expected signature: v0=HMAC-SHA256("v0:" + timestamp + ":" + rawBody)
+  const message = `v0:${timestamp}:${rawBody.toString('utf8')}`;
+  const expectedSignature = 'v0=' + crypto
+    .createHmac('sha256', secret)
+    .update(message)
+    .digest('hex');
+
+  // Length check before timing-safe comparison (prevents timingSafeEqual from throwing)
+  if (signature.length !== expectedSignature.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  );
+}
+
+/**
  * POST /api/rtms/webhook
  * Receive RTMS webhooks from Zoom
+ *
+ * Note: This route needs raw body access for HMAC verification.
+ * The raw body is captured via express.raw() middleware before JSON parsing.
  */
-router.post('/webhook', async (req, res) => {
-  console.log('🎯 HIT /api/rtms/webhook route!');
-  console.log('🎯 Full URL:', req.originalUrl);
-  console.log('🎯 Headers:', JSON.stringify(req.headers, null, 2));
+router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  // Parse the raw body as JSON
+  let body;
+  try {
+    body = JSON.parse(req.body.toString('utf8'));
+  } catch (e) {
+    console.error('❌ Invalid JSON in webhook request');
+    return res.status(400).json({ error: 'Invalid JSON' });
+  }
 
-  const { event, payload } = req.body;
+  const { event, payload } = body;
 
-  // Handle Zoom webhook validation (endpoint URL validation)
+  // Handle Zoom webhook validation (endpoint URL validation) — no signature on these
   if (event === 'endpoint.url_validation') {
     const { plainToken } = payload;
     console.log('📨 Webhook validation request received');
 
-    // Hash the plainToken with client secret and client ID
+    // Hash the plainToken with client secret
     const hash = crypto
       .createHmac('sha256', config.zoomClientSecret)
       .update(plainToken)
@@ -45,24 +99,33 @@ router.post('/webhook', async (req, res) => {
     });
   }
 
-  console.log(`📨 RTMS Webhook: ${event}`);
+  // Verify HMAC signature for all other events
+  const signature = req.headers['x-zm-signature'];
+  const timestamp = req.headers['x-zm-request-timestamp'];
+
+  if (!verifyWebhookSignature(req.body, timestamp, signature)) {
+    console.error('❌ Webhook signature verification failed');
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  console.log(`📨 RTMS Webhook: ${event} (signature verified)`);
   if (payload?.operator_id) {
     console.log(`📨 Operator ID: ${payload.operator_id}`);
   }
-  console.log(`📨 Payload:`, JSON.stringify(payload, null, 2));
+  if (config.logLevel === 'debug') {
+    console.log(`📨 Payload:`, JSON.stringify(payload, null, 2));
+  }
 
-  // Forward webhook to RTMS service
+  // Forward webhook to RTMS service (internal network only)
   if (event === 'meeting.rtms_started' || event === 'meeting.rtms_stopped') {
     try {
       const rtmsServiceUrl = process.env.RTMS_SERVICE_URL || 'http://rtms:3002';
-      await axios.post(`${rtmsServiceUrl}/webhook`, req.body, {
+      await axios.post(`${rtmsServiceUrl}/webhook`, body, {
         timeout: 5000,
         headers: {
-          // Forward Zoom signature headers for verification
-          'x-zm-signature': req.headers['x-zm-signature'] || '',
-          'x-zm-request-timestamp': req.headers['x-zm-request-timestamp'] || '',
-          // Mark as internally forwarded (backend already validated the source)
-          'x-arlo-internal': 'true',
+          // Forward original Zoom signature headers — RTMS service will re-verify
+          'x-zm-signature': signature,
+          'x-zm-request-timestamp': timestamp,
         },
       });
       console.log(`✅ Forwarded ${event} to RTMS service`);
