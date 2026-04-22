@@ -24,11 +24,11 @@ const meetingCache = new Map();
  * @returns {boolean} - True if signature is valid
  */
 function verifyWebhookSignature(rawBody, timestamp, signature) {
-  const secret = config.zoomClientSecret;
+  const secret = config.zoomWebhookToken;
 
   if (!secret) {
-    console.warn('⚠️ No webhook secret configured — skipping HMAC verification (dev mode)');
-    return true;
+    console.error('❌ ZOOM_WEBHOOK_TOKEN missing at runtime');
+    return false;
   }
 
   if (!signature || !timestamp) {
@@ -86,9 +86,9 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     const { plainToken } = payload;
     console.log('📨 Webhook validation request received');
 
-    // Hash the plainToken with client secret
+    // Hash the plainToken with the webhook secret token (Zoom's CRC spec)
     const hash = crypto
-      .createHmac('sha256', config.zoomClientSecret)
+      .createHmac('sha256', config.zoomWebhookToken)
       .update(plainToken)
       .digest('hex');
 
@@ -123,7 +123,10 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       await axios.post(`${rtmsServiceUrl}/webhook`, body, {
         timeout: 5000,
         headers: {
-          // Forward original Zoom signature headers — RTMS service will re-verify
+          // Backend has already verified Zoom's signature against the original
+          // bytes. Mark forwarded requests as internal so RTMS can trust them
+          // without re-verifying against axios-reserialized body bytes.
+          'x-arlo-internal': 'true',
           'x-zm-signature': signature,
           'x-zm-request-timestamp': timestamp,
         },

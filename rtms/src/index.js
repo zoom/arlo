@@ -18,11 +18,11 @@ const app = express();
 function verifyWebhookSignature(req, rawBody) {
   const signature = req.headers['x-zm-signature'];
   const timestamp = req.headers['x-zm-request-timestamp'];
-  const secret = process.env.ZOOM_CLIENT_SECRET || process.env.ZM_RTMS_SECRET;
+  const secret = process.env.ZOOM_WEBHOOK_TOKEN;
 
   if (!secret) {
-    console.warn('No webhook secret configured — skipping HMAC verification');
-    return true; // Allow if not configured (dev mode)
+    console.error('ZOOM_WEBHOOK_TOKEN missing — rejecting webhook');
+    return false;
   }
 
   if (!signature || !timestamp) {
@@ -103,9 +103,13 @@ setInterval(() => {
 app.post('/webhook', async (req, res) => {
   const { event, payload } = req.body;
 
-  // Skip HMAC verification for URL validation (uses its own mechanism)
-  if (event !== 'endpoint.url_validation') {
-    // Use raw body for signature verification (captured by verify callback in express.json)
+  // Skip HMAC verification for:
+  // - endpoint.url_validation (uses its own CRC mechanism)
+  // - Requests forwarded from the backend, already verified against Zoom's
+  //   original body bytes. Axios re-serializes the parsed JSON so a second
+  //   HMAC here would fail on the reserialized body.
+  const isInternal = req.headers['x-arlo-internal'] === 'true';
+  if (event !== 'endpoint.url_validation' && !isInternal) {
     const rawBody = req.rawBody || JSON.stringify(req.body);
     if (!verifyWebhookSignature(req, rawBody)) {
       console.error('Webhook signature verification failed');
