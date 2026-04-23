@@ -12,10 +12,10 @@ const app = express();
 // Webhook Secret Token for HMAC signature verification
 // This is the "Secret Token" from Zoom Marketplace → App → Feature → Event Subscriptions
 // NOT the same as ZOOM_CLIENT_SECRET (which is for OAuth)
-const WEBHOOK_SECRET = process.env.ZM_WEBHOOK_TOKEN;
+const WEBHOOK_SECRET = process.env.ZOOM_WEBHOOK_TOKEN;
 
 if (!WEBHOOK_SECRET) {
-  console.error('❌ FATAL: ZM_WEBHOOK_TOKEN is not configured');
+  console.error('❌ FATAL: ZOOM_WEBHOOK_TOKEN is not configured');
   console.error('   This is the "Secret Token" from Zoom Marketplace:');
   console.error('   App → Feature → Event Subscriptions → Secret Token');
   console.error('   (This is NOT the same as ZOOM_CLIENT_SECRET which is for OAuth)');
@@ -31,6 +31,8 @@ if (!WEBHOOK_SECRET) {
 function verifyWebhookSignature(req, rawBody) {
   const signature = req.headers['x-zm-signature'];
   const timestamp = req.headers['x-zm-request-timestamp'];
+
+  // WEBHOOK_SECRET is validated at startup, no need to check again here
 
   if (!signature || !timestamp) {
     console.warn('Missing signature or timestamp headers');
@@ -110,9 +112,13 @@ setInterval(() => {
 app.post('/webhook', async (req, res) => {
   const { event, payload } = req.body;
 
-  // Skip HMAC verification for URL validation (uses its own mechanism)
-  if (event !== 'endpoint.url_validation') {
-    // Use raw body for signature verification (captured by verify callback in express.json)
+  // Skip HMAC verification for:
+  // - endpoint.url_validation (uses its own CRC mechanism)
+  // - Requests forwarded from the backend, already verified against Zoom's
+  //   original body bytes. Axios re-serializes the parsed JSON so a second
+  //   HMAC here would fail on the reserialized body.
+  const isInternal = req.headers['x-arlo-internal'] === 'true';
+  if (event !== 'endpoint.url_validation' && !isInternal) {
     const rawBody = req.rawBody || JSON.stringify(req.body);
     if (!verifyWebhookSignature(req, rawBody)) {
       console.error('Webhook signature verification failed');
@@ -552,7 +558,7 @@ app.listen(PORT, () => {
   console.log(`Port: ${PORT}`);
   console.log(`Webhook: http://localhost:${PORT}/webhook`);
   console.log(`Health: http://localhost:${PORT}/health`);
-  console.log(`Webhook Auth: ZM_WEBHOOK_TOKEN`);
+  console.log(`Webhook Auth: ZOOM_WEBHOOK_TOKEN`);
   console.log('='.repeat(60));
   console.log('Waiting for RTMS webhooks from Zoom...');
   console.log('='.repeat(60));

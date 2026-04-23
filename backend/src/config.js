@@ -12,6 +12,7 @@ require('dotenv').config({ path: '../.env' });
 const requiredEnvVars = [
   'ZOOM_CLIENT_ID',
   'ZOOM_CLIENT_SECRET',
+  'ZOOM_WEBHOOK_TOKEN',
   'PUBLIC_URL',
   'DATABASE_URL',
   'SESSION_SECRET',
@@ -94,6 +95,7 @@ module.exports = {
   // Zoom App
   zoomClientId: process.env.ZOOM_CLIENT_ID,
   zoomClientSecret: process.env.ZOOM_CLIENT_SECRET,
+  zoomWebhookToken: process.env.ZOOM_WEBHOOK_TOKEN,
   zoomAppId: process.env.ZOOM_APP_ID || null,
   publicUrl: process.env.PUBLIC_URL,
   redirectUri: process.env.ZOOM_APP_REDIRECT_URI || `${process.env.PUBLIC_URL}/api/auth/callback`,
@@ -131,7 +133,6 @@ module.exports = {
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3001',
 
   // RTMS
-  rtmsWebhookSecret: process.env.RTMS_WEBHOOK_SECRET || null,
   rtmsPort: parseInt(process.env.RTMS_PORT || '3002', 10),
 
   // Logging

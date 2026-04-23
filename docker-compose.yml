@@ -103,7 +103,7 @@ services:
       ZM_RTMS_CLIENT: ${ZOOM_CLIENT_ID}
       ZM_RTMS_SECRET: ${ZOOM_CLIENT_SECRET}
       # Webhook HMAC verification (Secret Token from Zoom Marketplace Event Subscriptions)
-      ZM_WEBHOOK_TOKEN: ${ZM_WEBHOOK_TOKEN}
+      ZOOM_WEBHOOK_TOKEN: ${ZOOM_WEBHOOK_TOKEN}
       # RTMS SDK v1.0 logging (replaces configureLogger())
       ZM_RTMS_LOG_LEVEL: debug
       # Log level for PII gating
