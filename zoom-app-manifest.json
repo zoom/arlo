@@ -71,7 +71,10 @@
                     "sendAppInvitationToAllParticipants",
                     "sendAppInvitation",
                     "showAppInvitationDialog",
-                    "onSendAppInvitation"
+                    "onSendAppInvitation",
+                    "startCollaborate",
+                    "endCollaborate",
+                    "runRenderingContext"
                 ]
             },
             "guest_mode": {
@@ -82,7 +85,7 @@
                 "enable": true
             },
             "collaborate_mode": {
-                "enable": false,
+                "enable": true,
                 "enable_screen_sharing": false,
                 "enable_play_together": false
             }

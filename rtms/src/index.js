@@ -9,6 +9,19 @@ const axios = require('axios');
 
 const app = express();
 
+// Webhook Secret Token for HMAC signature verification
+// This is the "Secret Token" from Zoom Marketplace → App → Feature → Event Subscriptions
+// NOT the same as ZOOM_CLIENT_SECRET (which is for OAuth)
+const WEBHOOK_SECRET = process.env.ZM_WEBHOOK_TOKEN;
+
+if (!WEBHOOK_SECRET) {
+  console.error('❌ FATAL: ZM_WEBHOOK_TOKEN is not configured');
+  console.error('   This is the "Secret Token" from Zoom Marketplace:');
+  console.error('   App → Feature → Event Subscriptions → Secret Token');
+  console.error('   (This is NOT the same as ZOOM_CLIENT_SECRET which is for OAuth)');
+  process.exit(1);
+}
+
 /**
  * Verify Zoom webhook HMAC signature
  * @param {object} req - Express request object
@@ -18,12 +31,6 @@ const app = express();
 function verifyWebhookSignature(req, rawBody) {
   const signature = req.headers['x-zm-signature'];
   const timestamp = req.headers['x-zm-request-timestamp'];
-  const secret = process.env.ZOOM_CLIENT_SECRET || process.env.ZM_RTMS_SECRET;
-
-  if (!secret) {
-    console.warn('No webhook secret configured — skipping HMAC verification');
-    return true; // Allow if not configured (dev mode)
-  }
 
   if (!signature || !timestamp) {
     console.warn('Missing signature or timestamp headers');
@@ -42,7 +49,7 @@ function verifyWebhookSignature(req, rawBody) {
   const bodyStr = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
   const message = `v0:${timestamp}:${bodyStr}`;
   const expectedSignature = 'v0=' + crypto
-    .createHmac('sha256', secret)
+    .createHmac('sha256', WEBHOOK_SECRET)
     .update(message)
     .digest('hex');
 
@@ -545,6 +552,7 @@ app.listen(PORT, () => {
   console.log(`Port: ${PORT}`);
   console.log(`Webhook: http://localhost:${PORT}/webhook`);
   console.log(`Health: http://localhost:${PORT}/health`);
+  console.log(`Webhook Auth: ZM_WEBHOOK_TOKEN`);
   console.log('='.repeat(60));
   console.log('Waiting for RTMS webhooks from Zoom...');
   console.log('='.repeat(60));

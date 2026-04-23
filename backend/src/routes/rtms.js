@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const axios = require('axios');
 const router = express.Router();
 const config = require('../config');
+const logger = require('../lib/logger');
 const { broadcastTranscriptSegment, broadcastParticipantEvent, broadcastMeetingStatus, crossRegisterUser, getStats } = require('../services/websocket');
 const { zoomGet } = require('../services/zoomApi');
 const prisma = require('../lib/prisma');
@@ -11,6 +12,18 @@ const prisma = require('../lib/prisma');
 const PERSISTENCE_DISABLED = config.disableMeetingPersistence;
 if (PERSISTENCE_DISABLED) {
   console.log('⚠️ Meeting persistence DISABLED — transcripts will not be saved to database');
+}
+
+/**
+ * Send a response and log it in debug mode
+ * Ensures logged status always matches actual response
+ */
+function sendResponse(res, statusCode, body) {
+  logger.debug('📤 Response:', JSON.stringify({ status: statusCode, body }));
+  if (typeof body === 'string') {
+    return res.status(statusCode).send(body);
+  }
+  return res.status(statusCode).json(body);
 }
 
 // Cache for meeting IDs -> database meeting records
@@ -70,21 +83,46 @@ function verifyWebhookSignature(rawBody, timestamp, signature) {
  * The raw body is captured via express.raw() middleware before JSON parsing.
  */
 router.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  // Parse the raw body as JSON
+  // Handle both Buffer (from express.raw) and pre-parsed object (from express.json)
   let body;
-  try {
-    body = JSON.parse(req.body.toString('utf8'));
-  } catch (e) {
-    console.error('❌ Invalid JSON in webhook request');
-    return res.status(400).json({ error: 'Invalid JSON' });
+  let rawBodyStr;
+
+  if (Buffer.isBuffer(req.body)) {
+    // Body is a Buffer from express.raw()
+    rawBodyStr = req.body.toString('utf8');
+    try {
+      body = JSON.parse(rawBodyStr);
+    } catch (e) {
+      logger.error('❌ Invalid JSON in webhook request');
+      logger.error('❌ Parse error:', e.message);
+      logger.error('❌ Raw body:', rawBodyStr);
+      return sendResponse(res, 400, { error: 'Invalid JSON' });
+    }
+  } else if (req.body && typeof req.body === 'object') {
+    // Body was already parsed by express.json() middleware
+    body = req.body;
+    rawBodyStr = JSON.stringify(body);
+  } else {
+    logger.error('❌ Empty or invalid webhook request body');
+    logger.error('❌ Body type:', typeof req.body);
+    logger.error('❌ Body value:', String(req.body));
+    return sendResponse(res, 400, { error: 'Invalid request body' });
   }
+
+  // Debug: log request details
+  logger.debug('📨 Webhook request:', JSON.stringify({
+    contentType: req.headers['content-type'],
+    contentLength: req.headers['content-length'],
+    bodyType: Buffer.isBuffer(req.body) ? 'Buffer' : typeof req.body,
+    body: body,
+  }, null, 2));
 
   const { event, payload } = body;
 
   // Handle Zoom webhook validation (endpoint URL validation) — no signature on these
   if (event === 'endpoint.url_validation') {
     const { plainToken } = payload;
-    console.log('📨 Webhook validation request received');
+    logger.info('📨 Webhook validation request received');
 
     // Hash the plainToken with client secret
     const hash = crypto
@@ -92,20 +130,19 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       .update(plainToken)
       .digest('hex');
 
-    console.log('✅ Webhook validation response sent');
-    return res.status(200).json({
-      plainToken,
-      encryptedToken: hash,
-    });
+    logger.info('✅ Webhook validation response sent');
+    return sendResponse(res, 200, { plainToken, encryptedToken: hash });
   }
 
   // Verify HMAC signature for all other events
   const signature = req.headers['x-zm-signature'];
   const timestamp = req.headers['x-zm-request-timestamp'];
 
-  if (!verifyWebhookSignature(req.body, timestamp, signature)) {
-    console.error('❌ Webhook signature verification failed');
-    return res.status(401).json({ error: 'Unauthorized' });
+  // Use Buffer for signature verification (convert back if body was pre-parsed)
+  const rawBodyBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(rawBodyStr, 'utf8');
+  if (!verifyWebhookSignature(rawBodyBuffer, timestamp, signature)) {
+    logger.error('❌ Webhook signature verification failed');
+    return sendResponse(res, 401, { error: 'Unauthorized' });
   }
 
   console.log(`📨 RTMS Webhook: ${event} (signature verified)`);
@@ -136,7 +173,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   }
 
   // Acknowledge webhook immediately
-  res.status(200).send('OK');
+  sendResponse(res, 200, 'OK');
 });
 
 /**

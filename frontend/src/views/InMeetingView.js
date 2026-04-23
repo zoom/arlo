@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, ScrollArea } from '@base-ui/react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw } from 'lucide-react';
+import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw, MonitorPlay } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
@@ -153,6 +153,8 @@ export default function InMeetingView() {
   const [newTask, setNewTask] = useState('');
   const [inviteMenuOpen, setInviteMenuOpen] = useState(false);
   const [inviteSent, setInviteSent] = useState(false);
+  const [isCollaborating, setIsCollaborating] = useState(false);
+  const [collaborateLoading, setCollaborateLoading] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editedTitle, setEditedTitle] = useState('');
   const [isSavingTitle, setIsSavingTitle] = useState(false);
@@ -317,6 +319,46 @@ export default function InMeetingView() {
     });
     setInviteMenuOpen(false);
   }, [zoomSdk]);
+
+  // Collaborate mode handler
+  const handleCollaborate = useCallback(async () => {
+    if (!zoomSdk) return;
+    setCollaborateLoading(true);
+    try {
+      if (isCollaborating) {
+        // End collaborate mode
+        await zoomSdk.endCollaborate();
+        setIsCollaborating(false);
+        addToast('Collaborate mode ended', 'info');
+      } else {
+        // Start collaborate mode
+        await zoomSdk.startCollaborate({
+          shareScreen: false, // Don't share screen, just open app for all
+        });
+        setIsCollaborating(true);
+        addToast('Collaborate mode started - all participants can now see Arlo', 'success');
+      }
+    } catch (err) {
+      console.error('Collaborate mode error:', err);
+      // Try alternative method if startCollaborate doesn't exist
+      if (err.message?.includes('not a function') || err.message?.includes('undefined')) {
+        try {
+          await zoomSdk.runRenderingContext({
+            view: 'immersive',
+          });
+          setIsCollaborating(true);
+          addToast('Collaborate mode started', 'success');
+        } catch (fallbackErr) {
+          console.error('Fallback collaborate error:', fallbackErr);
+          addToast('Collaborate mode not available: ' + (fallbackErr.message || 'Unknown error'), 'error');
+        }
+      } else {
+        addToast('Failed to toggle collaborate mode: ' + (err.message || 'Unknown error'), 'error');
+      }
+    } finally {
+      setCollaborateLoading(false);
+    }
+  }, [zoomSdk, isCollaborating, addToast]);
 
   // Close invite dropdown on click outside
   useEffect(() => {
@@ -666,6 +708,19 @@ export default function InMeetingView() {
                           Stop
                         </Button>
                       </>
+                    )}
+                    {/* Collaborate mode */}
+                    {!isTestMode && (
+                      <Button
+                        variant={isCollaborating ? 'primary' : 'outline'}
+                        size="sm"
+                        onClick={handleCollaborate}
+                        disabled={collaborateLoading}
+                        title={isCollaborating ? 'End collaborate mode' : 'Start collaborate mode - share Arlo with all participants'}
+                      >
+                        {collaborateLoading ? <Loader2 size={12} className="animate-spin" /> : <MonitorPlay size={12} />}
+                        {isCollaborating ? 'End Collab' : 'Collaborate'}
+                      </Button>
                     )}
                     {/* Invite participants */}
                     {(

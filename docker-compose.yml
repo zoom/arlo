@@ -50,6 +50,7 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/meeting_assistant
       REDIS_URL: redis://redis:6379
       NODE_ENV: development
+      LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       - "3000:3000"
     volumes:
@@ -98,9 +99,11 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/meeting_assistant
       BACKEND_URL: http://backend:3000
-      # RTMS SDK requires these specific variable names
+      # RTMS SDK authentication (SDK uses these specific variable names)
       ZM_RTMS_CLIENT: ${ZOOM_CLIENT_ID}
       ZM_RTMS_SECRET: ${ZOOM_CLIENT_SECRET}
+      # Webhook HMAC verification (Secret Token from Zoom Marketplace Event Subscriptions)
+      ZM_WEBHOOK_TOKEN: ${ZM_WEBHOOK_TOKEN}
       # RTMS SDK v1.0 logging (replaces configureLogger())
       ZM_RTMS_LOG_LEVEL: debug
       # Log level for PII gating

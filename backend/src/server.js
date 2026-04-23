@@ -8,12 +8,17 @@ const http = require('http');
 const { initWebSocketServer } = require('./services/websocket');
 const config = require('./config');
 const prisma = require('./lib/prisma');
+const logger = require('./lib/logger');
 const { version } = require('../package.json');
 const rateLimit = require('express-rate-limit');
 
 // Initialize Express app
 const app = express();
 const server = http.createServer(app);
+
+// Trust proxy headers (required when behind ngrok, nginx, etc.)
+// This fixes express-rate-limit X-Forwarded-For warnings
+app.set('trust proxy', 1);
 
 // =============================================================================
 // MIDDLEWARE
@@ -53,9 +58,20 @@ app.use(cookieParser());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Logging
+// Debug mode: Log all POST/PUT/PATCH request bodies
+if (logger.isDebug) {
+  app.use((req, res, next) => {
+    if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+      logger.logRequest(req);
+    }
+    next();
+  });
+}
+
+// HTTP request logging (morgan)
 if (config.nodeEnv !== 'test') {
-  app.use(morgan('combined'));
+  // Use 'dev' format in debug mode for more readable output, 'combined' otherwise
+  app.use(morgan(logger.isDebug ? 'dev' : 'combined'));
 }
 
 // =============================================================================
@@ -300,6 +316,7 @@ server.listen(PORT, () => {
   console.log(`Database: ${config.databaseUrl ? 'Connected' : 'Not configured'}`);
   console.log(`AI Enabled: ${config.aiEnabled}`);
   console.log(`Default Model: ${config.defaultModel}`);
+  console.log(`Log Level: ${logger.level}${logger.isDebug ? ' (request bodies will be logged)' : ''}`);
   console.log('='.repeat(60));
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`WebSocket: ws://localhost:${PORT}`);
