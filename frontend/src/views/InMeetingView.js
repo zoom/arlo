@@ -90,25 +90,29 @@ function InlineEventLabel({ eventType, name }) {
   }
 }
 
-export default function InMeetingView() {
-  useParams(); // id available from route but meetingId comes from context
+export default function InMeetingView({ isGuestMode = false }) {
+  const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
   const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
-  const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
+  const { zoomSdk, meetingContext, isTestMode, runningContext, isGuest: sdkIsGuest } = useZoomSdk();
   const { authorize } = useZoomAuth();
   const { hasFeature, verticalId, getTerm } = useVertical();
+
+  // In guest mode, use 'general' vertical to show all features
+  const effectiveVerticalId = isGuestMode ? 'general' : verticalId;
   const { showDemoData } = useDemoData();
   const { getFeatureOrder, updateFeatureOrder, hasCustomOrder, resetFeatureOrder } = useFeatureLayout();
 
-  // Vertical-specific features
-  const isHealthcare = verticalId === 'healthcare';
-  const isLegal = verticalId === 'legal';
-  const isSales = verticalId === 'sales';
-  const isSupport = verticalId === 'support';
+  // Vertical-specific features (use effectiveVerticalId for guests)
+  const isHealthcare = effectiveVerticalId === 'healthcare';
+  const isLegal = effectiveVerticalId === 'legal';
+  const isSales = effectiveVerticalId === 'sales';
+  const isSupport = effectiveVerticalId === 'support';
+  const isGeneral = effectiveVerticalId === 'general' || isGuestMode;
 
   // Get current feature order for this vertical
-  const featureOrder = getFeatureOrder(verticalId);
+  const featureOrder = getFeatureOrder(effectiveVerticalId);
 
   // Shared jump-to-segment handler
   const handleJumpToSegment = useCallback((seqNo) => {
@@ -131,17 +135,18 @@ export default function InMeetingView() {
     const [removed] = newOrder.splice(result.source.index, 1);
     newOrder.splice(result.destination.index, 0, removed);
 
-    updateFeatureOrder(verticalId, newOrder);
-  }, [featureOrder, updateFeatureOrder, verticalId]);
+    updateFeatureOrder(effectiveVerticalId, newOrder);
+  }, [featureOrder, updateFeatureOrder, effectiveVerticalId]);
 
-  // Context guard: redirect to home if not in a meeting
+  // Context guard: redirect to home if not in a meeting (skip for guests)
   useEffect(() => {
+    if (isGuestMode) return; // Guests stay in meeting view
     if (isTestMode) return;
     if (runningContext === null) return; // SDK still loading
     if (runningContext !== 'inMeeting') {
       navigate('/home', { replace: true });
     }
-  }, [isTestMode, runningContext, navigate]);
+  }, [isGuestMode, isTestMode, runningContext, navigate]);
 
   const { addToast } = useToast();
   const [segments, setSegments] = useState([]);
@@ -168,26 +173,39 @@ export default function InMeetingView() {
   // Auto-authenticate when entering meeting without a session
   const authAttemptedRef = useRef(false);
   useEffect(() => {
+    if (isGuestMode) return; // Guests don't auto-authenticate
     if (isTestMode || isAuthenticated || authAttemptedRef.current) return;
     if (runningContext !== 'inMeeting' || !meetingContext?.meetingUUID) return;
 
     authAttemptedRef.current = true;
     authorize().catch((err) => console.error('Auth error:', err));
-  }, [isTestMode, isAuthenticated, runningContext, meetingContext, authorize]);
+  }, [isGuestMode, isTestMode, isAuthenticated, runningContext, meetingContext, authorize]);
 
-  // Connect WebSocket when authenticated and meeting is available
+  // Connect WebSocket when authenticated and meeting is available (or for guests)
+  // For guests, get meetingId from route params
+  const effectiveMeetingId = isGuestMode ? (routeId ? decodeURIComponent(routeId) : null) : meetingId;
   useEffect(() => {
-    if (!isAuthenticated || ws || !meetingId) return;
-    connectWebSocket(wsToken, meetingId);
-  }, [isAuthenticated, ws, meetingId, wsToken, connectWebSocket]);
+    if (ws) return; // Already connected
+    if (!effectiveMeetingId) return; // No meeting ID yet
+
+    if (isGuestMode) {
+      // Guests connect without token
+      connectWebSocket(null, effectiveMeetingId);
+    } else if (isAuthenticated) {
+      connectWebSocket(wsToken, effectiveMeetingId);
+    }
+  }, [isGuestMode, isAuthenticated, ws, effectiveMeetingId, wsToken, connectWebSocket]);
 
   // Load existing transcript segments from DB (for auto-started RTMS sessions)
   const historicalLoadedRef = useRef(false);
   useEffect(() => {
-    if (!rtmsActive || !meetingId || historicalLoadedRef.current) return;
+    const loadMeetingId = effectiveMeetingId;
+    // For guests, load immediately; for auth users, wait for rtmsActive
+    if (!loadMeetingId || historicalLoadedRef.current) return;
+    if (!isGuestMode && !rtmsActive) return;
     historicalLoadedRef.current = true;
 
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/transcript`, {
+    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(loadMeetingId)}/transcript`, {
       credentials: 'include',
     })
       .then(res => res.ok ? res.json() : null)
@@ -203,15 +221,17 @@ export default function InMeetingView() {
         }
       })
       .catch(() => {});
-  }, [rtmsActive, meetingId]);
+  }, [isGuestMode, rtmsActive, effectiveMeetingId]);
 
   // Load existing participant events from DB (for mid-meeting app opens)
   const historicalEventsLoadedRef = useRef(false);
   useEffect(() => {
-    if (!rtmsActive || !meetingId || historicalEventsLoadedRef.current) return;
+    const loadMeetingId = effectiveMeetingId;
+    if (!loadMeetingId || historicalEventsLoadedRef.current) return;
+    if (!isGuestMode && !rtmsActive) return;
     historicalEventsLoadedRef.current = true;
 
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/participant-events`, {
+    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(loadMeetingId)}/participant-events`, {
       credentials: 'include',
     })
       .then(res => res.ok ? res.json() : null)
@@ -227,7 +247,7 @@ export default function InMeetingView() {
         }
       })
       .catch(() => {});
-  }, [rtmsActive, meetingId]);
+  }, [isGuestMode, rtmsActive, effectiveMeetingId]);
 
   // Listen for transcript segments
   useEffect(() => {
@@ -340,8 +360,16 @@ export default function InMeetingView() {
       }
     } catch (err) {
       console.error('Collaborate mode error:', err);
-      // Try alternative method if startCollaborate doesn't exist
-      if (err.message?.includes('not a function') || err.message?.includes('undefined')) {
+      // Handle "app_not_support" error gracefully - this happens when:
+      // - Meeting type doesn't support collaborate (e.g., webinars, certain room types)
+      // - User doesn't have host/co-host permissions
+      // Don't show error toast for these known limitations
+      const errMsg = err.message || '';
+      if (errMsg.includes('app_not_support') || errMsg.includes('80004')) {
+        console.log('Collaborate mode not available for this meeting type or user role');
+        addToast('Collaborate mode is not available for this meeting', 'info');
+      } else if (errMsg.includes('not a function') || errMsg.includes('undefined')) {
+        // Try alternative method if startCollaborate doesn't exist
         try {
           await zoomSdk.runRenderingContext({
             view: 'immersive',
@@ -350,10 +378,10 @@ export default function InMeetingView() {
           addToast('Collaborate mode started', 'success');
         } catch (fallbackErr) {
           console.error('Fallback collaborate error:', fallbackErr);
-          addToast('Collaborate mode not available: ' + (fallbackErr.message || 'Unknown error'), 'error');
+          addToast('Collaborate mode not available', 'info');
         }
       } else {
-        addToast('Failed to toggle collaborate mode: ' + (err.message || 'Unknown error'), 'error');
+        addToast('Collaborate mode not available', 'info');
       }
     } finally {
       setCollaborateLoading(false);
@@ -461,7 +489,7 @@ export default function InMeetingView() {
   const renderDraggableFeatures = useCallback(() => {
     return (
       <DragDropContext onDragEnd={handleDragEnd}>
-        <Droppable droppableId={`features-${verticalId}`}>
+        <Droppable droppableId={`features-${effectiveVerticalId}`}>
           {(provided, snapshot) => (
             <div
               ref={provided.innerRef}
@@ -501,7 +529,7 @@ export default function InMeetingView() {
         </Droppable>
       </DragDropContext>
     );
-  }, [featureOrder, featureRenderers, handleDragEnd, verticalId]);
+  }, [featureOrder, featureRenderers, handleDragEnd, effectiveVerticalId]);
 
   // Early return while redirecting (after all hooks)
   if (!isTestMode && runningContext !== null && runningContext !== 'inMeeting') {
@@ -650,10 +678,14 @@ export default function InMeetingView() {
           {transcriptState === 'not-started' && (
             <Card className="transcript-state-card">
               <div className="transcript-state-inner">
-                <p className="text-serif text-muted">Transcription not started</p>
-                <Button onClick={() => startRTMS(false)} disabled={rtmsLoading}>
-                  {rtmsLoading ? 'Starting...' : 'Start Transcription'}
-                </Button>
+                <p className="text-serif text-muted">
+                  {isGuestMode ? 'Waiting for host to start transcription...' : 'Transcription not started'}
+                </p>
+                {!isGuestMode && (
+                  <Button onClick={() => startRTMS(false)} disabled={rtmsLoading}>
+                    {rtmsLoading ? 'Starting...' : 'Start Transcription'}
+                  </Button>
+                )}
               </div>
             </Card>
           )}
@@ -686,27 +718,32 @@ export default function InMeetingView() {
                     )}
                   </div>
                   <div className="transcript-controls-buttons">
-                    {transcriptState === 'live' ? (
+                    {/* RTMS controls - only for authenticated users (host/co-host) */}
+                    {!isGuestMode && (
                       <>
-                        <Button variant="outline" size="sm" onClick={handlePause} disabled={rtmsLoading}>
-                          <Pause size={12} />
-                          Pause
-                        </Button>
-                        <Button variant="outline" size="sm" className="btn-destructive-outline" onClick={handleStop} disabled={rtmsLoading}>
-                          <Square size={12} />
-                          Stop
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button size="sm" onClick={handleResume} disabled={rtmsLoading}>
-                          <Play size={12} />
-                          Resume
-                        </Button>
-                        <Button variant="outline" size="sm" className="btn-destructive-outline" onClick={handleStop} disabled={rtmsLoading}>
-                          <Square size={12} />
-                          Stop
-                        </Button>
+                        {transcriptState === 'live' ? (
+                          <>
+                            <Button variant="outline" size="sm" onClick={handlePause} disabled={rtmsLoading}>
+                              <Pause size={12} />
+                              Pause
+                            </Button>
+                            <Button variant="outline" size="sm" className="btn-destructive-outline" onClick={handleStop} disabled={rtmsLoading}>
+                              <Square size={12} />
+                              Stop
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button size="sm" onClick={handleResume} disabled={rtmsLoading}>
+                              <Play size={12} />
+                              Resume
+                            </Button>
+                            <Button variant="outline" size="sm" className="btn-destructive-outline" onClick={handleStop} disabled={rtmsLoading}>
+                              <Square size={12} />
+                              Stop
+                            </Button>
+                          </>
+                        )}
                       </>
                     )}
                     {/* Collaborate mode */}
@@ -858,11 +895,15 @@ export default function InMeetingView() {
             <div className="assist-transcript-status-inner">
               {transcriptState === 'not-started' ? (
                 <>
-                  <span className="text-sans text-sm text-muted">Transcription not started</span>
-                  <Button size="sm" onClick={() => startRTMS(false)} disabled={rtmsLoading}>
-                    <Mic size={14} />
-                    {rtmsLoading ? 'Starting...' : 'Start'}
-                  </Button>
+                  <span className="text-sans text-sm text-muted">
+                    {isGuestMode ? 'Waiting for host to start transcription...' : 'Transcription not started'}
+                  </span>
+                  {!isGuestMode && (
+                    <Button size="sm" onClick={() => startRTMS(false)} disabled={rtmsLoading}>
+                      <Mic size={14} />
+                      {rtmsLoading ? 'Starting...' : 'Start'}
+                    </Button>
+                  )}
                 </>
               ) : transcriptState === 'waiting' ? (
                 <>
@@ -875,10 +916,12 @@ export default function InMeetingView() {
                 <>
                   <span className="paused-badge-sm text-sans text-sm">Paused</span>
                   <div className="assist-transcript-controls">
-                    <Button size="sm" onClick={handleResume} disabled={rtmsLoading}>
-                      <Play size={14} />
-                      Resume
-                    </Button>
+                    {!isGuestMode && (
+                      <Button size="sm" onClick={handleResume} disabled={rtmsLoading}>
+                        <Play size={14} />
+                        Resume
+                      </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => setActiveTab('transcript')}>
                       View Transcript
                     </Button>
@@ -895,10 +938,12 @@ export default function InMeetingView() {
                     <span className="text-sans text-xs text-muted">({segments.length} segments)</span>
                   </div>
                   <div className="assist-transcript-controls">
-                    <Button variant="outline" size="sm" onClick={handlePause} disabled={rtmsLoading}>
-                      <Pause size={14} />
-                      Pause
-                    </Button>
+                    {!isGuestMode && (
+                      <Button variant="outline" size="sm" onClick={handlePause} disabled={rtmsLoading}>
+                        <Pause size={14} />
+                        Pause
+                      </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={() => setActiveTab('transcript')}>
                       View Transcript
                     </Button>
@@ -909,12 +954,12 @@ export default function InMeetingView() {
           </Card>
 
           {/* Feature reorder toolbar */}
-          {hasCustomOrder(verticalId) && (
+          {hasCustomOrder(effectiveVerticalId) && (
             <div className="feature-reorder-toolbar">
               <span className="text-xs text-muted">Custom order active</span>
               <button
                 className="reset-order-btn"
-                onClick={() => resetFeatureOrder(verticalId)}
+                onClick={() => resetFeatureOrder(effectiveVerticalId)}
                 title="Reset to default order"
               >
                 <RotateCcw size={14} />

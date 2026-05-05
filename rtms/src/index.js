@@ -463,7 +463,8 @@ async function handleTranscript(meetingId, transcript) {
   const seqNo = session ? ++session.seqCounter : Date.now();
 
   // Use Zoom-provided timestamp if available, fallback to Date.now()
-  const tStartMs = typeof timestamp === 'number' ? timestamp : Date.now();
+  // Zoom RTMS timestamps are in microseconds, convert to milliseconds
+  const tStartMs = typeof timestamp === 'number' ? Math.floor(timestamp / 1000) : Date.now();
 
   const segment = {
     speakerId: userId ? String(userId) : 'unknown',

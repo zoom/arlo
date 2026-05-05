@@ -71,6 +71,9 @@ export function ZoomSdkProvider({ children }) {
             'onSendAppInvitation',
             'startCollaborate',
             'endCollaborate',
+            'joinCollaborate',
+            'leaveCollaborate',
+            'onCollaborateChange',
             'runRenderingContext',
           ],
           version: '0.16.0',
@@ -171,7 +174,7 @@ export function ZoomSdkProvider({ children }) {
                   'sendMessageToChat', 'openUrl', 'onRunningContextChange',
                   'onMyUserContextChange', 'sendAppInvitationToAllParticipants',
                   'sendAppInvitation', 'showAppInvitationDialog', 'onSendAppInvitation',
-                  'startCollaborate', 'endCollaborate', 'runRenderingContext',
+                  'startCollaborate', 'endCollaborate', 'joinCollaborate', 'leaveCollaborate', 'onCollaborateChange', 'runRenderingContext',
                 ],
                 version: '0.16.0',
               });

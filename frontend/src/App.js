@@ -61,11 +61,12 @@ function RootView() {
     if (isGuest === null) return; // SDK still loading
 
     if (isGuest) {
-      // Guest user — route to guest views
+      // Guest user — route to full meeting view (same as authenticated users)
       const inMeeting = runningContext === 'inMeeting';
       const meetingUUID = meetingContext?.meetingUUID;
       if (inMeeting && meetingUUID) {
-        navigate(`/guest/${encodeURIComponent(meetingUUID)}`, { replace: true });
+        // Send guests to full InMeetingView with all features
+        navigate(`/guest-meeting/${encodeURIComponent(meetingUUID)}`, { replace: true });
       } else {
         navigate('/guest', { replace: true });
       }
@@ -154,6 +155,8 @@ function App() {
                       {/* Guest routes */}
                       <Route path="/guest" element={<GuestNoMeetingView />} />
                       <Route path="/guest/:id" element={<GuestInMeetingView />} />
+                      {/* Guest full meeting view - same features as authenticated, but read-only */}
+                      <Route path="/guest-meeting/:id" element={<InMeetingView isGuestMode={true} />} />
 
                       {/* Authenticated routes (inside AppShell, requires vertical selection) */}
                       <Route element={

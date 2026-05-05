@@ -22,35 +22,38 @@ function initWebSocketServer(server) {
 
     console.log('📡 New WebSocket connection attempt at', req.url);
 
-    // Security: Require a valid JWT token for all WebSocket connections
-    // Anonymous access is no longer allowed to prevent meeting enumeration
+    // Authenticate if token provided, otherwise allow as guest
     let userId = null;
-    if (!token) {
-      console.error('❌ WebSocket connection rejected: Missing authentication token');
-      ws.close(1008, 'Authentication required');
-      return;
-    }
+    let isGuest = true;
 
-    try {
-      const payload = verifyToken(token);
-      userId = payload.userId;
-      console.log(`✅ WebSocket authenticated: User ${userId}`);
-    } catch (error) {
-      console.error('❌ WebSocket token verification failed:', error.message);
-      ws.close(1008, 'Invalid authentication token');
-      return;
+    if (token) {
+      try {
+        const payload = verifyToken(token);
+        userId = payload.userId;
+        isGuest = false;
+        console.log(`✅ WebSocket authenticated: User ${userId}`);
+      } catch (error) {
+        console.error('❌ WebSocket token verification failed:', error.message);
+        ws.close(1008, 'Invalid authentication token');
+        return;
+      }
+    } else {
+      console.log('📡 WebSocket guest connection (no token)');
     }
 
     // Store connection
     ws.userId = userId;
     ws.meetingId = meeting_id;
     ws.isAlive = true;
+    ws.isGuest = isGuest;
 
-    // Add to user connections
-    if (!userConnections.has(userId)) {
-      userConnections.set(userId, new Set());
+    // Add to user connections (only for authenticated users)
+    if (userId) {
+      if (!userConnections.has(userId)) {
+        userConnections.set(userId, new Set());
+      }
+      userConnections.get(userId).add(ws);
     }
-    userConnections.get(userId).add(ws);
 
     // Add to meeting connections if meeting_id provided
     if (meeting_id) {
@@ -82,10 +85,10 @@ function initWebSocketServer(server) {
 
     // Handle disconnect
     ws.on('close', () => {
-      console.log(`📡 WebSocket disconnected: User ${userId}`);
+      console.log(`📡 WebSocket disconnected: ${userId ? `User ${userId}` : 'Guest'}`);
 
-      // Remove from user connections
-      if (userConnections.has(userId)) {
+      // Remove from user connections (only for authenticated users)
+      if (userId && userConnections.has(userId)) {
         userConnections.get(userId).delete(ws);
         if (userConnections.get(userId).size === 0) {
           userConnections.delete(userId);
@@ -118,6 +121,7 @@ function initWebSocketServer(server) {
       data: {
         userId,
         meetingId: meeting_id,
+        isGuest,
         timestamp: new Date().toISOString(),
       },
     }));
