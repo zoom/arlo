@@ -105,9 +105,11 @@ export function ZoomSdkProvider({ children }) {
         async function fetchMeetingContext() {
           let data = {};
           let meetingUUID = null;
+          let meetingID = null;
 
           try {
             const uuidResponse = await zoomSdk.getMeetingUUID();
+            console.log('getMeetingUUID response:', uuidResponse);
             if (uuidResponse) {
               meetingUUID = uuidResponse?.meetingUUID ||
                 uuidResponse?.uuid ||
@@ -119,21 +121,31 @@ export function ZoomSdkProvider({ children }) {
 
           try {
             const meeting = await zoomSdk.getMeetingContext();
+            console.log('getMeetingContext response:', meeting);
             if (!meetingUUID && meeting) {
               meetingUUID = meeting.meetingUUID || meeting.meetingId || meeting.uuid || meeting.id;
             }
+            // Also capture numeric meeting ID as fallback
+            meetingID = meeting?.meetingID || meeting?.meetingId || meeting?.id;
             data = { ...data, ...meeting };
-            if (meeting?.meetingID) {
-              data.meetingID = meeting.meetingID;
-            }
-          } catch {
-            // Could not get meeting context
+          } catch (ctxErr) {
+            console.error('getMeetingContext failed:', ctxErr);
           }
 
           if (meetingUUID) {
             data.meetingUUID = meetingUUID;
           }
+          if (meetingID) {
+            data.meetingID = meetingID;
+          }
 
+          // Use meetingID as fallback if no UUID available
+          if (!data.meetingUUID && data.meetingID) {
+            console.log('Using meetingID as fallback identifier:', data.meetingID);
+            data.meetingUUID = String(data.meetingID);
+          }
+
+          console.log('Final meeting context:', data);
           return data;
         }
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mic, Sparkles, Bookmark, Check, Minus } from 'lucide-react';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
@@ -21,6 +21,21 @@ export default function GuestNoMeetingView() {
   const navigate = useNavigate();
   const { zoomSdk, userContextStatus, meetingContext, runningContext, isTestMode } = useZoomSdk();
 
+  // Auto-redirect to full meeting view when meeting ID becomes available
+  useEffect(() => {
+    const inMeeting = runningContext === 'inMeeting';
+    const meetingUUID = meetingContext?.meetingUUID;
+    const meetingID = meetingContext?.meetingID;
+    const routeId = meetingUUID || meetingID;
+
+    console.log('GuestNoMeetingView: checking redirect', { inMeeting, meetingUUID, meetingID, routeId });
+
+    if (inMeeting && routeId) {
+      console.log('GuestNoMeetingView: redirecting to full view with ID:', routeId);
+      navigate(`/guest-meeting/${encodeURIComponent(routeId)}`, { replace: true });
+    }
+  }, [runningContext, meetingContext, navigate]);
+
   const handleInstall = () => {
     if (!isTestMode && zoomSdk?.promptAuthorize) {
       zoomSdk.promptAuthorize().catch(() => {});
@@ -29,9 +44,10 @@ export default function GuestNoMeetingView() {
 
   const handleContinueAsGuest = () => {
     const inMeeting = runningContext === 'inMeeting';
-    const meetingUUID = meetingContext?.meetingUUID;
-    if (inMeeting && meetingUUID) {
-      navigate(`/guest/${encodeURIComponent(meetingUUID)}`);
+    const routeId = meetingContext?.meetingUUID || meetingContext?.meetingID;
+    if (inMeeting && routeId) {
+      // Route to full meeting view with all features
+      navigate(`/guest-meeting/${encodeURIComponent(routeId)}`);
     }
   };
 
@@ -39,7 +55,7 @@ export default function GuestNoMeetingView() {
     ? 'Sign in to Zoom'
     : 'Add Arlo to Your Account';
 
-  const inMeeting = runningContext === 'inMeeting' && meetingContext?.meetingUUID;
+  const inMeeting = runningContext === 'inMeeting' && (meetingContext?.meetingUUID || meetingContext?.meetingID);
 
   return (
     <div className="guest-no-meeting">

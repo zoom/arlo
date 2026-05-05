@@ -60,14 +60,32 @@ function RootView() {
     // Inside Zoom: wait for SDK to determine guest status
     if (isGuest === null) return; // SDK still loading
 
+    console.log('RootView routing:', { isGuest, runningContext, meetingContext });
+
     if (isGuest) {
       // Guest user — route to full meeting view (same as authenticated users)
       const inMeeting = runningContext === 'inMeeting';
       const meetingUUID = meetingContext?.meetingUUID;
-      if (inMeeting && meetingUUID) {
+      const meetingID = meetingContext?.meetingID;
+
+      console.log('Guest routing check:', { inMeeting, meetingUUID, meetingID, meetingContext });
+
+      // If we're in a meeting but don't have meeting context yet, wait for it
+      // Give it a reasonable timeout (meetingContext should be set even if empty)
+      if (inMeeting && meetingContext === null) {
+        console.log('Guest in meeting, waiting for meetingContext to load...');
+        return; // Wait for meetingContext to be populated
+      }
+
+      // Use meetingUUID or meetingID for routing
+      const routeId = meetingUUID || meetingID;
+
+      if (inMeeting && routeId) {
         // Send guests to full InMeetingView with all features
-        navigate(`/guest-meeting/${encodeURIComponent(meetingUUID)}`, { replace: true });
+        console.log('Guest routing to full meeting view:', routeId);
+        navigate(`/guest-meeting/${encodeURIComponent(routeId)}`, { replace: true });
       } else {
+        console.log('Guest has no meeting ID, routing to /guest');
         navigate('/guest', { replace: true });
       }
     } else {
@@ -77,7 +95,9 @@ function RootView() {
   }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate, isVerticalSelected]);
 
   // Show spinner while loading
-  if (isLoading || (!isBrowser && isGuest === null)) {
+  // Also wait if guest is in meeting but meetingContext hasn't been set yet (null means still loading)
+  const waitingForMeetingContext = !isBrowser && isGuest && runningContext === 'inMeeting' && meetingContext === null;
+  if (isLoading || (!isBrowser && isGuest === null) || waitingForMeetingContext) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <LoadingSpinner />
