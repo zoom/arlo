@@ -53,16 +53,9 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 
 <div align="center">
 
-<!--
-  DEMO VIDEO PLACEHOLDER
-  Replace with: [![Arlo Demo](./docs/assets/demo-thumbnail.png)](https://youtube.com/watch?v=YOUR_VIDEO_ID)
--->
+![Arlo Vertical Selector](./docs/images/vertical-selector.png)
 
-| | |
-|:---:|:---:|
-| **Live Demo Coming Soon** | |
-| We're preparing video walkthroughs showing Arlo in action. | |
-| Check back soon or [star this repo](https://github.com/zoom/arlo) to get notified! | |
+*Choose your workflow — each vertical is tailored to your industry*
 
 </div>
 
@@ -248,69 +241,51 @@ Wait for all services to start:
 
 Arlo includes specialized modes demonstrating RTMS capabilities for different industries. Each vertical shows how real-time transcription can power domain-specific features.
 
-<table>
-<tr>
-<td align="center" width="50%">
-
 ### Arlo for Notes
-**Full-Featured Note-Taking**
+**Full-Featured Note-Taking** — Meeting summaries, key decisions, action items, and open questions tracked automatically.
 
-Meeting summaries, key decisions, action items, participant stats, and talk time analytics.
+<p align="center">
+<img src="./docs/images/notetaker-summary.png" alt="Meeting Summary" width="45%">
+<img src="./docs/images/notetaker-decisions.png" alt="Decisions & Questions" width="45%">
+</p>
 
-<!-- Demo: docs/assets/demos/notes-demo.mp4 -->
-*Demo video coming soon*
-
-</td>
-<td align="center" width="50%">
+---
 
 ### Arlo for Healthcare
-**Clinical Documentation**
+**Clinical Documentation** — SOAP notes auto-generation, medication and symptom detection, clinical terminology highlighting.
 
-SOAP notes auto-generation, clinical alerts for drug interactions, patient context sidebar.
+<p align="center">
+<img src="./docs/images/healthcare-transcript.png" alt="Healthcare Transcript" width="45%">
+<img src="./docs/images/healthcare-soap-notes.png" alt="SOAP Notes" width="45%">
+</p>
 
-<!-- Demo: docs/assets/demos/healthcare-demo.mp4 -->
-*Demo video coming soon*
-
-</td>
-</tr>
-<tr>
-<td align="center" width="50%">
+---
 
 ### Arlo for Legal
-**Deposition Assistance**
+**Deposition Assistance** — Real-time contradiction detection, billable time tracking with export, and exhibit management.
 
-Contradiction detection, billable time tracking, exhibit markers, privilege flags.
+<p align="center">
+<img src="./docs/images/legal-billable-time.png" alt="Billable Time Tracking" width="45%">
+<img src="./docs/images/legal-contradictions.png" alt="Contradiction Detection" width="45%">
+</p>
 
-<!-- Demo: docs/assets/demos/legal-demo.mp4 -->
-*Demo video coming soon*
-
-</td>
-<td align="center" width="50%">
+---
 
 ### Arlo for Sales
-**Deal Intelligence**
+**Deal Intelligence** — BANT qualification tracking (Budget, Authority, Need, Timeline), competitor mentions, and commitment detection.
 
-BANT qualification tracking, competitor mention detection, commitment tracking.
+<p align="center">
+<img src="./docs/images/sales-qualification.png" alt="Deal Qualification" width="70%">
+</p>
 
-<!-- Demo: docs/assets/demos/sales-demo.mp4 -->
-*Demo video coming soon*
-
-</td>
-</tr>
-<tr>
-<td align="center" colspan="2">
+---
 
 ### Arlo for Support
-**Agent Assistance**
+**Agent Assistance** — Live customer sentiment meter with trend analysis and emotional shift tracking.
 
-Live sentiment meter, escalation alerts, resolution workflow tracking.
-
-<!-- Demo: docs/assets/demos/support-demo.mp4 -->
-*Demo video coming soon*
-
-</td>
-</tr>
-</table>
+<p align="center">
+<img src="./docs/images/support-sentiment.png" alt="Customer Sentiment" width="70%">
+</p>
 
 > **Building your own vertical?** Fork this repo and customize the frontend components in `frontend/src/features/` for your specific use case.
 
