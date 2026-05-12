@@ -57,6 +57,12 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 
 *Choose your workflow — each vertical is tailored to your industry*
 
+<!-- VIDEO DEMO: Uncomment when ready
+[![Watch the Demo](./docs/images/demo-thumbnail.png)](https://youtube.com/watch?v=YOUR_VIDEO_ID)
+-->
+
+> **Video walkthrough coming soon** — [Star this repo](https://github.com/zoom/arlo) to get notified!
+
 </div>
 
 ---
