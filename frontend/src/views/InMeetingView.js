@@ -12,6 +12,7 @@ import useZoomAuth from '../hooks/useZoomAuth';
 import { useDemoData } from '../hooks/useDemoData';
 import { useFeatureLayout } from '../hooks/useFeatureLayout';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
+import ArloResponsePanel from '../components/ArloResponsePanel';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
@@ -169,6 +170,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   // Always default to "assist" tab (features page) when entering a meeting
   const [activeTab, setActiveTab] = useState('assist');
   const [voiceCommandsEnabled, setVoiceCommandsEnabled] = useState(true);
+  const [showResponsePanel, setShowResponsePanel] = useState(true);
   const transcriptRef = useRef(null);
   const inviteDropdownRef = useRef(null);
   const meetingSummaryRef = useRef(null);
@@ -435,7 +437,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   }, [addToast]);
 
   // Initialize voice commands hook
-  const { lastCommand, isProcessing: voiceProcessing } = useVoiceCommands({
+  const { lastCommand, isProcessing: voiceProcessing, responses: voiceResponses, clearResponses } = useVoiceCommands({
     ws,
     onSummarize: handleVoiceSummarize,
     onActionItems: handleVoiceActionItems,
@@ -793,14 +795,23 @@ export default function InMeetingView({ isGuestMode = false }) {
           </span>
         )}
         {/* Voice commands indicator */}
-        {rtmsActive && voiceCommandsEnabled && (
+        {rtmsActive && (
           <button
-            className={`voice-commands-indicator ${voiceProcessing ? 'processing' : ''} ${lastCommand ? 'active' : ''}`}
-            onClick={() => setVoiceCommandsEnabled(prev => !prev)}
-            title={`Voice commands ${voiceCommandsEnabled ? 'enabled' : 'disabled'}. Say "Hey Arlo" followed by a command.`}
+            className={`voice-commands-indicator ${voiceProcessing ? 'processing' : ''} ${voiceResponses.length > 0 ? 'has-responses' : ''} ${!voiceCommandsEnabled ? 'disabled' : ''}`}
+            onClick={() => {
+              if (voiceResponses.length > 0) {
+                setShowResponsePanel(prev => !prev);
+              } else {
+                setVoiceCommandsEnabled(prev => !prev);
+              }
+            }}
+            title={voiceCommandsEnabled ? 'Say "Hey Arlo" followed by a command. Click to toggle panel.' : 'Voice commands disabled. Click to enable.'}
           >
             <Volume2 size={14} />
-            <span className="text-sans text-xs">Voice</span>
+            <span className="text-sans text-xs">{voiceCommandsEnabled ? 'Voice' : 'Voice Off'}</span>
+            {voiceResponses.length > 0 && (
+              <span className="voice-badge">{voiceResponses.length}</span>
+            )}
           </button>
         )}
       </div>
@@ -1162,6 +1173,16 @@ export default function InMeetingView({ isGuestMode = false }) {
           )}
         </Tabs.Panel>
       </Tabs.Root>
+
+      {/* Voice command response panel */}
+      {showResponsePanel && (
+        <ArloResponsePanel
+          responses={voiceResponses}
+          isProcessing={voiceProcessing}
+          onClear={clearResponses}
+          onClose={() => setShowResponsePanel(false)}
+        />
+      )}
     </div>
   );
 }

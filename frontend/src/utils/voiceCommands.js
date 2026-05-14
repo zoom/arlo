@@ -4,13 +4,24 @@
  */
 
 // Trigger phrases to detect (case-insensitive)
+// More lenient matching to handle transcription variations
 const TRIGGER_PHRASES = [
   'hey arlo',
   'hey, arlo',
+  'hey. arlo',
   'hi arlo',
   'hi, arlo',
+  'hi. arlo',
+  'a arlo',  // common transcription of "hey"
+  'hay arlo',
   'arlo,',
+  'arlo.',
   'arlo ',
+  'arlo:',
+  // Handle common transcription errors
+  'carlo',
+  'harlo',
+  'hey carlo',
 ];
 
 // Command definitions with aliases and patterns

@@ -44,6 +44,7 @@ export function useVoiceCommands({
   const { zoomSdk } = useZoomSdk();
   const [lastCommand, setLastCommand] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [responses, setResponses] = useState([]);
 
   // Refs for callbacks to avoid stale closures
   const callbacksRef = useRef({
@@ -93,6 +94,13 @@ export function useVoiceCommands({
     setIsProcessing(true);
     setLastCommand(command);
 
+    // Add user command to responses
+    setResponses(prev => [...prev, {
+      type: 'user',
+      text: command.rawText,
+      timestamp: Date.now(),
+    }]);
+
     // Show acknowledgment toast
     addToast(`🎤 Heard: "${command.rawText}"`, 'info', 3000);
 
@@ -103,14 +111,26 @@ export function useVoiceCommands({
         case 'SUMMARIZE':
           addToast('📝 Generating summary...', 'info', 2000);
           if (callbacks.onSummarize) {
-            await callbacks.onSummarize();
+            const result = await callbacks.onSummarize();
+            setResponses(prev => [...prev, {
+              type: 'assistant',
+              action: 'Summary',
+              text: result || 'Summary generated! Check the Arlo Assist tab.',
+              timestamp: Date.now(),
+            }]);
           }
           break;
 
         case 'ACTION_ITEMS':
           addToast('✅ Finding action items...', 'info', 2000);
           if (callbacks.onActionItems) {
-            await callbacks.onActionItems();
+            const result = await callbacks.onActionItems();
+            setResponses(prev => [...prev, {
+              type: 'assistant',
+              action: 'Action Items',
+              text: result || 'Action items extracted! Check the Arlo Assist tab.',
+              timestamp: Date.now(),
+            }]);
           }
           break;
 
@@ -118,8 +138,13 @@ export function useVoiceCommands({
           addToast('⭐ Creating highlight...', 'info', 2000);
           if (callbacks.onHighlight) {
             await callbacks.onHighlight();
+            setResponses(prev => [...prev, {
+              type: 'assistant',
+              action: 'Highlight',
+              text: 'Highlight created at current timestamp!',
+              timestamp: Date.now(),
+            }]);
           }
-          // Show Zoom notification too
           if (zoomSdk) {
             zoomSdk.showNotification({
               type: 'success',
@@ -133,6 +158,12 @@ export function useVoiceCommands({
           addToast('🎯 Showing decisions...', 'info', 2000);
           if (callbacks.onDecisions) {
             await callbacks.onDecisions();
+            setResponses(prev => [...prev, {
+              type: 'assistant',
+              action: 'Decisions',
+              text: 'Scrolled to decisions panel.',
+              timestamp: Date.now(),
+            }]);
           }
           break;
 
@@ -140,6 +171,12 @@ export function useVoiceCommands({
           addToast('❓ Showing questions...', 'info', 2000);
           if (callbacks.onQuestions) {
             await callbacks.onQuestions();
+            setResponses(prev => [...prev, {
+              type: 'assistant',
+              action: 'Questions',
+              text: 'Scrolled to open questions panel.',
+              timestamp: Date.now(),
+            }]);
           }
           break;
 
@@ -147,25 +184,48 @@ export function useVoiceCommands({
           addToast('💬 Sending to chat...', 'info', 2000);
           if (callbacks.onSendToChat) {
             await callbacks.onSendToChat();
+            setResponses(prev => [...prev, {
+              type: 'assistant',
+              action: 'Send to Chat',
+              text: 'Summary sent to meeting chat!',
+              timestamp: Date.now(),
+            }]);
           }
           break;
 
         case 'SEARCH':
           addToast(`🔍 Searching: "${command.parameter}"`, 'info', 2000);
           if (callbacks.onSearch) {
-            await callbacks.onSearch(command.parameter);
+            const result = await callbacks.onSearch(command.parameter);
+            setResponses(prev => [...prev, {
+              type: 'assistant',
+              action: 'Search',
+              text: result || `Searched for "${command.parameter}"`,
+              timestamp: Date.now(),
+            }]);
           }
           break;
 
         case 'ASK':
-          addToast(`💭 Asking: "${command.parameter}"`, 'info', 2000);
+          addToast(`💭 Processing question...`, 'info', 2000);
           if (callbacks.onAsk) {
-            await callbacks.onAsk(command.parameter);
+            const result = await callbacks.onAsk(command.parameter);
+            setResponses(prev => [...prev, {
+              type: 'assistant',
+              action: 'Answer',
+              text: result || 'AI chat feature coming soon!',
+              timestamp: Date.now(),
+            }]);
           }
           break;
 
         case 'HELP':
-          addToast(getHelpText(), 'info', 10000);
+          setResponses(prev => [...prev, {
+            type: 'assistant',
+            action: 'Help',
+            text: getHelpText(),
+            timestamp: Date.now(),
+          }]);
           break;
 
         default:
@@ -188,9 +248,12 @@ export function useVoiceCommands({
     const text = segment?.text;
     if (!text) return;
 
+    // Debug: log all incoming text to help diagnose detection issues
+    console.log('[VoiceCommands] Processing segment:', text.substring(0, 100));
+
     const command = processTranscriptForCommand(text);
     if (command) {
-      console.log('Voice command detected:', command);
+      console.log('[VoiceCommands] Command detected:', command);
       executeCommand(command);
     }
   }, [enabled, isProcessing, executeCommand]);
@@ -220,9 +283,16 @@ export function useVoiceCommands({
     return () => ws.removeEventListener('message', handleMessage);
   }, [ws, enabled, processSegment]);
 
+  // Clear responses
+  const clearResponses = useCallback(() => {
+    setResponses([]);
+  }, []);
+
   return {
     lastCommand,
     isProcessing,
+    responses,
+    clearResponses,
     executeCommand,
     availableCommands: COMMANDS,
   };

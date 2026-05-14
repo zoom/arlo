@@ -181,6 +181,28 @@
   }
 }
 
+.voice-commands-indicator.disabled {
+  opacity: 0.5;
+}
+
+.voice-commands-indicator.has-responses {
+  border-color: var(--color-accent);
+}
+
+.voice-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--color-accent);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+}
+
 /* Recording dot (red pulsing) */
 .recording-dot {
   width: 8px;
