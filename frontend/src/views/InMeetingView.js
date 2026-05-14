@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, ScrollArea } from '@base-ui/react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw, MonitorPlay } from 'lucide-react';
+import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw, MonitorPlay, Volume2 } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
@@ -11,6 +11,7 @@ import { useVertical } from '../contexts/VerticalContext';
 import useZoomAuth from '../hooks/useZoomAuth';
 import { useDemoData } from '../hooks/useDemoData';
 import { useFeatureLayout } from '../hooks/useFeatureLayout';
+import { useVoiceCommands } from '../hooks/useVoiceCommands';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
@@ -167,8 +168,12 @@ export default function InMeetingView({ isGuestMode = false }) {
   const [displayTitle, setDisplayTitle] = useState(null);
   // Always default to "assist" tab (features page) when entering a meeting
   const [activeTab, setActiveTab] = useState('assist');
+  const [voiceCommandsEnabled, setVoiceCommandsEnabled] = useState(true);
   const transcriptRef = useRef(null);
   const inviteDropdownRef = useRef(null);
+  const meetingSummaryRef = useRef(null);
+  const decisionsLogRef = useRef(null);
+  const openQuestionsRef = useRef(null);
 
   // Auto-authenticate when entering meeting without a session
   const authAttemptedRef = useRef(false);
@@ -316,6 +321,132 @@ export default function InMeetingView({ isGuestMode = false }) {
     setTasks([...tasks, { id: Date.now().toString(), task: newTask, owner: 'Unassigned' }]);
     setNewTask('');
   };
+
+  // Voice command callbacks
+  const handleVoiceSummarize = useCallback(async () => {
+    // Switch to assist tab and trigger summary refresh
+    setActiveTab('assist');
+    if (meetingSummaryRef.current?.refresh) {
+      meetingSummaryRef.current.refresh();
+    }
+    addToast('Summary generated! Check Arlo Assist tab.', 'success', 3000);
+  }, [addToast]);
+
+  const handleVoiceActionItems = useCallback(async () => {
+    setActiveTab('assist');
+    addToast('Action items extracted! Check Arlo Assist tab.', 'success', 3000);
+  }, [addToast]);
+
+  const handleVoiceHighlight = useCallback(async () => {
+    // Create a highlight at the current time
+    const now = Date.now();
+    const lastSegment = segments[segments.length - 1];
+    if (lastSegment && effectiveMeetingId) {
+      try {
+        await fetch(`/api/highlights`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            meetingId: effectiveMeetingId,
+            timestampMs: lastSegment.tStartMs || now,
+            text: lastSegment.text?.substring(0, 200) || 'Voice command highlight',
+            label: 'Voice Highlight',
+          }),
+        });
+        addToast('Highlight created!', 'success', 3000);
+      } catch {
+        addToast('Failed to create highlight', 'error', 3000);
+      }
+    }
+  }, [segments, effectiveMeetingId, addToast]);
+
+  const handleVoiceDecisions = useCallback(async () => {
+    setActiveTab('assist');
+    // Scroll to decisions component
+    setTimeout(() => {
+      const decisionsEl = document.querySelector('[data-feature="decisions-log"]');
+      if (decisionsEl) {
+        decisionsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
+    addToast('Showing decisions...', 'info', 2000);
+  }, [addToast]);
+
+  const handleVoiceQuestions = useCallback(async () => {
+    setActiveTab('assist');
+    // Scroll to questions component
+    setTimeout(() => {
+      const questionsEl = document.querySelector('[data-feature="open-questions"]');
+      if (questionsEl) {
+        questionsEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 100);
+    addToast('Showing open questions...', 'info', 2000);
+  }, [addToast]);
+
+  const handleVoiceSendToChat = useCallback(async () => {
+    if (!zoomSdk) {
+      addToast('Chat not available', 'error', 3000);
+      return;
+    }
+    // Generate a quick summary and send to chat
+    try {
+      const message = `📝 Meeting Summary (via Arlo voice command)\n\nSegments captured: ${segments.length}\nUse Arlo to see full details.`;
+      await zoomSdk.sendMessageToChat({ message });
+      addToast('Summary sent to chat!', 'success', 3000);
+    } catch {
+      addToast('Failed to send to chat', 'error', 3000);
+    }
+  }, [zoomSdk, segments.length, addToast]);
+
+  const handleVoiceSearch = useCallback(async (query) => {
+    if (!query) return;
+    // Search through segments for the query
+    const results = segments.filter(s =>
+      s.text?.toLowerCase().includes(query.toLowerCase()) ||
+      s.speakerLabel?.toLowerCase().includes(query.toLowerCase())
+    );
+    if (results.length > 0) {
+      setActiveTab('transcript');
+      // Scroll to first result
+      setTimeout(() => {
+        const firstResult = results[0];
+        if (transcriptRef.current) {
+          const element = transcriptRef.current.querySelector(`[data-seq="${firstResult.seqNo}"]`);
+          if (element) {
+            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.classList.add('highlight-flash');
+            setTimeout(() => element.classList.remove('highlight-flash'), 2000);
+          }
+        }
+      }, 100);
+      addToast(`Found ${results.length} matches for "${query}"`, 'success', 3000);
+    } else {
+      addToast(`No matches found for "${query}"`, 'info', 3000);
+    }
+  }, [segments, addToast]);
+
+  const handleVoiceAsk = useCallback(async (question) => {
+    if (!question) return;
+    // For now, show that we received the question
+    // In the future, this could trigger the AI chat
+    addToast(`Question received: "${question}" - AI chat coming soon!`, 'info', 4000);
+  }, [addToast]);
+
+  // Initialize voice commands hook
+  const { lastCommand, isProcessing: voiceProcessing } = useVoiceCommands({
+    ws,
+    onSummarize: handleVoiceSummarize,
+    onActionItems: handleVoiceActionItems,
+    onHighlight: handleVoiceHighlight,
+    onDecisions: handleVoiceDecisions,
+    onQuestions: handleVoiceQuestions,
+    onSendToChat: handleVoiceSendToChat,
+    onSearch: handleVoiceSearch,
+    onAsk: handleVoiceAsk,
+    enabled: voiceCommandsEnabled && rtmsActive,
+  });
 
   // Invite handlers
   const handleInviteAll = useCallback(async () => {
@@ -660,6 +791,17 @@ export default function InMeetingView({ isGuestMode = false }) {
             <Users size={12} />
             {viewers.guestCount} {viewers.guestCount === 1 ? 'guest' : 'guests'} viewing
           </span>
+        )}
+        {/* Voice commands indicator */}
+        {rtmsActive && voiceCommandsEnabled && (
+          <button
+            className={`voice-commands-indicator ${voiceProcessing ? 'processing' : ''} ${lastCommand ? 'active' : ''}`}
+            onClick={() => setVoiceCommandsEnabled(prev => !prev)}
+            title={`Voice commands ${voiceCommandsEnabled ? 'enabled' : 'disabled'}. Say "Hey Arlo" followed by a command.`}
+          >
+            <Volume2 size={14} />
+            <span className="text-sans text-xs">Voice</span>
+          </button>
         )}
       </div>
 

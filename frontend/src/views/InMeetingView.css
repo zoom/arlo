@@ -143,6 +143,44 @@
   gap: 4px;
 }
 
+/* Voice commands indicator */
+.voice-commands-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: auto;
+}
+
+.voice-commands-indicator:hover {
+  background: var(--color-surface-hover);
+  border-color: var(--color-accent);
+}
+
+.voice-commands-indicator.active {
+  background: var(--color-accent-muted);
+  border-color: var(--color-accent);
+}
+
+.voice-commands-indicator.processing {
+  animation: voice-pulse 1s ease-in-out infinite;
+}
+
+@keyframes voice-pulse {
+  0%, 100% {
+    background: var(--color-accent-muted);
+  }
+  50% {
+    background: var(--color-accent);
+    color: white;
+  }
+}
+
 /* Recording dot (red pulsing) */
 .recording-dot {
   width: 8px;
