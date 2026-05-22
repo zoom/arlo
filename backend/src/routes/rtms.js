@@ -567,50 +567,70 @@ if (process.env.NODE_ENV !== 'production') {
  * Requires OAuth scope: meeting:update:participant_rtms_app_status
  */
 router.post('/start', requireAuth, async (req, res) => {
-  const { meetingId } = req.body;
+  const { meetingId, meetingNumber } = req.body;
 
-  if (!meetingId) {
-    return res.status(400).json({ error: 'meetingId is required' });
+  if (!meetingId && !meetingNumber) {
+    return res.status(400).json({ error: 'meetingId or meetingNumber is required' });
   }
 
-  console.log(`🚀 Starting RTMS via REST API for meeting ${meetingId} (user: ${req.user.id})`);
+  // Try numeric meeting ID first (no encoding needed), then fall back to UUID
+  const idsToTry = [];
+  if (meetingNumber) {
+    idsToTry.push({ id: String(meetingNumber), type: 'numeric' });
+  }
+  if (meetingId) {
+    // UUID needs double URL-encoding if it contains / or //
+    const encodedUUID = encodeURIComponent(encodeURIComponent(meetingId));
+    idsToTry.push({ id: encodedUUID, type: 'uuid' });
+  }
 
-  try {
-    // Call Zoom's participant RTMS API
-    // PATCH /v2/live_meetings/{meetingId}/rtms_app/status
-    // Meeting UUIDs containing / or // must be double URL-encoded
-    const encodedMeetingId = encodeURIComponent(encodeURIComponent(meetingId));
+  console.log(`🚀 Starting RTMS via REST API (user: ${req.user.id})`);
+  console.log(`   Meeting UUID: ${meetingId}`);
+  console.log(`   Meeting Number: ${meetingNumber}`);
 
-    const result = await zoomPatch(
-      req.user.id,
-      `/live_meetings/${encodedMeetingId}/rtms_app/status`,
-      {
-        action: 'start',
-        settings: {
-          client_id: config.zoomClientId,
-        },
-      }
-    );
+  let lastError = null;
 
-    console.log(`✅ RTMS started via REST API for meeting ${meetingId}`);
-    res.json({ success: true, result });
-  } catch (error) {
-    const status = error.response?.status || 500;
-    const message = error.response?.data?.message || error.message;
-    const code = error.response?.data?.code;
+  for (const { id, type } of idsToTry) {
+    try {
+      console.log(`   Trying ${type}: ${id}`);
 
-    console.error(`❌ Failed to start RTMS via REST API: ${status} - ${message}`);
-    if (error.response?.data) {
-      console.error(`❌ Zoom API response:`, JSON.stringify(error.response.data, null, 2));
+      const result = await zoomPatch(
+        req.user.id,
+        `/live_meetings/${id}/rtms_app/status`,
+        {
+          action: 'start',
+          settings: {
+            client_id: config.zoomClientId,
+          },
+        }
+      );
+
+      console.log(`✅ RTMS started via REST API using ${type}`);
+      return res.json({ success: true, result, usedId: type });
+    } catch (error) {
+      const status = error.response?.status || 500;
+      const message = error.response?.data?.message || error.message;
+      console.log(`   ❌ ${type} failed: ${status} - ${message}`);
+      lastError = error;
+      // Continue to next ID format
     }
-
-    // Return meaningful error to client
-    res.status(status).json({
-      error: 'Failed to start RTMS via REST API',
-      message,
-      code,
-    });
   }
+
+  // All attempts failed
+  const status = lastError?.response?.status || 500;
+  const message = lastError?.response?.data?.message || lastError?.message;
+  const code = lastError?.response?.data?.code;
+
+  console.error(`❌ Failed to start RTMS via REST API (all formats failed)`);
+  if (lastError?.response?.data) {
+    console.error(`❌ Last Zoom API response:`, JSON.stringify(lastError.response.data, null, 2));
+  }
+
+  res.status(status).json({
+    error: 'Failed to start RTMS via REST API',
+    message,
+    code,
+  });
 });
 
 /**

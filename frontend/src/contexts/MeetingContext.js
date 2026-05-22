@@ -324,12 +324,15 @@ export function MeetingProvider({ children }) {
     setApiStartLoading(true);
     setApiStartError(null);
 
+    // Get numeric meeting ID as well (live_meetings API may need it)
+    const meetingNumber = meetingContext?.meetingID;
+
     try {
       const response = await fetch('/api/rtms/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ meetingId }),
+        body: JSON.stringify({ meetingId, meetingNumber }),
       });
 
       const data = await response.json();
@@ -350,7 +353,7 @@ export function MeetingProvider({ children }) {
     } finally {
       setApiStartLoading(false);
     }
-  }, [apiStartLoading, meetingId]);
+  }, [apiStartLoading, meetingId, meetingContext]);
 
   // Stable ref to startRTMS so the auto-start timer isn't cancelled
   // when the callback reference changes (sendChatNotice/meetingId stabilising)
