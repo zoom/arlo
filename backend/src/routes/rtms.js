@@ -563,14 +563,18 @@ if (process.env.NODE_ENV !== 'production') {
 
 /**
  * POST /api/rtms/start
- * Start RTMS via Zoom REST API (participant REST API)
+ * Start or stop RTMS via Zoom REST API (participant REST API)
  * Requires OAuth scope: meeting:update:participant_rtms_app_status
  */
 router.post('/start', requireAuth, async (req, res) => {
-  const { meetingId, meetingNumber } = req.body;
+  const { meetingId, meetingNumber, action = 'start' } = req.body;
 
   if (!meetingId && !meetingNumber) {
     return res.status(400).json({ error: 'meetingId or meetingNumber is required' });
+  }
+
+  if (!['start', 'stop'].includes(action)) {
+    return res.status(400).json({ error: 'action must be "start" or "stop"' });
   }
 
   // Try numeric meeting ID first (no encoding needed), then fall back to UUID
@@ -584,7 +588,10 @@ router.post('/start', requireAuth, async (req, res) => {
     idsToTry.push({ id: encodedUUID, type: 'uuid' });
   }
 
-  console.log(`🚀 Starting RTMS via REST API (user: ${req.user.id})`);
+  const actionVerb = action === 'start' ? 'Starting' : 'Stopping';
+  const actionPast = action === 'start' ? 'started' : 'stopped';
+
+  console.log(`🚀 ${actionVerb} RTMS via REST API (user: ${req.user.id})`);
   console.log(`   Meeting UUID: ${meetingId}`);
   console.log(`   Meeting Number: ${meetingNumber}`);
 
@@ -594,19 +601,20 @@ router.post('/start', requireAuth, async (req, res) => {
     try {
       console.log(`   Trying ${type}: ${id}`);
 
+      const payload = { action };
+      // Only include settings for start action
+      if (action === 'start') {
+        payload.settings = { client_id: config.zoomClientId };
+      }
+
       const result = await zoomPatch(
         req.user.id,
         `/live_meetings/${id}/rtms_app/status`,
-        {
-          action: 'start',
-          settings: {
-            client_id: config.zoomClientId,
-          },
-        }
+        payload
       );
 
-      console.log(`✅ RTMS started via REST API using ${type}`);
-      return res.json({ success: true, result, usedId: type });
+      console.log(`✅ RTMS ${actionPast} via REST API using ${type}`);
+      return res.json({ success: true, result, usedId: type, action });
     } catch (error) {
       const status = error.response?.status || 500;
       const message = error.response?.data?.message || error.message;
@@ -621,13 +629,13 @@ router.post('/start', requireAuth, async (req, res) => {
   const message = lastError?.response?.data?.message || lastError?.message;
   const code = lastError?.response?.data?.code;
 
-  console.error(`❌ Failed to start RTMS via REST API (all formats failed)`);
+  console.error(`❌ Failed to ${action} RTMS via REST API (all formats failed)`);
   if (lastError?.response?.data) {
     console.error(`❌ Last Zoom API response:`, JSON.stringify(lastError.response.data, null, 2));
   }
 
   res.status(status).json({
-    error: 'Failed to start RTMS via REST API',
+    error: `Failed to ${action} RTMS via REST API`,
     message,
     code,
   });

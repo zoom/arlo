@@ -70,7 +70,7 @@ export default function SettingsView() {
   const { theme, toggleTheme } = useTheme();
   const { vertical, clearVertical } = useVertical();
   const { showDemoData, setShowDemoData } = useDemoData();
-  const { meetingId, startRTMSViaAPI, apiStartLoading, apiStartError } = useMeeting();
+  const { meetingId, rtmsActive, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
   const [apiStartSuccess, setApiStartSuccess] = useState(false);
   const [autoOpen, setAutoOpen] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
@@ -740,11 +740,11 @@ export default function SettingsView() {
                 <div className="settings-dev-header">
                   <Terminal size={16} />
                   <label className="text-sans font-medium">
-                    Start Transcription via REST API
+                    {rtmsActive ? 'Stop' : 'Start'} Transcription via REST API
                   </label>
                 </div>
                 <p className="text-sans text-sm text-muted">
-                  Test starting RTMS using Zoom&apos;s participant REST API instead of the client SDK.
+                  Test {rtmsActive ? 'stopping' : 'starting'} RTMS using Zoom&apos;s participant REST API instead of the client SDK.
                   Requires OAuth scope: <code className="settings-code-inline">meeting:update:participant_rtms_app_status</code>
                 </p>
                 {!meetingId && (
@@ -754,30 +754,32 @@ export default function SettingsView() {
                 )}
               </div>
               <Button
-                variant="outline"
-                disabled={!meetingId || apiStartLoading}
+                variant={rtmsActive ? 'destructive' : 'outline'}
+                disabled={!meetingId || apiActionLoading}
                 onClick={async () => {
                   setApiStartSuccess(false);
-                  const result = await startRTMSViaAPI();
+                  const result = rtmsActive ? await stopRTMSViaAPI() : await startRTMSViaAPI();
                   if (result.success) {
                     setApiStartSuccess(true);
                     setTimeout(() => setApiStartSuccess(false), 5000);
                   }
                 }}
               >
-                {apiStartLoading ? 'Starting...' : 'Start via API'}
+                {apiActionLoading
+                  ? (rtmsActive ? 'Stopping...' : 'Starting...')
+                  : (rtmsActive ? 'Stop via API' : 'Start via API')}
               </Button>
             </div>
             {apiStartSuccess && (
               <div className="settings-api-feedback settings-api-success">
                 <CheckCircle2 size={14} />
-                <span className="text-sans text-sm">RTMS start request sent successfully</span>
+                <span className="text-sans text-sm">RTMS {rtmsActive ? 'stop' : 'start'} request sent successfully</span>
               </div>
             )}
-            {apiStartError && (
+            {apiActionError && (
               <div className="settings-api-feedback settings-api-error">
                 <XCircle size={14} />
-                <span className="text-sans text-sm">{apiStartError}</span>
+                <span className="text-sans text-sm">{apiActionError}</span>
               </div>
             )}
           </div>
