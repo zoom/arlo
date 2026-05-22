@@ -578,9 +578,12 @@ router.post('/start', requireAuth, async (req, res) => {
   try {
     // Call Zoom's participant RTMS API
     // PATCH /v2/live_meetings/{meetingId}/rtms_app/status
+    // Meeting UUIDs containing / or // must be double URL-encoded
+    const encodedMeetingId = encodeURIComponent(encodeURIComponent(meetingId));
+
     const result = await zoomPatch(
       req.user.id,
-      `/live_meetings/${meetingId}/rtms_app/status`,
+      `/live_meetings/${encodedMeetingId}/rtms_app/status`,
       {
         action: 'start',
         settings: {

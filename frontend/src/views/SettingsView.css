@@ -401,13 +401,11 @@
 
 .settings-dev-row {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .settings-dev-info {
-  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -423,6 +421,11 @@
 .settings-dev-header svg {
   color: var(--muted-foreground);
   flex-shrink: 0;
+}
+
+.settings-dev-row button {
+  align-self: flex-start;
+  white-space: nowrap;
 }
 
 .settings-api-feedback {

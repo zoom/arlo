@@ -1088,7 +1088,16 @@ export default function InMeetingView({ isGuestMode = false }) {
                       <div className="recording-dot-ping" />
                     </div>
                     <span className="text-sans text-sm text-muted">Transcribing</span>
-                    <span className="text-sans text-xs text-muted">({segments.length} segments)</span>
+                    <span className="text-sans text-xs text-muted">({segments.length})</span>
+                    {/* Voice commands indicator - inline */}
+                    <button
+                      className={`voice-commands-btn ${voiceCommandsEnabled ? 'active' : ''}`}
+                      onClick={() => setVoiceCommandsEnabled(prev => !prev)}
+                      title='Say "Hey Arlo, summarize" or other commands'
+                    >
+                      <Volume2 size={14} />
+                      <span className="text-sans text-xs">Voice {voiceCommandsEnabled ? 'On' : 'Off'}</span>
+                    </button>
                   </div>
                   <div className="assist-transcript-controls">
                     {!isGuestMode && (
