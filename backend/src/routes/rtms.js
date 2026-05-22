@@ -5,7 +5,8 @@ const router = express.Router();
 const config = require('../config');
 const logger = require('../lib/logger');
 const { broadcastTranscriptSegment, broadcastParticipantEvent, broadcastMeetingStatus, crossRegisterUser, getStats } = require('../services/websocket');
-const { zoomGet } = require('../services/zoomApi');
+const { zoomGet, zoomPatch } = require('../services/zoomApi');
+const { requireAuth } = require('../middleware/auth');
 const prisma = require('../lib/prisma');
 
 // Check if meeting persistence is disabled (demo mode)
@@ -559,6 +560,55 @@ if (process.env.NODE_ENV !== 'production') {
     res.json({ received: meetingId, contextKeys: fullContext ? Object.keys(fullContext) : [] });
   });
 }
+
+/**
+ * POST /api/rtms/start
+ * Start RTMS via Zoom REST API (participant REST API)
+ * Requires OAuth scope: meeting:update:participant_rtms_app_status
+ */
+router.post('/start', requireAuth, async (req, res) => {
+  const { meetingId } = req.body;
+
+  if (!meetingId) {
+    return res.status(400).json({ error: 'meetingId is required' });
+  }
+
+  console.log(`🚀 Starting RTMS via REST API for meeting ${meetingId} (user: ${req.user.id})`);
+
+  try {
+    // Call Zoom's participant RTMS API
+    // PATCH /v2/live_meetings/{meetingId}/rtms_app/status
+    const result = await zoomPatch(
+      req.user.id,
+      `/live_meetings/${meetingId}/rtms_app/status`,
+      {
+        action: 'start',
+        settings: {
+          client_id: config.zoomClientId,
+        },
+      }
+    );
+
+    console.log(`✅ RTMS started via REST API for meeting ${meetingId}`);
+    res.json({ success: true, result });
+  } catch (error) {
+    const status = error.response?.status || 500;
+    const message = error.response?.data?.message || error.message;
+    const code = error.response?.data?.code;
+
+    console.error(`❌ Failed to start RTMS via REST API: ${status} - ${message}`);
+    if (error.response?.data) {
+      console.error(`❌ Zoom API response:`, JSON.stringify(error.response.data, null, 2));
+    }
+
+    // Return meaningful error to client
+    res.status(status).json({
+      error: 'Failed to start RTMS via REST API',
+      message,
+      code,
+    });
+  }
+});
 
 /**
  * Enrich a meeting record with metadata from Zoom REST API.

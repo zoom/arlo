@@ -161,4 +161,34 @@ async function zoomDelete(userId, path) {
   }
 }
 
-module.exports = { getAccessToken, zoomGet, zoomPost, zoomDelete };
+/**
+ * Authenticated PATCH to Zoom REST API. Retries once on 401.
+ */
+async function zoomPatch(userId, path, data = {}) {
+  async function attempt(token) {
+    return axios.patch(`${config.zoomApiUrl}${path}`, data, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+  }
+
+  let token = await getAccessToken(userId);
+  try {
+    const res = await attempt(token);
+    console.log(`[zoomApi] PATCH ${path} → ${res.status}`);
+    return res.data;
+  } catch (err) {
+    if (err.response?.status === 401) {
+      token = await getAccessToken(userId);
+      const res = await attempt(token);
+      console.log(`[zoomApi] PATCH ${path} → ${res.status} (retry)`);
+      return res.data;
+    }
+    console.error(`[zoomApi] PATCH ${path} failed: ${err.response?.status || err.message}`);
+    throw err;
+  }
+}
+
+module.exports = { getAccessToken, zoomGet, zoomPost, zoomDelete, zoomPatch };

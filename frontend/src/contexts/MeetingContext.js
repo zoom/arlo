@@ -314,6 +314,44 @@ export function MeetingProvider({ children }) {
     }
   }, [rtmsLoading, zoomSdk, sendChatNotice, meetingId]);
 
+  // Start RTMS via backend REST API (calls Zoom's participant REST API)
+  const [apiStartLoading, setApiStartLoading] = useState(false);
+  const [apiStartError, setApiStartError] = useState(null);
+
+  const startRTMSViaAPI = useCallback(async () => {
+    if (apiStartLoading || !meetingId) return { success: false, error: 'No meeting ID' };
+
+    setApiStartLoading(true);
+    setApiStartError(null);
+
+    try {
+      const response = await fetch('/api/rtms/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ meetingId }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMsg = data.message || data.error || 'Failed to start RTMS via API';
+        setApiStartError(errorMsg);
+        return { success: false, error: errorMsg, code: data.code };
+      }
+
+      // Success - RTMS should start and we'll get notified via webhook/WebSocket
+      console.log('RTMS started via REST API:', data);
+      return { success: true, data };
+    } catch (error) {
+      const errorMsg = error.message || 'Network error';
+      setApiStartError(errorMsg);
+      return { success: false, error: errorMsg };
+    } finally {
+      setApiStartLoading(false);
+    }
+  }, [apiStartLoading, meetingId]);
+
   // Stable ref to startRTMS so the auto-start timer isn't cancelled
   // when the callback reference changes (sendChatNotice/meetingId stabilising)
   const startRTMSRef = useRef(startRTMS);
@@ -416,10 +454,13 @@ export function MeetingProvider({ children }) {
     stopRTMS,
     pauseRTMS,
     resumeRTMS,
+    startRTMSViaAPI,
+    apiStartLoading,
+    apiStartError,
     connectWebSocket,
     setWs,
     setTitleUserRenamed,
-  }), [rtmsActive, rtmsPaused, rtmsLoading, ws, meetingId, viewers, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [rtmsActive, rtmsPaused, rtmsLoading, ws, meetingId, viewers, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, apiStartLoading, apiStartError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

@@ -15,10 +15,12 @@ import {
   Scale,
   TrendingUp,
   Headphones,
+  Terminal,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useVertical } from '../contexts/VerticalContext';
 import { useDemoData } from '../hooks/useDemoData';
+import { useMeeting } from '../contexts/MeetingContext';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -68,6 +70,8 @@ export default function SettingsView() {
   const { theme, toggleTheme } = useTheme();
   const { vertical, clearVertical } = useVertical();
   const { showDemoData, setShowDemoData } = useDemoData();
+  const { meetingId, startRTMSViaAPI, apiStartLoading, apiStartError } = useMeeting();
+  const [apiStartSuccess, setApiStartSuccess] = useState(false);
   const [autoOpen, setAutoOpen] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
   const [settingsUpcoming, setSettingsUpcoming] = useState([]);
@@ -721,6 +725,60 @@ export default function SettingsView() {
                   </>
                 )}
               </>
+            )}
+          </div>
+        </Card>
+      </section>
+
+      {/* Developer Tools */}
+      <section className="settings-section">
+        <h2 className="text-serif text-xl">Developer Tools</h2>
+        <Card>
+          <div className="settings-card-inner">
+            <div className="settings-dev-row">
+              <div className="settings-dev-info">
+                <div className="settings-dev-header">
+                  <Terminal size={16} />
+                  <label className="text-sans font-medium">
+                    Start Transcription via REST API
+                  </label>
+                </div>
+                <p className="text-sans text-sm text-muted">
+                  Test starting RTMS using Zoom&apos;s participant REST API instead of the client SDK.
+                  Requires OAuth scope: <code className="settings-code-inline">meeting:update:participant_rtms_app_status</code>
+                </p>
+                {!meetingId && (
+                  <p className="text-sans text-xs text-muted" style={{ marginTop: 8, fontStyle: 'italic' }}>
+                    Join a meeting to enable this feature.
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="outline"
+                disabled={!meetingId || apiStartLoading}
+                onClick={async () => {
+                  setApiStartSuccess(false);
+                  const result = await startRTMSViaAPI();
+                  if (result.success) {
+                    setApiStartSuccess(true);
+                    setTimeout(() => setApiStartSuccess(false), 5000);
+                  }
+                }}
+              >
+                {apiStartLoading ? 'Starting...' : 'Start via API'}
+              </Button>
+            </div>
+            {apiStartSuccess && (
+              <div className="settings-api-feedback settings-api-success">
+                <CheckCircle2 size={14} />
+                <span className="text-sans text-sm">RTMS start request sent successfully</span>
+              </div>
+            )}
+            {apiStartError && (
+              <div className="settings-api-feedback settings-api-error">
+                <XCircle size={14} />
+                <span className="text-sans text-sm">{apiStartError}</span>
+              </div>
             )}
           </div>
         </Card>
