@@ -171,11 +171,32 @@ export default function InMeetingView({ isGuestMode = false }) {
   const [activeTab, setActiveTab] = useState('assist');
   const [voiceCommandsEnabled, setVoiceCommandsEnabled] = useState(true);
   const [showResponsePanel, setShowResponsePanel] = useState(true);
+  const [voiceResponsesEnabled, setVoiceResponsesEnabled] = useState(() => {
+    try {
+      const cached = localStorage.getItem('arlo-voice-responses');
+      return cached !== null ? JSON.parse(cached) : true;
+    } catch {
+      return true;
+    }
+  });
   const transcriptRef = useRef(null);
   const inviteDropdownRef = useRef(null);
   const meetingSummaryRef = useRef(null);
   const decisionsLogRef = useRef(null);
   const openQuestionsRef = useRef(null);
+
+  // Listen for voice responses preference changes (from Settings)
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'arlo-voice-responses') {
+        try {
+          setVoiceResponsesEnabled(JSON.parse(e.newValue));
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   // Auto-authenticate when entering meeting without a session
   const authAttemptedRef = useRef(false);
@@ -816,6 +837,17 @@ export default function InMeetingView({ isGuestMode = false }) {
         )}
       </div>
 
+      {/* Voice command response panel - inline above tabs */}
+      {voiceResponsesEnabled && showResponsePanel && (voiceResponses.length > 0 || voiceProcessing) && (
+        <ArloResponsePanel
+          responses={voiceResponses}
+          isProcessing={voiceProcessing}
+          onClear={clearResponses}
+          onClose={() => setShowResponsePanel(false)}
+          inline
+        />
+      )}
+
       {/* Tabs: Arlo Assist (default) | Transcript */}
       <Tabs.Root
         value={activeTab}
@@ -1183,15 +1215,6 @@ export default function InMeetingView({ isGuestMode = false }) {
         </Tabs.Panel>
       </Tabs.Root>
 
-      {/* Voice command response panel */}
-      {showResponsePanel && (
-        <ArloResponsePanel
-          responses={voiceResponses}
-          isProcessing={voiceProcessing}
-          onClear={clearResponses}
-          onClose={() => setShowResponsePanel(false)}
-        />
-      )}
     </div>
   );
 }

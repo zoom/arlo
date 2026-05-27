@@ -16,6 +16,7 @@ import {
   TrendingUp,
   Headphones,
   Terminal,
+  Volume2,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useVertical } from '../contexts/VerticalContext';
@@ -81,6 +82,10 @@ export default function SettingsView() {
   const [model, setModel] = useState('anthropic/claude-3.5-sonnet');
   const [testStatus, setTestStatus] = useState('idle');
 
+  // Voice commands state
+  const [showVoiceResponses, setShowVoiceResponses] = useState(true);
+  const voiceResponsesMountedRef = useRef(false);
+
   // Chat notifications state
   const [chatNotificationsEnabled, setChatNotificationsEnabled] = useState(true);
   const [notifyOnStart, setNotifyOnStart] = useState(true);
@@ -129,6 +134,10 @@ export default function SettingsView() {
       if (cachedAutoStart !== null) {
         setAutoStart(JSON.parse(cachedAutoStart));
       }
+      const cachedVoiceResponses = localStorage.getItem('arlo-voice-responses');
+      if (cachedVoiceResponses !== null) {
+        setShowVoiceResponses(JSON.parse(cachedVoiceResponses));
+      }
     } catch {}
 
     // Then fetch from API
@@ -142,6 +151,10 @@ export default function SettingsView() {
         if (prefs?.autoStartRTMS !== undefined) {
           setAutoStart(prefs.autoStartRTMS);
           localStorage.setItem('arlo-auto-start', JSON.stringify(prefs.autoStartRTMS));
+        }
+        if (prefs?.showVoiceResponses !== undefined) {
+          setShowVoiceResponses(prefs.showVoiceResponses);
+          localStorage.setItem('arlo-voice-responses', JSON.stringify(prefs.showVoiceResponses));
         }
       })
       .catch(() => {});
@@ -199,6 +212,21 @@ export default function SettingsView() {
       body: JSON.stringify({ autoStartRTMS: autoStart }),
     }).catch(() => {});
   }, [autoStart]);
+
+  // Save voice responses preference on change (skip initial mount)
+  useEffect(() => {
+    if (!voiceResponsesMountedRef.current) {
+      voiceResponsesMountedRef.current = true;
+      return;
+    }
+    localStorage.setItem('arlo-voice-responses', JSON.stringify(showVoiceResponses));
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ showVoiceResponses }),
+    }).catch(() => {});
+  }, [showVoiceResponses]);
 
   // Fetch upcoming meetings for auto-open section
   useEffect(() => {
@@ -726,6 +754,36 @@ export default function SettingsView() {
                 )}
               </>
             )}
+          </div>
+        </Card>
+      </section>
+
+      {/* Voice Commands */}
+      <section className="settings-section">
+        <h2 className="text-serif text-xl">Voice Commands</h2>
+        <Card>
+          <div className="settings-card-inner">
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <div className="settings-dev-header">
+                  <Volume2 size={16} />
+                  <label className="text-sans font-medium">Show Arlo Responses</label>
+                </div>
+                <p className="text-sans text-sm text-muted">
+                  Display Arlo&apos;s voice command responses in the meeting view.
+                  Turn off for cleaner demos.
+                </p>
+              </div>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  checked={showVoiceResponses}
+                  onChange={(e) => setShowVoiceResponses(e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+                <span className="settings-toggle-thumb" />
+              </label>
+            </div>
           </div>
         </Card>
       </section>

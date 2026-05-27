@@ -14,6 +14,20 @@
   overflow: hidden;
 }
 
+/* Inline mode - not fixed, flows with content */
+.arlo-response-panel-inline {
+  position: relative;
+  bottom: auto;
+  right: auto;
+  width: 100%;
+  max-width: 100%;
+  max-height: 200px;
+  z-index: auto;
+  box-shadow: none;
+  border: 1px solid var(--color-border);
+  margin-bottom: 12px;
+}
+
 .arlo-response-header {
   display: flex;
   align-items: center;

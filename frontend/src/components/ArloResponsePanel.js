@@ -12,13 +12,14 @@ export default function ArloResponsePanel({
   isProcessing = false,
   onClear,
   onClose,
+  inline = false,
 }) {
   if (responses.length === 0 && !isProcessing) {
     return null;
   }
 
   return (
-    <Card className="arlo-response-panel">
+    <Card className={`arlo-response-panel ${inline ? 'arlo-response-panel-inline' : ''}`}>
       <div className="arlo-response-header">
         <div className="arlo-response-title">
           <Volume2 size={16} />
