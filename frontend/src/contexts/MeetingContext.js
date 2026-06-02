@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useZoomSdk } from './ZoomSdkContext';
 import { useAuth } from './AuthContext';
+import { useServerSettings } from './ServerSettingsContext';
 
 const MeetingContext = createContext();
 
@@ -18,6 +19,7 @@ const DEFAULT_CHAT_NOTICES = {
 
 export function MeetingProvider({ children }) {
   const { zoomSdk, meetingContext, isGuest, userContext } = useZoomSdk();
+  const { demoMode } = useServerSettings();
   const [rtmsActive, setRtmsActive] = useState(false);
   const [rtmsPaused, setRtmsPaused] = useState(false);
   const [rtmsLoading, setRtmsLoading] = useState(false);
@@ -83,14 +85,18 @@ export function MeetingProvider({ children }) {
       if (!prefs.events?.[eventType]) return;
       const template = prefs.messages?.[eventType] || DEFAULT_CHAT_NOTICES.messages[eventType];
       if (!template) return;
-      const message = meetingId
+      let message = meetingId
         ? template.replace(/\[meeting-id\]/g, meetingId)
         : template;
+      // Append demo mode notice on start event
+      if (demoMode && eventType === 'start') {
+        message += '\n\nThe app is running in demo mode and won\'t retain data after this meeting.';
+      }
       zoomSdk.sendMessageToChat({ message }).catch(() => {});
     } catch {
       // Silently ignore — chat notices are best-effort
     }
-  }, [zoomSdk, meetingId]);
+  }, [zoomSdk, meetingId, demoMode]);
 
   // Stable ref so detection paths (WS handler, REST fallback) can send chat notices
   const sendChatNoticeRef = useRef(sendChatNotice);

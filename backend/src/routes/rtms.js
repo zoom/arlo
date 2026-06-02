@@ -375,7 +375,10 @@ router.post('/broadcast', async (req, res) => {
   const { meetingId, segment } = req.body;
   const stats = getStats();
 
-  console.log(`📝 Transcript segment for meeting ${meetingId}:`, segment?.text?.substring(0, 50));
+  // Only log transcript content in debug mode to avoid PII exposure
+  if (logger.isDebug) {
+    console.log(`📝 Transcript segment for meeting ${meetingId}:`, segment?.text?.substring(0, 50));
+  }
 
   // Broadcast transcript segment to all WebSocket clients immediately
   const sentCount = broadcastTranscriptSegment(meetingId, segment);
