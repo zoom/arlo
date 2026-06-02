@@ -97,7 +97,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   const navigate = useNavigate();
   const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
-  const { zoomSdk, meetingContext, isTestMode, runningContext, isGuest: sdkIsGuest } = useZoomSdk();
+  const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
   const { hasFeature, verticalId, getTerm } = useVertical();
 
@@ -111,6 +111,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   const isLegal = effectiveVerticalId === 'legal';
   const isSales = effectiveVerticalId === 'sales';
   const isSupport = effectiveVerticalId === 'support';
+  // eslint-disable-next-line no-unused-vars
   const isGeneral = effectiveVerticalId === 'general' || isGuestMode;
 
   // Get current feature order for this vertical
@@ -182,7 +183,9 @@ export default function InMeetingView({ isGuestMode = false }) {
   const transcriptRef = useRef(null);
   const inviteDropdownRef = useRef(null);
   const meetingSummaryRef = useRef(null);
+  // eslint-disable-next-line no-unused-vars
   const decisionsLogRef = useRef(null);
+  // eslint-disable-next-line no-unused-vars
   const openQuestionsRef = useRef(null);
 
   // Listen for voice responses preference changes (from Settings)
@@ -458,6 +461,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   }, [addToast]);
 
   // Initialize voice commands hook
+  // eslint-disable-next-line no-unused-vars
   const { lastCommand, isProcessing: voiceProcessing, responses: voiceResponses, clearResponses } = useVoiceCommands({
     ws,
     onSummarize: handleVoiceSummarize,

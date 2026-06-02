@@ -178,10 +178,12 @@ export function getHelpText() {
   return lines.join('\n');
 }
 
-export default {
+const voiceCommands = {
   detectTrigger,
   parseCommand,
   processTranscriptForCommand,
   getHelpText,
   COMMANDS,
 };
+
+export default voiceCommands;
