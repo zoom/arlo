@@ -78,6 +78,7 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 | Feature | Description |
 |---------|-------------|
 | **Live Transcription** | Real-time captions via RTMS (< 1 second latency) |
+| **Voice Commands** | Say "Arlo, summarize" or "Arlo, action items" during meetings |
 | **AI Insights** | Summaries, action items, and next steps powered by OpenRouter |
 | **Full-Text Search** | Search across all your meeting transcripts instantly |
 | **Chat with Transcripts** | Ask questions about your meetings using AI |
@@ -87,6 +88,73 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 | **Industry Verticals** | Specialized modes: Arlo for Notes, Healthcare, Legal, Sales, and Support |
 
 > **AI features work out of the box** — no API key required! Arlo uses [OpenRouter](https://openrouter.ai/) with free models (Gemini, Llama). Optional: add your own `OPENROUTER_API_KEY` for higher rate limits.
+
+---
+
+## Voice Commands
+
+Control Arlo hands-free during meetings. Just say the wake word followed by a command:
+
+| Command | What It Does |
+|---------|--------------|
+| "Arlo, summarize" | Generate a meeting summary |
+| "Arlo, action items" | Extract action items and to-dos |
+| "Arlo, highlight this" | Create a bookmark at the current moment |
+| "Arlo, decisions" | Show key decisions made |
+| "Arlo, questions" | Show open/unanswered questions |
+| "Arlo, send to chat" | Send summary to meeting chat |
+| "Arlo, help" | Show available commands |
+
+**Alternate wake words:** "Hey Arlo", "Hi Arlo"
+
+Responses appear inline in the meeting view. You can toggle response visibility in Settings.
+
+---
+
+## Settings
+
+Access settings via the gear icon in the app. Available options:
+
+### Transcription
+
+| Setting | Description |
+|---------|-------------|
+| **Auto-open in meetings** | Automatically open Arlo when you join scheduled meetings |
+| **Auto-start transcription** | Begin transcription immediately when the app opens |
+
+### Demo Mode
+
+| Setting | Description |
+|---------|-------------|
+| **Show sample data** | Display example data to demonstrate features. Turn off to only see real meeting data. |
+
+### Chat Notifications
+
+| Setting | Description |
+|---------|-------------|
+| **Enable Chat Notifications** | Send automatic messages to Zoom chat when transcription events occur |
+| **Event toggles** | Choose which events trigger notifications (start, pause, resume, stop, restart) |
+| **Message templates** | Customize the message text for each event. Use `[meeting-id]` as a placeholder. |
+
+### Voice Commands
+
+| Setting | Description |
+|---------|-------------|
+| **Show Arlo Responses** | Display voice command responses in the meeting view. Turn off for cleaner demos. |
+
+### Developer Tools
+
+| Setting | Description |
+|---------|-------------|
+| **Start/Stop via REST API** | Test RTMS control using Zoom's participant REST API instead of the client SDK. Useful for automation and testing. |
+
+### AI Configuration
+
+| Setting | Description |
+|---------|-------------|
+| **AI Provider** | Choose between OpenRouter (default, free), Anthropic, OpenAI, or Custom |
+| **API Key** | Your API key (stored locally, never sent to Arlo's servers) |
+| **Model** | Select which AI model to use for summaries and insights |
 
 ---
 
