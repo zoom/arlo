@@ -57,11 +57,17 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 
 *Choose your workflow — each vertical is tailored to your industry*
 
-<!-- VIDEO DEMO: Uncomment when ready
-[![Watch the Demo](./docs/images/demo-thumbnail.png)](https://youtube.com/watch?v=YOUR_VIDEO_ID)
--->
+### Video Demos
 
-> **Video walkthrough coming soon** — [Star this repo](https://github.com/zoom/arlo) to get notified!
+| Healthcare | Sales | Support |
+|:----------:|:-----:|:-------:|
+| [![Healthcare Demo](https://img.youtube.com/vi/F496oIqo6ls/mqdefault.jpg)](https://youtu.be/F496oIqo6ls) | [![Sales Demo](https://img.youtube.com/vi/LKpZAe5_A8o/mqdefault.jpg)](https://youtu.be/LKpZAe5_A8o) | [![Support Demo](https://img.youtube.com/vi/1N6hs88nOhA/mqdefault.jpg)](https://youtu.be/1N6hs88nOhA) |
+| [Watch Demo](https://youtu.be/F496oIqo6ls) | [Watch Demo](https://youtu.be/LKpZAe5_A8o) | [Watch Demo](https://youtu.be/1N6hs88nOhA) |
+
+| Legal | Notes |
+|:-----:|:-----:|
+| [![Legal Demo](https://img.youtube.com/vi/WNM5YxRTrIU/mqdefault.jpg)](https://youtu.be/WNM5YxRTrIU) | [![Notes Demo](https://img.youtube.com/vi/4N-g5TgGRz0/mqdefault.jpg)](https://youtu.be/4N-g5TgGRz0) |
+| [Watch Demo](https://youtu.be/WNM5YxRTrIU) | [Watch Demo](https://youtu.be/4N-g5TgGRz0) |
 
 </div>
 
@@ -250,6 +256,8 @@ Arlo includes specialized modes demonstrating RTMS capabilities for different in
 ### Arlo for Notes
 **Full-Featured Note-Taking** — Meeting summaries, key decisions, action items, and open questions tracked automatically.
 
+[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/4N-g5TgGRz0)
+
 <p align="center">
 <img src="./docs/images/notetaker-summary.png" alt="Meeting Summary" width="45%">
 <img src="./docs/images/notetaker-decisions.png" alt="Decisions & Questions" width="45%">
@@ -259,6 +267,8 @@ Arlo includes specialized modes demonstrating RTMS capabilities for different in
 
 ### Arlo for Healthcare
 **Clinical Documentation** — SOAP notes auto-generation, medication and symptom detection, clinical terminology highlighting.
+
+[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/F496oIqo6ls)
 
 <p align="center">
 <img src="./docs/images/healthcare-transcript.png" alt="Healthcare Transcript" width="45%">
@@ -270,6 +280,8 @@ Arlo includes specialized modes demonstrating RTMS capabilities for different in
 ### Arlo for Legal
 **Deposition Assistance** — Real-time contradiction detection, billable time tracking with export, and exhibit management.
 
+[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/WNM5YxRTrIU)
+
 <p align="center">
 <img src="./docs/images/legal-billable-time.png" alt="Billable Time Tracking" width="45%">
 <img src="./docs/images/legal-contradictions.png" alt="Contradiction Detection" width="45%">
@@ -280,6 +292,8 @@ Arlo includes specialized modes demonstrating RTMS capabilities for different in
 ### Arlo for Sales
 **Deal Intelligence** — BANT qualification tracking (Budget, Authority, Need, Timeline), competitor mentions, and commitment detection.
 
+[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/LKpZAe5_A8o)
+
 <p align="center">
 <img src="./docs/images/sales-qualification.png" alt="Deal Qualification" width="70%">
 </p>
@@ -288,6 +302,8 @@ Arlo includes specialized modes demonstrating RTMS capabilities for different in
 
 ### Arlo for Support
 **Agent Assistance** — Live customer sentiment meter with trend analysis and emotional shift tracking.
+
+[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/1N6hs88nOhA)
 
 <p align="center">
 <img src="./docs/images/support-sentiment.png" alt="Customer Sentiment" width="70%">
