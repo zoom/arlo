@@ -526,6 +526,27 @@ ZOOM_HOST=zoomgov.com
 
 ## Production Deployment
 
+### Deploy to Render (One-Click)
+
+The easiest way to deploy Arlo to production is with [Render](https://render.com/):
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/zoom/arlo)
+
+This deploys all services (backend, frontend, RTMS, PostgreSQL) with automatic secret generation. After deployment:
+
+1. Add your Zoom credentials in the Render dashboard:
+   - `ZOOM_CLIENT_ID`
+   - `ZOOM_CLIENT_SECRET`
+   - `ZOOM_WEBHOOK_TOKEN`
+2. Update your Zoom App settings with the Render URLs
+3. That's it — you're live!
+
+See [`render.yaml`](./render.yaml) for the full infrastructure configuration.
+
+---
+
+### Production Considerations
+
 This reference implementation is designed for **learning and prototyping**. Before production deployment:
 
 | Area | Development | Production Recommendation |
