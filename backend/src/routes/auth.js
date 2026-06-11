@@ -222,6 +222,8 @@ router.get('/callback', async (req, res) => {
  */
 router.get('/poll-code', (req, res) => {
   const { state } = req.query;
+  // OAuth codes must never be cached; clients poll until ready.
+  res.set('Cache-Control', 'no-store');
 
   if (!state) {
     return res.status(400).json({ error: 'Missing state parameter' });

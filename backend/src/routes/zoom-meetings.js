@@ -35,6 +35,14 @@ router.get('/', requireAuth, async (req, res) => {
     res.json({ meetings });
   } catch (error) {
     console.error('Error fetching upcoming meetings:', error.response?.data || error.message);
+    const upstreamStatus = error.response?.status;
+    // Missing scopes or account limits should not break the home dashboard.
+    if (upstreamStatus && [400, 403, 404].includes(upstreamStatus)) {
+      return res.json({
+        meetings: [],
+        warning: 'Zoom did not return upcoming meetings for this account',
+      });
+    }
     res.status(error.response?.status || 500).json({
       error: 'Failed to fetch upcoming meetings',
     });

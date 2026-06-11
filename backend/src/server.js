@@ -35,14 +35,19 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "appssdk.zoom.us", "'unsafe-inline'"],
+      // Scheme-required URLs: bare hostnames are rejected by strict CSP parsers.
+      scriptSrc: ["'self'", "https://appssdk.zoom.us", "'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       fontSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", "wss:", "https:"],
-      frameSrc: ["'self'", "appssdk.zoom.us"],
+      frameSrc: ["'self'", "https://appssdk.zoom.us"],
+      // Zoom desktop client embeds the app surface.
+      frameAncestors: ["'self'", "https://zoom.us", "https://*.zoom.us", "https://*.zoom.com"],
     },
   },
+  // Allow Zoom client embedding: frame-ancestors CSP above is authoritative.
+  frameguard: false,
   hsts: {
     maxAge: 31536000,
     includeSubDomains: true,
@@ -94,15 +99,26 @@ const globalLimiter = rateLimit({
 });
 app.use('/api/', globalLimiter);
 
-// Stricter rate limit for auth endpoints
+// Stricter rate limit for auth endpoints (poll-code has its own limiter below).
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 30,
+  max: 120, // Raised from 30: OAuth + meeting bootstrap can burst during app open.
+  skip: (req) => req.path === '/poll-code', // poll-code uses authPollLimiter instead.
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts' },
 });
 app.use('/api/auth/', authLimiter);
+
+// Poll-code endpoint needs a higher ceiling for temporary OAuth polling bursts.
+const authPollLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many authentication status checks' },
+});
+app.use('/api/auth/poll-code', authPollLimiter);
 
 // Stricter rate limit for AI endpoints
 const aiLimiter = rateLimit({
@@ -146,15 +162,20 @@ app.use('/api/zoom-meetings', require('./routes/zoom-meetings'));
 const { createProxyMiddleware } = require('http-proxy-middleware');
 const axios = require('axios');
 
+// Resolve frontend target from config/env (supports host:port or full URL)
+const frontendTarget = /^https?:\/\//i.test(config.frontendUrl)
+  ? config.frontendUrl
+  : `http://${config.frontendUrl}`;
+
 // Track frontend readiness
 let frontendReady = false;
 
 // Check frontend health
 async function checkFrontendHealth() {
   try {
-    await axios.get('http://frontend:3000', { timeout: 2000 });
+    await axios.get(frontendTarget, { timeout: 2000 });
     if (!frontendReady) {
-      console.log('✅ Frontend is now ready');
+      console.log(`Frontend is now ready at ${frontendTarget}`);
     }
     frontendReady = true;
     return true;
@@ -226,22 +247,35 @@ const getStartupPage = () => `
 </html>
 `;
 
+// Lightweight 503 page while the frontend process is still starting.
+function sendFrontendStartupPage(res) {
+  res.writeHead(503, {
+    'Content-Type': 'text/html',
+    'Retry-After': '3',
+  });
+  res.end(getStartupPage());
+}
+
+// Fail fast when the frontend is slow or still starting; avoids hung page loads.
+const proxyTimeoutMs = 5000;
+
 // Proxy middleware - DO NOT use ws:true as it intercepts ALL WebSocket upgrades
 // Our WebSocket server (initialized separately) handles /ws connections
 const frontendProxy = createProxyMiddleware({
-  target: 'http://frontend:3000',
+  target: frontendTarget,
   changeOrigin: true,
   ws: false, // IMPORTANT: Don't proxy WebSockets - our WebSocket.Server handles /ws
+  proxyTimeout: proxyTimeoutMs,
+  timeout: proxyTimeoutMs,
   logLevel: 'warn',
   onError: (err, req, res) => {
     console.error('Proxy error:', err.message, 'for path:', req.path);
-    // Only show startup page for frontend requests, not API requests
-    if (!frontendReady && !req.path.startsWith('/api/')) {
-      res.writeHead(503, {
-        'Content-Type': 'text/html',
-        'Retry-After': '3',
-      });
-      res.end(getStartupPage());
+    // Mark frontend as unavailable so requests temporarily return startup page.
+    frontendReady = false;
+
+    // Only show startup page for frontend requests, not API requests.
+    if (!req.path.startsWith('/api/')) {
+      sendFrontendStartupPage(res);
     } else {
       res.writeHead(502, { 'Content-Type': 'text/plain' });
       res.end('Bad Gateway - Frontend temporarily unavailable');
@@ -265,7 +299,7 @@ if (hasProductionBuild) {
     res.sendFile(path.join(publicDir, 'index.html'));
   });
 } else {
-  console.log('⚠️ No production build found, proxying to frontend dev server');
+  console.log(`No production build found, proxying to frontend at ${frontendTarget}`);
 
   // Apply proxy for frontend routes only
   app.use((req, res, next) => {
@@ -281,7 +315,20 @@ if (hasProductionBuild) {
       console.log('💡 This should be going to /api/rtms/webhook instead');
     }
 
-    // Use the proxy middleware for frontend requests
+    // If frontend is still booting, return a fast startup page instead of hanging.
+    if (!frontendReady) {
+      checkFrontendHealth()
+        .then(isReady => {
+          if (!isReady) {
+            sendFrontendStartupPage(res);
+            return;
+          }
+          frontendProxy(req, res, next);
+        })
+        .catch(() => sendFrontendStartupPage(res));
+      return;
+    }
+
     frontendProxy(req, res, next);
   });
 }
@@ -331,7 +378,8 @@ initWebSocketServer(server);
 
 const PORT = config.port;
 
-server.listen(PORT, () => {
+// Bind all interfaces so reverse proxies and sibling services can reach the API.
+server.listen(PORT, '0.0.0.0', () => {
   console.log('='.repeat(60));
   console.log(`🚀 Arlo Meeting Assistant Backend Server`);
   console.log('='.repeat(60));

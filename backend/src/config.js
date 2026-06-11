@@ -13,10 +13,49 @@ const requiredEnvVars = [
   'ZOOM_CLIENT_ID',
   'ZOOM_CLIENT_SECRET',
   'ZOOM_WEBHOOK_TOKEN',
-  'PUBLIC_URL',
+  // PUBLIC_URL is resolved separately (explicit value or injected external URL).
   'DATABASE_URL',
   'SESSION_SECRET',
 ];
+
+// OAuth callbacks and webhook URLs need a stable public HTTPS base.
+// Prefer explicit PUBLIC_URL; otherwise accept any injected *_EXTERNAL_URL env var.
+function resolvePublicUrl() {
+  if (process.env.PUBLIC_URL) {
+    return process.env.PUBLIC_URL;
+  }
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value && value.startsWith('https://') && key.endsWith('_EXTERNAL_URL')) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+const resolvedPublicUrl = resolvePublicUrl();
+if (!resolvedPublicUrl) {
+  console.error('Missing public URL: set PUBLIC_URL');
+  process.exit(1);
+}
+
+// RTMS runs as a separate process; wire host/port into the URL the backend forwards webhooks to.
+if (!process.env.RTMS_SERVICE_URL && process.env.RTMS_HOST && process.env.RTMS_PORT) {
+  process.env.RTMS_SERVICE_URL = `http://${process.env.RTMS_HOST}:${process.env.RTMS_PORT}`;
+}
+
+// Hosted deploys may inject base64 keys; local dev typically uses 64-char hex.
+function resolveEncryptionKey(raw) {
+  if (/^[0-9a-f]{32}$/i.test(raw) || /^[0-9a-f]{64}$/i.test(raw)) {
+    return raw;
+  }
+  const decoded = Buffer.from(raw, 'base64');
+  if (decoded.length === 32) {
+    return decoded.toString('hex');
+  }
+  return raw;
+}
 
 // Validate required variables
 const missing = requiredEnvVars.filter((varName) => !process.env[varName]);
@@ -51,6 +90,14 @@ if (placeholderVars.length > 0) {
   process.exit(1);
 }
 
+if (process.env.PUBLIC_URL && placeholderPatterns.some((pattern) => pattern.test(process.env.PUBLIC_URL))) {
+  // Catch leftover .env.example values before OAuth/webhook URLs are registered with Zoom.
+  console.error('PUBLIC_URL contains a placeholder value');
+  console.error(`   PUBLIC_URL="${process.env.PUBLIC_URL}"`);
+  console.error('\nReplace this with your actual public HTTPS URL.');
+  process.exit(1);
+}
+
 // Validate SESSION_SECRET is not a placeholder
 const sessionSecret = process.env.SESSION_SECRET;
 if (sessionSecret && /^your_.*_here$/i.test(sessionSecret)) {
@@ -60,15 +107,17 @@ if (sessionSecret && /^your_.*_here$/i.test(sessionSecret)) {
 }
 
 // Support new TOKEN_ENCRYPTION_KEY with REDIS_ENCRYPTION_KEY as fallback
-const encryptionKey = process.env.TOKEN_ENCRYPTION_KEY || process.env.REDIS_ENCRYPTION_KEY;
-if (!encryptionKey) {
+const encryptionKeyRaw = process.env.TOKEN_ENCRYPTION_KEY || process.env.REDIS_ENCRYPTION_KEY;
+if (!encryptionKeyRaw) {
   console.error('❌ Missing TOKEN_ENCRYPTION_KEY (or legacy REDIS_ENCRYPTION_KEY)');
   console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
 }
 
-// Check for placeholder encryption key
-if (/^your_.*_here$/i.test(encryptionKey)) {
+const encryptionKey = resolveEncryptionKey(encryptionKeyRaw);
+
+// Validate placeholder against the raw env value, not the decoded/normalized key.
+if (/^your_.*_here$/i.test(encryptionKeyRaw)) {
   console.error('❌ TOKEN_ENCRYPTION_KEY contains a placeholder value');
   console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
   process.exit(1);
@@ -97,8 +146,8 @@ module.exports = {
   zoomClientSecret: process.env.ZOOM_CLIENT_SECRET,
   zoomWebhookToken: process.env.ZOOM_WEBHOOK_TOKEN,
   zoomAppId: process.env.ZOOM_APP_ID || null,
-  publicUrl: process.env.PUBLIC_URL,
-  redirectUri: process.env.ZOOM_APP_REDIRECT_URI || `${process.env.PUBLIC_URL}/api/auth/callback`,
+  publicUrl: resolvedPublicUrl,
+  redirectUri: process.env.ZOOM_APP_REDIRECT_URI || `${resolvedPublicUrl}/api/auth/callback`,
 
   // Zoom for Government support
   // Set ZOOM_HOST=zoomgov.com for ZfG deployments
@@ -130,7 +179,8 @@ module.exports = {
   // Server
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3001',
+  // Default matches docker-compose service name; override with FRONTEND_URL when split across hosts.
+  frontendUrl: process.env.FRONTEND_URL || 'http://frontend:3000',
 
   // RTMS
   rtmsPort: parseInt(process.env.RTMS_PORT || '3002', 10),

@@ -39,7 +39,7 @@ import VerticalSelectorView from './views/VerticalSelectorView';
  * - Browser + unauthenticated: show marketing landing page
  */
 function RootView() {
-  const { isTestMode: isBrowser, isGuest, meetingContext, runningContext } = useZoomSdk();
+  const { isTestMode: isBrowser, isGuest, meetingContext, runningContext, sdkError } = useZoomSdk();
   const { isAuthenticated, isLoading } = useAuth();
   const { isVerticalSelected } = useVertical();
   const navigate = useNavigate();
@@ -54,6 +54,12 @@ function RootView() {
           navigate('/home', { replace: true });
         }
       }
+      return;
+    }
+
+    // If SDK configuration failed in Zoom, route to auth instead of hanging on spinner.
+    if (sdkError) {
+      navigate('/auth', { replace: true });
       return;
     }
 
@@ -92,7 +98,7 @@ function RootView() {
       // Authorized user — route to auth for token exchange
       navigate('/auth', { replace: true });
     }
-  }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate, isVerticalSelected]);
+  }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate, isVerticalSelected, sdkError]);
 
   // Show spinner while loading
   // Also wait if guest is in meeting but meetingContext hasn't been set yet (null means still loading)

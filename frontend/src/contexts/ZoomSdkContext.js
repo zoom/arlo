@@ -2,6 +2,40 @@ import React, { createContext, useContext, useState, useEffect, useMemo } from '
 
 const ZoomSdkContext = createContext();
 
+// Capabilities required for auth, RTMS, and in-meeting flows.
+const CORE_CAPABILITIES = [
+  'getMeetingContext',
+  'getMeetingUUID',
+  'getRunningContext',
+  'getUserContext',
+  'authorize',
+  'onAuthorized',
+  'promptAuthorize',
+  'callZoomApi',
+  'showNotification',
+  'sendMessageToChat',
+  'openUrl',
+  'onRunningContextChange',
+  'onMyUserContextChange',
+];
+
+// Collaboration and invitation APIs vary by Zoom client; request separately so we can fall back.
+const OPTIONAL_CAPABILITIES = [
+  'getMeetingParticipants',
+  'onMessage',
+  'postMessage',
+  'sendAppInvitationToAllParticipants',
+  'sendAppInvitation',
+  'showAppInvitationDialog',
+  'onSendAppInvitation',
+  'startCollaborate',
+  'endCollaborate',
+  'joinCollaborate',
+  'leaveCollaborate',
+  'onCollaborateChange',
+  'runRenderingContext',
+];
+
 // Check if running outside Zoom - evaluated dynamically
 const checkIsTestMode = () => !window.zoomSdk || window.location.search.includes('test=true');
 
@@ -47,37 +81,21 @@ export function ZoomSdkProvider({ children }) {
 
     async function configureSdk() {
       try {
-        const configResponse = await zoomSdk.config({
-          capabilities: [
-            'getMeetingContext',
-            'getMeetingUUID',
-            'getRunningContext',
-            'getUserContext',
-            'getMeetingParticipants',
-            'authorize',
-            'onAuthorized',
-            'promptAuthorize',
-            'callZoomApi',
-            'onMessage',
-            'postMessage',
-            'showNotification',
-            'sendMessageToChat',
-            'openUrl',
-            'onRunningContextChange',
-            'onMyUserContextChange',
-            'sendAppInvitationToAllParticipants',
-            'sendAppInvitation',
-            'showAppInvitationDialog',
-            'onSendAppInvitation',
-            'startCollaborate',
-            'endCollaborate',
-            'joinCollaborate',
-            'leaveCollaborate',
-            'onCollaborateChange',
-            'runRenderingContext',
-          ],
-          version: '0.16.0',
-        });
+        // Some Zoom clients reject config when unsupported capabilities are requested.
+        // Try full capabilities first, then gracefully fall back to a core set.
+        let configResponse;
+        try {
+          configResponse = await zoomSdk.config({
+            capabilities: [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES],
+            version: '0.16.0',
+          });
+        } catch (fullConfigError) {
+          console.warn('Full capability set rejected, retrying with core capabilities only:', fullConfigError);
+          configResponse = await zoomSdk.config({
+            capabilities: CORE_CAPABILITIES,
+            version: '0.16.0',
+          });
+        }
 
         console.log('SDK Configured:', configResponse);
         setSdkConfigured(true);
@@ -198,7 +216,10 @@ export function ZoomSdkProvider({ children }) {
       } catch (error) {
         console.error('SDK Configuration Error:', error);
         setSdkError(error.message);
-        setRunningContext('error'); // Fallback so routing can proceed
+        // Prevent infinite loading states if SDK setup fails.
+        setRunningContext('error');
+        // Route as non-guest so RootView sends the user to /auth (web OAuth fallback).
+        setIsGuest(false);
       }
     }
 

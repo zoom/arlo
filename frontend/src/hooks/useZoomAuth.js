@@ -15,6 +15,7 @@ export default function useZoomAuth() {
   const { zoomSdk } = useZoomSdk();
   const [isAuthorizing, setIsAuthorizing] = useState(false);
   const [error, setError] = useState(null);
+  const authInFlightRef = useRef(false);
 
   // Track active listener for cleanup on unmount
   const cleanupRef = useRef(null);
@@ -30,7 +31,10 @@ export default function useZoomAuth() {
 
   const authorize = useCallback(async () => {
     if (!zoomSdk) throw new Error('Zoom SDK not available');
+    // Prevent duplicate authorize() calls from double-clicks or strict-mode re-renders.
+    if (authInFlightRef.current) return;
 
+    authInFlightRef.current = true;
     setIsAuthorizing(true);
     setError(null);
 
@@ -66,6 +70,16 @@ export default function useZoomAuth() {
       const authPromise = new Promise((resolve, reject) => {
         let resolved = false;
         let pollIntervalId = null;
+        let pollStartTimeoutId = null;
+        let timeoutId = null;
+
+        // Tear down timers and listener on success, timeout, or unmount.
+        const cleanup = () => {
+          if (pollStartTimeoutId) clearTimeout(pollStartTimeoutId);
+          if (timeoutId) clearTimeout(timeoutId);
+          if (pollIntervalId) clearInterval(pollIntervalId);
+          zoomSdk.removeEventListener('onAuthorized', handler);
+        };
 
         // Poll for code as fallback (in case browser callback completes but onAuthorized doesn't fire)
         const startPolling = () => {
@@ -76,14 +90,29 @@ export default function useZoomAuth() {
               return;
             }
             try {
-              const pollResponse = await fetch(`/api/auth/poll-code?state=${encodeURIComponent(state)}`);
+              const pollResponse = await fetch(`/api/auth/poll-code?state=${encodeURIComponent(state)}`, {
+                cache: 'no-store',
+                credentials: 'include', // Session cookie may be set during browser OAuth leg.
+              });
+              // Ignore not-modified and transient errors; keep polling until timeout.
+              if (pollResponse.status === 304) {
+                return;
+              }
+              if (!pollResponse.ok) {
+                if (pollResponse.status === 429) {
+                  console.warn('Poll request rate-limited, will retry');
+                  return;
+                }
+                console.warn(`Poll request failed with status ${pollResponse.status}`);
+                return;
+              }
               const pollData = await pollResponse.json();
               if (pollData.ready && pollData.code) {
                 console.log('Poll received code, exchanging...');
                 clearInterval(pollIntervalId);
                 if (!resolved) {
                   resolved = true;
-                  zoomSdk.removeEventListener('onAuthorized', handler);
+                  cleanup();
                   cleanupRef.current = null;
                   try {
                     const result = await exchangeCode(pollData.code);
@@ -97,15 +126,14 @@ export default function useZoomAuth() {
               // Polling error - continue trying
               console.warn('Poll error:', err);
             }
-          }, 1000); // Poll every second
+          }, 2500); // Slower interval reduces load on poll-code rate limits.
         };
 
         // Timeout after 60 seconds
-        const timeoutId = setTimeout(() => {
+        timeoutId = setTimeout(() => {
           if (!resolved) {
             console.error('Authorization timeout after 60s');
-            clearInterval(pollIntervalId);
-            zoomSdk.removeEventListener('onAuthorized', handler);
+            cleanup();
             cleanupRef.current = null;
             reject(new Error('Authorization timed out'));
           }
@@ -114,10 +142,8 @@ export default function useZoomAuth() {
         const handler = async (event) => {
           if (resolved) return;
           resolved = true;
-          clearTimeout(timeoutId);
-          clearInterval(pollIntervalId);
+          cleanup();
           console.log('onAuthorized event received:', event);
-          zoomSdk.removeEventListener('onAuthorized', handler);
           cleanupRef.current = null;
 
           const { code } = event;
@@ -135,15 +161,13 @@ export default function useZoomAuth() {
         };
 
         cleanupRef.current = () => {
-          clearTimeout(timeoutId);
-          clearInterval(pollIntervalId);
-          zoomSdk.removeEventListener('onAuthorized', handler);
+          cleanup();
         };
 
         zoomSdk.addEventListener('onAuthorized', handler);
 
         // Start polling after a short delay (give onAuthorized a chance to fire first)
-        setTimeout(startPolling, 2000);
+        pollStartTimeoutId = setTimeout(startPolling, 2000);
       });
 
       // 3. Trigger Zoom OAuth (listener is already registered)
@@ -153,6 +177,11 @@ export default function useZoomAuth() {
         console.log('zoomSdk.authorize returned:', authorizeResult);
       } catch (authError) {
         console.error('zoomSdk.authorize failed:', authError);
+        // Stop polling/listening if authorize() throws before onAuthorized fires.
+        if (cleanupRef.current) {
+          cleanupRef.current();
+          cleanupRef.current = null;
+        }
         throw authError;
       }
       console.log('Waiting for onAuthorized event...');
@@ -163,6 +192,7 @@ export default function useZoomAuth() {
       setError(err.message);
       throw err;
     } finally {
+      authInFlightRef.current = false; // Always release, including thrown authorize() errors.
       setIsAuthorizing(false);
     }
   }, [zoomSdk, login]);
