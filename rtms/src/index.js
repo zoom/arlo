@@ -1,4 +1,17 @@
 require('dotenv').config({ path: '../../.env' });
+
+// The RTMS SDK expects ZM_RTMS_* names; map from the shared ZOOM_* creds when unset.
+if (process.env.ZOOM_CLIENT_ID && !process.env.ZM_RTMS_CLIENT) {
+  process.env.ZM_RTMS_CLIENT = process.env.ZOOM_CLIENT_ID;
+}
+if (process.env.ZOOM_CLIENT_SECRET && !process.env.ZM_RTMS_SECRET) {
+  process.env.ZM_RTMS_SECRET = process.env.ZOOM_CLIENT_SECRET;
+}
+// Compose BACKEND_URL from host/port when only those are provided (multi-service deploys).
+if (!process.env.BACKEND_URL && process.env.BACKEND_HOST && process.env.BACKEND_PORT) {
+  process.env.BACKEND_URL = `http://${process.env.BACKEND_HOST}:${process.env.BACKEND_PORT}`;
+}
+
 const express = require('express');
 const crypto = require('crypto');
 const rtmsModule = require('@zoom/rtms');
@@ -550,9 +563,11 @@ app.get('/health', (req, res) => {
 // START SERVER
 // =============================================================================
 
-const PORT = process.env.RTMS_PORT || 3002;
+// Prefer PORT (platform-assigned) over RTMS_PORT (local/docker default).
+const PORT = process.env.PORT || process.env.RTMS_PORT || 3002;
 
-app.listen(PORT, () => {
+// Bind all interfaces so the process is reachable from other containers/services.
+app.listen(PORT, '0.0.0.0', () => {
   console.log('='.repeat(60));
   console.log('Arlo Meeting Assistant RTMS Service');
   console.log('='.repeat(60));

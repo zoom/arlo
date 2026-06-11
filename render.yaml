@@ -1,0 +1,103 @@
+# Multi-service hosted layout: public backend, internal frontend + RTMS, managed Postgres.
+# Only Zoom creds are manual; secrets and service URLs wire automatically.
+services:
+  - type: web
+    name: backend
+    runtime: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    dockerCommand: npm start
+    # prestart also runs db:deploy; this covers deploys where prestart is skipped.
+    preDeployCommand: npm run db:deploy
+    plan: starter
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Manual: set in dashboard after first deploy.
+      - key: ZOOM_CLIENT_ID
+        sync: false
+      - key: ZOOM_CLIENT_SECRET
+        sync: false
+      - key: ZOOM_WEBHOOK_TOKEN
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: TOKEN_ENCRYPTION_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: postgres
+          property: connectionString
+      # Backend proxies UI requests to the internal frontend service.
+      - key: FRONTEND_URL
+        fromService:
+          type: pserv
+          name: frontend
+          property: hostport
+      # config.js builds RTMS_SERVICE_URL from these (see backend/src/config.js).
+      - key: RTMS_HOST
+        fromService:
+          type: pserv
+          name: rtms
+          property: host
+      - key: RTMS_PORT
+        fromService:
+          type: pserv
+          name: rtms
+          property: port
+
+  - type: pserv
+    name: frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    # Static build served by the `serve` package (see frontend/package.json).
+    startCommand: npx serve -s build -l $PORT
+    plan: starter
+    envVars:
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=384
+      - key: GENERATE_SOURCEMAP
+        value: "false"
+
+  - type: pserv
+    name: rtms
+    runtime: docker
+    dockerContext: ./rtms
+    dockerfilePath: ./rtms/Dockerfile
+    plan: starter
+    envVars:
+      # RTMS maps ZOOM_* → ZM_RTMS_* at startup; creds flow from backend.
+      - key: ZOOM_CLIENT_ID
+        fromService:
+          type: web
+          name: backend
+          envVarKey: ZOOM_CLIENT_ID
+      - key: ZOOM_CLIENT_SECRET
+        fromService:
+          type: web
+          name: backend
+          envVarKey: ZOOM_CLIENT_SECRET
+      - key: ZOOM_WEBHOOK_TOKEN
+        fromService:
+          type: web
+          name: backend
+          envVarKey: ZOOM_WEBHOOK_TOKEN
+      # rtms/src/index.js composes BACKEND_URL from host + port.
+      - key: BACKEND_HOST
+        fromService:
+          type: web
+          name: backend
+          property: host
+      - key: BACKEND_PORT
+        fromService:
+          type: web
+          name: backend
+          property: port
+
+databases:
+  - name: postgres
+    plan: basic-256mb
+    databaseName: meeting_assistant
+    user: arlo_user

@@ -441,8 +441,9 @@ export function MeetingProvider({ children }) {
         credentials: 'include',
         body: JSON.stringify({ title: topic, meetingNumber }),
       }).then(res => {
-        // Meeting record may not exist yet — retry after delay (max 3 attempts)
-        if (res.status === 404 && ++attempts < 3) {
+        // Meeting record may not exist yet — retry after delay (max 3 attempts).
+        // Backend returns 202 (pending) or 404 until RTMS creates the row.
+        if ((res.status === 202 || res.status === 404) && ++attempts < 3) {
           setTimeout(sendTitle, 3000);
         }
       }).catch(() => {});

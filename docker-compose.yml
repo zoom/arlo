@@ -99,11 +99,8 @@ services:
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/meeting_assistant
       BACKEND_URL: http://backend:3000
-      # RTMS SDK authentication (SDK uses these specific variable names)
-      ZM_RTMS_CLIENT: ${ZOOM_CLIENT_ID}
-      ZM_RTMS_SECRET: ${ZOOM_CLIENT_SECRET}
-      # Webhook HMAC verification (Secret Token from Zoom Marketplace Event Subscriptions)
-      ZOOM_WEBHOOK_TOKEN: ${ZOOM_WEBHOOK_TOKEN}
+      # RTMS maps ZOOM_* → ZM_RTMS_* at startup (see rtms/src/index.js); no duplicate vars needed here.
+      # ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, and ZOOM_WEBHOOK_TOKEN come from env_file (.env)
       # RTMS SDK v1.0 logging (replaces configureLogger())
       ZM_RTMS_LOG_LEVEL: debug
       # Log level for PII gating

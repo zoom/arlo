@@ -14,6 +14,18 @@ export default function AuthView() {
   const { isTestMode: isBrowser, runningContext, meetingContext } = useZoomSdk();
   const { authorize, isAuthorizing, error } = useZoomAuth();
 
+  // Some marketplace app types lack in-client authorize; detect and use browser OAuth instead.
+  const isAuthorizeApiUnsupported = (err) => {
+    if (!err) return false;
+    const message = String(err.message || '');
+    return (
+      err.code === 80004 ||
+      err.reason === 'app_not_support' ||
+      /80004/.test(message) ||
+      /app_not_support/i.test(message)
+    );
+  };
+
   const getPostAuthDestination = useCallback(() => {
     if (runningContext === 'inMeeting' && meetingContext?.meetingUUID) {
       return `/meeting/${encodeURIComponent(meetingContext.meetingUUID)}`;
@@ -55,6 +67,12 @@ export default function AuthView() {
       await authorize();
       // Navigation handled by the useEffect above after login sets isAuthenticated
     } catch (err) {
+      if (isAuthorizeApiUnsupported(err)) {
+        // In-meeting OAuth unavailable for this app type; use the browser redirect flow.
+        console.warn('Zoom authorize API not supported for this app/client, falling back to web OAuth');
+        window.location.href = '/api/auth/start';
+        return;
+      }
       console.error('Authentication error:', err);
     }
   };

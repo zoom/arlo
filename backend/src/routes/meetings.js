@@ -108,7 +108,16 @@ router.patch('/by-zoom-id/:zoomMeetingId/topic', optionalAuth, async (req, res) 
     const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id);
 
     if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
+      // Explicit renames require a persisted row; auto-sync can wait for RTMS to create one.
+      if (force) {
+        return res.status(404).json({ error: 'Meeting not found' });
+      }
+      // RTMS may auto-start before the DB record exists; 202 lets the client retry.
+      return res.status(202).json({
+        updated: false,
+        pending: true,
+        message: 'Meeting is not persisted yet. Retry shortly.',
+      });
     }
 
     // Build update data
@@ -171,7 +180,12 @@ router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
     });
 
     if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
+      // Empty payload with pending=true avoids 404 noise while RTMS bootstraps the record.
+      return res.json({
+        meeting: null,
+        pending: true,
+        message: 'Meeting is not available yet',
+      });
     }
 
     // Authenticated users: verify ownership
@@ -206,7 +220,12 @@ router.get('/by-zoom-id/:zoomMeetingId/transcript', optionalAuth, async (req, re
     const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id);
 
     if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
+      // Return empty segments instead of 404 so the in-meeting UI can poll until RTMS creates the record.
+      return res.json({
+        segments: [],
+        meetingDbId: null,
+        pending: true,
+      });
     }
 
     // Authenticated users: verify ownership
@@ -256,7 +275,11 @@ router.get('/by-zoom-id/:zoomMeetingId/participant-events', optionalAuth, async 
     const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id);
 
     if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
+      // Same pending pattern as transcript: timeline is empty until the meeting record exists.
+      return res.json({
+        events: [],
+        pending: true,
+      });
     }
 
     // Authenticated users: verify ownership
