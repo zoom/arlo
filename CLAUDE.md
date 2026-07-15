@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Docker Setup (Recommended)
 
 ```bash
-docker-compose up --build              # Start all services (Postgres, Backend, Frontend, RTMS)
+docker-compose up --build              # Start all services (MySQL, Backend, Frontend, RTMS)
 docker-compose up --build -V           # Rebuild with fresh node_modules (use after adding/removing npm deps)
 docker-compose logs -f backend         # View backend logs
 docker-compose restart backend         # Restart specific service
@@ -66,7 +66,7 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
    - Live transcript display, AI suggestions, highlights
    - Start/stop RTMS via `zoomSdk.callZoomApi('startRTMS')`
 
-2. **Backend API** (`backend/`) — Node.js/Express + PostgreSQL + Prisma
+2. **Backend API** (`backend/`) — Node.js/Express + MySQL + Prisma
    - Zoom OAuth 2.0 (PKCE flow), session management with httpOnly cookies
    - REST API for meetings, transcripts, search, AI, highlights
    - WebSocket server for live transcript broadcast
@@ -81,7 +81,7 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
 ### Data Flow
 
 ```
-Zoom RTMS WebSocket → RTMS Service → Backend (normalize, buffer, batch insert to Postgres)
+Zoom RTMS WebSocket → RTMS Service → Backend (normalize, buffer, batch insert to MySQL)
     → WebSocket broadcast → Frontend (live transcript display, < 1s end-to-end)
 ```
 
@@ -95,7 +95,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 3. Frontend: zoomSdk.authorize({ codeChallenge, state })
 4. Zoom fires onAuthorized → { code } (NOTE: SDK does NOT return state — use closure from step 1)
 5. Frontend: POST /api/auth/callback { code, state } (credentials: 'include')
-6. Backend: Exchanges code for tokens, stores AES-256-GCM encrypted in Postgres, creates session cookie
+6. Backend: Exchanges code for tokens, stores AES-256-GCM encrypted in MySQL, creates session cookie
 7. Frontend: login(user, wsToken) → navigate to /home
 ```
 
@@ -124,11 +124,11 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `components/ui/` — Unstyled primitives: Button, Card, Badge, Input, Textarea, LoadingSpinner
 
 ### Database
-- `backend/prisma/schema.prisma` — PostgreSQL schema
+- `backend/prisma/schema.prisma` — MySQL schema
 - Key models: User, Meeting, Speaker, TranscriptSegment, Highlight, VttFile, UserToken, ParticipantEvent
 - `Speaker` has `@@unique([meetingId, zoomParticipantId])` compound constraint
 - `TranscriptSegment.seqNo` is UNIQUE per meeting (idempotency)
-- Full-text search uses Postgres GIN index on `text` column
+- Full-text search uses MySQL FULLTEXT index on `text` column
 - All queries filtered by `ownerId` (row-level data isolation)
 - Highlight/AiCitation timestamp fields use `BigInt` (epoch milliseconds)
 
@@ -242,7 +242,7 @@ ZOOM_CLIENT_ID=...              # From Zoom Marketplace
 ZOOM_CLIENT_SECRET=...
 ZOOM_APP_ID=...                 # Marketplace App ID (for open_apps API, different from Client ID)
 PUBLIC_URL=https://...          # ngrok HTTPS URL
-DATABASE_URL=postgresql://...   # Postgres connection string
+DATABASE_URL=mysql://...        # MySQL connection string
 SESSION_SECRET=...              # 64 chars: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 TOKEN_ENCRYPTION_KEY=...        # 64 chars (AES-256): node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 OPENROUTER_API_KEY=...          # Optional — free models work without it
@@ -287,7 +287,7 @@ LOG_LEVEL=info                  # Set to 'debug' to enable transcript/PII loggin
 
 ## Security
 
-- Access tokens stored **encrypted** (AES-256-GCM authenticated encryption, 32-byte key from `TOKEN_ENCRYPTION_KEY`) in Postgres, auto-refresh before expiry
+- Access tokens stored **encrypted** (AES-256-GCM authenticated encryption, 32-byte key from `TOKEN_ENCRYPTION_KEY`) in MySQL, auto-refresh before expiry
 - httpOnly session cookies, never expose tokens to frontend
 - All API calls from frontend use `fetch` with `credentials: 'include'`
 - HTTP headers required by Zoom Apps: `Strict-Transport-Security`, `X-Content-Type-Options`, `Content-Security-Policy`, `Referrer-Policy`

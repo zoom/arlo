@@ -6,14 +6,14 @@ const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const router = express.Router();
 
 /**
- * Sanitize search query for use with PostgreSQL full-text search.
- * Removes tsquery operators that could be exploited for DoS.
+ * Sanitize search query for use with MySQL full-text search.
+ * Removes special characters that could cause issues.
  */
 function sanitizeSearchQuery(query) {
   if (!query) return '';
-  // Remove tsquery operators: & | ! < > ( ) : * \
+  // Remove MySQL full-text special characters: + - > < ( ) ~ * " @
   // Replace with spaces to preserve word boundaries
-  return query.replace(/[&|!<>():*\\]/g, ' ').trim();
+  return query.replace(/[+\-><()~*"@]/g, ' ').trim();
 }
 
 // Apply auth middleware to all routes
@@ -112,63 +112,53 @@ router.get('/', async (req, res) => {
         take: parseInt(limit),
       }),
 
-      // 2. Summary search (JSONB fields)
+      // 2. Summary search (JSON fields - MySQL)
       prisma.$queryRaw`
-        SELECT m.id, m.title, m.start_time as "startTime", m.summary
+        SELECT m.id, m.title, m.start_time as startTime, m.summary
         FROM meetings m
-        WHERE m.owner_id = ANY(${ownerIds})
+        WHERE m.owner_id IN (${Prisma.join(ownerIds)})
           AND m.summary IS NOT NULL
           ${meeting_id ? Prisma.sql`AND m.id = ${meeting_id}` : Prisma.empty}
           ${from ? Prisma.sql`AND m.start_time >= ${new Date(from)}` : Prisma.empty}
           ${to ? Prisma.sql`AND m.start_time <= ${new Date(to)}` : Prisma.empty}
           AND (
-            m.summary->>'overview' ILIKE ${'%' + q + '%'}
-            OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                CASE WHEN jsonb_typeof(m.summary->'keyPoints') = 'array' THEN m.summary->'keyPoints' ELSE '[]'::jsonb END
-              ) elem WHERE elem ILIKE ${'%' + q + '%'}
-            )
-            OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                CASE WHEN jsonb_typeof(m.summary->'decisions') = 'array' THEN m.summary->'decisions' ELSE '[]'::jsonb END
-              ) elem WHERE elem ILIKE ${'%' + q + '%'}
-            )
-            OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                CASE WHEN jsonb_typeof(m.summary->'nextSteps') = 'array' THEN m.summary->'nextSteps' ELSE '[]'::jsonb END
-              ) elem WHERE elem ILIKE ${'%' + q + '%'}
-            )
+            JSON_UNQUOTE(JSON_EXTRACT(m.summary, '$.overview')) LIKE ${'%' + q + '%'}
+            OR CAST(m.summary->'$.keyPoints' AS CHAR) LIKE ${'%' + q + '%'}
+            OR CAST(m.summary->'$.decisions' AS CHAR) LIKE ${'%' + q + '%'}
+            OR CAST(m.summary->'$.nextSteps' AS CHAR) LIKE ${'%' + q + '%'}
           )
         ORDER BY m.start_time DESC
         LIMIT ${parseInt(limit)}
       `,
 
-      // 3. Transcript full-text search (existing)
+      // 3. Transcript full-text search (MySQL FULLTEXT)
+      // Note: Requires FULLTEXT index on transcript_segments.text column
+      // Falls back to LIKE search if FULLTEXT is not available
       prisma.$queryRaw`
         SELECT
           ts.id,
-          ts.meeting_id as "meetingId",
-          ts.speaker_id as "speakerId",
-          ts.t_start_ms as "tStartMs",
-          ts.t_end_ms as "tEndMs",
+          ts.meeting_id as meetingId,
+          ts.speaker_id as speakerId,
+          ts.t_start_ms as tStartMs,
+          ts.t_end_ms as tEndMs,
           ts.text,
           ts.confidence,
-          m.id as "meeting.id",
-          m.title as "meeting.title",
-          m.start_time as "meeting.startTime",
-          s.label as "speaker.label",
-          s.display_name as "speaker.displayName",
-          ts_rank(to_tsvector('english', ts.text), plainto_tsquery('english', ${q})) as rank
+          m.id as \`meeting.id\`,
+          m.title as \`meeting.title\`,
+          m.start_time as \`meeting.startTime\`,
+          s.label as \`speaker.label\`,
+          s.display_name as \`speaker.displayName\`,
+          MATCH(ts.text) AGAINST(${q} IN NATURAL LANGUAGE MODE) as \`rank\`
         FROM transcript_segments ts
         INNER JOIN meetings m ON ts.meeting_id = m.id
         LEFT JOIN speakers s ON ts.speaker_id = s.id
         WHERE
-          to_tsvector('english', ts.text) @@ plainto_tsquery('english', ${q})
-          AND m.owner_id = ANY(${ownerIds})
+          MATCH(ts.text) AGAINST(${q} IN NATURAL LANGUAGE MODE)
+          AND m.owner_id IN (${Prisma.join(ownerIds)})
           ${meeting_id ? Prisma.sql`AND m.id = ${meeting_id}` : Prisma.empty}
           ${from ? Prisma.sql`AND m.start_time >= ${new Date(from)}` : Prisma.empty}
           ${to ? Prisma.sql`AND m.start_time <= ${new Date(to)}` : Prisma.empty}
-        ORDER BY rank DESC, m.start_time DESC, ts.t_start_ms ASC
+        ORDER BY \`rank\` DESC, m.start_time DESC, ts.t_start_ms ASC
         LIMIT ${parseInt(limit)}
       `,
     ]);

@@ -1,24 +1,26 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: arlo-meeting-assistant-postgres
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: arlo-meeting-assistant-mysql
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: meeting_assistant
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_USER: arlo
+      MYSQL_PASSWORD: arlo
+      MYSQL_DATABASE: meeting_assistant
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
       interval: 10s
       timeout: 5s
       retries: 5
+    command: --default-authentication-plugin=mysql_native_password
 
   # Redis (optional, for WebSocket scaling)
   redis:
@@ -47,7 +49,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/meeting_assistant
+      DATABASE_URL: mysql://arlo:arlo@mysql:3306/meeting_assistant
       REDIS_URL: redis://redis:6379
       NODE_ENV: development
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -58,7 +60,7 @@ services:
       - /app/node_modules
       - ./storage:/app/storage
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     command: sh -c "npx prisma generate && npx prisma db push && npm run dev"
 
@@ -97,7 +99,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/meeting_assistant
+      DATABASE_URL: mysql://arlo:arlo@mysql:3306/meeting_assistant
       BACKEND_URL: http://backend:3000
       # RTMS maps ZOOM_* → ZM_RTMS_* at startup (see rtms/src/index.js); no duplicate vars needed here.
       # ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, and ZOOM_WEBHOOK_TOKEN come from env_file (.env)
@@ -118,7 +120,7 @@ services:
     command: npm start
 
 volumes:
-  postgres_data:
+  mysql_data:
     driver: local
   redis_data:
     driver: local

@@ -1,14 +1,15 @@
 // Prisma Schema for Arlo Meeting Assistant
-// Database: PostgreSQL 15+
+// Database: MySQL 8+
 
 generator client {
-  provider      = "prisma-client-js"
+  provider        = "prisma-client-js"
   // Include binary targets for both local development (Mac) and Docker (Linux)
-  binaryTargets = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x", "debian-openssl-3.0.x"]
+  previewFeatures = ["fullTextIndex"] // Required for MySQL FULLTEXT indexes
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -46,7 +47,7 @@ model UserToken {
   accessToken  String   @map("access_token") @db.Text // Encrypted
   refreshToken String   @map("refresh_token") @db.Text // Encrypted
   expiresAt    DateTime @map("expires_at")
-  scopes       String[] // Array of OAuth scopes
+  scopes       Json     @default("[]") // Array of OAuth scopes (stored as JSON for MySQL)
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -129,6 +130,7 @@ model TranscriptSegment {
   @@unique([meetingId, seqNo])
   @@index([meetingId, tStartMs])
   @@index([meetingId, seqNo])
+  @@fulltext([text]) // MySQL FULLTEXT index for search
   @@map("transcript_segments")
 }
 
@@ -179,7 +181,7 @@ model Highlight {
   tEndMs    BigInt   @map("t_end_ms") // Highlight end time
   title     String
   notes     String?  @db.Text
-  tags      String[] // Array of tags
+  tags      Json     @default("[]") // Array of tags (stored as JSON for MySQL)
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

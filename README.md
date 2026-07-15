@@ -165,7 +165,7 @@ Before you begin, ensure you have:
 | Requirement | Why You Need It |
 |-------------|-----------------|
 | **[Node.js 20+](https://nodejs.org/)** | Runtime for backend services |
-| **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** | Runs PostgreSQL and all services |
+| **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** | Runs MySQL and all services |
 | **[ngrok](https://ngrok.com/)** | Creates secure tunnels for Zoom webhooks |
 | **[Zoom Account](https://marketplace.zoom.us/)** | To create and configure your Zoom App |
 
@@ -296,7 +296,7 @@ docker-compose up --build
 ```
 
 Wait for all services to start:
-- PostgreSQL database
+- MySQL database
 - Backend API (port 3000)
 - Frontend (port 3001)
 - RTMS service (port 3002)
@@ -394,7 +394,7 @@ docker-compose restart backend
 
 **"Can't reach database server"**
 ```bash
-docker-compose restart postgres backend
+docker-compose restart mysql backend
 ```
 
 **Tables don't exist**
@@ -484,7 +484,7 @@ npm run db:studio                    # Open Prisma database GUI
 |-------|------------|
 | Frontend | React 18, Zoom Apps SDK, Base UI |
 | Backend | Node.js 20, Express, Prisma |
-| Database | PostgreSQL 15 |
+| Database | MySQL 8.0 |
 | AI | OpenRouter (free models available) |
 | Real-time | WebSocket + RTMS SDK |
 
@@ -532,7 +532,7 @@ The easiest way to deploy Arlo to production is with [Render](https://render.com
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/zoom/arlo)
 
-This deploys all services (backend, frontend, RTMS, PostgreSQL) with automatic secret generation. After deployment:
+This deploys all services (backend, frontend, RTMS, MySQL) with automatic secret generation. After deployment:
 
 1. Add your Zoom credentials in the Render dashboard:
    - `ZOOM_CLIENT_ID`
@@ -552,7 +552,7 @@ This reference implementation is designed for **learning and prototyping**. Befo
 | Area | Development | Production Recommendation |
 |------|-------------|---------------------------|
 | **Credentials** | `.env` file | Secrets manager (AWS, Vault, Azure) |
-| **Tokens** | PostgreSQL + AES | Add encryption at rest |
+| **Tokens** | MySQL + AES | Add encryption at rest |
 | **Sessions** | In-memory | Redis or database-backed |
 | **HTTPS** | ngrok tunnel | Load balancer with TLS |
 | **WebSockets** | Single instance | Redis pub/sub for scaling |
