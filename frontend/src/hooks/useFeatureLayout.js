@@ -27,6 +27,7 @@ const DEFAULT_FEATURE_ORDER = {
     'privilege-markers',
   ],
   sales: [
+    'filler-word-alert',
     'qualification-signals',
     'competitor-mentions',
     'commitments',

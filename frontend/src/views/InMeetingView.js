@@ -42,6 +42,7 @@ import {
   CompetitorMentions,
   CommitmentsPanel,
   QualificationSignals,
+  FillerWordAlert,
 } from '../features/sales';
 // Customer Support vertical features
 import {
@@ -623,6 +624,7 @@ export default function InMeetingView({ isGuestMode = false }) {
     'privilege-markers': () => <PrivilegeMarkers segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
 
     // Sales features
+    'filler-word-alert': () => <FillerWordAlert segments={segments} showDemoData={showDemoData} />,
     'qualification-signals': () => <QualificationSignals segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
     'competitor-mentions': () => <CompetitorMentions segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
     'commitments': () => <CommitmentsPanel segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
