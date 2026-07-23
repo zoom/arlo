@@ -14,7 +14,6 @@ const requiredEnvVars = [
   'ZOOM_CLIENT_SECRET',
   'ZOOM_WEBHOOK_TOKEN',
   // PUBLIC_URL is resolved separately (explicit value or injected external URL).
-  'DATABASE_URL',
   'SESSION_SECRET',
 ];
 
@@ -155,8 +154,8 @@ module.exports = {
   zoomOAuthUrl: `https://${process.env.ZOOM_HOST || 'zoom.us'}/oauth`,
   zoomApiUrl: `https://api.${process.env.ZOOM_HOST || 'zoom.us'}/v2`,
 
-  // Database
-  databaseUrl: process.env.DATABASE_URL,
+  // Demo Mode - no database, no persistent storage
+  demoMode: process.env.DEMO_MODE === 'true',
 
   // Security
   sessionSecret: process.env.SESSION_SECRET,

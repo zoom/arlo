@@ -1,44 +1,6 @@
 version: '3.8'
 
 services:
-  # MySQL Database
-  mysql:
-    image: mysql:8.0
-    container_name: arlo-meeting-assistant-mysql
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: rootpassword
-      MYSQL_USER: arlo
-      MYSQL_PASSWORD: arlo
-      MYSQL_DATABASE: meeting_assistant
-    ports:
-      - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootpassword"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    command: --default-authentication-plugin=mysql_native_password
-
-  # Redis (optional, for WebSocket scaling)
-  redis:
-    image: redis:7-alpine
-    container_name: arlo-meeting-assistant-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    profiles:
-      - with-redis
-
   # Backend API Server
   backend:
     build:
@@ -49,20 +11,16 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: mysql://arlo:arlo@mysql:3306/meeting_assistant
-      REDIS_URL: redis://redis:6379
       NODE_ENV: development
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      DEMO_MODE: "true"
     ports:
       - "3000:3000"
     volumes:
       - ./backend:/app
       - /app/node_modules
       - ./storage:/app/storage
-    depends_on:
-      mysql:
-        condition: service_healthy
-    command: sh -c "npx prisma generate && npx prisma db push && npm run dev"
+    command: npm run dev
 
   # Frontend (Zoom App)
   frontend:
@@ -99,7 +57,6 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: mysql://arlo:arlo@mysql:3306/meeting_assistant
       BACKEND_URL: http://backend:3000
       # RTMS maps ZOOM_* → ZM_RTMS_* at startup (see rtms/src/index.js); no duplicate vars needed here.
       # ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, and ZOOM_WEBHOOK_TOKEN come from env_file (.env)
@@ -118,9 +75,3 @@ services:
       backend:
         condition: service_started
     command: npm start
-
-volumes:
-  mysql_data:
-    driver: local
-  redis_data:
-    driver: local
