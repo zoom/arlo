@@ -1,5 +1,12 @@
 # Figma Design Prompt — Arlo Guest Mode Showcase
 
+> **Design artifact only:** This file describes proposed Guest Mode screens. It
+> is not a statement that unauthenticated guests can currently read live
+> transcripts. The current production backend requires an authenticated signed
+> WebSocket token, and public links are disabled by default. Treat guest
+> transcript access as a separate product/security decision before implementing
+> these screens.
+
 ## Context
 
 Arlo Meeting Assistant is a Zoom App that runs inside Zoom meetings. It captures live transcripts, generates AI summaries, and tracks action items — without a meeting bot. This design task adds **Guest Mode** — a read-only, real-time experience for meeting participants who haven't installed the app. An authenticated host invites guests during a meeting, and they get instant access to live transcripts and summaries with no sign-in required.

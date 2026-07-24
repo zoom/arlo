@@ -1,38 +1,32 @@
-# Arlo Meeting Assistant - Project Documentation
+# Arlo Documentation
 
-This directory contains **project-specific documentation** for the Arlo Meeting Assistant Zoom App.
+This directory contains documentation specific to the Arlo Meeting Assistant
+reference implementation.
 
-## Zoom Apps Development Guidance
+## Start Here
 
-For **general Zoom Apps development guidance**, including SDK setup, OAuth, RTMS, and REST API patterns, see the reusable skill documentation:
+| Document | Use it for |
+| --- | --- |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Current local/AWS components, data flow, security, and WebSocket contract |
+| [`FRESH_INSTALL_CHECKLIST.md`](./FRESH_INSTALL_CHECKLIST.md) | Fresh local Docker Compose verification |
+| [`MYSQL_MIGRATION.md`](./MYSQL_MIGRATION.md) | MySQL setup and legacy PostgreSQL cutover notes |
+| [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) | Implemented features, limitations, and next actions |
+| [`TROUBLESHOOTING.md`](./TROUBLESHOOTING.md) | Local development and Zoom App troubleshooting |
+| [`figma-prompt-guest-mode.md`](./figma-prompt-guest-mode.md) | Design-only guest-mode UI brief |
 
-**Location:** `.claude/skills/zoom-apps/`
+## Deployment Guides
 
-The skill includes:
-- [Getting Started](../.claude/skills/zoom-apps/01-getting-started.md) - Marketplace setup, ngrok configuration
-- [SDK Setup](../.claude/skills/zoom-apps/02-sdk-setup.md) - SDK initialization and capabilities
-- [Frontend Patterns](../.claude/skills/zoom-apps/03-frontend-patterns.md) - React + SDK usage patterns
-- [Backend OAuth](../.claude/skills/zoom-apps/04-backend-oauth.md) - OAuth flows, token management
-- [RTMS Integration](../.claude/skills/zoom-apps/05-rtms-integration.md) - Real-time media streams
-- [REST API Guide](../.claude/skills/zoom-apps/06-rest-api.md) - Making Zoom API calls
-- [Security Best Practices](../.claude/skills/zoom-apps/07-security.md) - OAuth security, encryption
-- [SDK Reference](../.claude/skills/zoom-apps/08-sdk-reference.md) - Complete SDK API reference
+- Local quick start: [`../README.md`](../README.md)
+- AWS scalable Terraform: [`../deploy/aws/terraform/README.md`](../deploy/aws/terraform/README.md)
+- Self-hosted VM: [`../deploy/selfhost/README.md`](../deploy/selfhost/README.md)
+- Deployment overview: [`../deploy/README.md`](../deploy/README.md)
 
-## Project-Specific Documentation
+## Reusable Zoom Guidance
 
-| Document | Description |
-|----------|-------------|
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | Arlo Meeting Assistant system design and architecture |
-| [PROJECT_STATUS.md](./PROJECT_STATUS.md) | Development roadmap and current phase status |
-| [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | Arlo-specific debugging and issue resolution |
+The repository also contains reusable Zoom Apps guidance under
+[`../.claude/skills/zoom-apps/`](../.claude/skills/zoom-apps/). Those files are
+general SDK guidance, not a substitute for the current Arlo architecture or
+deployment instructions.
 
-## Quick Links
-
-- **Main Project:** See [CLAUDE.md](../CLAUDE.md) for project overview and development commands
-- **Zoom Apps Skill:** See [zoom-apps.md](../.claude/skills/zoom-apps/zoom-apps.md) for the main skill entry point
-
-## Key Differences
-
-**This `/docs/` directory** contains documentation specific to the Arlo Meeting Assistant project - its architecture, roadmap, and project-specific troubleshooting.
-
-**The `/skills/zoom-apps/` directory** contains reusable documentation for building any Zoom App - patterns, code templates, and best practices that apply to all Zoom Apps development.
+The current source of truth for SDK capabilities is
+[`frontend/src/contexts/ZoomSdkContext.js`](../frontend/src/contexts/ZoomSdkContext.js).

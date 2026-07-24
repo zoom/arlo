@@ -2,7 +2,7 @@
 
 This template is the AWS-first deployment shape for scaling Arlo RTMS:
 
-- Public CloudFront distribution and public ALB with native AWS FQDN and optional Route53 custom domain.
+- Public CloudFront distribution and public ALB with a native AWS HTTPS FQDN.
 - Always-on ECS/Fargate services for `frontend`, `backend`, and `rtms-control` in private subnets by default.
 - `rtms-control` is where the webhook hub, dispatcher, webhook spoke, and compute launcher should run.
 - Per-meeting RTMS compute jobs run as ECS/Fargate `RunTask` tasks from `rtms_worker_image`.
@@ -174,8 +174,10 @@ cd deploy/aws/terraform
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-Edit `terraform.tfvars` with image URIs, `public_url`, and optional
-`certificate_arn`/Route53 values.
+Edit `terraform.tfvars` with image URIs and non-secret settings. For the
+current supported public path, leave `public_url`, `custom_domain_name`,
+`route53_zone_id`, and `certificate_arn` empty; Terraform will use the native
+CloudFront HTTPS hostname after apply.
 
 For a new mock environment, use a separate Terraform state directory or a
 separate remote-backend state key. Set at least these values so it cannot share
@@ -243,16 +245,23 @@ contain the secret values.
 
 ## HTTPS and FQDN
 
-The ALB output `alb_dns_name` is a native AWS FQDN. For production Zoom webhooks,
-use a custom domain plus an ACM certificate:
+The supported viewer endpoint is the CloudFront native hostname returned by
+`cloudfront_domain_name`. CloudFront uses its AWS-managed default certificate,
+redirects HTTP to HTTPS, and applies the Zoom App security response headers.
+Use that hostname for the Zoom App Home URL, OAuth redirect URL, webhook URL,
+and browser WebSocket URL.
 
-- Set `public_url = "https://arlo.example.com"`.
-- Set `custom_domain_name = "arlo.example.com"`.
-- Set `route53_zone_id` if Route53 should create the alias record.
-- Set `certificate_arn` to a certificate in the same region as the ALB.
+The current template does not yet implement a working custom domain on
+CloudFront. `custom_domain_name` creates a Route 53 alias directly to the ALB;
+it does not create a CloudFront alias or viewer certificate. The ALB listener
+also requires the CloudFront origin header, so that direct alias is not a
+working public endpoint as currently written. A custom production domain needs
+additional Terraform for a CloudFront alias and an ACM certificate in
+`us-east-1`. Do not set `public_url` to a custom domain until that work is
+complete.
 
-Without `certificate_arn`, Terraform creates an HTTP listener only. That is for
-bootstrap testing, not production Zoom webhook delivery.
+`certificate_arn` is a regional ALB certificate input, not a CloudFront viewer
+certificate. Setting it alone does not add a custom CloudFront hostname.
 
 ## Outputs and Teardown
 

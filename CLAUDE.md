@@ -13,11 +13,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ### Docker Setup (Recommended)
 
 ```bash
-docker-compose up --build              # Start all services (Postgres, Backend, Frontend, RTMS)
-docker-compose up --build -V           # Rebuild with fresh node_modules (use after adding/removing npm deps)
-docker-compose logs -f backend         # View backend logs
-docker-compose restart backend         # Restart specific service
-docker-compose down -v && docker-compose up --build  # Clean restart (deletes DB data)
+docker compose up --build              # Start all services (MySQL, Backend, Frontend, RTMS)
+docker compose up --build -V           # Rebuild with fresh node_modules (use after adding/removing npm deps)
+docker compose logs -f backend         # View backend logs
+docker compose restart backend         # Restart specific service
+docker compose down -v && docker compose up --build  # Clean restart (deletes DB data)
 ```
 
 ### Manual Development
@@ -33,14 +33,15 @@ npm run setup            # Install all workspace dependencies
 ### Database (Prisma)
 
 ```bash
-npm run db:migrate       # Run migrations (from root)
 npm run db:generate      # Generate Prisma client after schema changes
 npm run db:studio        # Open Prisma Studio GUI at localhost:5555
-npm run db:reset         # Reset database (WARNING: deletes all data)
+
+# The repository currently uses Prisma db push; no migration history is checked in.
+cd backend && npx prisma db push
 
 # Or from backend directory:
 cd backend
-npx prisma migrate dev --name description_of_change   # Create new migration
+npx prisma db push                                      # Apply the current schema
 ```
 
 ### Frontend Build
@@ -70,7 +71,7 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
    - Zoom OAuth 2.0 (PKCE flow), session management with httpOnly cookies
    - REST API for meetings, transcripts, search, AI, highlights
    - WebSocket server for live transcript broadcast
-   - AI orchestration via OpenRouter (free models, no API key required)
+   - AI orchestration via OpenRouter's allowlisted free models; an API key is optional but recommended for rate limits
 
 3. **RTMS Service** (`rtms/`) — @zoom/rtms v1.0.2
    - Webhook handlers for `meeting.rtms_started` / `meeting.rtms_stopped`
@@ -81,8 +82,8 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
 ### Data Flow
 
 ```
-Zoom RTMS WebSocket → RTMS Service → Backend (normalize, buffer, batch insert to Postgres)
-    → WebSocket broadcast → Frontend (live transcript display, < 1s end-to-end)
+Zoom RTMS WebSocket → RTMS Service → Backend (normalize, buffer, batch insert to MySQL)
+    → WebSocket fanout → Frontend (near-real-time transcript display)
 ```
 
 ### Authentication Flow (Zoom OAuth PKCE)
@@ -95,7 +96,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 3. Frontend: zoomSdk.authorize({ codeChallenge, state })
 4. Zoom fires onAuthorized → { code } (NOTE: SDK does NOT return state — use closure from step 1)
 5. Frontend: POST /api/auth/callback { code, state } (credentials: 'include')
-6. Backend: Exchanges code for tokens, stores AES-128-CBC encrypted in Postgres, creates session cookie
+6. Backend: Exchanges code for tokens, stores AES-128-CBC encrypted in MySQL, creates session cookie
 7. Frontend: login(user, wsToken) → navigate to /home
 ```
 
@@ -128,8 +129,8 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - Key models: User, Meeting, Speaker, TranscriptSegment, Highlight, VttFile, UserToken, ParticipantEvent
 - `Speaker` has `@@unique([meetingId, zoomParticipantId])` compound constraint
 - `TranscriptSegment.seqNo` is UNIQUE per meeting (idempotency)
-- Full-text search uses Postgres GIN index on `text` column
-- All queries filtered by `ownerId` (row-level data isolation)
+- Transcript search uses MySQL-compatible `LIKE` queries; it is not PostgreSQL full-text search.
+- Meeting data queries are filtered by `ownerId` where the route requires an Arlo user.
 - Highlight/AiCitation timestamp fields use `BigInt` (epoch milliseconds)
 
 ### Monorepo (npm workspaces)
@@ -144,7 +145,7 @@ npm install <package> -w rtms         # Add to rtms
 
 ### Docker Startup Behavior
 
-Docker Compose runs `npx prisma db push --skip-generate` (not migrations) on backend startup to sync the schema. This means schema changes via `schema.prisma` are applied automatically when rebuilding containers — no migration files needed for development. Use `docker-compose up --build -V` when npm dependencies change (recreates volumes).
+Docker Compose runs `npx prisma generate && npx prisma db push` on backend startup to sync the MySQL schema. No migration files are checked in. Use `docker compose up --build -V` when npm dependencies change (recreates volumes).
 
 ## Frontend UI (Base UI)
 
@@ -194,12 +195,15 @@ Tabs (MeetingDetailView, InMeetingView), ScrollArea (MeetingDetailView, InMeetin
 - `GET /api/meetings/:id/vtt` — Download WebVTT file
 - `PATCH /api/meetings/:id` — Rename meeting
 - `DELETE /api/meetings/:id` — Delete meeting
-- `POST /api/meetings/:id/generate-title` — AI-generate title from transcript/summary
+- `POST /api/ai/generate-title` — AI-generate title from transcript/summary
 
 ### AI & Search
-- `GET /api/search` — Full-text search (params: q, meeting_id, from, to)
-- `POST /api/ai/chat` — Chat with transcripts (SSE stream)
+- `GET /api/search` — Transcript search using MySQL `LIKE` (params: q, meeting_id, from, to)
+- `POST /api/ai/chat` — Chat with transcripts (JSON response; not SSE)
 - `POST /api/ai/suggest` — In-meeting AI suggestions
+- `GET /api/ai/status` — AI configuration and availability status
+- `POST /api/ai/summary-live` — Generate a summary from the live transcript
+- `POST /api/ai/key-moment` — Analyze a live transcript window for a key moment
 
 ### Home Dashboard
 - `GET /api/home/highlights` — This week's meeting highlights (uses `optionalAuth`)
@@ -210,7 +214,7 @@ Tabs (MeetingDetailView, InMeetingView), ScrollArea (MeetingDetailView, InMeetin
 - `GET /api/meetings/:id/export/markdown` — Export meeting as Markdown
 
 ### Highlights
-- Routes in `backend/src/routes/highlights.js`
+- Routes are mounted at `/api/highlights` in `backend/src/routes/highlights.js`.
 
 ### Preferences
 - `GET /api/preferences` — Get user preferences
@@ -224,11 +228,15 @@ Tabs (MeetingDetailView, InMeetingView), ScrollArea (MeetingDetailView, InMeetin
 ## WebSocket Protocol
 
 ```
-Connection: ws://host/ws?meeting_id={uuid}&token={jwt}
-Client → Server: { type: 'subscribe', meetingId: 'uuid' }
-Server → Client: { type: 'transcript.segment', data: { meetingId, segment: {...} } }
-Server → Client: { type: 'ai.suggestion', data: { meetingId, suggestion: {...} } }
-Server → Client: { type: 'meeting.status', data: { meetingId, status: '...' } }
+Connection: wss://host/ws?meeting_uuid={meetingUuid}&session_id={rtmsSessionId}&meetingid={numericMeetingId}&token={jwt}
+Client → Server: { type: 'subscribe', meetingUuid: 'uuid', sessionId: 'rtms-session-id' }
+Server → Client: { type: 'transcript.segment', meetingUuid: 'uuid', sessionId: 'rtms-session-id', data: {...} }
+Server → Client: { type: 'ai.suggestion', meetingUuid: 'uuid', sessionId: 'rtms-session-id', data: {...} }
+Server → Client: { type: 'meeting.status', meetingUuid: 'uuid', sessionId: 'rtms-session-id', data: {...} }
+
+Production WebSocket connections require the short-lived signed `wsToken`
+returned by the authenticated meeting flow. Do not use `meeting_uuid` or
+`session_id` as authorization by themselves.
 ```
 
 ## Environment Variables
@@ -268,7 +276,7 @@ FALLBACK_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:fre
 1. Start ngrok: `ngrok http 3000 --domain=your-domain.ngrok-free.app`
 2. Update `PUBLIC_URL` in `.env`
 3. Update Home URL and OAuth Redirect URL in Zoom Marketplace
-4. `docker-compose restart backend`
+4. `docker compose restart backend`
 5. In Zoom: Apps → Find your app → Open
 6. Right-click app → Inspect Element (DevTools)
 
@@ -286,7 +294,7 @@ FALLBACK_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:fre
 
 ## Security
 
-- Access tokens stored **encrypted** (AES-128-CBC, 16-byte key from `REDIS_ENCRYPTION_KEY`) in Postgres, auto-refresh before expiry
+- Access tokens stored **encrypted** (AES-128-CBC, 16-byte key derived from `REDIS_ENCRYPTION_KEY`) in MySQL, auto-refresh before expiry
 - httpOnly session cookies, never expose tokens to frontend
 - All API calls from frontend use `fetch` with `credentials: 'include'`
 - HTTP headers required by Zoom Apps: `Strict-Transport-Security`, `X-Content-Type-Options`, `Content-Security-Policy`, `Referrer-Policy`
@@ -306,8 +314,8 @@ FALLBACK_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:fre
 
 ## Known Issues
 
-- No automated tests exist yet (manual testing only)
+- `npm test` runs the repository smoke test; broader integration coverage is still limited
 - Frontend uses CRA (react-scripts), NOT Next.js
 - If RTMS stream starts before the app is opened in a meeting, the "Start" chat notice is never sent. The disclaimer/notice should be sent when the app opens and detects RTMS is already active.
-- Guest transcript access is permissive — anyone with a Zoom meeting ID can read transcripts via WebSocket or REST. See ROADMAP.md for planned mitigation.
-- HomeView weekly digest, action items, and recurring topics sections use hardcoded mock data (API endpoints planned)
+- Guest-mode screens exist, but live production WebSocket access requires authentication and public links are disabled by default.
+- Some HomeView weekly digest, action-item, and recurring-topic sections remain demo-oriented; see `ROADMAP.md`.

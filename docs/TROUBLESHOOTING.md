@@ -1,447 +1,303 @@
 # Troubleshooting Guide
 
-Common issues and solutions when running Arlo Meeting Assistant.
+This guide covers the local Docker Compose path. For AWS, use the same
+application checks plus ECS task/service events, ALB target health, CloudFront
+behavior configuration, DynamoDB control records, and Valkey connectivity.
 
----
-
-## Quick Fixes
-
-Most issues can be resolved with these commands:
+## Quick Checks
 
 ```bash
-# Restart services
-docker-compose restart backend
-
-# Clean restart (keeps data)
-docker-compose down && docker-compose up --build
-
-# Full reset (deletes database!)
-docker-compose down -v && docker-compose up --build
-```
-
----
-
-## App Not Loading in Zoom
-
-### Issue: Blank screen or app won't load
-
-**Solutions:**
-
-1. **Verify backend is running:**
-   ```bash
-   curl http://localhost:3000/health
-   # Should return: {"status":"ok",...}
-   ```
-
-2. **Check ngrok is running:**
-   ```bash
-   curl https://your-ngrok-url.ngrok-free.app/health
-   ```
-
-3. **Verify Home URL in Zoom Marketplace:**
-   - Go to Zoom Marketplace → Your App → Features → Surface
-   - Home URL should be: `https://YOUR-NGROK-URL` (no path, just the base URL)
-
-4. **Check browser console for errors:**
-   - In Zoom, right-click on the app → Inspect Element
-   - Look for red errors in Console tab
-
-5. **Restart services:**
-   ```bash
-   docker-compose restart backend frontend
-   ```
-
-### Issue: "403 Forbidden" or CORS errors
-
-**Cause:** Domain not in allow list or CORS misconfigured.
-
-**Solutions:**
-
-1. **Add domain to Zoom Marketplace allow lists:**
-   - OAuth Allow List: `https://YOUR-NGROK-URL`
-   - Domain Allow List: `YOUR-NGROK-URL` (without https://)
-
-2. **Check PUBLIC_URL in .env matches your ngrok URL exactly**
-
-3. **Restart backend after .env changes:**
-   ```bash
-   docker-compose restart backend
-   ```
-
----
-
-## Authentication Issues
-
-### Issue: "Connect with Zoom" button doesn't work
-
-**Solutions:**
-
-1. **Check OAuth Redirect URL in Zoom Marketplace:**
-   - Must be exactly: `https://YOUR-NGROK-URL/api/auth/callback`
-
-2. **Verify client credentials in .env:**
-   ```bash
-   # Check these are set correctly
-   ZOOM_CLIENT_ID=your_actual_client_id
-   ZOOM_CLIENT_SECRET=your_actual_client_secret
-   ```
-
-3. **Check backend logs for OAuth errors:**
-   ```bash
-   docker-compose logs backend | grep -i "oauth\|auth"
-   ```
-
-### Issue: "Invalid state" or "CSRF" error
-
-**Cause:** OAuth state mismatch, usually from stale session.
-
-**Solutions:**
-
-1. **Clear browser/Zoom app cache:**
-   - Close and reopen the Zoom app
-   - Or restart Zoom client entirely
-
-2. **Restart backend to clear PKCE store:**
-   ```bash
-   docker-compose restart backend
-   ```
-
-### Issue: Logged in but redirected back to auth screen
-
-**Cause:** Session cookie not being set or sent.
-
-**Solutions:**
-
-1. **Check cookie settings in .env:**
-   ```bash
-   # For development
-   NODE_ENV=development
-   ```
-
-2. **Verify PUBLIC_URL matches where you're accessing the app**
-
----
-
-## WebSocket / Live Transcript Issues
-
-### Issue: "Connecting to server..." never resolves
-
-**Solutions:**
-
-1. **Check WebSocket endpoint is accessible:**
-   ```bash
-   # Backend should log WebSocket connections
-   docker-compose logs backend | grep -i "websocket\|ws"
-   ```
-
-2. **Verify you're authenticated:**
-   - WebSocket requires valid session
-   - Try logging out and back in
-
-3. **Check for proxy issues:**
-   - ngrok should support WebSocket by default
-   - If using custom proxy, ensure WS upgrade is allowed
-
-### Issue: Transcripts not appearing during meeting
-
-**Causes:**
-- RTMS not started
-- RTMS access not approved
-- WebSocket not connected
-
-**Solutions:**
-
-1. **Verify RTMS is started:**
-   - Check for "Start Arlo" button in the app
-   - Look for RTMS status indicator
-
-2. **Check RTMS service logs:**
-   ```bash
-   docker-compose logs rtms
-   ```
-
-3. **Verify RTMS webhooks are configured:**
-   - Event endpoint: `https://YOUR-NGROK-URL/api/rtms/webhook`
-   - Events: `meeting.rtms_started`, `meeting.rtms_stopped`
-
-4. **Confirm RTMS access is approved:**
-   - RTMS requires approval from Zoom
-   - Check your Zoom Marketplace app status
-
----
-
-## Database / Prisma Issues
-
-### Issue: "Cannot find module '.prisma/client'"
-
-**Cause:** Prisma client not generated for the correct platform.
-
-**Solution:**
-```bash
-docker-compose exec backend npx prisma generate
-docker-compose restart backend
-```
-
-### Issue: "Can't reach database server"
-
-**Cause:** MySQL not ready or connection string wrong.
-
-**Solutions:**
-
-1. **Wait for MySQL to be healthy:**
-   ```bash
-   docker-compose ps
-   # mysql should show "healthy"
-   ```
-
-2. **Check DATABASE_URL in .env:**
-   ```bash
-   # For Docker
-   DATABASE_URL=mysql://arlo:arlo@mysql:3306/meeting_assistant
-   ```
-
-3. **Restart services:**
-   ```bash
-   docker-compose restart mysql backend
-   ```
-
-### Issue: "Table does not exist"
-
-**Cause:** Database schema not applied.
-
-**Solution:**
-```bash
-docker-compose exec backend npx prisma db push
-```
-
-### Issue: Schema changes not reflected
-
-**Solution:**
-```bash
-docker-compose exec backend npx prisma generate
-docker-compose exec backend npx prisma db push
-docker-compose restart backend
-```
-
----
-
-## Docker Issues
-
-### Issue: Port already in use
-
-**Error:** `Error: listen EADDRINUSE: address already in use :::3000`
-
-**Solutions:**
-
-1. **Find and kill process using port:**
-   ```bash
-   lsof -ti:3000 | xargs kill -9
-   ```
-
-2. **Or change port in .env:**
-   ```bash
-   PORT=3001
-   ```
-
-### Issue: Container won't start
-
-**Solutions:**
-
-1. **Check container logs:**
-   ```bash
-   docker-compose logs backend
-   docker-compose logs frontend
-   docker-compose logs rtms
-   ```
-
-2. **Rebuild containers:**
-   ```bash
-   docker-compose down
-   docker-compose up --build
-   ```
-
-3. **Full reset (removes volumes):**
-   ```bash
-   docker-compose down -v
-   docker-compose up --build
-   ```
-
-### Issue: Changes not reflecting
-
-**Solutions:**
-
-1. **Frontend changes:** Hot reload should work. If not:
-   ```bash
-   docker-compose restart frontend
-   ```
-
-2. **Backend changes:** Nodemon should auto-restart. If not:
-   ```bash
-   docker-compose restart backend
-   ```
-
-3. **Package.json changes:** Requires rebuild:
-   ```bash
-   docker-compose up --build -V
-   ```
-
----
-
-## ngrok Issues
-
-### Issue: App stops working after restarting ngrok
-
-**Cause:** Random ngrok URLs change each restart.
-
-**Solutions:**
-
-1. **Use a static ngrok domain (recommended):**
-   - Get free static domain at [ngrok dashboard](https://dashboard.ngrok.com/domains)
-   - Start with: `ngrok http 3000 --domain=your-static-domain.ngrok-free.app`
-
-2. **If using random domain, update everything:**
-   - Update `PUBLIC_URL` in `.env`
-   - Update URLs in Zoom Marketplace (OAuth, Home URL, Webhooks)
-   - Restart backend: `docker-compose restart backend`
-
-### Issue: ngrok tunnel expired
-
-**Cause:** Free ngrok tunnels expire after 2 hours of inactivity.
-
-**Solution:**
-- Restart ngrok: `ngrok http 3000`
-- Update URLs if using random domain
-
----
-
-## Zoom SDK Issues
-
-### Issue: "zoomSdk is not defined"
-
-**Cause:** SDK only works inside Zoom client.
-
-**Solutions:**
-
-1. **Verify app is running in Zoom:**
-   - SDK won't work in regular browser
-   - Must be opened via Apps menu in Zoom meeting
-
-2. **Check SDK script is loaded:**
-   - View page source in Zoom app
-   - Look for: `<script src="https://appssdk.zoom.us/sdk.min.js"></script>`
-
-### Issue: "API not supported" errors
-
-**Cause:** SDK capability not enabled in Zoom Marketplace.
-
-**Solutions:**
-
-1. **Check console for which API failed:**
-   ```
-   ❌ getMeetingParticipants failed: API not supported
-   ```
-
-2. **Enable the API in Zoom Marketplace:**
-   - Go to Your App → Features → Zoom App SDK
-   - Click "Add APIs"
-   - Enable the missing API
-   - Save and reinstall app
-
-**Common APIs to enable:**
-- `getMeetingContext`
-- `getMeetingUUID`
-- `getUserContext`
-- `authorize` / `onAuthorized`
-- `callZoomApi` (for RTMS)
-
----
-
-## AI Features Not Working
-
-### Issue: Summaries/suggestions fail
-
-**Cause:** Usually rate limiting or network issues.
-
-**Solutions:**
-
-1. **Check if using free models (no API key needed):**
-   ```bash
-   # .env should have:
-   DEFAULT_MODEL=openai/gpt-oss-120b:free
-   FALLBACK_MODEL=google/gemma-4-31b-it:free
-   FALLBACK_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
-   ```
-
-2. **Check backend logs for AI errors:**
-   ```bash
-   docker-compose logs backend | grep -i "openrouter\|ai"
-   ```
-
-3. **Wait for rate limit reset:**
-   - Free tier: 10 requests/minute
-   - Add `OPENROUTER_API_KEY` for higher limits
-
----
-
-## Debugging Commands
-
-```bash
-# Health checks
+docker compose ps
 curl http://localhost:3000/health
-
-# View all logs
-docker-compose logs -f
-
-# View specific service
-docker-compose logs -f backend
-docker-compose logs -f frontend
-docker-compose logs -f rtms
-
-# Check running containers
-docker ps
-
-# Restart specific service
-docker-compose restart backend
-
-# Rebuild everything
-docker-compose down && docker-compose up --build
-
-# Check database
-docker-compose exec backend npx prisma studio
-
-# Check ports in use
-lsof -i :3000
-lsof -i :3001
-lsof -i :3002
+docker compose logs --tail=100 backend
+docker compose logs --tail=100 rtms
 ```
 
----
+Restart without deleting data:
 
-## Still Having Issues?
+```bash
+docker compose down
+docker compose up --build
+```
 
-1. **Enable debug logging:**
+Full reset, which deletes the local MySQL and Redis volumes:
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+## App Does Not Load
+
+1. Confirm `backend` is healthy at `http://localhost:3000/health`.
+2. Confirm `frontend` is running on host port 3001 and that the backend can
+   reach it through `FRONTEND_UPSTREAM_URL=http://frontend:3000`.
+3. If using Zoom, run `ngrok http 3000`; ngrok must point to the backend, not
+   directly to the frontend or RTMS port.
+4. Set `PUBLIC_URL` to the exact HTTPS ngrok/custom URL and restart the backend.
+5. Configure the Zoom Home URL as the base URL and configure the event endpoint
+   as `/api/rtms/webhook`.
+6. Inspect the Zoom WebView console and backend logs for the first failed
+   request. A frontend 503 usually means the backend proxy cannot reach the
+   frontend container.
+
+For CORS or 403 errors:
+
+- Put the exact public origin in `CORS_ORIGINS`.
+- Put the hostname without a scheme in the Zoom Domain Allow List.
+- Put the full HTTPS origin in the OAuth Allow List.
+- Restart the backend after changing `.env`.
+
+## OAuth and Authentication
+
+### OAuth callback or `invalid_grant`
+
+- The redirect URL must exactly match the Marketplace value:
+  `https://HOST/api/auth/callback`.
+- Confirm `ZOOM_CLIENT_ID` and `ZOOM_CLIENT_SECRET` belong to the same app.
+- Do not exchange a code twice; restart the app flow after a failed exchange.
+- Clear the Zoom App/WebView session and reauthorize if the PKCE state is stale.
+- Check backend logs without printing tokens:
+
+  ```bash
+  docker compose logs backend | grep -iE 'oauth|auth|pkce'
+  ```
+
+### `/api/auth/me` returns 401 after login
+
+- Confirm the response from OAuth contains a session cookie and `wsToken`.
+- The frontend must use `credentials: 'include'` for API requests.
+- Confirm `PUBLIC_URL`, `FRONTEND_URL`, and the browser origin are consistent.
+- Do not use an HTTP public URL for production; secure cookies and Zoom App
+  embedding require HTTPS.
+
+### WebSocket closes with authentication errors
+
+Production WebSockets require the signed `wsToken` returned by the auth flow.
+The browser should connect with a URL shaped like:
+
+```text
+wss://HOST/ws?meeting_uuid=<meeting UUID>&session_id=<RTMS session ID>&meetingid=<optional numeric meeting ID>&token=<signed token>
+```
+
+The current frontend does not need to send `app_user_id` or `zoom_user_id` in
+the URL. The signed token is authoritative. Local development may allow an
+anonymous socket, but production must not enable `ALLOW_ANONYMOUS_WS`.
+
+## WebSocket and Transcript Problems
+
+### The browser stays on "Connecting"
+
+1. Confirm the Zoom App has a meeting UUID from `getMeetingUUID()`.
+2. Confirm `getRTMSStatus()` returns an active session/stream ID. The frontend
+   intentionally waits for this before opening `/ws`.
+3. Confirm the URL does not contain `:3000` when the public endpoint is
+   CloudFront or ngrok. Use the public host and `/ws` path.
+4. For a reverse proxy, forward WebSocket upgrades. CloudFront must have a
+   `/ws*` behavior that allows WebSockets and points to the ALB origin.
+5. Confirm backend heartbeat logs and reconnect attempts:
+
    ```bash
-   # In .env
-   LOG_LEVEL=debug
+   docker compose logs backend | grep -iE 'websocket|ws|heartbeat|reconnect'
    ```
 
-2. **Check all prerequisites:**
-   - Docker running
-   - ngrok running with correct URL
-   - All environment variables set
-   - RTMS access approved by Zoom
+The browser sends an application ping every 25 seconds. The backend sends
+protocol pings every 30 seconds and closes stale connections after missed
+heartbeats. Reconnects use exponential backoff.
 
-3. **Fresh start:**
-   ```bash
-   docker-compose down -v
-   docker-compose up --build
-   ```
+### RTMS is active but no transcript appears
 
-4. **Check documentation:**
-   - [README.md](../README.md) — Quick start guide
-   - [ARCHITECTURE.md](./ARCHITECTURE.md) — System architecture
+- Confirm Zoom delivered `meeting.rtms_started` to
+  `https://HOST/api/rtms/webhook`.
+- Confirm `ZOOM_WEBHOOK_SECRET_TOKEN` is set and the request signature is
+  accepted.
+- Confirm RTMS credentials are configured. The service uses
+  `ZM_RTMS_CLIENT`/`ZM_RTMS_SECRET`, falling back to
+  `ZOOM_CLIENT_ID`/`ZOOM_CLIENT_SECRET`.
+- Confirm the RTMS client joined using the `meeting_uuid`, `rtms_stream_id`,
+  and `server_urls` from the webhook.
+- Check both services:
 
-5. **Get help:**
-   - [GitHub Issues](https://github.com/zoom/arlo/issues)
-   - [GitHub Discussions](https://github.com/zoom/arlo/discussions)
-   - [Zoom Developer Forum](https://devforum.zoom.us/)
+  ```bash
+  docker compose logs --tail=200 backend
+  docker compose logs --tail=200 rtms
+  ```
+
+- Confirm `INTERNAL_WEBHOOK_SECRET` matches between backend and RTMS when the
+  environment is not development.
+- Confirm the WebSocket uses the same meeting UUID and RTMS session/stream ID
+  that the RTMS service publishes.
+
+### Transcripts arrive, but the UI reconnects repeatedly
+
+This usually means the socket is reaching the backend but the public proxy is
+not preserving WebSocket upgrades, or the browser is using a stale meeting or
+session ID. Inspect the actual URL, proxy behavior, and the `subscribed` event.
+Valkey replay can make transcripts appear after a socket reconnect; that does
+not mean the failed socket was healthy.
+
+## Database and Prisma
+
+### MySQL connection refused
+
+The Compose service is named `mysql`, not `db`:
+
+```bash
+docker compose ps mysql
+docker compose logs mysql
+docker compose exec mysql mysqladmin ping -h localhost -u arlo -parlo
+```
+
+The local URL is:
+
+```text
+mysql://arlo:arlo@mysql:3306/meeting_assistant
+```
+
+For a remote MySQL database, use its private hostname and verify VPC/peering,
+security groups, DNS, and port 3306 from every task that must connect.
+
+### Prisma client or table errors
+
+The Compose backend generates the client and runs `db push` at startup. Retry
+manually when diagnosing a failed startup:
+
+```bash
+docker compose exec backend npx prisma generate
+docker compose exec backend npx prisma db push
+docker compose restart backend
+```
+
+Do not run `db push` blindly against production. The repository does not yet
+contain a checked-in Prisma migrations directory; see
+[`MYSQL_MIGRATION.md`](./MYSQL_MIGRATION.md).
+
+## RTMS Worker and AWS Control Plane
+
+### An AWS worker is not launched
+
+- Check that `rtms-control` has `ECS_CLUSTER_ARN`,
+  `RTMS_WORKER_TASK_DEFINITION_ARN`, worker subnet IDs, and worker security
+  groups.
+- Check that its task role can call ECS `RunTask` and `StopTask` and pass the
+  worker task role.
+- Check DynamoDB for the `MEETING#...` / `STREAM#...` control record and its
+  launch status.
+- Check ECS service events and the task definition image URI.
+- Confirm the worker subnets have outbound access to Zoom and ECR. Workers do
+  not need public IPs when NAT/VPC endpoints are configured.
+- Check that the worker image is built for `linux/amd64`, as required by the
+  current RTMS native dependency.
+
+### Worker starts slowly
+
+ECS/Fargate task provisioning and image pull are on the RTMS start path. Use an
+immutable image already pushed to same-region ECR, keep the image small, and
+maintain a warm service/task strategy if the 60-second startup requirement is
+strict. Terraform does not build or push the ECR image.
+
+### Worker stopped but realtime data remains
+
+The normal stop path deletes the Valkey session, event list, and aliases, and
+deletes the DynamoDB control record. TTLs are a safety net, not the primary
+cleanup mechanism. Check the exact meeting UUID and RTMS stream ID, then inspect
+the control-plane/backend logs. MySQL meeting history is intentionally retained.
+
+## AI Features
+
+### Summary or key moment returns 4xx/5xx
+
+- Check `GET /api/ai/status` and confirm `AI_ENABLED=true`.
+- Summary-live rejects transcript text shorter than 50 characters.
+- Key-moment rejects text shorter than 10 characters.
+- The backend tries only the free allowlist:
+  `openai/gpt-oss-120b:free`, `google/gemma-4-31b-it:free`, and
+  `nvidia/nemotron-3-ultra-550b-a55b:free`.
+- Key-moment retries the configured model chain and returns 502 only after all
+  models fail or return invalid structured output.
+- Summary generation returns an extractive fallback when model calls fail.
+- The backend rate limits most AI routes to 20 requests/minute and key-moment
+  to 120 requests/minute per backend instance. OpenRouter's own limits vary;
+  an API key can improve provider limits but does not remove Arlo's limits.
+
+Check logs without exposing the API key:
+
+```bash
+docker compose logs backend | grep -iE 'openrouter|ai|summary|key moment'
+```
+
+The frontend key-moment job runs every 30 seconds after a 3-second initial
+delay, processes a rolling window, and may correctly produce no result for
+ordinary speech.
+
+## Demo Data and Vertical Panels
+
+If cards show placeholder decisions, questions, participants, or sales data,
+disable the Settings demo-data toggle. Several vertical components are
+intentionally visualization scaffolds and do not automatically populate from
+the transcript. General summary and key moments, support sentiment, and
+healthcare SOAP notes are the primary AI-connected examples.
+
+## Docker and Port Conflicts
+
+```bash
+docker compose logs backend frontend rtms
+docker compose up --build
+```
+
+Host ports are mapped as follows:
+
+- backend: 3000
+- frontend: 3001
+- RTMS: 3002
+- MySQL: 3306
+- optional Redis: 6379
+
+Changing the backend `PORT` variable alone does not change the Compose host
+mapping. Change the Compose port mapping and the relevant frontend/ngrok URL if
+you need a different host port.
+
+## ngrok
+
+Use a static domain to avoid reconfiguring Zoom after each restart:
+
+```bash
+ngrok http 3000 --domain=your-static-domain.ngrok-free.app
+```
+
+If the URL changes, update `PUBLIC_URL`, OAuth redirect/allow-list values, Home
+URL, Domain Allow List, and the RTMS event endpoint. Restart the backend after
+changing `.env`.
+
+## SDK Capability Errors
+
+`HybridError`, `API not supported`, or `require_meeting_role` generally means
+the capability is unavailable in the current Zoom context, the app was not
+reinstalled after Marketplace changes, or the caller lacks the required meeting
+role. Compare the enabled capabilities with
+`frontend/src/contexts/ZoomSdkContext.js`, especially the RTMS status and
+meeting-context APIs. A participant may not be allowed to call every meeting
+context/API operation even when the capability is listed.
+
+After changing Marketplace capabilities:
+
+1. Save the app configuration.
+2. Reinstall or reauthorize the app in the Zoom client.
+3. Close and reopen the Zoom App WebView.
+4. Capture the exact SDK error code and running context.
+
+## Still Blocked
+
+Collect:
+
+```bash
+docker compose ps
+docker compose logs --tail=200 backend
+docker compose logs --tail=200 rtms
+curl -i http://localhost:3000/health
+```
+
+Do not include OAuth tokens, client secrets, webhook secrets, database
+passwords, or full signed WebSocket URLs in an issue. See the
+[`README.md`](../README.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md), and
+[`MYSQL_MIGRATION.md`](./MYSQL_MIGRATION.md) guides before opening a report.

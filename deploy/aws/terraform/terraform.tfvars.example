@@ -3,19 +3,19 @@ name_prefix = "arlo"
 environment = "prod"
 owner       = "arlo-assistant"
 
-# Use your custom domain for production. The ALB DNS name is a native AWS FQDN,
-# but Zoom production webhooks should use HTTPS with a certificate that matches
-# your domain.
-public_url         = "https://arlo.example.com"
-custom_domain_name = "arlo.example.com"
+# The current supported public endpoint is the native CloudFront HTTPS hostname
+# created by this stack. Leave these empty until CloudFront custom-domain
+# aliases and an ACM viewer certificate are added to the Terraform module.
+public_url         = ""
+custom_domain_name = ""
 route53_zone_id    = ""
 certificate_arn    = ""
 
-# Push these images to ECR first.
-backend_image      = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-backend:latest"
-frontend_image     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-frontend:latest"
-rtms_control_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms-control:latest"
-rtms_worker_image  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms-worker:latest"
+# Push these images to ECR first. Terraform does not build or push images.
+backend_image      = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-backend:REPLACE_WITH_GIT_TAG"
+frontend_image     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-frontend:REPLACE_WITH_GIT_TAG"
+rtms_control_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms-control:REPLACE_WITH_GIT_TAG"
+rtms_worker_image  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms-worker:REPLACE_WITH_GIT_TAG"
 
 ssm_parameter_prefix = "/arlo/prod"
 kms_alias_name       = "alias/arlo-prod"

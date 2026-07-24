@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Arlo is a developer reference implementation** demonstrating how to build real-time meeting intelligence using Zoom's RTMS (Real-Time Media Streams) APIs. It showcases what's possible when developers have access to live meeting data — sub-second transcription, real-time AI analysis, participant tracking, and more — all without requiring a meeting bot.
+**Arlo is a developer reference implementation** demonstrating how to build real-time meeting intelligence using Zoom's RTMS (Real-Time Media Streams) APIs. It showcases what's possible when developers have access to live meeting data — near-real-time transcription, real-time AI analysis, participant tracking, and more — all without requiring a meeting bot.
 
 This is **not a product** — it's a learning resource and starting point for developers building their own RTMS-powered applications. The industry verticals (Healthcare, Legal, Sales, Support) are illustrative examples showing how real-time capabilities can be tailored for specific domains.
 
@@ -14,7 +14,7 @@ This is **not a product** — it's a learning resource and starting point for de
 - **AI Orchestration**: Live summarization, suggestions, chat with transcripts
 - **Production Patterns**: Token encryption, rate limiting, ownership isolation
 
-This document defines the v1.0 implementation. Use it to understand the architecture, identify extension points, and guide your own build-out.
+This document defines the intended v1.0 implementation. Use [`docs/PROJECT_STATUS.md`](./docs/PROJECT_STATUS.md) and [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) for the current implementation and known gaps.
 
 ---
 
@@ -126,7 +126,7 @@ When the user is in an active meeting (determined by Zoom Apps SDK meeting conte
   7. Frontend calls `login(user, wsToken)` and navigates to `/home`.
 - **Session restoration:** On app load (or Zoom WebView reload), `AuthContext` calls `GET /api/auth/me` to restore the session from the httpOnly cookie. A loading spinner displays during this check to prevent an auth-screen flash.
 - **User info fallback:** If the `user:read` OAuth scope is not configured, the backend falls back to decoding the JWT access token payload to extract user ID and name.
-- **Token encryption:** Access tokens are stored AES-128-CBC encrypted in Postgres (the `REDIS_ENCRYPTION_KEY` env var provides a 16-byte hex key).
+- **Token encryption:** Access tokens are stored AES-128-CBC encrypted in MySQL (the `REDIS_ENCRYPTION_KEY` env var provides a 16-byte hex key).
 - On successful OAuth callback, redirect to `/home`.
 
 **Web OAuth redirect flow (browser/Marketplace install):**
@@ -174,7 +174,7 @@ When the user is in an active meeting (determined by Zoom Apps SDK meeting conte
   1. Mic icon (accent) + **"Live Transcript"** + "Follow along with a real-time transcript of the conversation. See who said what, with timestamps."
   2. Sparkles icon (accent) + **"AI Summary"** + "Key takeaways, decisions, and action items — generated as the meeting progresses."
   3. Bookmark icon (accent) + **"Highlights"** + "View moments the host has bookmarked as important."
-- **Comparison table** — Guest vs Full Access with Check/Minus icons showing read-only access for guests (Live transcript, AI summary, Highlights) and full access features for authorized users (Meeting history, Full-text search).
+- **Comparison table** — Guest vs Full Access with Check/Minus icons showing read-only access for guests (Live transcript, AI summary, Highlights) and full access features for authorized users (Meeting history, transcript search).
 - **Elevation CTA** — Two-button layout:
   - Primary: **"Sign in to Zoom"** (unauthenticated) or **"Add Arlo to Your Account"** (authenticated) → calls `zoomSdk.promptAuthorize()`.
   - Secondary: **"Continue as guest"** → navigates to `/guest/:meetingUUID` if in meeting.
@@ -191,7 +191,7 @@ When the user is in an active meeting (determined by Zoom Apps SDK meeting conte
 
 - **Compact header bar:** OwlIcon (20px) + "Arlo" branding (left), meeting title from `meetingContext.meetingTopic` or DB (center), Live/Ended badge (right). No navigation.
 
-- **Live transcript area** (~60% viewport): WebSocket-powered real-time transcript streaming via `connectWebSocket(null, meetingId)` (anonymous connection, no token required). Chronological timeline merging transcript segments and participant events (join/leave, transcription lifecycle). Speaker labels, timestamps, and text at full opacity. Auto-scroll with "Scroll to live" button. Uses Base UI `ScrollArea`.
+- **Live transcript area** (~60% viewport): WebSocket-powered real-time transcript streaming via the meeting-scoped connection flow. The proposed guest design requires a future meeting-scoped authorization mechanism; production sockets currently require a signed token. Chronological timeline merging transcript segments and participant events (join/leave, transcription lifecycle). Speaker labels, timestamps, and text at full opacity. Auto-scroll with "Scroll to live" button. Uses Base UI `ScrollArea`.
 
 - **Collapsible summary card:** Native `<details>/<summary>` element. Collapsed: Sparkles icon + "Meeting Summary" + rotating chevron. Expanded: Overview paragraph + Key Decisions list + Key Points list + Action Items list. Skeleton loading state while live. Auto-expanded when meeting ends. Data from `GET /api/meetings/by-zoom-id/:zoomMeetingId` (uses `optionalAuth`, works without auth).
 
@@ -206,7 +206,7 @@ When the user is in an active meeting (determined by Zoom Apps SDK meeting conte
 **Read-only enforcement:** No transport controls, no AI chat, no highlights/bookmarks, no title editing, no settings.
 
 **Data dependencies:**
-- WebSocket anonymous connection for live transcript segments, participant events, meeting status, and presence.
+- WebSocket connection for live transcript segments, participant events, meeting status, and presence; authorization is required in the current production backend.
 - `GET /api/meetings/by-zoom-id/:zoomMeetingId` for meeting title and cached summary (uses `optionalAuth`).
 - `GET /api/meetings/by-zoom-id/:zoomMeetingId/transcript` for historical segments on mount.
 - `GET /api/meetings/by-zoom-id/:zoomMeetingId/participant-events` for historical participant events.
@@ -291,7 +291,7 @@ When the user is in an active meeting (determined by Zoom Apps SDK meeting conte
 - Click title: Switch to edit mode — Input field (serif font, text-2xl, auto-focused, text selected), Check button, X button.
 - Enter key: Save via `PATCH /api/meetings/:id` with `{ title }`. Escape key: Cancel.
 - Save shows Loader2 spinner on check button during API call.
-- **AI title generation:** Sparkle icon button next to the title calls `POST /api/meetings/:id/generate-title` to generate a concise, descriptive title from the transcript/summary. Generated title pre-fills the inline editor for review before saving.
+- **AI title generation:** Sparkle icon button next to the title calls `POST /api/ai/generate-title` to generate a concise, descriptive title from the transcript/summary. Generated title pre-fills the inline editor for review before saving.
 
 **Delete Meeting:**
 - Trash2 icon button in the export row (destructive outline variant).
@@ -385,7 +385,7 @@ Before transcript data is flowing, the In-Meeting view replaces the tabbed conte
 - The user has requested access or is waiting for the host to start.
 - Render: *"Waiting for host to start transcription."* with a subtle loading indicator (spinner or pulsing dot).
 
-**Transition:** When transcript data begins flowing (detected via client state polling or WebSocket/SSE event), automatically transition from any pre-transcript state to the live transcript tab view.
+**Transition:** When transcript data begins flowing (detected via client state polling or a WebSocket event), automatically transition from any pre-transcript state to the live transcript tab view.
 
 **Note on auto-start:** The host may have configured auto-start transcription in their Zoom web settings (external to Arlo). In this case, transcript data may already be flowing when the app opens — skip pre-transcript states entirely and render the live transcript.
 
@@ -507,6 +507,6 @@ On app load:
 Key client-side state to track:
 - **Auth state:** Authenticated vs. guest vs. unauthenticated.
 - **Meeting context:** From Zoom Apps SDK — is a meeting active? What is the meeting UUID? Is the user the host?
-- **Transcript state:** Is transcript data currently flowing for this meeting? (Polled from server or pushed via WebSocket/SSE.)
+- **Transcript state:** Is transcript data currently flowing for this meeting? (Polled from server or pushed via WebSocket.)
 - **Theme preference:** Light or dark. Persisted in localStorage or equivalent.
 - **Active meeting flag:** Used to conditionally render the "Return to live transcript" banner across non-In-Meeting views.

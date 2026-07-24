@@ -36,9 +36,9 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 
 ### What You'll Build
 
-- Live transcription with < 1 second latency
+- Near-real-time transcription via RTMS
 - AI-powered summaries and action items
-- Full-text search across meetings
+- Transcript search across meetings
 - Industry-specific modes (Healthcare, Legal, Sales)
 
 </td>
@@ -55,7 +55,7 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 
 <!--
   DEMO VIDEO PLACEHOLDER
-  Replace with: [![Arlo Demo](./docs/assets/demo-thumbnail.png)](https://youtube.com/watch?v=YOUR_VIDEO_ID)
+  Replace this placeholder with a thumbnail link to the published demo video.
 -->
 
 | | |
@@ -72,16 +72,16 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 
 | Feature | Description |
 |---------|-------------|
-| **Live Transcription** | Real-time captions via RTMS (< 1 second latency) |
+| **Live Transcription** | Near-real-time captions via RTMS |
 | **AI Insights** | Summaries, action items, and next steps powered by OpenRouter |
-| **Full-Text Search** | Search across all your meeting transcripts instantly |
+| **Transcript Search** | Search across saved meeting transcripts |
 | **Chat with Transcripts** | Ask questions about your meetings using AI |
 | **Meeting Highlights** | Create bookmarks with timestamps for key moments |
 | **Export Options** | Download WebVTT files or Markdown summaries |
 | **Dark Mode** | Automatic OS detection with manual toggle |
 | **Industry Verticals** | Specialized modes: Arlo for Notes, Healthcare, Legal, Sales, and Support |
 
-> **AI features work out of the box** — no API key required! Arlo uses [OpenRouter](https://openrouter.ai/) with free models (Gemini, Llama). Optional: add your own `OPENROUTER_API_KEY` for higher rate limits.
+> **AI features use OpenRouter.** The application allowlist currently contains `openai/gpt-oss-120b:free`, `google/gemma-4-31b-it:free`, and `nvidia/nemotron-3-ultra-550b-a55b:free`. An `OPENROUTER_API_KEY` is optional for development, but free-provider rate limits can still cause failures without one.
 
 ---
 
@@ -179,15 +179,23 @@ In [Zoom Marketplace](https://marketplace.zoom.us/) → Your App:
 <summary><strong>Scopes</strong></summary>
 
 Add these OAuth scopes:
-- `meeting:read` — Read meeting details
-- `user:read` — Read user profile
+- `zoomapp:inmeeting` — Run inside a Zoom meeting
+- `meeting:read:meeting` — Read meeting details
+- `meeting:read:list_meetings` — List upcoming meetings
+- `meeting:read:meeting_transcript` — Meeting transcript access used by the RTMS workflow
+- `meeting:write:open_app` — Optional; register the app for upcoming-meeting auto-open
+- `user:read` — Optional; read the Zoom user profile
 
 </details>
 
 <details>
 <summary><strong>Features → Zoom App SDK</strong></summary>
 
-- Click **Add APIs** and enable required capabilities
+- Click **Add APIs** and enable the capabilities listed in
+  [`ZoomSdkContext.js`](./frontend/src/contexts/ZoomSdkContext.js), including
+  `getMeetingUUID`, `getMeetingContext`, `getUserContext`, `getRTMSStatus`,
+  `onRTMSStatusChange`, `startRTMS`, `stopRTMS`, and the notification/chat APIs.
+- Enable **In-Client OAuth** and **Guest Mode** if those surfaces are used.
 - **Enable RTMS → Transcripts** (requires RTMS approval)
 
 </details>
@@ -198,7 +206,7 @@ Add these OAuth scopes:
 | Setting | Value |
 |---------|-------|
 | Home URL | `https://YOUR-NGROK-URL` |
-| Domain Allow List | `https://YOUR-NGROK-URL` |
+| Domain Allow List | `YOUR-NGROK-HOST` and `appssdk.zoom.us` |
 
 </details>
 
@@ -219,7 +227,7 @@ Add these OAuth scopes:
 ### 5. Start the Application
 
 ```bash
-docker-compose up --build
+docker compose up --build
 ```
 
 Wait for all services to start:
@@ -258,7 +266,7 @@ Arlo includes first-cut deployment templates in [`deploy/`](./deploy/) for AWS a
 
 The AWS Terraform stack provisions:
 
-- CloudFront and an Application Load Balancer for HTTPS/FQDN access to the Zoom App, backend API, webhooks, and browser WebSocket endpoint.
+- CloudFront and an Application Load Balancer for HTTPS/FQDN access to the Zoom App, backend API, webhooks, and browser WebSocket endpoint. The current Terraform stack uses the native CloudFront hostname; its Route 53 option points directly at the ALB and is not a CloudFront custom-domain configuration.
 - ECS/Fargate services for the frontend, backend, and RTMS control plane.
 - One ECS/Fargate RTMS worker task per active RTMS stream. The worker connects to Zoom RTMS signaling/media and publishes realtime events to Valkey.
 - Amazon RDS MySQL for persisted meetings/transcripts, ElastiCache Serverless Valkey for realtime fanout/replay, DynamoDB for RTMS control state, and KMS/SSM Parameter Store for secrets. Container images are built and pushed to ECR separately; Terraform consumes their image URIs.
@@ -304,7 +312,7 @@ flowchart LR
 ### AWS Deployment Flow
 
 The complete guide, including ECR image publishing, mock-environment isolation,
-custom-domain/ACM configuration, and secret bootstrap, is in
+secret bootstrap, and the current custom-domain limitation, is in
 [`deploy/aws/terraform/README.md`](./deploy/aws/terraform/README.md).
 
 ```bash
@@ -434,18 +442,18 @@ Live sentiment meter, escalation alerts, resolution workflow tracking.
 
 **"Cannot find module '.prisma/client'"**
 ```bash
-docker-compose exec backend npx prisma generate
-docker-compose restart backend
+docker compose exec backend npx prisma generate
+docker compose restart backend
 ```
 
 **"Can't reach database server"**
 ```bash
-docker-compose restart mysql backend
+docker compose restart mysql backend
 ```
 
 **Tables don't exist**
 ```bash
-docker-compose exec backend npx prisma db push
+docker compose exec backend npx prisma db push
 ```
 
 </details>
@@ -457,10 +465,10 @@ If you're having persistent issues:
 
 ```bash
 # Stop everything and remove volumes
-docker-compose down -v
+docker compose down -v
 
 # Rebuild with fresh node_modules
-docker-compose up --build -V
+docker compose up --build -V
 ```
 
 </details>
@@ -474,7 +482,7 @@ If using a random domain:
 1. Copy the new ngrok URL
 2. Update `PUBLIC_URL` in `.env`
 3. Update all URLs in Zoom Marketplace settings
-4. Restart: `docker-compose restart backend`
+4. Restart: `docker compose restart backend`
 
 > **Pro tip:** Use a [static ngrok domain](https://dashboard.ngrok.com/domains) (free) to avoid this!
 
@@ -498,6 +506,7 @@ See the full [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for additional i
 | [Specification](./SPEC.md) | Feature spec and milestones |
 | [Troubleshooting](./docs/TROUBLESHOOTING.md) | Common issues and fixes |
 | [CLAUDE.md](./CLAUDE.md) | Quick reference for AI assistants |
+| [ROADMAP.md](./ROADMAP.md) | Completed work and future contribution areas |
 
 ---
 
@@ -518,10 +527,10 @@ arlo/
 ### Common Commands
 
 ```bash
-docker-compose up                    # Start all services
-docker-compose logs -f backend       # View backend logs
-docker-compose restart backend       # Restart a service
-docker-compose down -v               # Stop and remove volumes
+docker compose up                    # Start all services
+docker compose logs -f backend       # View backend logs
+docker compose restart backend       # Restart a service
+docker compose down -v               # Stop and remove volumes
 npm run db:studio                    # Open Prisma database GUI
 ```
 
@@ -580,9 +589,9 @@ This reference implementation is designed for **learning and prototyping**. For 
 |------|-------------|---------------------------|
 | **Credentials** | `.env` file | KMS-backed SSM Parameter Store, Secrets Manager, Vault, or cloud equivalent |
 | **Tokens** | MySQL + AES | Database encryption at rest plus stricter app-layer policy for sensitive fields |
-| **Sessions** | In-memory | Valkey/Redis or database-backed shared state |
+| **Sessions** | Signed cookie + MySQL-backed OAuth tokens; PKCE exchange state is in-memory | Shared PKCE/session state for multi-instance deployments |
 | **HTTPS** | ngrok tunnel | CloudFront, load balancer, or reverse proxy with TLS |
-| **WebSockets** | Single instance | Shared realtime bus and per-user fanout routing |
+| **WebSockets** | Single instance without `REDIS_URL`; Valkey-backed replay/fanout when configured | Shared realtime bus and per-user fanout routing |
 | **RTMS workers** | Single local process | Per-stream container workers with cleanup and TTLs |
 
 See [Known Limitations](#known-limitations) for additional considerations.
@@ -595,8 +604,8 @@ This is a reference implementation with intentional simplifications:
 
 | Pattern | Current | Production Recommendation |
 |---------|---------|---------------------------|
-| PKCE Storage | In-memory Map | Redis with TTL |
-| WebSocket Scaling | Single-instance | Redis pub/sub adapter |
+| PKCE Storage | In-memory Map | Shared store with TTL for multi-instance OAuth flows |
+| WebSocket Scaling | Valkey is optional; local mode is single-instance | Shared realtime bus and per-user fanout routing |
 | Retry Logic | Basic 401 retry | Exponential backoff |
 | Webhook Processing | Synchronous | Queue-based async |
 | Input Validation | Basic checks | Schema validation (Zod) |

@@ -4,7 +4,7 @@
 
 For the scalable RTMS direction, use `deploy/aws/terraform`. It deploys:
 
-- ALB with native AWS FQDN and optional custom domain
+- CloudFront with a native AWS HTTPS hostname and a public ALB origin
 - always-on ECS/Fargate `frontend`, `backend`, and `rtms-control`
 - DynamoDB On-Demand control store
 - KMS key plus SSM Parameter Store `SecureString` secret references
@@ -33,12 +33,24 @@ Notes:
 - `cloudformation.yml` is the one-click CloudFormation template.
 - This first cut assumes your container images already exist in ECR or ECR
   Public.
-- As of March 31, 2026, AWS App Runner is no longer open to new customers. This
-  path is for existing App Runner customers.
+- Treat this as a legacy scaffold and verify App Runner availability for the
+  target AWS account. Use Terraform for the current ECS/Fargate architecture.
 - The template deploys `frontend` and `rtms` as separate App Runner services and
   points the backend at their generated service URLs.
-- Private RTMS ingress, RDS VPC networking, and secret-manager wiring are a
-  follow-up pass.
+- Private RTMS ingress, per-stream worker orchestration, RDS VPC networking, and
+  KMS/SSM secret wiring are not implemented in this path.
+
+## Current Custom-Domain Limitation
+
+The current Terraform stack uses the CloudFront default hostname for the
+production viewer URL. `custom_domain_name` creates a Route 53 alias directly
+to the ALB; it does not configure a CloudFront alias or a CloudFront ACM
+certificate. Because the ALB listener accepts the CloudFront origin header,
+that direct alias is not a working public endpoint in the current template.
+Leave `custom_domain_name`, `route53_zone_id`, and `certificate_arn` empty unless
+you are deliberately testing the ALB path and have added the required Terraform
+changes. A production custom domain needs a CloudFront alias, an ACM
+certificate in `us-east-1`, and corresponding Terraform support.
 
 ## CLI
 

@@ -35,7 +35,7 @@ variable "public_url" {
 }
 
 variable "custom_domain_name" {
-  description = "Optional custom domain to create as a Route53 alias to the ALB."
+  description = "Experimental Route53 alias to the ALB; this does not configure a CloudFront custom domain and is not a supported public endpoint with the current origin-header listener rules."
   type        = string
   default     = ""
 }
@@ -47,7 +47,7 @@ variable "route53_zone_id" {
 }
 
 variable "certificate_arn" {
-  description = "Optional ACM certificate ARN for HTTPS on the ALB. Required for production Zoom webhooks."
+  description = "Optional regional ACM certificate ARN for the ALB listener. It does not configure a CloudFront viewer certificate or custom hostname."
   type        = string
   default     = ""
 }

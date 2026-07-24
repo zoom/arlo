@@ -56,18 +56,18 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 5. **Start services**:
    ```bash
-   docker-compose up --build
+   docker compose up --build
    ```
 
-6. **Run database migrations**:
+6. **Apply the development database schema**:
    ```bash
-   docker-compose exec backend npx prisma migrate dev
+   docker compose exec backend npx prisma db push
    ```
 
 7. **Verify setup**:
    - Backend: http://localhost:3000/health
    - Frontend: http://localhost:3001
-   - Database: `docker-compose exec backend npx prisma studio`
+   - Database: `docker compose exec backend npx prisma studio`
 
 ## Development Workflow
 
@@ -133,7 +133,7 @@ git rebase upstream/main
 - [ ] Update documentation if needed
 - [ ] Add comments to complex code sections
 - [ ] Check for console errors and warnings
-- [ ] Verify database migrations work correctly
+- [ ] Verify the Prisma schema applies cleanly with `prisma db push`
 - [ ] Test in both development and Docker environments
 
 ### Submitting a Pull Request
@@ -161,7 +161,7 @@ git rebase upstream/main
    ## Testing
    - [ ] Tested locally with Docker
    - [ ] Tested in Zoom App
-   - [ ] Database migrations verified
+   - [ ] Database schema verified
    - [ ] No console errors
 
    ## Screenshots
@@ -266,13 +266,14 @@ When testing your changes:
    - [ ] WebSocket broadcasts work
 
 4. **Database**:
-   - [ ] Migrations apply cleanly
+   - [ ] Prisma schema applies cleanly
    - [ ] Data persists correctly
    - [ ] Relationships work as expected
 
 ### Automated Tests (Coming Soon)
 
-We're working on adding automated tests. In the meantime:
+The repository includes a smoke test, but broader integration coverage is still
+limited. In the meantime:
 - Manually test all affected functionality
 - Check for console errors
 - Verify database queries work correctly
