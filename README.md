@@ -259,7 +259,6 @@ Arlo includes first-cut deployment templates in [`deploy/`](./deploy/) for AWS a
 | Target | Path | Format | Intended Use |
 |--------|------|--------|--------------|
 | **AWS** | [`deploy/aws/terraform`](./deploy/aws/terraform) | Terraform | Scalable ECS/Fargate deployment with per-RTMS-stream workers |
-| **AWS quick start** | [`deploy/aws/cloudformation.yml`](./deploy/aws/cloudformation.yml) | CloudFormation YAML | Simpler AWS bootstrap, less complete than Terraform |
 | **Self-hosted VM** | [`deploy/selfhost`](./deploy/selfhost) | Docker Compose + nginx | Ubuntu/Debian VM or Proxmox-style deployment |
 
 ### Recommended AWS Terraform Architecture
