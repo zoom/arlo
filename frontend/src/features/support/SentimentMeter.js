@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Activity, TrendingUp, TrendingDown, Minus, Sparkles } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { getPreferredAiModel } from '../../utils/aiModel';
 import './SentimentMeter.css';
 
 /**
@@ -19,6 +20,21 @@ const SENTIMENT_LEVELS = [
   { id: 'satisfied', label: 'Satisfied', emoji: '🙂', color: '#22c55e', position: 75 },
   { id: 'happy', label: 'Happy', emoji: '😊', color: '#10b981', position: 100 },
 ];
+const SENTIMENT_ANALYSIS_INTERVAL_MS = 30000;
+const SENTIMENT_INITIAL_DELAY_MS = 5000;
+const SENTIMENT_WINDOW_SEGMENTS = 8;
+const SENTIMENT_MIN_CHARS = 20;
+
+// Format timestamp from milliseconds
+function formatTime(ms) {
+  const date = new Date(ms);
+  if (isNaN(date.getTime()) || ms === 0) return '';
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
 
 // Analyze sentiment using AI
 async function analyzeSentimentAI(text) {
@@ -27,7 +43,7 @@ async function analyzeSentimentAI(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, model: getPreferredAiModel() }),
     });
 
     if (!response.ok) {
@@ -48,43 +64,48 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
   const [history, setHistory] = useState([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
-  const lastProcessedSeqNo = useRef(-1);
+  const latestSegmentsRef = useRef([]);
+  const lastAnalyzedSeqNo = useRef(-1);
   const currentSentimentRef = useRef('neutral');
-  const analysisQueue = useRef([]);
-  const isProcessingQueue = useRef(false);
+  const inFlightRef = useRef(false);
 
   // Keep ref in sync with state
   useEffect(() => {
     currentSentimentRef.current = currentSentiment;
   }, [currentSentiment]);
 
-  // Format timestamp from milliseconds
-  const formatTime = (ms) => {
-    const date = new Date(ms);
-    if (isNaN(date.getTime()) || ms === 0) return '';
-    return date.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-  };
+  useEffect(() => {
+    latestSegmentsRef.current = segments || [];
+  }, [segments]);
 
-  // Process queued segments with AI (debounced)
-  const processQueue = useCallback(async () => {
-    if (isProcessingQueue.current || analysisQueue.current.length === 0) return;
+  const analyzeRecentWindow = useCallback(async () => {
+    const currentSegments = latestSegmentsRef.current;
+    if (inFlightRef.current || !currentSegments || currentSegments.length === 0) return;
 
-    isProcessingQueue.current = true;
+    const orderedSegments = [...currentSegments]
+      .filter(segment => segment?.text && Number.isFinite(Number(segment.seqNo)))
+      .sort((left, right) => Number(left.seqNo) - Number(right.seqNo));
+    if (orderedSegments.length === 0) return;
+
+    const latestSeqNo = Number(orderedSegments[orderedSegments.length - 1].seqNo);
+    if (latestSeqNo <= lastAnalyzedSeqNo.current) return;
+
+    const windowSegments = orderedSegments.slice(-SENTIMENT_WINDOW_SEGMENTS);
+    const text = windowSegments
+      .map(segment => segment.text)
+      .join('\n')
+      .trim();
+    if (text.length < SENTIMENT_MIN_CHARS) return;
+
+    inFlightRef.current = true;
     setIsAnalyzing(true);
 
-    // Get the most recent segment to analyze
-    const segment = analysisQueue.current.pop();
-    analysisQueue.current = []; // Clear queue, we'll analyze the latest
-
-    if (segment && segment.text) {
-      const result = await analyzeSentimentAI(segment.text);
+    try {
+      const result = await analyzeSentimentAI(text);
+      lastAnalyzedSeqNo.current = latestSeqNo;
 
       if (result && result.sentiment) {
-        // Handle timestamp
+        const segment = windowSegments[windowSegments.length - 1];
         const ts = segment.tStartMs || segment.timestamp;
         const timestamp = formatTime(typeof ts === 'number' ? ts : Date.parse(ts));
 
@@ -92,63 +113,33 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
         setCurrentSentiment(result.sentiment);
         setHasAnalyzed(true);
 
-        // Add to history with AI's reasoning
         setHistory(prev => [
           ...prev.slice(-4),
           {
             sentiment: result.sentiment,
             timestamp,
-            trigger: `"${segment.text.slice(0, 50)}${segment.text.length > 50 ? '...' : ''}"`,
+            trigger: `"${text.slice(0, 50)}${text.length > 50 ? '...' : ''}"`,
             reason: result.reason,
             confidence: result.confidence,
           },
         ]);
       }
-    }
-
-    setIsAnalyzing(false);
-    isProcessingQueue.current = false;
-
-    // Process more if queue has items
-    if (analysisQueue.current.length > 0) {
-      setTimeout(processQueue, 500);
+    } finally {
+      inFlightRef.current = false;
+      setIsAnalyzing(false);
     }
   }, []);
 
-  // Queue new segments for AI analysis
-  const queueSegment = useCallback((segment) => {
-    if (!segment.text || segment.text.trim().length < 3) return;
-
-    analysisQueue.current.push(segment);
-
-    // Debounce: wait 1 second before processing to batch rapid speech
-    setTimeout(() => {
-      processQueue();
-    }, 1000);
-  }, [processQueue]);
-
-  // Watch for new transcript segments
+  // Analyze recent customer speech on a stable 30-second cadence.
   useEffect(() => {
-    if (!segments || segments.length === 0) {
-      return;
-    }
+    const initialTimer = setTimeout(analyzeRecentWindow, SENTIMENT_INITIAL_DELAY_MS);
+    const interval = setInterval(analyzeRecentWindow, SENTIMENT_ANALYSIS_INTERVAL_MS);
 
-    // Process only new segments
-    const newSegments = segments.filter(s => {
-      const seqNo = Number(s.seqNo);
-      return !isNaN(seqNo) && seqNo > lastProcessedSeqNo.current;
-    });
-
-    if (newSegments.length > 0) {
-      // Queue each new segment for analysis
-      newSegments.forEach(segment => {
-        queueSegment(segment);
-      });
-      // Update last processed
-      const maxSeqNo = Math.max(...newSegments.map(s => Number(s.seqNo)));
-      lastProcessedSeqNo.current = maxSeqNo;
-    }
-  }, [segments, queueSegment]);
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+    };
+  }, [analyzeRecentWindow]);
 
   const currentLevel = SENTIMENT_LEVELS.find(l => l.id === currentSentiment) || SENTIMENT_LEVELS[2];
   const previousLevel = SENTIMENT_LEVELS.find(l => l.id === previousSentiment) || SENTIMENT_LEVELS[2];

@@ -1,0 +1,78 @@
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: meeting_assistant
+      MYSQL_USER: ${MYSQL_USER:-arlo}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u\"$${MYSQL_USER}\" -p\"$${MYSQL_PASSWORD}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  backend:
+    image: ${BACKEND_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL}
+      FRONTEND_URL: ${PUBLIC_URL}
+      FRONTEND_UPSTREAM_URL: http://frontend:3000
+      RTMS_SERVICE_URL: http://rtms:3002
+      DATABASE_URL: ${DATABASE_URL}
+      ZOOM_CLIENT_ID: ${ZOOM_CLIENT_ID}
+      ZOOM_CLIENT_SECRET: ${ZOOM_CLIENT_SECRET}
+      RTMS_CLIENT_ID: ${RTMS_CLIENT_ID:-${ZOOM_CLIENT_ID}}
+      ZOOM_APP_ID: ${ZOOM_APP_ID:-}
+      ZOOM_HOST: ${ZOOM_HOST:-zoom.us}
+      SESSION_SECRET: ${SESSION_SECRET}
+      REDIS_ENCRYPTION_KEY: ${REDIS_ENCRYPTION_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-openai/gpt-oss-120b:free}
+      FALLBACK_MODEL: ${FALLBACK_MODEL:-google/gemma-4-31b-it:free}
+      FALLBACK_MODELS: ${FALLBACK_MODELS:-google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free}
+      AI_ENABLED: ${AI_ENABLED:-true}
+      EXTRACTION_ENABLED: ${EXTRACTION_ENABLED:-false}
+      PUBLIC_LINKS_ENABLED: ${PUBLIC_LINKS_ENABLED:-false}
+      DISABLE_MEETING_PERSISTENCE: ${DISABLE_MEETING_PERSISTENCE:-false}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: production
+      PORT: 3000
+      RTMS_PORT: 3002
+      CORS_ORIGINS: ${PUBLIC_URL}
+    ports:
+      - "${SELFHOST_BIND_BACKEND_PORT:-3000}:3000"
+
+  frontend:
+    image: ${FRONTEND_IMAGE}
+    restart: unless-stopped
+    ports:
+      - "${SELFHOST_BIND_FRONTEND_PORT:-3001}:3000"
+
+  rtms:
+    image: ${RTMS_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      BACKEND_URL: http://backend:3000
+      ZOOM_CLIENT_ID: ${ZOOM_CLIENT_ID}
+      ZOOM_CLIENT_SECRET: ${ZOOM_CLIENT_SECRET}
+      ZM_RTMS_CLIENT: ${ZOOM_CLIENT_ID}
+      ZM_RTMS_SECRET: ${ZOOM_CLIENT_SECRET}
+      NODE_ENV: production
+      RTMS_PORT: 3002
+    ports:
+      - "${SELFHOST_BIND_RTMS_PORT:-3002}:3002"
+
+volumes:
+  mysql_data:

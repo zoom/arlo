@@ -40,7 +40,7 @@ const DEMO_SUGGESTIONS = [
     id: 4,
     title: 'Handling Frustrated Enterprise Customers',
     category: 'Process',
-    snippet: 'For enterprise accounts with ongoing issues: acknowledge impact, offer premium support call, consider service credit...',
+    snippet: 'For enterprise accounts with ongoing issues: acknowledge impact, schedule a support follow-up, consider service credit...',
     relevance: 72,
     isNew: false,
   },

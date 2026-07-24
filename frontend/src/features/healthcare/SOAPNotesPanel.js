@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { FileText, ChevronDown, ChevronRight, ChevronUp, Loader2, RefreshCw, Check, AlertCircle, Tag, ClipboardCheck, LayoutTemplate } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Textarea from '../../components/ui/Textarea';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
+import { getPreferredAiModel } from '../../utils/aiModel';
 import './SOAPNotesPanel.css';
 
 // Visit templates for quick-start documentation
@@ -142,6 +143,8 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoDa
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
   const [showCodes, setShowCodes] = useState(false);
   const [copiedCode, setCopiedCode] = useState(null);
+  const autoProcessTimer = useRef(null);
+  const processTranscriptRef = useRef(null);
 
   // Calculate quality measure completion based on SOAP content
   const qualityProgress = useMemo(() => {
@@ -190,6 +193,7 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoDa
           meetingId,
           transcript: transcriptText,
           currentSoap: soapData,
+          model: getPreferredAiModel(),
         }),
       });
 
@@ -285,16 +289,28 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoDa
     setLastProcessedCount(segs.length);
   }, [soapData, editedSections]);
 
-  // Auto-process when new segments arrive (debounced)
+  useEffect(() => {
+    processTranscriptRef.current = processTranscript;
+  }, [processTranscript]);
+
+  useEffect(() => {
+    return () => {
+      if (autoProcessTimer.current) {
+        clearTimeout(autoProcessTimer.current);
+      }
+    };
+  }, []);
+
+  // Auto-process when new segments arrive without resetting the timer on every segment.
   useEffect(() => {
     if (!isLive || segments.length === 0) return;
+    if (segments.length === lastProcessedCount || autoProcessTimer.current) return;
 
-    const timer = setTimeout(() => {
-      processTranscript();
+    autoProcessTimer.current = setTimeout(() => {
+      autoProcessTimer.current = null;
+      processTranscriptRef.current?.();
     }, 3000); // Process every 3 seconds of new content
-
-    return () => clearTimeout(timer);
-  }, [segments.length, isLive, processTranscript]);
+  }, [segments.length, lastProcessedCount, isLive]);
 
   // Toggle section expansion
   const toggleSection = (key) => {

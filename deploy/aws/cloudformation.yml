@@ -1,0 +1,287 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: First-cut Arlo deployment on AWS App Runner. Requires prebuilt ECR/ECR Public images and a MySQL 8.0 connection string.
+
+Parameters:
+  NamePrefix:
+    Type: String
+    Default: arlo
+    MinLength: 2
+    MaxLength: 20
+    AllowedPattern: '^[a-zA-Z][a-zA-Z0-9-]*$'
+    Description: Prefix used for App Runner service names.
+  PublicUrl:
+    Type: String
+    Default: https://arlo.example.com
+    Description: External URL users and Zoom will use. Use the generated backend URL first, then replace it with your custom domain after DNS is configured.
+  BackendImage:
+    Type: String
+    Description: Backend ECR or ECR Public image identifier.
+  FrontendImage:
+    Type: String
+    Description: Frontend ECR or ECR Public image identifier.
+  RtmsImage:
+    Type: String
+    Description: RTMS ECR or ECR Public image identifier.
+  ImageRepositoryType:
+    Type: String
+    Default: ECR
+    AllowedValues:
+      - ECR
+      - ECR_PUBLIC
+    Description: App Runner image repository type.
+  EcrAccessRoleArn:
+    Type: String
+    Default: ''
+    Description: Required for private ECR images. Leave blank for ECR Public.
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+    Description: MySQL 8.0 connection string used by backend and RTMS.
+  ZoomClientId:
+    Type: String
+    Description: Zoom OAuth or RTMS client ID.
+  ZoomClientSecret:
+    Type: String
+    NoEcho: true
+    Description: Zoom OAuth or RTMS client secret.
+  ZoomAppId:
+    Type: String
+    Default: ''
+    Description: Optional Zoom app ID.
+  ZoomHost:
+    Type: String
+    Default: zoom.us
+    AllowedValues:
+      - zoom.us
+      - zoomgov.com
+    Description: Zoom host. Use zoomgov.com for Zoom for Government.
+  SessionSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Session secret. Generate with deploy/common/generate-secrets.sh.
+  RedisEncryptionKey:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    MaxLength: 32
+    Description: Exactly 32 characters. Arlo uses this even when Redis is disabled.
+  OpenRouterApiKey:
+    Type: String
+    NoEcho: true
+    Default: unused
+    Description: Optional OpenRouter API key.
+  DefaultModel:
+    Type: String
+    Default: openai/gpt-oss-120b:free
+    Description: Default free OpenRouter model.
+  FallbackModel:
+    Type: String
+    Default: google/gemma-4-31b-it:free
+    Description: Fallback free OpenRouter model.
+  AiEnabled:
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
+    Description: Set true only when OpenRouter is configured.
+  AppRunnerCpu:
+    Type: String
+    Default: 0.25 vCPU
+    AllowedValues:
+      - 0.25 vCPU
+      - 0.5 vCPU
+      - 1 vCPU
+      - 2 vCPU
+      - 4 vCPU
+    Description: App Runner instance CPU for each Arlo service.
+  AppRunnerMemory:
+    Type: String
+    Default: 0.5 GB
+    AllowedValues:
+      - 0.5 GB
+      - 1 GB
+      - 2 GB
+      - 3 GB
+      - 4 GB
+      - 6 GB
+      - 8 GB
+      - 10 GB
+      - 12 GB
+    Description: App Runner instance memory for each Arlo service.
+
+Conditions:
+  HasEcrAccessRole: !Not [!Equals [!Ref EcrAccessRoleArn, '']]
+
+Resources:
+  FrontendService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: !Sub '${NamePrefix}-frontend'
+      HealthCheckConfiguration:
+        Protocol: TCP
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+      InstanceConfiguration:
+        Cpu: !Ref AppRunnerCpu
+        Memory: !Ref AppRunnerMemory
+      SourceConfiguration:
+        AutoDeploymentsEnabled: false
+        AuthenticationConfiguration: !If
+          - HasEcrAccessRole
+          - AccessRoleArn: !Ref EcrAccessRoleArn
+          - !Ref AWS::NoValue
+        ImageRepository:
+          ImageIdentifier: !Ref FrontendImage
+          ImageRepositoryType: !Ref ImageRepositoryType
+          ImageConfiguration:
+            Port: '3000'
+
+  RtmsService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: !Sub '${NamePrefix}-rtms'
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /health
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+      InstanceConfiguration:
+        Cpu: !Ref AppRunnerCpu
+        Memory: !Ref AppRunnerMemory
+      SourceConfiguration:
+        AutoDeploymentsEnabled: false
+        AuthenticationConfiguration: !If
+          - HasEcrAccessRole
+          - AccessRoleArn: !Ref EcrAccessRoleArn
+          - !Ref AWS::NoValue
+        ImageRepository:
+          ImageIdentifier: !Ref RtmsImage
+          ImageRepositoryType: !Ref ImageRepositoryType
+          ImageConfiguration:
+            Port: '3002'
+            RuntimeEnvironmentVariables:
+              - Name: DATABASE_URL
+                Value: !Ref DatabaseUrl
+              - Name: BACKEND_URL
+                Value: !Ref PublicUrl
+              - Name: ZOOM_CLIENT_ID
+                Value: !Ref ZoomClientId
+              - Name: ZOOM_CLIENT_SECRET
+                Value: !Ref ZoomClientSecret
+              - Name: ZM_RTMS_CLIENT
+                Value: !Ref ZoomClientId
+              - Name: ZM_RTMS_SECRET
+                Value: !Ref ZoomClientSecret
+              - Name: NODE_ENV
+                Value: production
+              - Name: RTMS_PORT
+                Value: '3002'
+
+  BackendService:
+    Type: AWS::AppRunner::Service
+    Properties:
+      ServiceName: !Sub '${NamePrefix}-backend'
+      HealthCheckConfiguration:
+        Protocol: HTTP
+        Path: /health
+        Interval: 10
+        Timeout: 5
+        HealthyThreshold: 1
+        UnhealthyThreshold: 5
+      InstanceConfiguration:
+        Cpu: !Ref AppRunnerCpu
+        Memory: !Ref AppRunnerMemory
+      SourceConfiguration:
+        AutoDeploymentsEnabled: false
+        AuthenticationConfiguration: !If
+          - HasEcrAccessRole
+          - AccessRoleArn: !Ref EcrAccessRoleArn
+          - !Ref AWS::NoValue
+        ImageRepository:
+          ImageIdentifier: !Ref BackendImage
+          ImageRepositoryType: !Ref ImageRepositoryType
+          ImageConfiguration:
+            Port: '3000'
+            RuntimeEnvironmentVariables:
+              - Name: PUBLIC_URL
+                Value: !Ref PublicUrl
+              - Name: FRONTEND_URL
+                Value: !Ref PublicUrl
+              - Name: FRONTEND_UPSTREAM_URL
+                Value: !Sub
+                  - 'https://${Url}'
+                  - Url: !GetAtt FrontendService.ServiceUrl
+              - Name: RTMS_SERVICE_URL
+                Value: !Sub
+                  - 'https://${Url}'
+                  - Url: !GetAtt RtmsService.ServiceUrl
+              - Name: DATABASE_URL
+                Value: !Ref DatabaseUrl
+              - Name: ZOOM_CLIENT_ID
+                Value: !Ref ZoomClientId
+              - Name: ZOOM_CLIENT_SECRET
+                Value: !Ref ZoomClientSecret
+              - Name: ZOOM_APP_ID
+                Value: !Ref ZoomAppId
+              - Name: ZOOM_HOST
+                Value: !Ref ZoomHost
+              - Name: SESSION_SECRET
+                Value: !Ref SessionSecret
+              - Name: REDIS_ENCRYPTION_KEY
+                Value: !Ref RedisEncryptionKey
+              - Name: OPENROUTER_API_KEY
+                Value: !Ref OpenRouterApiKey
+              - Name: DEFAULT_MODEL
+                Value: !Ref DefaultModel
+              - Name: FALLBACK_MODEL
+                Value: !Ref FallbackModel
+              - Name: AI_ENABLED
+                Value: !Ref AiEnabled
+              - Name: EXTRACTION_ENABLED
+                Value: 'false'
+              - Name: PUBLIC_LINKS_ENABLED
+                Value: 'false'
+              - Name: DISABLE_MEETING_PERSISTENCE
+                Value: 'false'
+              - Name: LOG_LEVEL
+                Value: info
+              - Name: NODE_ENV
+                Value: production
+              - Name: PORT
+                Value: '3000'
+              - Name: RTMS_PORT
+                Value: '3002'
+              - Name: CORS_ORIGINS
+                Value: !Ref PublicUrl
+
+Outputs:
+  BackendGeneratedUrl:
+    Description: App Runner generated backend URL.
+    Value: !Sub
+      - 'https://${Url}'
+      - Url: !GetAtt BackendService.ServiceUrl
+  FrontendGeneratedUrl:
+    Description: App Runner generated frontend URL.
+    Value: !Sub
+      - 'https://${Url}'
+      - Url: !GetAtt FrontendService.ServiceUrl
+  RtmsGeneratedUrl:
+    Description: App Runner generated RTMS URL.
+    Value: !Sub
+      - 'https://${Url}'
+      - Url: !GetAtt RtmsService.ServiceUrl
+  ConfiguredPublicUrl:
+    Description: Public URL configured in Arlo.
+    Value: !Ref PublicUrl
+  OauthRedirectUrl:
+    Description: Zoom OAuth redirect URL.
+    Value: !Sub '${PublicUrl}/api/auth/callback'
+  RtmsWebhookUrl:
+    Description: Zoom RTMS webhook URL.
+    Value: !Sub '${PublicUrl}/api/rtms/webhook'

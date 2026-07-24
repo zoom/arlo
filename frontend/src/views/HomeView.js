@@ -39,14 +39,6 @@ const mockWeeklyDigest = {
   summary: 'This week focused on Q1 planning and product roadmap alignment. Key decisions around mobile app priorities and hiring timeline were finalized.',
 };
 
-const mockActionItems = [
-  { id: '1', task: 'Finalize mobile design mockups', owner: 'Sarah Chen', meeting: 'Product Strategy Q1 Review', meetingId: '1', done: false, due: 'Feb 15' },
-  { id: '2', task: 'Review notification system architecture', owner: 'Marcus Johnson', meeting: 'Technical Planning', meetingId: '2', done: false },
-  { id: '3', task: 'Send client proposal draft', owner: 'Elena Rodriguez', meeting: 'Client Check-in', meetingId: '3', done: true },
-];
-
-const mockRecurringTopics = ['Q3 Budget', 'Hiring', 'Product Launch', 'Mobile App'];
-
 // =============================================================================
 // LEGAL MOCK DATA
 // =============================================================================
@@ -145,7 +137,6 @@ export default function HomeView() {
   const [reminders, setReminders] = useState([]);
   const [upcomingMeetings, setUpcomingMeetings] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [actionItems, setActionItems] = useState(mockActionItems);
 
   useEffect(() => {
     async function fetchHomeData() {
@@ -212,14 +203,6 @@ export default function HomeView() {
     return `${dayName}, ${monthDay} · ${startTime} – ${endTime}`;
   };
 
-  const toggleActionItem = (id) => {
-    setActionItems(items =>
-      items.map(item =>
-        item.id === id ? { ...item, done: !item.done } : item
-      )
-    );
-  };
-
   if (loading) {
     return (
       <div className="home-loading">
@@ -249,8 +232,6 @@ export default function HomeView() {
             hasContent={hasContent}
             highlights={highlights}
             reminders={reminders}
-            actionItems={showDemoData ? actionItems : []}
-            toggleActionItem={toggleActionItem}
             navigate={navigate}
             showDemoData={showDemoData}
           />
@@ -743,7 +724,7 @@ function SupportDashboard({ data, navigate }) {
 // =============================================================================
 // GENERAL (NOTES) DASHBOARD
 // =============================================================================
-function GeneralDashboard({ hasContent, highlights, reminders, actionItems, toggleActionItem, navigate, showDemoData }) {
+function GeneralDashboard({ hasContent, highlights, reminders, navigate, showDemoData }) {
   const hasRealContent = hasContent || highlights.length > 0 || reminders.length > 0;
 
   if (!hasRealContent && !showDemoData) {
@@ -787,69 +768,6 @@ function GeneralDashboard({ hasContent, highlights, reminders, actionItems, togg
               <p className="text-serif text-sm text-muted home-digest-summary">
                 {mockWeeklyDigest.summary}
               </p>
-            </div>
-          </Card>
-        </section>
-      )}
-
-      {/* Action Items - only show if there are items */}
-      {actionItems.length > 0 && (
-        <section className="home-section">
-          <h2 className="text-serif home-section-title">Action items this week</h2>
-          <div className="home-cards">
-            {actionItems.filter(item => !item.done).map((item) => (
-              <Card key={item.id}>
-                <div className="home-action-card">
-                  <div className="home-action-item">
-                    <input
-                      type="checkbox"
-                      className="home-action-checkbox"
-                      checked={item.done}
-                      onChange={() => toggleActionItem(item.id)}
-                    />
-                    <div className="home-action-content">
-                      <p className="text-serif text-sm">{item.task}</p>
-                      <div className="home-action-meta">
-                        <span>Owner: {item.owner}</span>
-                        {item.due && (
-                          <>
-                            <span>&bull;</span>
-                            <span>Due: {item.due}</span>
-                          </>
-                        )}
-                        <span>&bull;</span>
-                        <button
-                          className="home-action-meeting-link"
-                          onClick={() => navigate(`/meetings/${item.meetingId}`)}
-                        >
-                          {item.meeting}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Recurring Topics - only show with demo data */}
-      {showDemoData && (
-        <section className="home-section">
-          <h2 className="text-serif home-section-title">Recurring topics</h2>
-          <Card>
-            <div className="home-recurring-inner">
-              <p className="text-sans text-xs text-muted">
-                Topics mentioned in 2+ meetings this week
-              </p>
-              <div className="home-recurring-badges">
-                {mockRecurringTopics.map((topic, i) => (
-                  <Badge key={i} variant="outline" className="home-recurring-badge">
-                    {topic}
-                  </Badge>
-                ))}
-              </div>
             </div>
           </Card>
         </section>

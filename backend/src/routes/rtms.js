@@ -3,7 +3,8 @@ const crypto = require('crypto');
 const axios = require('axios');
 const router = express.Router();
 const config = require('../config');
-const { broadcastTranscriptSegment, broadcastParticipantEvent, broadcastMeetingStatus, crossRegisterUser, getStats } = require('../services/websocket');
+const { broadcastTranscriptSegment, broadcastParticipantEvent, broadcastMeetingStatus, crossRegisterUser, crossRegisterZoomUser, getStats } = require('../services/websocket');
+const realtimeBus = require('../services/realtimeBus');
 const { zoomGet } = require('../services/zoomApi');
 const prisma = require('../lib/prisma');
 
@@ -13,62 +14,203 @@ if (PERSISTENCE_DISABLED) {
   console.log('⚠️ Meeting persistence DISABLED — transcripts will not be saved to database');
 }
 
+const WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS = 300;
+
 // Cache for meeting IDs -> database meeting records
 const meetingCache = new Map();
+
+function timingSafeEqual(left, right) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function getRawBody(req) {
+  return req.rawBody ? req.rawBody.toString('utf8') : JSON.stringify(req.body);
+}
+
+function verifyZoomWebhook(req) {
+  if (!config.rtmsWebhookSecret) {
+    return { ok: false, reason: 'webhook_secret_not_configured' };
+  }
+
+  const signature = req.headers['x-zm-signature'];
+  const timestamp = req.headers['x-zm-request-timestamp'];
+  if (!signature || !timestamp) {
+    return { ok: false, reason: 'missing_signature_headers' };
+  }
+
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) {
+    return { ok: false, reason: 'invalid_timestamp' };
+  }
+
+  if (Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds) > WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS) {
+    return { ok: false, reason: 'stale_timestamp' };
+  }
+
+  const message = `v0:${timestamp}:${getRawBody(req)}`;
+  const expected = `v0=${crypto
+    .createHmac('sha256', config.rtmsWebhookSecret)
+    .update(message)
+    .digest('hex')}`;
+
+  return timingSafeEqual(signature, expected)
+    ? { ok: true }
+    : { ok: false, reason: 'invalid_signature' };
+}
+
+function verifyInternalWebhook(req) {
+  if (!config.internalWebhookSecret) {
+    return {
+      ok: config.nodeEnv !== 'production',
+      reason: 'internal_webhook_secret_not_configured',
+    };
+  }
+
+  const signature = req.headers['x-arlo-signature'];
+  const timestamp = req.headers['x-arlo-request-timestamp'];
+  if (!signature || !timestamp) {
+    return { ok: false, reason: 'missing_internal_signature_headers' };
+  }
+
+  const timestampSeconds = Number(timestamp);
+  if (!Number.isFinite(timestampSeconds)) {
+    return { ok: false, reason: 'invalid_internal_timestamp' };
+  }
+
+  if (Math.abs(Math.floor(Date.now() / 1000) - timestampSeconds) > WEBHOOK_TIMESTAMP_TOLERANCE_SECONDS) {
+    return { ok: false, reason: 'stale_internal_timestamp' };
+  }
+
+  const message = `v0:${timestamp}:${getRawBody(req)}`;
+  const expected = `v0=${crypto
+    .createHmac('sha256', config.internalWebhookSecret)
+    .update(message)
+    .digest('hex')}`;
+
+  return timingSafeEqual(signature, expected)
+    ? { ok: true }
+    : { ok: false, reason: 'invalid_internal_signature' };
+}
+
+function requireInternalRtmsRequest(req, res) {
+  const verification = verifyInternalWebhook(req);
+  if (verification.ok) return true;
+
+  console.warn(`Rejected internal RTMS request path=${req.path} reason=${verification.reason}`);
+  res.status(401).json({ error: 'invalid_internal_rtms_signature', reason: verification.reason });
+  return false;
+}
+
+function buildInternalWebhookHeaders(body) {
+  const headers = {
+    'x-zm-signature': body.zoomSignature || '',
+    'x-zm-request-timestamp': body.zoomTimestamp || '',
+  };
+
+  if (!config.internalWebhookSecret) {
+    return headers;
+  }
+
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const serializedBody = JSON.stringify(body.payload);
+  headers['x-arlo-internal'] = 'true';
+  headers['x-arlo-request-timestamp'] = timestamp;
+  headers['x-arlo-signature'] = `v0=${crypto
+    .createHmac('sha256', config.internalWebhookSecret)
+    .update(`v0:${timestamp}:${serializedBody}`)
+    .digest('hex')}`;
+  return headers;
+}
+
+async function enrichRealtimeMetadataForMeeting(meetingId, metadata = {}) {
+  const enriched = {
+    ...metadata,
+    rtmsMeetingId: metadata.rtmsMeetingId || meetingId,
+  };
+
+  if (enriched.appUserId && enriched.zoomUserId) {
+    return enriched;
+  }
+
+  try {
+    const meeting = await prisma.meeting.findUnique({
+      where: { zoomMeetingId: meetingId },
+      select: {
+        ownerId: true,
+        owner: { select: { zoomUserId: true } },
+      },
+    });
+    if (meeting?.ownerId) {
+      enriched.appUserId = enriched.appUserId || meeting.ownerId;
+      enriched.zoomUserId = enriched.zoomUserId || meeting.owner?.zoomUserId || null;
+    }
+  } catch (error) {
+    console.warn('Could not enrich realtime metadata:', error.message);
+  }
+
+  return enriched;
+}
 
 /**
  * POST /api/rtms/webhook
  * Receive RTMS webhooks from Zoom
  */
 router.post('/webhook', async (req, res) => {
-  console.log('🎯 HIT /api/rtms/webhook route!');
-  console.log('🎯 Full URL:', req.originalUrl);
-  console.log('🎯 Headers:', JSON.stringify(req.headers, null, 2));
-
   const { event, payload } = req.body;
 
   // Handle Zoom webhook validation (endpoint URL validation)
   if (event === 'endpoint.url_validation') {
-    const { plainToken } = payload;
-    console.log('📨 Webhook validation request received');
+    const plainToken = payload?.plainToken;
+    if (!plainToken) {
+      return res.status(400).json({ error: 'missing_plain_token' });
+    }
+    if (!config.rtmsWebhookSecret) {
+      return res.status(500).json({ error: 'webhook_secret_not_configured' });
+    }
 
-    // Hash the plainToken with client secret and client ID
     const hash = crypto
-      .createHmac('sha256', config.zoomClientSecret)
+      .createHmac('sha256', config.rtmsWebhookSecret)
       .update(plainToken)
       .digest('hex');
 
-    console.log('✅ Webhook validation response sent');
     return res.status(200).json({
       plainToken,
       encryptedToken: hash,
     });
   }
 
+  const verification = verifyZoomWebhook(req);
+  if (!verification.ok) {
+    console.warn(`Rejected Zoom RTMS webhook event=${event || 'unknown'} reason=${verification.reason}`);
+    const status = verification.reason === 'webhook_secret_not_configured' ? 500 : 401;
+    return res.status(status).json({ error: 'invalid_zoom_webhook', reason: verification.reason });
+  }
+
   console.log(`📨 RTMS Webhook: ${event}`);
   if (payload?.operator_id) {
     console.log(`📨 Operator ID: ${payload.operator_id}`);
   }
-  console.log(`📨 Payload:`, JSON.stringify(payload, null, 2));
 
   // Forward webhook to RTMS service
   if (event === 'meeting.rtms_started' || event === 'meeting.rtms_stopped') {
     try {
       const rtmsServiceUrl = process.env.RTMS_SERVICE_URL || 'http://rtms:3002';
-      await axios.post(`${rtmsServiceUrl}/webhook`, req.body, {
+      const forwardRequest = {
+        payload: req.body,
+        zoomSignature: req.headers['x-zm-signature'],
+        zoomTimestamp: req.headers['x-zm-request-timestamp'],
+      };
+      await axios.post(`${rtmsServiceUrl}/webhook`, forwardRequest.payload, {
         timeout: 5000,
-        headers: {
-          // Forward Zoom signature headers for verification
-          'x-zm-signature': req.headers['x-zm-signature'] || '',
-          'x-zm-request-timestamp': req.headers['x-zm-request-timestamp'] || '',
-          // Mark as internally forwarded (backend already validated the source)
-          'x-arlo-internal': 'true',
-        },
+        headers: buildInternalWebhookHeaders(forwardRequest),
       });
       console.log(`✅ Forwarded ${event} to RTMS service`);
     } catch (error) {
       console.error(`❌ Failed to forward webhook to RTMS service:`, error.message);
-      // Don't fail the webhook - Zoom expects 200 response
+      // Ask Zoom to retry rather than silently losing a start/stop event.
+      return res.status(503).json({ error: 'rtms_service_unavailable' });
     }
   }
 
@@ -81,7 +223,9 @@ router.post('/webhook', async (req, res) => {
  * Receive RTMS status updates from RTMS service
  */
 router.post('/status', async (req, res) => {
-  const { meetingId, status, meetingTopic, operatorId } = req.body;
+  if (!requireInternalRtmsRequest(req, res)) return;
+
+  const { meetingId, status, meetingTopic, operatorId, rtmsStreamId } = req.body;
 
   console.log(`📡 RTMS Status Update: ${status} for meeting ${meetingId}`);
   console.log(`📡 Operator ID: ${operatorId || 'not provided'}`);
@@ -217,9 +361,37 @@ router.post('/status', async (req, res) => {
     // Don't fail the request - we still want to broadcast
   }
 
-  // Broadcast status change to WebSocket clients
-  const sentCount = broadcastMeetingStatus(meetingId, status);
-  console.log(`📡 Broadcast status to ${sentCount} clients`);
+  const realtimeMetadata = {
+    rtmsMeetingId: meetingId,
+    rtmsStreamId: rtmsStreamId || null,
+    zoomUserId: operatorId || null,
+    operatorId: operatorId || null,
+    appUserId: null,
+  };
+
+  if (operatorId) {
+    crossRegisterZoomUser(operatorId, meetingId);
+  }
+
+  if (dbMeetingId) {
+    try {
+      const meeting = await prisma.meeting.findUnique({
+        where: { id: dbMeetingId },
+        include: { owner: true },
+      });
+      if (meeting?.owner) {
+        realtimeMetadata.appUserId = meeting.owner.id;
+        realtimeMetadata.zoomUserId = meeting.owner.zoomUserId || realtimeMetadata.zoomUserId;
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not enrich realtime status metadata:', error.message);
+    }
+  }
+
+  // Broadcast status change to WebSocket clients through Valkey when available.
+  const publishedStatus = await realtimeBus.publishMeetingStatus(meetingId, status, realtimeMetadata);
+  const sentCount = publishedStatus ? 0 : broadcastMeetingStatus(meetingId, status, realtimeMetadata);
+  console.log(`📡 ${publishedStatus ? 'Published' : 'Broadcast'} status to ${publishedStatus ? 'Valkey' : `${sentCount} clients`}`);
 
   // Also broadcast a transcription lifecycle event for the timeline
   const lifecycleMap = {
@@ -236,7 +408,10 @@ router.post('/status', async (req, res) => {
       participantId: null,
       timestamp: Date.now(),
     };
-    broadcastParticipantEvent(meetingId, lifecycleEvent);
+    const publishedLifecycle = await realtimeBus.publishParticipantEvent(meetingId, lifecycleEvent, realtimeMetadata);
+    if (!publishedLifecycle) {
+      broadcastParticipantEvent(meetingId, lifecycleEvent, realtimeMetadata);
+    }
 
     // Save to database using local dbMeetingId (not cache, which may be deleted)
     // Skip when persistence is disabled
@@ -258,6 +433,9 @@ router.post('/status', async (req, res) => {
   // Clean up cache after all processing is complete
   if (status === 'rtms_stopped') {
     meetingCache.delete(meetingId);
+    realtimeBus.deleteMeeting(meetingId, rtmsStreamId).catch((err) => {
+      console.warn('⚠️ Valkey meeting cleanup failed:', err.message);
+    });
   }
 
   res.status(200).json({ received: true, broadcast: sentCount });
@@ -268,14 +446,37 @@ router.post('/status', async (req, res) => {
  * Receive transcript segments from RTMS service to broadcast to clients
  */
 router.post('/broadcast', async (req, res) => {
-  const { meetingId, segment } = req.body;
+  if (!requireInternalRtmsRequest(req, res)) return;
+
+  const { meetingId, segment, publish = true, metadata = {} } = req.body;
   const stats = getStats();
 
-  console.log(`📝 Transcript segment for meeting ${meetingId}:`, segment?.text?.substring(0, 50));
+  console.log(`📝 Transcript segment for meeting ${meetingId}: seq=${segment?.seqNo || 'n/a'} bytes=${Buffer.byteLength(segment?.text || '', 'utf8')}`);
 
-  // Broadcast transcript segment to all WebSocket clients immediately
-  const sentCount = broadcastTranscriptSegment(meetingId, segment);
-  console.log(`📡 Broadcast transcript to ${sentCount} clients`);
+  let sentCount = 0;
+  let published = false;
+  const realtimeMetadata = await enrichRealtimeMetadataForMeeting(meetingId, {
+    ...metadata,
+    rtmsMeetingId: metadata.rtmsMeetingId || meetingId,
+  });
+  if (realtimeMetadata.appUserId) {
+    crossRegisterUser(realtimeMetadata.appUserId, meetingId);
+  }
+  if (realtimeMetadata.zoomUserId || realtimeMetadata.operatorId) {
+    crossRegisterZoomUser(realtimeMetadata.zoomUserId || realtimeMetadata.operatorId, meetingId);
+  }
+
+  if (publish !== false) {
+    published = await realtimeBus.publishTranscriptSegment(meetingId, segment, realtimeMetadata);
+    if (!published) {
+      sentCount = broadcastTranscriptSegment(meetingId, segment, realtimeMetadata);
+    }
+  } else {
+    // RTMS already published to Valkey. Still fan out locally as a safety net so
+    // a missed Valkey mapping/subscription does not drop live transcript delivery.
+    sentCount = broadcastTranscriptSegment(meetingId, segment, realtimeMetadata);
+  }
+  console.log(`📡 ${published ? 'Published transcript to Valkey' : `Broadcast transcript to ${sentCount} clients`}`);
 
   // Save to database in the background (don't block the response)
   console.log('💾 Starting background save of transcript segment...');
@@ -284,7 +485,7 @@ router.post('/broadcast', async (req, res) => {
     console.error('❌ Full error:', err);
   });
 
-  res.status(200).json({ received: true, broadcast: sentCount });
+  res.status(200).json({ received: true, broadcast: sentCount, published });
 });
 
 /**
@@ -372,14 +573,33 @@ async function saveTranscriptSegment(zoomMeetingId, segment) {
  * Receive participant join/leave events from RTMS service
  */
 router.post('/participant-event', async (req, res) => {
-  const { meetingId, events } = req.body;
+  if (!requireInternalRtmsRequest(req, res)) return;
 
-  console.log(`👥 Participant event for meeting ${meetingId}:`, events);
+  const { meetingId, events, publish = true, metadata = {} } = req.body;
+
+  console.log(`👥 Participant events for meeting ${meetingId}: count=${events.length}`);
 
   // Broadcast each event to WebSocket clients immediately
   let sentCount = 0;
+  const realtimeMetadata = await enrichRealtimeMetadataForMeeting(meetingId, {
+    ...metadata,
+    rtmsMeetingId: metadata.rtmsMeetingId || meetingId,
+  });
+  if (realtimeMetadata.appUserId) {
+    crossRegisterUser(realtimeMetadata.appUserId, meetingId);
+  }
+  if (realtimeMetadata.zoomUserId || realtimeMetadata.operatorId) {
+    crossRegisterZoomUser(realtimeMetadata.zoomUserId || realtimeMetadata.operatorId, meetingId);
+  }
+
   for (const event of events) {
-    sentCount += broadcastParticipantEvent(meetingId, event);
+    let published = false;
+    if (publish !== false) {
+      published = await realtimeBus.publishParticipantEvent(meetingId, event, realtimeMetadata);
+    }
+    if (!published) {
+      sentCount += broadcastParticipantEvent(meetingId, event, realtimeMetadata);
+    }
   }
 
   // Save to database in the background

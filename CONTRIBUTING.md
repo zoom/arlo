@@ -29,7 +29,7 @@ By participating in this project, you agree to abide by our Code of Conduct. Ple
 
 - Node.js 20+
 - Docker and Docker Compose
-- PostgreSQL 15+ (or use Docker)
+- MySQL 8.0+ (or use Docker)
 - ngrok (for local Zoom App testing)
 - A Zoom account with developer access
 

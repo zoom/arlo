@@ -57,6 +57,20 @@ temp/
 # Docker
 docker-compose.override.yml
 
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+tfplan*
+**/tfplan*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
 # Misc
 *.pem
 *.key

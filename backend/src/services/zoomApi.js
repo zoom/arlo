@@ -21,7 +21,7 @@ async function withRefreshLock(userId, fn) {
 /**
  * Get a valid access token for the user, refreshing if needed.
  */
-async function getAccessToken(userId) {
+async function getAccessToken(userId, forceRefresh = false) {
   const userToken = await prisma.userToken.findFirst({
     where: { userId },
     orderBy: { createdAt: 'desc' },
@@ -33,7 +33,7 @@ async function getAccessToken(userId) {
 
   const needsRefresh = new Date(userToken.expiresAt).getTime() - Date.now() < 5 * 60 * 1000;
 
-  if (!needsRefresh) {
+  if (!forceRefresh && !needsRefresh) {
     return decryptToken(userToken.accessToken);
   }
 
@@ -44,7 +44,7 @@ async function getAccessToken(userId) {
       where: { userId },
       orderBy: { createdAt: 'desc' },
     });
-    if (latestToken && new Date(latestToken.expiresAt).getTime() - Date.now() >= 5 * 60 * 1000) {
+    if (!forceRefresh && latestToken && new Date(latestToken.expiresAt).getTime() - Date.now() >= 5 * 60 * 1000) {
       return decryptToken(latestToken.accessToken);
     }
 
@@ -99,7 +99,7 @@ async function zoomGet(userId, path, params = {}) {
   } catch (err) {
     if (err.response?.status === 401) {
       // Force refresh and retry
-      token = await getAccessToken(userId);
+      token = await getAccessToken(userId, true);
       const res = await attempt(token);
       return res.data;
     }
@@ -127,7 +127,7 @@ async function zoomPost(userId, path, data = {}) {
     return res.data;
   } catch (err) {
     if (err.response?.status === 401) {
-      token = await getAccessToken(userId);
+      token = await getAccessToken(userId, true);
       const res = await attempt(token);
       console.log(`[zoomApi] POST ${path} → ${res.status} (retry)`);
       return res.data;
@@ -153,7 +153,7 @@ async function zoomDelete(userId, path) {
     return res.data;
   } catch (err) {
     if (err.response?.status === 401) {
-      token = await getAccessToken(userId);
+      token = await getAccessToken(userId, true);
       const res = await attempt(token);
       return res.data;
     }

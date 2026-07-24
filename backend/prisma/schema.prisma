@@ -1,5 +1,5 @@
 // Prisma Schema for Arlo Meeting Assistant
-// Database: PostgreSQL 15+
+// Database: MySQL 8.0+
 
 generator client {
   provider      = "prisma-client-js"
@@ -8,7 +8,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -46,7 +46,7 @@ model UserToken {
   accessToken  String   @map("access_token") @db.Text // Encrypted
   refreshToken String   @map("refresh_token") @db.Text // Encrypted
   expiresAt    DateTime @map("expires_at")
-  scopes       String[] // Array of OAuth scopes
+  scopes       Json // JSON array of OAuth scopes
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
@@ -179,7 +179,7 @@ model Highlight {
   tEndMs    BigInt   @map("t_end_ms") // Highlight end time
   title     String
   notes     String?  @db.Text
-  tags      String[] // Array of tags
+  tags      Json // JSON array of tags
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

@@ -23,6 +23,14 @@
                 "optional": false
             },
             {
+                "scope": "meeting:read:list_meetings",
+                "optional": false
+            },
+            {
+                "scope": "meeting:read:meeting_transcript",
+                "optional": false
+            },
+            {
                 "scope": "meeting:write:open_app",
                 "optional": true
             },
@@ -61,6 +69,10 @@
                     "authorize",
                     "onAuthorized",
                     "promptAuthorize",
+                    "startRTMS",
+                    "stopRTMS",
+                    "pauseRTMS",
+                    "resumeRTMS",
                     "onMessage",
                     "postMessage",
                     "showNotification",

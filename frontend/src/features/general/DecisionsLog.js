@@ -83,9 +83,17 @@ export default function DecisionsLog({ segments, onJumpToSegment, showDemoData =
 
   return (
     <Card className={`decisions-log ${collapsed ? 'feature-collapsed' : ''}`}>
-      <button
+      <div
         className="decisions-log-header feature-collapse-header"
+        role="button"
+        tabIndex={0}
         onClick={() => toggleCollapsed('decisions-log')}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleCollapsed('decisions-log');
+          }
+        }}
         aria-expanded={!collapsed}
       >
         <div className="decisions-log-title">
@@ -111,7 +119,7 @@ export default function DecisionsLog({ segments, onJumpToSegment, showDemoData =
             <ChevronUp size={16} className="feature-chevron" />
           )}
         </div>
-      </button>
+      </div>
 
       {!collapsed && showAddForm && (
         <div className="decisions-log-add-form">

@@ -49,7 +49,7 @@ This document outlines the architecture for a Zoom Apps-based meeting assistant 
     │  Postgres   │   │  OpenRouter     │
     │  Database   │   │  (LLM Provider) │
     │  - Meetings │   │  - Free models  │
-    │  - Trans.   │   │  - Premium opts │
+    │  - Trans.   │   │  - Free-only    │
     │  - Users    │   └─────────────────┘
     └─────────────┘
 
@@ -237,8 +237,8 @@ Routes:
 - POST   /api/ai/suggest                  // Get AI suggestions
 
 Rate Limiting:
-- Free tier: 10 AI requests/minute
-- Authenticated: 100 requests/minute
+- Heavier AI endpoints: 20 requests/minute
+- Live key-moment analysis: 120 requests/minute
 ```
 
 #### E. AI Orchestration Service
@@ -247,12 +247,15 @@ Rate Limiting:
 Default Configuration:
 {
   provider: 'OpenRouter',
-  defaultModel: 'google/gemini-2.0-flash-thinking-exp:free',
-  fallbackModel: 'meta-llama/llama-3.2-3b-instruct:free',
-  requiresKey: false,  // Works without API key
+  defaultModel: 'openai/gpt-oss-120b:free',
+  fallbackModels: [
+    'google/gemma-4-31b-it:free',
+    'nvidia/nemotron-3-ultra-550b-a55b:free'
+  ],
+  freeModelsOnly: true,
   rateLimits: {
-    free: { requests: 10, per: '1m' },
-    premium: { requests: 100, per: '1m' }
+    summary: { requests: 20, per: '1m' },
+    keyMoment: { requests: 120, per: '1m' }
   }
 }
 
@@ -669,7 +672,7 @@ See `docker-compose.yml` for the full configuration. Services:
 
 | Service | Port | Notes |
 |---------|------|-------|
-| `postgres` | 5432 | PostgreSQL 15, healthcheck enabled |
+| `mysql` | 3306 | MySQL 8.0, healthcheck enabled |
 | `backend` | 3000 | Express API, reads `.env` file, nodemon for dev |
 | `frontend` | 3001 | CRA dev server, proxies API to backend |
 | `rtms` | 3002 | RTMS SDK, forced `linux/amd64` (Rosetta on Apple Silicon) |
@@ -697,8 +700,10 @@ PUBLIC_URL                             # Your public HTTPS URL
 DATABASE_URL                           # Postgres connection string
 SESSION_SECRET                         # 64-char random string
 REDIS_ENCRYPTION_KEY                   # 32-char random string (token encryption)
-OPENROUTER_API_KEY                     # Optional (free models work without)
-DEFAULT_MODEL                          # Default: google/gemini-2.0-flash-thinking-exp:free
+OPENROUTER_API_KEY                     # Optional; only free OpenRouter models are configured
+DEFAULT_MODEL                          # Default: openai/gpt-oss-120b:free
+FALLBACK_MODEL                         # Default: google/gemma-4-31b-it:free
+FALLBACK_MODELS                        # Default includes nvidia/nemotron-3-ultra-550b-a55b:free
 ```
 
 ---
@@ -746,14 +751,15 @@ DEFAULT_MODEL                          # Default: google/gemini-2.0-flash-thinki
 - **Authentication**: Zoom OAuth 2.0 (PKCE) with httpOnly session cookies
 
 ### Database
-- **Primary**: PostgreSQL 15+
+- **Primary**: MySQL 8.0+
 - **Features**: Full-text search (GIN index)
 - **Optional**: Redis (WebSocket pub/sub, profile: `with-redis`)
 
 ### AI
 - **Provider**: OpenRouter
-- **Default Model**: google/gemini-2.0-flash-thinking-exp (free, no API key required)
-- **Fallback**: meta-llama/llama-3.2-3b-instruct:free
+- **Default Model**: openai/gpt-oss-120b:free
+- **Fallbacks**: google/gemma-4-31b-it:free, nvidia/nemotron-3-ultra-550b-a55b:free
+- **Model Policy**: Free-model allowlist only
 - **Features**: RAG via Postgres FTS, summarization, action items
 
 ### DevOps

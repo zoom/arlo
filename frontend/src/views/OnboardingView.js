@@ -259,7 +259,7 @@ export default function OnboardingView() {
 
           <p className="text-sans text-sm text-muted" style={{ textAlign: 'center' }}>
             Need help?{' '}
-            <a href="https://github.com/anthropics/arlo-meeting-assistant" target="_blank" rel="noopener noreferrer">
+            <a href="https://github.com/zoom/arlo" target="_blank" rel="noopener noreferrer">
               Visit our documentation
             </a>
           </p>

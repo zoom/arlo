@@ -14,6 +14,7 @@ export function AuthProvider({ children }) {
       if (response.ok) {
         const data = await response.json();
         setUser(data.user);
+        if (data.wsToken) setWsToken(data.wsToken);
         setIsAuthenticated(true);
         return data.user;
       }

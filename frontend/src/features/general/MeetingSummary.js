@@ -3,6 +3,7 @@ import { FileText, ChevronDown, ChevronUp, Sparkles, RefreshCw } from 'lucide-re
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
+import { getPreferredAiModel } from '../../utils/aiModel';
 import './MeetingSummary.css';
 
 /**
@@ -27,7 +28,7 @@ async function generateSummaryAI(transcript, title) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ transcript, title }),
+      body: JSON.stringify({ transcript, title, model: getPreferredAiModel() }),
     });
 
     if (!response.ok) {
@@ -60,69 +61,81 @@ export default function MeetingSummary({ segments, meetingId, showDemoData = tru
   const [summary, setSummary] = useState(EMPTY_SUMMARY);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState(null);
+  const latestSegmentsRef = useRef([]);
+  const isGeneratingRef = useRef(false);
   const lastGeneratedSegmentCount = useRef(0);
   const autoGenerateTimer = useRef(null);
 
-  // Auto-generate summary when enough new content arrives
-  const scheduleAutoGenerate = useCallback(() => {
-    // Clear any pending timer
-    if (autoGenerateTimer.current) {
-      clearTimeout(autoGenerateTimer.current);
-    }
-
-    // Only auto-generate if we have significant new content
-    const segmentCount = segments?.length || 0;
-    const newSegments = segmentCount - lastGeneratedSegmentCount.current;
-
-    // Auto-generate every 20 new segments (roughly 2-3 minutes of conversation)
-    if (newSegments >= 20 && !isGenerating) {
-      autoGenerateTimer.current = setTimeout(() => {
-        generateSummary();
-      }, 2000); // Small delay to batch rapid segments
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments, isGenerating]); // generateSummary intentionally omitted to avoid circular deps
-
-  // Watch for new segments
   useEffect(() => {
-    scheduleAutoGenerate();
+    latestSegmentsRef.current = segments || [];
+  }, [segments]);
 
+  useEffect(() => {
+    isGeneratingRef.current = isGenerating;
+  }, [isGenerating]);
+
+  useEffect(() => {
     return () => {
       if (autoGenerateTimer.current) {
         clearTimeout(autoGenerateTimer.current);
       }
     };
-  }, [segments, scheduleAutoGenerate]);
+  }, []);
 
-  const generateSummary = async () => {
-    if (!segments || segments.length === 0) {
+  const generateSummary = useCallback(async () => {
+    const currentSegments = latestSegmentsRef.current;
+    if (!currentSegments || currentSegments.length === 0) {
       setError('No transcript available yet');
       return;
     }
 
-    const transcript = buildTranscriptText(segments);
+    const transcript = buildTranscriptText(currentSegments);
     if (transcript.length < 50) {
       setError('Not enough transcript to summarize');
       return;
     }
 
+    if (isGeneratingRef.current) return;
+    isGeneratingRef.current = true;
     setIsGenerating(true);
     setError(null);
 
-    const result = await generateSummaryAI(transcript, 'Meeting');
+    try {
+      const result = await generateSummaryAI(transcript, 'Meeting');
 
-    if (result && result.summary) {
-      setSummary({
-        ...result.summary,
-        generatedAt: result.generatedAt || Date.now(),
-      });
-      lastGeneratedSegmentCount.current = segments.length;
-    } else {
-      setError('Failed to generate summary');
+      if (result && result.summary) {
+        setSummary({
+          ...result.summary,
+          generatedAt: result.generatedAt || Date.now(),
+        });
+        lastGeneratedSegmentCount.current = currentSegments.length;
+      } else {
+        setError('Failed to generate summary');
+      }
+    } finally {
+      isGeneratingRef.current = false;
+      setIsGenerating(false);
     }
+  }, []);
 
-    setIsGenerating(false);
-  };
+  // Auto-generate summary once enough new content arrives; do not reset on every segment.
+  const scheduleAutoGenerate = useCallback(() => {
+    if (autoGenerateTimer.current || isGeneratingRef.current) return;
+
+    const segmentCount = latestSegmentsRef.current?.length || 0;
+    const newSegments = segmentCount - lastGeneratedSegmentCount.current;
+    if (newSegments < 20) return;
+
+    autoGenerateTimer.current = setTimeout(() => {
+      autoGenerateTimer.current = null;
+      generateSummary();
+    }, 2000);
+  }, [generateSummary]);
+
+  // Watch for new segments
+  useEffect(() => {
+    scheduleAutoGenerate();
+  }, [segments, scheduleAutoGenerate]);
 
   const timeSinceGenerated = summary.generatedAt
     ? Math.floor((Date.now() - summary.generatedAt) / 60000)

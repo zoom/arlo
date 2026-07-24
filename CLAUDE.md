@@ -66,7 +66,7 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
    - Live transcript display, AI suggestions, highlights
    - Start/stop RTMS via `zoomSdk.callZoomApi('startRTMS')`
 
-2. **Backend API** (`backend/`) — Node.js/Express + PostgreSQL + Prisma
+2. **Backend API** (`backend/`) — Node.js/Express + MySQL + Prisma
    - Zoom OAuth 2.0 (PKCE flow), session management with httpOnly cookies
    - REST API for meetings, transcripts, search, AI, highlights
    - WebSocket server for live transcript broadcast
@@ -124,7 +124,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `components/ui/` — Unstyled primitives: Button, Card, Badge, Input, Textarea, LoadingSpinner
 
 ### Database
-- `backend/prisma/schema.prisma` — PostgreSQL schema
+- `backend/prisma/schema.prisma` — MySQL schema
 - Key models: User, Meeting, Speaker, TranscriptSegment, Highlight, VttFile, UserToken, ParticipantEvent
 - `Speaker` has `@@unique([meetingId, zoomParticipantId])` compound constraint
 - `TranscriptSegment.seqNo` is UNIQUE per meeting (idempotency)
@@ -240,11 +240,13 @@ ZOOM_CLIENT_ID=...              # From Zoom Marketplace
 ZOOM_CLIENT_SECRET=...
 ZOOM_APP_ID=...                 # Marketplace App ID (for open_apps API, different from Client ID)
 PUBLIC_URL=https://...          # ngrok HTTPS URL
-DATABASE_URL=postgresql://...   # Postgres connection string
+DATABASE_URL=mysql://...   # MySQL connection string
 SESSION_SECRET=...              # 64 chars: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 REDIS_ENCRYPTION_KEY=...        # 32 chars: node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
-OPENROUTER_API_KEY=...          # Optional — free models work without it
-DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
+OPENROUTER_API_KEY=...          # Optional; only free OpenRouter models are configured
+DEFAULT_MODEL=openai/gpt-oss-120b:free
+FALLBACK_MODEL=google/gemma-4-31b-it:free
+FALLBACK_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
 ```
 
 ## Common Development Workflows

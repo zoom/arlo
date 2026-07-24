@@ -183,6 +183,11 @@
   font-style: italic;
 }
 
+.key-moments-last-checked {
+  margin: 0;
+  text-align: center;
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

@@ -51,6 +51,15 @@ function getSummarySnippet(summary, query) {
   return null;
 }
 
+function normalizeSummary(summary) {
+  if (typeof summary !== 'string') return summary;
+  try {
+    return JSON.parse(summary);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * GET /api/search
  * Multi-source search: titles -> summaries -> transcripts
@@ -66,8 +75,6 @@ router.get('/', async (req, res) => {
     console.log(`🔍 Searching for: "${q}"`);
 
     // Build meeting filter — only search the authenticated user's meetings
-    const ownerIds = [req.user.id];
-
     const meetingWhere = {
       ownerId: req.user.id,
       ...(meeting_id && { id: meeting_id }),
@@ -81,7 +88,7 @@ router.get('/', async (req, res) => {
       prisma.meeting.findMany({
         where: {
           ...meetingWhere,
-          title: { contains: q, mode: 'insensitive' },
+          title: { contains: q },
         },
         select: {
           id: true,
@@ -94,63 +101,47 @@ router.get('/', async (req, res) => {
         take: parseInt(limit),
       }),
 
-      // 2. Summary search (JSONB fields)
+      // 2. Summary search. JSON is portable at the Prisma model layer; this
+      // query uses MySQL JSON storage without relying on PostgreSQL JSONB.
       prisma.$queryRaw`
-        SELECT m.id, m.title, m.start_time as "startTime", m.summary
+        SELECT m.id, m.title, m.start_time AS startTime, m.summary
         FROM meetings m
-        WHERE m.owner_id = ANY(${ownerIds})
+        WHERE m.owner_id = ${req.user.id}
           AND m.summary IS NOT NULL
           ${meeting_id ? Prisma.sql`AND m.id = ${meeting_id}` : Prisma.empty}
           ${from ? Prisma.sql`AND m.start_time >= ${new Date(from)}` : Prisma.empty}
           ${to ? Prisma.sql`AND m.start_time <= ${new Date(to)}` : Prisma.empty}
-          AND (
-            m.summary->>'overview' ILIKE ${'%' + q + '%'}
-            OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                CASE WHEN jsonb_typeof(m.summary->'keyPoints') = 'array' THEN m.summary->'keyPoints' ELSE '[]'::jsonb END
-              ) elem WHERE elem ILIKE ${'%' + q + '%'}
-            )
-            OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                CASE WHEN jsonb_typeof(m.summary->'decisions') = 'array' THEN m.summary->'decisions' ELSE '[]'::jsonb END
-              ) elem WHERE elem ILIKE ${'%' + q + '%'}
-            )
-            OR EXISTS (
-              SELECT 1 FROM jsonb_array_elements_text(
-                CASE WHEN jsonb_typeof(m.summary->'nextSteps') = 'array' THEN m.summary->'nextSteps' ELSE '[]'::jsonb END
-              ) elem WHERE elem ILIKE ${'%' + q + '%'}
-            )
-          )
+          AND LOWER(CAST(m.summary AS CHAR)) LIKE LOWER(${`%${q}%`})
         ORDER BY m.start_time DESC
         LIMIT ${parseInt(limit)}
       `,
 
-      // 3. Transcript full-text search (existing)
+      // 3. Transcript search. This is intentionally LIKE-compatible for the
+      // initial MySQL migration; a FULLTEXT index can be added after cutover.
       prisma.$queryRaw`
         SELECT
           ts.id,
-          ts.meeting_id as "meetingId",
-          ts.speaker_id as "speakerId",
-          ts.t_start_ms as "tStartMs",
-          ts.t_end_ms as "tEndMs",
+          ts.meeting_id AS meetingId,
+          ts.speaker_id AS speakerId,
+          ts.t_start_ms AS tStartMs,
+          ts.t_end_ms AS tEndMs,
           ts.text,
           ts.confidence,
-          m.id as "meeting.id",
-          m.title as "meeting.title",
-          m.start_time as "meeting.startTime",
-          s.label as "speaker.label",
-          s.display_name as "speaker.displayName",
-          ts_rank(to_tsvector('english', ts.text), plainto_tsquery('english', ${q})) as rank
+          m.id AS meetingIdJoined,
+          m.title AS meetingTitle,
+          m.start_time AS meetingStartTime,
+          s.label AS speakerLabel,
+          s.display_name AS speakerDisplayName
         FROM transcript_segments ts
         INNER JOIN meetings m ON ts.meeting_id = m.id
         LEFT JOIN speakers s ON ts.speaker_id = s.id
         WHERE
-          to_tsvector('english', ts.text) @@ plainto_tsquery('english', ${q})
-          AND m.owner_id = ANY(${ownerIds})
+          LOWER(ts.text) LIKE LOWER(${`%${q}%`})
+          AND m.owner_id = ${req.user.id}
           ${meeting_id ? Prisma.sql`AND m.id = ${meeting_id}` : Prisma.empty}
           ${from ? Prisma.sql`AND m.start_time >= ${new Date(from)}` : Prisma.empty}
           ${to ? Prisma.sql`AND m.start_time <= ${new Date(to)}` : Prisma.empty}
-        ORDER BY rank DESC, m.start_time DESC, ts.t_start_ms ASC
+        ORDER BY m.start_time DESC, ts.t_start_ms ASC
         LIMIT ${parseInt(limit)}
       `,
     ]);
@@ -169,7 +160,7 @@ router.get('/', async (req, res) => {
     const summaryResults = summaryMeetings
       .filter(m => !titleMatchIds.has(m.id))
       .map(m => {
-        const snippet = getSummarySnippet(m.summary, q);
+        const snippet = getSummarySnippet(normalizeSummary(m.summary), q);
         return {
           type: 'summary',
           meetingId: m.id,
@@ -183,27 +174,27 @@ router.get('/', async (req, res) => {
     // Format transcript results
     const formattedSegments = transcriptSegments.map(seg => ({
       id: seg.id,
-      meetingId: seg.meetingId || seg['meeting.id'],
+      meetingId: seg.meetingId || seg.meetingIdJoined,
       speakerId: seg.speakerId,
       tStartMs: seg.tStartMs,
       tEndMs: seg.tEndMs,
       text: seg.text,
       confidence: seg.confidence,
       meeting: {
-        id: seg['meeting.id'],
-        title: seg['meeting.title'],
-        startTime: seg['meeting.startTime'],
+        id: seg.meetingIdJoined,
+        title: seg.meetingTitle,
+        startTime: seg.meetingStartTime,
       },
-      speaker: seg['speaker.label'] ? {
-        label: seg['speaker.label'],
-        displayName: seg['speaker.displayName'],
+      speaker: seg.speakerLabel ? {
+        label: seg.speakerLabel,
+        displayName: seg.speakerDisplayName,
       } : null,
     }));
 
     // Fallback to basic search if full-text search returns nothing
     const finalSegments = transcriptSegments.length > 0 ? formattedSegments : await prisma.transcriptSegment.findMany({
       where: {
-        text: { contains: q, mode: 'insensitive' },
+        text: { contains: q },
         meeting: meetingWhere,
       },
       include: {

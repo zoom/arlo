@@ -47,7 +47,10 @@ export default function DealTracker({ segments, meetingId, showDemoData = true }
   const [editingField, setEditingField] = useState(null);
   const [editValue, setEditValue] = useState('');
 
-  const currentStageIndex = DEAL_STAGES.findIndex(s => s.id === deal.stage);
+  const matchedStageIndex = deal
+    ? DEAL_STAGES.findIndex(stage => stage.id === deal.stage)
+    : -1;
+  const currentStageIndex = matchedStageIndex >= 0 ? matchedStageIndex : 0;
   const currentStage = DEAL_STAGES[currentStageIndex];
 
   const startEdit = (field, value) => {

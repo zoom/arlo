@@ -23,6 +23,7 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Textarea from '../components/ui/Textarea';
+import { FREE_OPENROUTER_MODELS, getPreferredAiModel, setPreferredAiModel } from '../utils/aiModel';
 import './SettingsView.css';
 
 // Icon mapping for verticals
@@ -35,24 +36,7 @@ const VERTICAL_ICONS = {
 };
 
 const MODELS = {
-  openrouter: [
-    { value: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
-    { value: 'openai/gpt-4', label: 'GPT-4' },
-    { value: 'openai/gpt-4-turbo', label: 'GPT-4 Turbo' },
-  ],
-  anthropic: [
-    { value: 'claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
-    { value: 'claude-3-opus', label: 'Claude 3 Opus' },
-    { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' },
-  ],
-  openai: [
-    { value: 'gpt-4', label: 'GPT-4' },
-    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-  ],
-  custom: [
-    { value: 'custom-model', label: 'Custom Model' },
-  ],
+  openrouter: FREE_OPENROUTER_MODELS,
 };
 
 const DEFAULT_MESSAGES = {
@@ -74,7 +58,7 @@ export default function SettingsView() {
   const [provider, setProvider] = useState('openrouter');
   const [apiKey, setApiKey] = useState('');
   const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('anthropic/claude-3.5-sonnet');
+  const [model, setModel] = useState(getPreferredAiModel);
   const [testStatus, setTestStatus] = useState('idle');
 
   // Chat notifications state
@@ -235,16 +219,32 @@ export default function SettingsView() {
   const handleProviderChange = (newProvider) => {
     setProvider(newProvider);
     const firstModel = MODELS[newProvider]?.[0]?.value || '';
-    setModel(firstModel);
+    setModel(setPreferredAiModel(firstModel));
   };
 
-  const handleTestConnection = () => {
+  const handleModelChange = (newModel) => {
+    setModel(setPreferredAiModel(newModel));
+    setTestStatus('idle');
+  };
+
+  const handleTestConnection = async () => {
     setTestStatus('testing');
-    // TODO: Replace with actual API test call
-    setTimeout(() => {
+    try {
+      const response = await fetch('/api/ai/key-moment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          model,
+          text: 'We decided that the launch deadline is next Friday and Alex will own the migration plan.',
+        }),
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       setTestStatus('success');
       setTimeout(() => setTestStatus('idle'), 3000);
-    }, 1500);
+    } catch {
+      setTestStatus('error');
+    }
   };
 
   return (
@@ -395,8 +395,6 @@ export default function SettingsView() {
               </div>
             )}
 
-            <hr className="settings-separator" />
-
             <div className="settings-toggle-row">
               <div className="settings-toggle-text">
                 <label className="text-sans font-medium" htmlFor="auto-start">
@@ -441,12 +439,9 @@ export default function SettingsView() {
                 onChange={(e) => handleProviderChange(e.target.value)}
               >
                 <option value="openrouter">OpenRouter</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
-                <option value="custom">Custom</option>
               </select>
               <p className="settings-field-help">
-                Choose your preferred AI provider for meeting summaries and insights
+                This deployment only uses free OpenRouter models.
               </p>
             </div>
 
@@ -485,7 +480,7 @@ export default function SettingsView() {
                 id="model"
                 className="settings-select"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => handleModelChange(e.target.value)}
               >
                 {(MODELS[provider] || []).map((m) => (
                   <option key={m.value} value={m.value}>
@@ -494,7 +489,7 @@ export default function SettingsView() {
                 ))}
               </select>
               <p className="settings-field-help">
-                Select the AI model to use for processing meeting data
+                Select a free model for live meeting AI. The backend rejects non-free model IDs.
               </p>
             </div>
 

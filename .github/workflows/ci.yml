@@ -43,6 +43,6 @@ jobs:
           ZOOM_CLIENT_ID: test
           ZOOM_CLIENT_SECRET: test
           PUBLIC_URL: https://example.com
-          DATABASE_URL: postgresql://postgres:postgres@postgres:5432/test
+          DATABASE_URL: mysql://arlo:arlo@mysql:3306/test
           SESSION_SECRET: testsecrettestsecrettestsecrettestsecrettestsecrettestsecret1234
           REDIS_ENCRYPTION_KEY: testkeytestkeytestkey12345678901

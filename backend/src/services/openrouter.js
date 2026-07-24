@@ -6,6 +6,24 @@
 const config = require('../config');
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const KEY_MOMENT_TYPES = new Set(['announcement', 'agreement', 'concern', 'insight', 'milestone']);
+const KEY_MOMENT_TYPE_ALIASES = {
+  action: 'agreement',
+  action_item: 'agreement',
+  commitment: 'agreement',
+  decision: 'agreement',
+  decisions: 'agreement',
+  issue: 'concern',
+  problem: 'concern',
+  risk: 'concern',
+  blocker: 'concern',
+  update: 'announcement',
+  news: 'announcement',
+  idea: 'insight',
+  observation: 'insight',
+  completion: 'milestone',
+  progress: 'milestone',
+};
 
 /**
  * Call OpenRouter API
@@ -15,8 +33,10 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
  * @returns {Promise<string>} The AI response text
  */
 async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
-  const model = options.model || config.defaultModel;
+  const models = options.models || buildModelChain(options.model);
   const maxTokens = options.maxTokens || 2048;
+  const timeoutMs = options.timeoutMs || 20000;
+  const temperature = options.temperature ?? 0.7;
 
   const headers = {
     'Content-Type': 'application/json',
@@ -29,46 +49,171 @@ async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
     headers['Authorization'] = `Bearer ${config.openrouterApiKey}`;
   }
 
+  const messages = buildMessages(prompt, systemPrompt);
+  let lastError = null;
+
+  for (const model of models) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(OPENROUTER_API_URL, {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens: maxTokens,
+          temperature,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        lastError = new Error(`OpenRouter API error: ${response.status}`);
+        lastError.status = response.status;
+        lastError.body = errorText;
+        console.error(`❌ OpenRouter API error for ${model}:`, response.status, errorText);
+        continue;
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      if (content.trim()) {
+        if (options.parseResponse) {
+          try {
+            return options.parseResponse(content);
+          } catch (error) {
+            lastError = new Error(`Invalid response format from ${model}: ${error.message}`);
+            console.warn(`⚠️ Invalid OpenRouter response format from ${model}:`, error.message);
+            continue;
+          }
+        }
+        return content;
+      }
+
+      lastError = new Error(`OpenRouter returned an empty response for ${model}`);
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ OpenRouter call failed for ${model}:`, error.message);
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  throw lastError || new Error('OpenRouter call failed');
+}
+
+function buildModelChain(preferredModel) {
+  const normalizedPreferredModel = normalizeRequestedModel(preferredModel);
+  const chain = [
+    normalizedPreferredModel || config.defaultModel,
+    config.defaultModel,
+    ...(config.fallbackModels || []),
+    config.fallbackModel,
+  ];
+
+  return [...new Set(chain.filter(Boolean))];
+}
+
+function normalizeRequestedModel(model) {
+  if (!model) return null;
+  const requested = String(model).trim();
+  if ((config.allowedOpenRouterModels || []).includes(requested)) {
+    return requested;
+  }
+  console.warn(`Ignoring unsupported OpenRouter model request "${requested}"`);
+  return null;
+}
+
+function buildMessages(prompt, systemPrompt) {
   const messages = [];
   if (systemPrompt) {
     messages.push({ role: 'system', content: systemPrompt });
   }
   messages.push({ role: 'user', content: prompt });
+  return messages;
+}
+
+function extractJsonObject(text) {
+  const cleaned = String(text || '')
+    .replace(/^```(?:json)?\s*\n?/i, '')
+    .replace(/\n?```\s*$/i, '')
+    .trim();
 
   try {
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: maxTokens,
-        temperature: 0.7,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ OpenRouter API error:', response.status, errorText);
-
-      // Try fallback model if primary fails
-      if (model !== config.fallbackModel) {
-        console.log('🔄 Trying fallback model:', config.fallbackModel);
-        return callOpenRouter(prompt, systemPrompt, {
-          ...options,
-          model: config.fallbackModel,
-        });
-      }
-
-      throw new Error(`OpenRouter API error: ${response.status}`);
+    return JSON.parse(cleaned);
+  } catch {
+    const match = cleaned.match(/\{[\s\S]*\}/);
+    if (!match) return null;
+    try {
+      return JSON.parse(match[0]);
+    } catch {
+      return null;
     }
-
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
-  } catch (error) {
-    console.error('❌ OpenRouter call failed:', error.message);
-    throw error;
   }
+}
+
+function normalizeKeyMomentType(type) {
+  const key = String(type || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  const normalized = KEY_MOMENT_TYPE_ALIASES[key] || key;
+  return KEY_MOMENT_TYPES.has(normalized) ? normalized : null;
+}
+
+function normalizeConfidence(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 50;
+  if (number <= 1) return Math.round(number * 100);
+  return Math.max(0, Math.min(100, Math.round(number)));
+}
+
+function parseKeyMomentResponse(response) {
+  const parsed = extractJsonObject(response);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('response is not a JSON object');
+  }
+  if (parsed.skip === true) {
+    return { skip: true };
+  }
+
+  const type = normalizeKeyMomentType(parsed.type || parsed.category || parsed.kind);
+  const textValue = parsed.text || parsed.quote || parsed.summary || parsed.moment;
+  const momentText = String(textValue || '').trim().replace(/^["']|["']$/g, '');
+  if (!type) {
+    throw new Error('missing or unsupported key moment type');
+  }
+  if (!momentText) {
+    throw new Error('missing key moment text');
+  }
+
+  return {
+    type,
+    text: momentText.substring(0, 160),
+    confidence: normalizeConfidence(parsed.confidence),
+  };
+}
+
+function buildExtractiveSummary(transcript) {
+  const lines = transcript
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const keyPoints = lines
+    .slice(0, 5)
+    .map((line) => line.replace(/^\[[^\]]+\]:\s*/, '').slice(0, 180));
+
+  return {
+    overview: keyPoints.length > 0
+      ? keyPoints.slice(0, 2).join(' ')
+      : 'Transcript captured, but AI summary generation was unavailable.',
+    keyPoints,
+    decisions: [],
+    nextSteps: [],
+  };
 }
 
 /**
@@ -77,7 +222,7 @@ async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
  * @param {string} meetingTitle - Meeting title for context
  * @returns {Promise<object>} Summary object with sections
  */
-async function generateSummary(transcript, meetingTitle = 'Meeting') {
+async function generateSummary(transcript, meetingTitle = 'Meeting', options = {}) {
   const systemPrompt = `You are an expert meeting assistant. Your job is to create clear, concise meeting summaries.
 Focus on the key points, decisions made, and important discussions.
 Format your response as JSON with the following structure:
@@ -94,7 +239,7 @@ Only output valid JSON, no markdown or explanation.`;
 ${transcript}`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1024 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1024, model: options.model });
 
     // Strip markdown code fences if present (e.g., ```json ... ```)
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -114,7 +259,7 @@ ${transcript}`;
     }
   } catch (error) {
     console.error('❌ Summary generation failed:', error.message);
-    throw error;
+    return buildExtractiveSummary(transcript);
   }
 }
 
@@ -255,7 +400,7 @@ Generate a better, more descriptive title:`;
  * @param {object} currentSoap - Current SOAP data (for incremental updates)
  * @returns {Promise<object>} SOAP notes object with subjective, objective, assessment, plan
  */
-async function extractSOAPNotes(transcript, currentSoap = {}) {
+async function extractSOAPNotes(transcript, currentSoap = {}, options = {}) {
   const systemPrompt = `You are a clinical documentation assistant helping healthcare providers document patient encounters.
 Extract SOAP notes from the transcript. Be accurate and use clinical terminology.
 
@@ -295,7 +440,7 @@ P: ${currentSoap.plan || '(empty)'}
 ` : ''}`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1536 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1536, model: options.model });
 
     // Strip markdown code fences if present
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -330,7 +475,7 @@ P: ${currentSoap.plan || '(empty)'}
  * @param {string} text - The text to analyze
  * @returns {Promise<object>} Sentiment analysis result
  */
-async function analyzeSentiment(text) {
+async function analyzeSentiment(text, options = {}) {
   const systemPrompt = `You are an expert sentiment analyzer for customer support calls.
 Analyze the customer's emotional state from their speech.
 
@@ -356,7 +501,7 @@ Output ONLY valid JSON, no markdown.`;
   const prompt = `Analyze sentiment: "${text}"`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 100 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 100, model: options.model });
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
     try {
@@ -381,7 +526,7 @@ Output ONLY valid JSON, no markdown.`;
  * @param {string} text - Recent transcript text to analyze
  * @returns {Promise<object|null>} Key moment object or null if no significant moment
  */
-async function extractKeyMoment(text) {
+async function extractKeyMoment(text, options = {}) {
   const systemPrompt = `You are an expert at identifying key moments in meetings.
 Analyze the text and determine if it contains a significant moment worth highlighting.
 
@@ -406,26 +551,31 @@ Output ONLY valid JSON, no markdown.`;
 
   const prompt = `Is this a key moment? "${text}"`;
 
-  try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 150 });
-    const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+  const models = buildModelChain(options.model);
+  let validSkip = null;
+  let lastError = null;
 
+  for (const model of models) {
     try {
-      const parsed = JSON.parse(cleaned);
-      if (parsed.skip) return null;
-      if (!parsed.type || !parsed.text) return null;
-      return {
-        type: parsed.type,
-        text: parsed.text,
-        confidence: parsed.confidence || 50,
-      };
-    } catch {
-      return null;
+      const result = await callOpenRouter(prompt, systemPrompt, {
+        models: [model],
+        maxTokens: 150,
+        temperature: 0.1,
+        parseResponse: parseKeyMomentResponse,
+      });
+      if (result.skip) {
+        validSkip = validSkip || { skip: true, modelUsed: model };
+        continue;
+      }
+      return { ...result, modelUsed: model };
+    } catch (error) {
+      lastError = error;
+      console.warn(`⚠️ Key moment model ${model} failed validation or request:`, error.message);
     }
-  } catch (error) {
-    console.error('❌ Key moment extraction failed:', error.message);
-    return null;
   }
+
+  if (validSkip) return validSkip;
+  throw new Error(`All key moment models failed: ${lastError?.message || 'unknown error'}`);
 }
 
 module.exports = {

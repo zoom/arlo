@@ -138,7 +138,7 @@ test_rtms_health() {
 test_database_connection() {
     print_test "Testing database connection"
 
-    if docker-compose exec -T postgres pg_isready -U postgres > /dev/null 2>&1; then
+    if docker-compose exec -T mysql mysqladmin ping -h localhost -u arlo -parlo > /dev/null 2>&1; then
         print_pass "Database is accepting connections"
         return 0
     else
@@ -151,13 +151,13 @@ test_database_connection() {
 test_database_tables() {
     print_test "Testing database tables exist"
 
-    tables=$(docker-compose exec -T postgres psql -U postgres -d meeting_assistant -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='public';" 2>&1 | tr -d ' ')
+    tables=$(docker-compose exec -T mysql mysql -u arlo -parlo -D meeting_assistant -Nse "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE();" 2>&1 | tr -d ' ')
 
     if [ "$tables" -gt 0 ] 2>/dev/null; then
         print_pass "Database has $tables tables"
         return 0
     else
-        print_fail "No database tables found. Run: docker-compose exec backend npx prisma migrate dev"
+        print_fail "No database tables found. Run: docker-compose exec backend npx prisma db push"
         return 1
     fi
 }
@@ -204,17 +204,17 @@ test_env_variables() {
     fi
 }
 
-# Test 9: Full-text Search Index
+# Test 9: Transcript Search Table
 test_fulltext_index() {
-    print_test "Testing full-text search index exists"
+    print_test "Testing transcript search table exists"
 
-    index_check=$(docker-compose exec -T postgres psql -U postgres -d meeting_assistant -t -c "SELECT indexname FROM pg_indexes WHERE tablename='transcript_segments' AND indexname='transcript_segments_text_search_idx';" 2>&1)
+    index_check=$(docker-compose exec -T mysql mysql -u arlo -parlo -D meeting_assistant -Nse "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'transcript_segments';" 2>&1)
 
-    if echo "$index_check" | grep -q "transcript_segments_text_search_idx"; then
-        print_pass "Full-text search index exists"
+    if echo "$index_check" | grep -q "transcript_segments"; then
+        print_pass "Transcript search table exists"
         return 0
     else
-        print_fail "Full-text search index not found"
+        print_fail "Transcript search table not found"
         return 1
     fi
 }

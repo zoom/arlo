@@ -93,7 +93,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function InMeetingView() {
   useParams(); // id available from route but meetingId comes from context
   const navigate = useNavigate();
-  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed } = useMeeting();
+  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, rtmsSessionId, connectWebSocket, viewers, setTitleUserRenamed } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -175,57 +175,76 @@ export default function InMeetingView() {
 
   // Connect WebSocket when authenticated and meeting is available
   useEffect(() => {
-    if (!isAuthenticated || ws || !meetingId) return;
+    if (!isAuthenticated || !wsToken || ws || !meetingId || !rtmsSessionId) return;
     connectWebSocket(wsToken, meetingId);
-  }, [isAuthenticated, ws, meetingId, wsToken, connectWebSocket]);
+  }, [isAuthenticated, ws, meetingId, rtmsSessionId, wsToken, connectWebSocket]);
 
   // Load existing transcript segments from DB (for auto-started RTMS sessions)
   const historicalLoadedRef = useRef(false);
-  useEffect(() => {
-    if (!rtmsActive || !meetingId || historicalLoadedRef.current) return;
-    historicalLoadedRef.current = true;
+  const historicalEventsLoadedRef = useRef(false);
 
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/transcript`, {
+  const syncHistoricalTranscript = useCallback(() => {
+    if (!meetingId) return Promise.resolve();
+    return fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/transcript`, {
       credentials: 'include',
     })
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data?.segments?.length > 0) {
           setSegments(prev => {
-            // Merge: DB segments first, then any WS segments not already present
-            const dbSeqs = new Set(data.segments.map(s => s.seqNo));
-            const newFromWs = prev.filter(s => !dbSeqs.has(String(s.seqNo)));
-            return [...data.segments, ...newFromWs];
+            const seenSeqs = new Set(prev.map(s => String(s.seqNo)));
+            const merged = [...prev];
+            data.segments.forEach((segment) => {
+              if (!seenSeqs.has(String(segment.seqNo))) {
+                seenSeqs.add(String(segment.seqNo));
+                merged.push(segment);
+              }
+            });
+            return merged.sort((a, b) => Number(a.seqNo) - Number(b.seqNo));
           });
           console.log(`Loaded ${data.segments.length} historical segments from DB`);
         }
       })
       .catch(() => {});
-  }, [rtmsActive, meetingId]);
+  }, [meetingId]);
 
-  // Load existing participant events from DB (for mid-meeting app opens)
-  const historicalEventsLoadedRef = useRef(false);
-  useEffect(() => {
-    if (!rtmsActive || !meetingId || historicalEventsLoadedRef.current) return;
-    historicalEventsLoadedRef.current = true;
-
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/participant-events`, {
+  const syncHistoricalParticipantEvents = useCallback(() => {
+    if (!meetingId) return Promise.resolve();
+    return fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/participant-events`, {
       credentials: 'include',
     })
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data?.events?.length > 0) {
           setParticipantEvents(prev => {
-            // Merge: DB events first, then any WS events not already present
-            const dbIds = new Set(data.events.map(e => e.id));
-            const newFromWs = prev.filter(e => !dbIds.has(e.id));
-            return [...data.events, ...newFromWs];
+            const dbIds = new Set(prev.map(e => e.id));
+            const merged = [...prev];
+            data.events.forEach((event) => {
+              if (!dbIds.has(event.id)) {
+                dbIds.add(event.id);
+                merged.push(event);
+              }
+            });
+            return merged.sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
           });
           console.log(`Loaded ${data.events.length} historical participant events from DB`);
         }
       })
       .catch(() => {});
-  }, [rtmsActive, meetingId]);
+  }, [meetingId]);
+
+  useEffect(() => {
+    if (!rtmsActive || !meetingId || historicalLoadedRef.current) return;
+    historicalLoadedRef.current = true;
+    syncHistoricalTranscript();
+  }, [rtmsActive, meetingId, syncHistoricalTranscript]);
+
+  // Load existing participant events from DB (for mid-meeting app opens)
+  useEffect(() => {
+    if (!rtmsActive || !meetingId || historicalEventsLoadedRef.current) return;
+    historicalEventsLoadedRef.current = true;
+    syncHistoricalParticipantEvents();
+  }, [rtmsActive, meetingId, syncHistoricalParticipantEvents]);
 
   // Listen for transcript segments
   useEffect(() => {
@@ -233,6 +252,11 @@ export default function InMeetingView() {
 
     const handleMessage = (event) => {
       const message = JSON.parse(event.data);
+      if (message.type === 'subscribed') {
+        syncHistoricalTranscript();
+        syncHistoricalParticipantEvents();
+      }
+
       if (message.type === 'transcript.segment') {
         const { segment } = message.data;
         setSegments((prev) => {
@@ -269,7 +293,7 @@ export default function InMeetingView() {
 
     ws.addEventListener('message', handleMessage);
     return () => ws.removeEventListener('message', handleMessage);
-  }, [ws, followLive]);
+  }, [ws, followLive, syncHistoricalTranscript, syncHistoricalParticipantEvents]);
 
   // Scroll detection
   const handleScroll = useCallback(() => {

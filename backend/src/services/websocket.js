@@ -2,10 +2,142 @@ const WebSocket = require('ws');
 const url = require('url');
 const { verifyToken } = require('./auth');
 const prisma = require('../lib/prisma');
+const realtimeBus = require('./realtimeBus');
+const config = require('../config');
 
 // Store active connections
-const connections = new Map(); // meetingId -> Set of WebSocket connections
+const connections = new Map(); // legacy meeting bucket, disabled for new fanout
 const userConnections = new Map(); // userId -> Set of WebSocket connections
+const zoomUserConnections = new Map(); // zoomUserId -> Set of WebSocket connections
+const sessionConnections = new Map(); // RTMS stream/sessionId -> Set of WebSocket connections
+
+function addToSetMap(map, key, value) {
+  if (!key) return;
+  if (!map.has(key)) {
+    map.set(key, new Set());
+  }
+  map.get(key).add(value);
+}
+
+function deleteFromSetMap(map, key, value) {
+  if (!key || !map.has(key)) return;
+  map.get(key).delete(value);
+  if (map.get(key).size === 0) {
+    map.delete(key);
+  }
+}
+
+function wsMatchesEnvelopeIdentity(ws, envelope) {
+  if (!ws.userId) return false;
+
+  const envelopeMeetingIds = new Set([
+    envelope.meetingId,
+    envelope.rtmsMeetingId,
+    envelope.sdkMeetingId,
+  ].filter(Boolean));
+  const meetingMatches = !envelopeMeetingIds.size ||
+    envelopeMeetingIds.has(ws.meetingId) ||
+    envelopeMeetingIds.has(ws.rtmsMeetingId);
+  const streamMatches = !!(envelope.rtmsStreamId && ws.rtmsStreamId === envelope.rtmsStreamId);
+  const sessionMatches = !!(envelope.clientSessionId && ws.clientSessionId === envelope.clientSessionId);
+
+  if (meetingMatches && streamMatches) {
+    return true;
+  }
+
+  if (envelope.appUserId && ws.appUserId === envelope.appUserId) {
+    return meetingMatches || sessionMatches;
+  }
+
+  const envelopeZoomIds = [envelope.zoomUserId, envelope.operatorId].filter(Boolean);
+  if (ws.zoomUserId && envelopeZoomIds.includes(ws.zoomUserId)) {
+    return meetingMatches || sessionMatches;
+  }
+
+  return sessionMatches;
+}
+
+function addMapMatches(clients, map, key) {
+  if (!key || !map.has(key)) return;
+  map.get(key).forEach((ws) => clients.add(ws));
+}
+
+function collectEnvelopeClients(envelope) {
+  const clients = new Set();
+  addMapMatches(clients, userConnections, envelope.appUserId);
+  addMapMatches(clients, zoomUserConnections, envelope.zoomUserId);
+  addMapMatches(clients, zoomUserConnections, envelope.operatorId);
+  addMapMatches(clients, sessionConnections, envelope.clientSessionId);
+  addMapMatches(clients, sessionConnections, envelope.rtmsStreamId);
+  return clients;
+}
+
+function sendRealtimeEnvelope(ws, envelope) {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  if (!wsMatchesEnvelopeIdentity(ws, envelope)) return false;
+
+  let message = null;
+  switch (envelope.type) {
+    case 'transcript.segment':
+      message = {
+        type: 'transcript.segment',
+        data: {
+          meetingId: envelope.meetingId,
+          sessionId: envelope.rtmsStreamId || null,
+          realtimeSessionId: envelope.sessionId,
+          segment: envelope.segment,
+          timestamp: new Date(envelope.publishedAt || Date.now()).toISOString(),
+        },
+      };
+      break;
+    case 'participant.event':
+      message = {
+        type: 'participant.event',
+        data: {
+          meetingId: envelope.meetingId,
+          sessionId: envelope.rtmsStreamId || null,
+          realtimeSessionId: envelope.sessionId,
+          event: envelope.event,
+          timestamp: new Date(envelope.publishedAt || Date.now()).toISOString(),
+        },
+      };
+      break;
+    case 'meeting.status':
+      message = {
+        type: 'meeting.status',
+        data: {
+          meetingId: envelope.meetingId,
+          sessionId: envelope.rtmsStreamId || null,
+          realtimeSessionId: envelope.sessionId,
+          status: envelope.status,
+          timestamp: new Date(envelope.publishedAt || Date.now()).toISOString(),
+        },
+      };
+      break;
+    default:
+      return false;
+  }
+
+  ws.send(JSON.stringify(message));
+  return true;
+}
+
+function broadcastRealtimeEnvelope(envelope) {
+  if (!envelope?.meetingId) return 0;
+  const clients = collectEnvelopeClients(envelope);
+
+  if (clients.size === 0) {
+    console.log(`📡 No active user/session connections for realtime meeting ${envelope.meetingId}`);
+    return 0;
+  }
+
+  let sentCount = 0;
+  clients.forEach((ws) => {
+    if (sendRealtimeEnvelope(ws, envelope)) sentCount++;
+  });
+  console.log(`📡 Valkey realtime ${envelope.type} to ${sentCount} user/session client(s) for meeting ${envelope.meetingId}`);
+  return sentCount;
+}
 
 /**
  * Initialize WebSocket server
@@ -18,51 +150,83 @@ function initWebSocketServer(server) {
 
   wss.on('connection', async (ws, req) => {
     const queryParams = url.parse(req.url, true).query;
-    const { meeting_id, token } = queryParams;
+    const {
+      meeting_uuid,
+      meeting_id,
+      meetingid,
+      token,
+      session_id,
+      app_user_id,
+      zoom_user_id,
+      zoom_meeting_number,
+    } = queryParams;
+    const requestedMeetingId = meeting_uuid || meeting_id;
+    const requestedRtmsStreamId = session_id || null;
+    const requestedMeetingNumber = meetingid || zoom_meeting_number || null;
 
-    console.log('📡 New WebSocket connection attempt at', req.url);
-    console.log('📡 Meeting ID from query:', meeting_id);
+    const allowAnonymous = config.nodeEnv !== 'production' || process.env.ALLOW_ANONYMOUS_WS === 'true';
+    console.log('📡 New WebSocket connection attempt', {
+      path: '/ws',
+      meetingId: requestedMeetingId || null,
+      hasToken: !!token,
+      hasSessionId: !!session_id,
+    });
 
-    // Verify token if provided, otherwise allow anonymous meeting subscription
+    // Verify token. Browser-supplied user IDs are hints only; the signed token is authoritative.
     let userId = null;
+    let zoomUserId = null;
     if (token) {
       try {
         const payload = await verifyToken(token);
         userId = payload.userId;
+        zoomUserId = payload.zoomUserId || null;
         console.log(`✅ WebSocket authenticated: User ${userId}`);
       } catch (error) {
         console.error('⚠️ WebSocket token verification failed:', error.message);
-        // Allow connection but mark as anonymous
-        console.log('📡 Allowing anonymous WebSocket connection for meeting streaming');
+        ws.close(1008, 'Invalid authentication token');
+        return;
       }
-    } else if (meeting_id) {
-      // Allow token-less connections for in-meeting transcript streaming
-      console.log(`📡 Anonymous WebSocket connection for meeting: ${meeting_id}`);
+    } else if (!allowAnonymous) {
+      console.error('❌ WebSocket token required in production');
+      ws.close(1008, 'Authentication required');
+      return;
+    } else if (requestedMeetingId) {
+      console.log(`📡 Anonymous development WebSocket connection for meeting: ${requestedMeetingId}`);
     } else {
       console.error('❌ WebSocket requires either token or meeting_id');
-      ws.close(1008, 'Authentication required');
+      ws.close(1008, 'Meeting ID required');
+      return;
+    }
+
+    if (userId && app_user_id && app_user_id !== userId) {
+      console.warn(`Rejected WebSocket user mismatch tokenUser=${userId} queryUser=${app_user_id}`);
+      ws.close(1008, 'User identity mismatch');
+      return;
+    }
+
+    if (zoomUserId && zoom_user_id && zoom_user_id !== zoomUserId) {
+      console.warn(`Rejected WebSocket Zoom user mismatch tokenZoomUser=${zoomUserId} queryZoomUser=${zoom_user_id}`);
+      ws.close(1008, 'Zoom user identity mismatch');
       return;
     }
 
     // Store connection
     ws.userId = userId;
-    ws.meetingId = meeting_id;
+    ws.appUserId = userId;
+    ws.zoomUserId = zoomUserId;
+    ws.clientAppUserIdHint = app_user_id || null;
+    ws.clientZoomUserIdHint = zoom_user_id || null;
+    ws.clientSessionId = null;
+    ws.rtmsStreamId = requestedRtmsStreamId;
+    ws.meetingID = requestedMeetingNumber;
+    ws.zoomMeetingNumber = requestedMeetingNumber;
+    ws.meetingId = requestedMeetingId;
     ws.isAlive = true;
 
     // Add to user connections
-    if (!userConnections.has(userId)) {
-      userConnections.set(userId, new Set());
-    }
-    userConnections.get(userId).add(ws);
-
-    // Add to meeting connections if meeting_id provided
-    if (meeting_id) {
-      if (!connections.has(meeting_id)) {
-        connections.set(meeting_id, new Set());
-      }
-      connections.get(meeting_id).add(ws);
-      console.log(`📡 Subscribed to meeting: ${meeting_id}`);
-    }
+    addToSetMap(userConnections, ws.appUserId, ws);
+    addToSetMap(zoomUserConnections, ws.zoomUserId, ws);
+    addToSetMap(sessionConnections, ws.rtmsStreamId, ws);
 
     // Heartbeat
     ws.on('pong', () => {
@@ -88,21 +252,17 @@ function initWebSocketServer(server) {
       console.log(`📡 WebSocket disconnected: User ${userId}`);
 
       // Remove from user connections
-      if (userConnections.has(userId)) {
-        userConnections.get(userId).delete(ws);
-        if (userConnections.get(userId).size === 0) {
-          userConnections.delete(userId);
-        }
-      }
+      deleteFromSetMap(userConnections, ws.appUserId, ws);
+      deleteFromSetMap(zoomUserConnections, ws.zoomUserId, ws);
+      deleteFromSetMap(sessionConnections, ws.clientSessionId, ws);
+      deleteFromSetMap(sessionConnections, ws.rtmsStreamId, ws);
 
-      // Remove from meeting connections and broadcast updated presence
-      const disconnectedMeetingId = ws.meetingId || meeting_id;
+      // Remove any legacy meeting-bucket registration left by older connections.
+      const disconnectedMeetingId = ws.meetingId || requestedMeetingId;
       if (disconnectedMeetingId && connections.has(disconnectedMeetingId)) {
         connections.get(disconnectedMeetingId).delete(ws);
         if (connections.get(disconnectedMeetingId).size === 0) {
           connections.delete(disconnectedMeetingId);
-        } else {
-          broadcastPresence(disconnectedMeetingId);
         }
       }
 
@@ -120,7 +280,8 @@ function initWebSocketServer(server) {
       type: 'connected',
       data: {
         userId,
-        meetingId: meeting_id,
+        meetingId: requestedMeetingId,
+        rtmsStreamId: ws.rtmsStreamId,
         timestamp: new Date().toISOString(),
       },
     }));
@@ -158,7 +319,21 @@ async function handleWebSocketMessage(ws, data) {
   switch (type) {
     case 'subscribe':
       // Subscribe to a meeting
-      const { meetingId, participantName, isGuest } = payload || {};
+      const {
+        meetingUUID,
+        meetingId: legacyMeetingId,
+        participantName,
+        isGuest,
+        sessionId,
+        rtmsStreamId: payloadRtmsStreamId,
+        appUserId,
+        zoomUserId,
+        meetingID: payloadMeetingID,
+        zoomMeetingNumber,
+      } = payload || {};
+      const meetingId = meetingUUID || legacyMeetingId;
+      const rtmsStreamId = payloadRtmsStreamId || sessionId || ws.rtmsStreamId || null;
+      const numericMeetingID = payloadMeetingID || zoomMeetingNumber || ws.meetingID || null;
       if (meetingId) {
         // Remove from previous meeting if subscribed
         if (ws.meetingId && ws.meetingId !== meetingId && connections.has(ws.meetingId)) {
@@ -170,22 +345,74 @@ async function handleWebSocketMessage(ws, data) {
         ws.meetingId = meetingId;
         ws.participantName = participantName || null;
         ws.isGuest = !!isGuest;
-        if (!connections.has(meetingId)) {
-          connections.set(meetingId, new Set());
+        if (ws.userId && appUserId && appUserId !== ws.userId) {
+          ws.send(JSON.stringify({ type: 'error', error: 'User identity mismatch' }));
+          ws.close(1008, 'User identity mismatch');
+          return;
         }
-        connections.get(meetingId).add(ws);
+        if (ws.zoomUserId && zoomUserId && zoomUserId !== ws.zoomUserId) {
+          ws.send(JSON.stringify({ type: 'error', error: 'Zoom user identity mismatch' }));
+          ws.close(1008, 'Zoom user identity mismatch');
+          return;
+        }
+
+        ws.rtmsStreamId = rtmsStreamId;
+        ws.clientSessionId = payload?.clientSessionId || ws.clientSessionId || null;
+        ws.clientAppUserIdHint = appUserId || ws.clientAppUserIdHint || null;
+        ws.clientZoomUserIdHint = zoomUserId || ws.clientZoomUserIdHint || null;
+        ws.meetingID = ws.meetingID || numericMeetingID || null;
+        ws.zoomMeetingNumber = ws.meetingID;
+        addToSetMap(userConnections, ws.appUserId, ws);
+        addToSetMap(zoomUserConnections, ws.zoomUserId, ws);
+        addToSetMap(sessionConnections, ws.clientSessionId, ws);
+        addToSetMap(sessionConnections, ws.rtmsStreamId, ws);
+
+        let realtimeSession = null;
+        if (ws.userId) {
+          try {
+            realtimeSession = await realtimeBus.resolveSession({
+              meetingId,
+              sessionId: ws.rtmsStreamId,
+              rtmsStreamId: ws.rtmsStreamId,
+            });
+
+            if (realtimeSession?.rtmsMeetingId && realtimeSession.rtmsMeetingId !== meetingId) {
+              ws.rtmsMeetingId = realtimeSession.rtmsMeetingId;
+            }
+          } catch (error) {
+            console.warn('⚠️ Valkey client session registration failed:', error.message);
+          }
+        }
+
         ws.send(JSON.stringify({
           type: 'subscribed',
-          data: { meetingId },
+          data: {
+            meetingId,
+            sessionId: ws.rtmsStreamId || null,
+            rtmsStreamId: ws.rtmsStreamId || null,
+            realtimeSessionId: realtimeSession?.sessionId || null,
+            rtmsMeetingId: realtimeSession?.rtmsMeetingId || null,
+          },
         }));
 
-        // Broadcast updated presence to all viewers in this meeting
-        broadcastPresence(meetingId);
+        if (ws.userId && realtimeSession?.sessionId) {
+          realtimeBus.replaySession(realtimeSession.sessionId, (envelope) => {
+            sendRealtimeEnvelope(ws, envelope);
+          }).then((count) => {
+            if (count > 0) {
+              console.log(`📡 Replayed ${count} Valkey event(s) to WS session ${realtimeSession.sessionId}`);
+            }
+          }).catch((err) => {
+            console.warn('⚠️ Valkey replay failed:', err.message);
+          });
+        }
+
+        sendPresence(ws, meetingId);
 
         // Check current meeting status and inform the subscriber
         console.log(`📡 WS subscribe: looking up meeting by zoomMeetingId="${meetingId}"`);
-        prisma.meeting.findUnique({
-          where: { zoomMeetingId: meetingId },
+        prisma.meeting.findFirst({
+          where: { zoomMeetingId: meetingId, ...(ws.userId && { ownerId: ws.userId }) },
         }).then(meeting => {
           if (!meeting && ws.userId) {
             // Fallback: SDK UUID may differ from RTMS UUID — find user's ongoing meeting
@@ -201,16 +428,10 @@ async function handleWebSocketMessage(ws, data) {
             return;
           }
 
-          // If found via fallback (different UUID), cross-register under RTMS UUID
-          // so transcript broadcasts (keyed by RTMS UUID) reach this client
+          // If found via fallback (different UUID), remember the RTMS UUID for cleanup/debug only.
           if (meeting.zoomMeetingId !== meetingId) {
             const rtmsUuid = meeting.zoomMeetingId;
             console.log(`📡 WS UUID fallback: SDK "${meetingId}" → RTMS "${rtmsUuid}"`);
-            if (!connections.has(rtmsUuid)) {
-              connections.set(rtmsUuid, new Set());
-            }
-            connections.get(rtmsUuid).add(ws);
-            // Track the RTMS UUID on the socket for cleanup on disconnect
             ws.rtmsMeetingId = rtmsUuid;
           }
 
@@ -237,12 +458,12 @@ async function handleWebSocketMessage(ws, data) {
       // Unsubscribe from a meeting
       if (ws.meetingId && connections.has(ws.meetingId)) {
         connections.get(ws.meetingId).delete(ws);
-        ws.send(JSON.stringify({
-          type: 'unsubscribed',
-          data: { meetingId: ws.meetingId },
-        }));
-        ws.meetingId = null;
       }
+      ws.send(JSON.stringify({
+        type: 'unsubscribed',
+        data: { meetingId: ws.meetingId },
+      }));
+      ws.meetingId = null;
       break;
 
     case 'ping':
@@ -258,80 +479,39 @@ async function handleWebSocketMessage(ws, data) {
   }
 }
 
-/**
- * Broadcast presence (viewer count + list) to all connections in a meeting.
- * Deduplicates by userId so a user with multiple WS connections counts once.
- */
-function broadcastPresence(meetingId) {
-  if (!connections.has(meetingId)) return;
-
-  const clients = connections.get(meetingId);
-  const viewers = [];
-  const seenUserIds = new Set();
-  let guestCount = 0;
-
-  clients.forEach((client) => {
-    if (client.readyState !== WebSocket.OPEN) return;
-
-    // Deduplicate authenticated users by userId
-    if (client.userId) {
-      if (seenUserIds.has(client.userId)) return;
-      seenUserIds.add(client.userId);
-    }
-
-    if (client.isGuest) {
-      guestCount++;
-    }
-    viewers.push({
-      name: client.participantName || (client.isGuest ? 'Guest' : 'User'),
-      isGuest: client.isGuest,
-    });
-  });
-
-  const message = JSON.stringify({
+function sendPresence(ws, meetingId) {
+  if (ws.readyState !== WebSocket.OPEN) return 0;
+  const viewer = {
+    name: ws.participantName || (ws.isGuest ? 'Guest' : 'User'),
+    isGuest: !!ws.isGuest,
+  };
+  ws.send(JSON.stringify({
     type: 'meeting.presence',
     data: {
       meetingId,
-      viewerCount: viewers.length,
-      guestCount,
-      viewers,
+      viewerCount: 1,
+      guestCount: viewer.isGuest ? 1 : 0,
+      viewers: [viewer],
       timestamp: new Date().toISOString(),
     },
-  });
-
-  clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(message);
-    }
-  });
+  }));
+  return 1;
 }
 
 /**
- * Broadcast message to all connections in a meeting
+ * Meeting-wide presence is intentionally disabled to avoid cross-user disclosure.
+ */
+function broadcastPresence(meetingId) {
+  console.log(`📡 Meeting-wide presence disabled for ${meetingId}`);
+  return 0;
+}
+
+/**
+ * Meeting-wide WebSocket fanout is intentionally disabled.
  */
 function broadcastToMeeting(meetingId, message) {
-  if (!connections.has(meetingId)) {
-    console.log(`📡 No active connections for meeting ${meetingId}`);
-    return 0;
-  }
-
-  const clients = connections.get(meetingId);
-  const messageStr = JSON.stringify(message);
-  let sentCount = 0;
-
-  clients.forEach((ws) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(messageStr);
-        sentCount++;
-      } catch (err) {
-        console.error('WebSocket send error:', err.message);
-      }
-    }
-  });
-
-  console.log(`📡 Broadcast to ${sentCount} clients in meeting ${meetingId}`);
-  return sentCount;
+  console.warn(`📡 Blocked meeting-wide WebSocket broadcast for ${meetingId}: ${message?.type || 'unknown'}`);
+  return 0;
 }
 
 /**
@@ -361,28 +541,38 @@ function broadcastToUser(userId, message) {
 /**
  * Broadcast new transcript segment
  */
-function broadcastTranscriptSegment(meetingId, segment) {
-  return broadcastToMeeting(meetingId, {
+function broadcastTranscriptSegment(meetingId, segment, metadata = {}) {
+  return broadcastRealtimeEnvelope({
     type: 'transcript.segment',
-    data: {
-      meetingId,
-      segment,
-      timestamp: new Date().toISOString(),
-    },
+    meetingId,
+    rtmsMeetingId: metadata.rtmsMeetingId || meetingId,
+    sdkMeetingId: metadata.sdkMeetingId || null,
+    rtmsStreamId: metadata.rtmsStreamId || null,
+    appUserId: metadata.appUserId || null,
+    zoomUserId: metadata.zoomUserId || null,
+    operatorId: metadata.operatorId || null,
+    clientSessionId: metadata.clientSessionId || null,
+    segment,
+    publishedAt: Date.now(),
   });
 }
 
 /**
  * Broadcast participant event (join/leave)
  */
-function broadcastParticipantEvent(meetingId, event) {
-  return broadcastToMeeting(meetingId, {
+function broadcastParticipantEvent(meetingId, event, metadata = {}) {
+  return broadcastRealtimeEnvelope({
     type: 'participant.event',
-    data: {
-      meetingId,
-      event,
-      timestamp: new Date().toISOString(),
-    },
+    meetingId,
+    rtmsMeetingId: metadata.rtmsMeetingId || meetingId,
+    sdkMeetingId: metadata.sdkMeetingId || null,
+    rtmsStreamId: metadata.rtmsStreamId || null,
+    appUserId: metadata.appUserId || null,
+    zoomUserId: metadata.zoomUserId || null,
+    operatorId: metadata.operatorId || null,
+    clientSessionId: metadata.clientSessionId || null,
+    event,
+    publishedAt: Date.now(),
   });
 }
 
@@ -403,14 +593,19 @@ function broadcastAiSuggestion(meetingId, suggestion) {
 /**
  * Broadcast meeting status change
  */
-function broadcastMeetingStatus(meetingId, status) {
-  return broadcastToMeeting(meetingId, {
+function broadcastMeetingStatus(meetingId, status, metadata = {}) {
+  return broadcastRealtimeEnvelope({
     type: 'meeting.status',
-    data: {
-      meetingId,
-      status,
-      timestamp: new Date().toISOString(),
-    },
+    meetingId,
+    rtmsMeetingId: metadata.rtmsMeetingId || meetingId,
+    sdkMeetingId: metadata.sdkMeetingId || null,
+    rtmsStreamId: metadata.rtmsStreamId || null,
+    appUserId: metadata.appUserId || null,
+    zoomUserId: metadata.zoomUserId || null,
+    operatorId: metadata.operatorId || null,
+    clientSessionId: metadata.clientSessionId || null,
+    status,
+    publishedAt: Date.now(),
   });
 }
 
@@ -423,21 +618,9 @@ function crossRegisterUser(userId, rtmsMeetingId) {
   if (!userConnections.has(userId)) return 0;
 
   const clients = userConnections.get(userId);
-  if (!connections.has(rtmsMeetingId)) {
-    connections.set(rtmsMeetingId, new Set());
-  }
-
   let count = 0;
   clients.forEach(ws => {
     if (ws.readyState === WebSocket.OPEN) {
-      connections.get(rtmsMeetingId).add(ws);
-      // Clean up old cross-registration if present
-      if (ws.rtmsMeetingId && ws.rtmsMeetingId !== rtmsMeetingId && connections.has(ws.rtmsMeetingId)) {
-        connections.get(ws.rtmsMeetingId).delete(ws);
-        if (connections.get(ws.rtmsMeetingId).size === 0) {
-          connections.delete(ws.rtmsMeetingId);
-        }
-      }
       ws.rtmsMeetingId = rtmsMeetingId;
       count++;
     }
@@ -445,6 +628,42 @@ function crossRegisterUser(userId, rtmsMeetingId) {
 
   if (count > 0) {
     console.log(`📡 Cross-registered ${count} WS connection(s) for user ${userId} under RTMS UUID "${rtmsMeetingId}"`);
+  }
+  return count;
+}
+
+function crossRegisterZoomUser(zoomUserId, rtmsMeetingId) {
+  if (!zoomUserConnections.has(zoomUserId)) return 0;
+
+  const clients = zoomUserConnections.get(zoomUserId);
+  let count = 0;
+  clients.forEach(ws => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.rtmsMeetingId = rtmsMeetingId;
+      count++;
+    }
+  });
+
+  if (count > 0) {
+    console.log(`📡 Cross-registered ${count} WS connection(s) for Zoom user ${zoomUserId} under RTMS UUID "${rtmsMeetingId}"`);
+  }
+  return count;
+}
+
+function crossRegisterSession(clientSessionId, rtmsMeetingId) {
+  if (!sessionConnections.has(clientSessionId)) return 0;
+
+  const clients = sessionConnections.get(clientSessionId);
+  let count = 0;
+  clients.forEach(ws => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.rtmsMeetingId = rtmsMeetingId;
+      count++;
+    }
+  });
+
+  if (count > 0) {
+    console.log(`📡 Cross-registered ${count} WS connection(s) for session ${clientSessionId} under RTMS UUID "${rtmsMeetingId}"`);
   }
   return count;
 }
@@ -457,6 +676,8 @@ function getStats() {
     totalConnections: Array.from(connections.values()).reduce((sum, set) => sum + set.size, 0),
     activeMeetings: connections.size,
     activeUsers: userConnections.size,
+    activeZoomUsers: zoomUserConnections.size,
+    activeClientSessions: sessionConnections.size,
     meetingIds: Array.from(connections.keys()),
   };
 }
@@ -471,5 +692,7 @@ module.exports = {
   broadcastAiSuggestion,
   broadcastMeetingStatus,
   crossRegisterUser,
+  crossRegisterZoomUser,
+  broadcastRealtimeEnvelope,
   getStats,
 };

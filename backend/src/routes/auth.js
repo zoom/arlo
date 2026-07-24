@@ -230,7 +230,7 @@ router.get('/poll-code', (req, res) => {
   const pkceData = pkceStore.get(state);
 
   if (!pkceData) {
-    return res.status(404).json({ error: 'State not found or expired', ready: false });
+    return res.json({ ready: false });
   }
 
   if (!pkceData.code) {
@@ -405,16 +405,8 @@ router.post('/callback', async (req, res) => {
  * GET /api/auth/me
  * Get current authenticated user
  */
-router.get('/me', async (req, res) => {
+router.get('/me', devAuthBypass, requireAuth, async (req, res) => {
   try {
-    // Apply auth middleware
-    await new Promise((resolve, reject) => {
-      requireAuth(req, res, (err) => {
-        if (err) return reject(err);
-        devAuthBypass(req, res, resolve);
-      });
-    });
-
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: {
@@ -431,12 +423,15 @@ router.get('/me', async (req, res) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ user });
+    const wsToken = generateToken({
+      userId: user.id,
+      zoomUserId: user.zoomUserId,
+      exp: Date.now() + 24 * 60 * 60 * 1000,
+    });
+
+    res.json({ user, wsToken });
   } catch (error) {
     console.error('Get user error:', error);
-    if (error.message === 'Unauthorized') {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
     res.status(500).json({ error: 'Failed to get user' });
   }
 });
@@ -445,16 +440,8 @@ router.get('/me', async (req, res) => {
  * POST /api/auth/refresh
  * Refresh access token
  */
-router.post('/refresh', async (req, res) => {
+router.post('/refresh', devAuthBypass, requireAuth, async (req, res) => {
   try {
-    // Apply auth middleware
-    await new Promise((resolve, reject) => {
-      requireAuth(req, res, (err) => {
-        if (err) return reject(err);
-        devAuthBypass(req, res, resolve);
-      });
-    });
-
     const userId = req.user.id;
 
     // Get user token
@@ -512,9 +499,6 @@ router.post('/refresh', async (req, res) => {
     });
   } catch (error) {
     console.error('Token refresh error:', error.response?.data || error.message);
-    if (error.message === 'Unauthorized') {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
     res.status(500).json({ error: 'Failed to refresh token' });
   }
 });
@@ -534,16 +518,8 @@ router.get('/settings', (req, res) => {
  * POST /api/auth/logout
  * Logout user (revoke token)
  */
-router.post('/logout', async (req, res) => {
+router.post('/logout', devAuthBypass, requireAuth, async (req, res) => {
   try {
-    // Apply auth middleware
-    await new Promise((resolve, reject) => {
-      requireAuth(req, res, (err) => {
-        if (err) return reject(err);
-        devAuthBypass(req, res, resolve);
-      });
-    });
-
     // Delete user tokens from database
     await prisma.userToken.deleteMany({
       where: { userId: req.user.id },
@@ -559,9 +535,6 @@ router.post('/logout', async (req, res) => {
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
     console.error('Logout error:', error);
-    if (error.message === 'Unauthorized') {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
     res.status(500).json({ error: 'Failed to logout' });
   }
 });

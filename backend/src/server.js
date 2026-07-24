@@ -5,7 +5,8 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const http = require('http');
-const { initWebSocketServer } = require('./services/websocket');
+const { initWebSocketServer, broadcastRealtimeEnvelope } = require('./services/websocket');
+const realtimeBus = require('./services/realtimeBus');
 const config = require('./config');
 const prisma = require('./lib/prisma');
 const { version } = require('../package.json');
@@ -18,6 +19,11 @@ const server = http.createServer(app);
 // =============================================================================
 // MIDDLEWARE
 // =============================================================================
+
+// Required for accurate client IPs and secure cookies behind known reverse proxies.
+if (config.trustProxyHops > 0) {
+  app.set('trust proxy', config.trustProxyHops);
+}
 
 // Security headers (required by Zoom Apps)
 app.use(helmet({
@@ -49,8 +55,13 @@ app.use(cors(corsOptions));
 // Cookie parsing (required for session management)
 app.use(cookieParser());
 
-// Body parsing
-app.use(express.json({ limit: '10mb' }));
+// Preserve the exact JSON bytes because Zoom signs the raw webhook body.
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, _res, buffer) => {
+    req.rawBody = buffer;
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Logging
@@ -66,13 +77,15 @@ if (config.nodeEnv !== 'test') {
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000, // 1000 requests per 15 minutes
+  skip: (req) => req.path === '/auth/poll-code' || req.path === '/rtms/webhook',
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
 });
 app.use('/api/', globalLimiter);
 
-// Stricter rate limit for auth endpoints
+// Limit OAuth initiation and exchange attempts. Session checks and PKCE polling
+// are intentionally excluded because a normal in-client flow calls them often.
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
@@ -80,12 +93,26 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts' },
 });
-app.use('/api/auth/', authLimiter);
+app.use(
+  ['/api/auth/start', '/api/auth/authorize', '/api/auth/callback'],
+  authLimiter
+);
 
-// Stricter rate limit for AI endpoints
+// Live transcript features call this frequently during a meeting.
+const liveAiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many live AI requests, please try again later' },
+});
+app.use('/api/ai/key-moment', liveAiLimiter);
+
+// Stricter rate limit for heavier AI endpoints
 const aiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
   max: 20,
+  skip: (req) => req.originalUrl.startsWith('/api/ai/key-moment'),
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many AI requests, please try again later' },
@@ -105,6 +132,9 @@ app.get('/health', (req, res) => {
     version,
   });
 });
+
+// Some embedded browsers request this even when the app does not define one.
+app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // API routes
 app.use('/api/auth', require('./routes/auth'));
@@ -130,7 +160,7 @@ let frontendReady = false;
 // Check frontend health
 async function checkFrontendHealth() {
   try {
-    await axios.get('http://frontend:3000', { timeout: 2000 });
+    await axios.get(config.frontendUpstreamUrl, { timeout: 2000 });
     if (!frontendReady) {
       console.log('✅ Frontend is now ready');
     }
@@ -207,7 +237,7 @@ const getStartupPage = () => `
 // Proxy middleware - DO NOT use ws:true as it intercepts ALL WebSocket upgrades
 // Our WebSocket server (initialized separately) handles /ws connections
 const frontendProxy = createProxyMiddleware({
-  target: 'http://frontend:3000',
+  target: config.frontendUpstreamUrl,
   changeOrigin: true,
   ws: false, // IMPORTANT: Don't proxy WebSockets - our WebSocket.Server handles /ws
   logLevel: 'warn',
@@ -276,6 +306,13 @@ app.use((err, req, res, next) => {
 // =============================================================================
 
 initWebSocketServer(server);
+realtimeBus.initRealtimeBus(broadcastRealtimeEnvelope).then((enabled) => {
+  if (enabled) {
+    console.log('Valkey realtime fanout enabled');
+  } else {
+    console.log('Valkey realtime fanout disabled; using local WebSocket fanout');
+  }
+});
 
 // =============================================================================
 // START SERVER

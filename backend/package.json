@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
+    "test": "node --test",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
@@ -16,6 +17,7 @@
     "db:push": "prisma db push"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1070.0",
     "@prisma/client": "^5.8.0",
     "axios": "^1.6.5",
     "cookie-parser": "^1.4.6",
@@ -26,6 +28,7 @@
     "express-session": "^1.17.3",
     "helmet": "^7.1.0",
     "http-proxy-middleware": "^2.0.9",
+    "ioredis": "^5.11.1",
     "joi": "^17.11.0",
     "morgan": "^1.10.0",
     "uuid": "^9.0.1",

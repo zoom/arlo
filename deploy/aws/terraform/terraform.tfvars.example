@@ -1,0 +1,69 @@
+aws_region  = "us-east-1"
+name_prefix = "arlo"
+environment = "prod"
+owner       = "arlo-assistant"
+
+# Use your custom domain for production. The ALB DNS name is a native AWS FQDN,
+# but Zoom production webhooks should use HTTPS with a certificate that matches
+# your domain.
+public_url         = "https://arlo.example.com"
+custom_domain_name = "arlo.example.com"
+route53_zone_id    = ""
+certificate_arn    = ""
+
+# Push these images to ECR first.
+backend_image      = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-backend:latest"
+frontend_image     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-frontend:latest"
+rtms_control_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms-control:latest"
+rtms_worker_image  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms-worker:latest"
+
+ssm_parameter_prefix = "/arlo/prod"
+kms_alias_name       = "alias/arlo-prod"
+
+# Create a small encrypted AWS RDS MySQL database and write DATABASE_URL into SSM.
+create_database          = true
+db_instance_class        = "db.t4g.micro"
+db_engine_version        = "8.0.46"
+db_port                  = 3306
+db_allocated_storage     = 20
+db_backup_retention_days = 1
+db_deletion_protection   = false
+db_skip_final_snapshot   = true
+db_connection_limit      = 5
+
+zoom_host      = "zoom.us"
+zoom_app_id    = ""
+rtms_client_id = ""
+
+ai_enabled     = false
+default_model  = "openai/gpt-oss-120b:free"
+fallback_model = "google/gemma-4-31b-it:free"
+fallback_models = [
+  "google/gemma-4-31b-it:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free"
+]
+
+# Keep these at 1+ to avoid sleeping. ECS replaces failed tasks.
+backend_desired_count      = 1
+backend_single_subnet      = true
+backend_subnet_index       = 0
+frontend_desired_count     = 1
+frontend_single_subnet     = true
+frontend_subnet_index      = 1
+rtms_control_desired_count = 1
+
+# Production hardening: CloudFront/ALB are public; ECS tasks run in private subnets.
+app_services_assign_public_ip = false
+rtms_worker_assign_public_ip  = false
+
+# Capacity for a large RTMS worker fleet: one /20 has roughly 4,000 usable IPs.
+use_scalable_rtms_worker_subnets = true
+rtms_worker_private_subnet_cidrs = [
+  "10.42.64.0/20"
+]
+# Cost-conscious default: both private AZs use one shared NAT gateway.
+nat_gateway_per_az = false
+
+# Disabled by default to avoid CloudWatch log spend.
+enable_cloudwatch_logs        = false
+cloudwatch_log_retention_days = 1

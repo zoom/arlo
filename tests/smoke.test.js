@@ -183,6 +183,13 @@ async function runTests() {
     assertEqual(res.status, 401, `Expected 401, got ${res.status}`);
   });
 
+  await test('POST RTMS REST start requires authentication', async () => {
+    const res = await request(`${BASE_URL}/api/zoom-meetings/1234567890/rtms/start`, {
+      method: 'POST',
+    });
+    assertEqual(res.status, 401, `Expected 401, got ${res.status}`);
+  });
+
   await test('GET /api/home/highlights uses optionalAuth (returns data or empty)', async () => {
     const res = await request(`${BASE_URL}/api/home/highlights`);
     // This endpoint uses optionalAuth, so should return 200 even without auth
@@ -197,7 +204,7 @@ async function runTests() {
   await test('Frontend index.html is served', async () => {
     const res = await request(`${BASE_URL}/`);
     assertEqual(res.status, 200, `Expected 200, got ${res.status}`);
-    assertIncludes(res.body, '<!DOCTYPE html>', 'Should return HTML document');
+    assert(res.body.toLowerCase().includes('<!doctype html>'), 'Should return HTML document');
   });
 
   await test('Zoom Apps SDK script reference exists', async () => {

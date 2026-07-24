@@ -69,6 +69,7 @@ export default function useZoomAuth() {
 
         // Poll for code as fallback (in case browser callback completes but onAuthorized doesn't fire)
         const startPolling = () => {
+          if (resolved) return;
           console.log('Starting poll for authorization code...');
           pollIntervalId = setInterval(async () => {
             if (resolved) {
@@ -83,6 +84,7 @@ export default function useZoomAuth() {
                 clearInterval(pollIntervalId);
                 if (!resolved) {
                   resolved = true;
+                  clearTimeout(timeoutId);
                   zoomSdk.removeEventListener('onAuthorized', handler);
                   cleanupRef.current = null;
                   try {
@@ -97,12 +99,13 @@ export default function useZoomAuth() {
               // Polling error - continue trying
               console.warn('Poll error:', err);
             }
-          }, 1000); // Poll every second
+          }, 2000);
         };
 
         // Timeout after 60 seconds
         const timeoutId = setTimeout(() => {
           if (!resolved) {
+            resolved = true;
             console.error('Authorization timeout after 60s');
             clearInterval(pollIntervalId);
             zoomSdk.removeEventListener('onAuthorized', handler);
@@ -160,6 +163,10 @@ export default function useZoomAuth() {
       // 4. Wait for the onAuthorized handler to complete the exchange
       return await authPromise;
     } catch (err) {
+      if (cleanupRef.current) {
+        cleanupRef.current();
+        cleanupRef.current = null;
+      }
       setError(err.message);
       throw err;
     } finally {

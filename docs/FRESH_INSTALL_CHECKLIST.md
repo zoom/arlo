@@ -96,7 +96,7 @@ Use this checklist to verify that the Arlo reference implementation works correc
   ```
 
 - [ ] Verify all services start:
-  - [ ] `db` — PostgreSQL (port 5432)
+  - [ ] `db` — MySQL (port 3306)
   - [ ] `backend` — Express API (port 3000)
   - [ ] `frontend` — React dev server (port 3001)
   - [ ] `rtms` — RTMS service (port 3002)
@@ -202,7 +202,7 @@ Use this checklist to verify that the Arlo reference implementation works correc
 - Check for errors in rtms service logs
 
 ### "Database connection refused"
-- Ensure PostgreSQL container is running
+- Ensure MySQL container is running
 - Check DATABASE_URL in .env
 
 ---

@@ -27,7 +27,7 @@
 | **Icons** | `lucide-react` | Lightweight, tree-shakeable icon library |
 | **Fonts** | Source Serif 4 + Inter (self-hosted) | Zoom WebView blocks Google CDN fonts |
 | **Backend** | Express.js (JavaScript) | Simple, flexible, well-documented |
-| **Database** | PostgreSQL 15+ | Full-text search (GIN index), JSON support |
+| **Database** | MySQL 8.0+ | JSON support and portable search queries |
 | **ORM** | Prisma | Type-safe, great migrations, modern |
 | **AI Provider** | OpenRouter | Free models (Gemini Flash), no API key required |
 | **RTMS SDK** | `@zoom/rtms` v1.0.2 | Class-based Client API, multi-meeting support |
@@ -68,7 +68,7 @@
 - Auto-suggestions at configurable meeting duration
 - Meeting history, rename, delete
 - Highlights CRUD with timestamps and tags
-- Full-text search (PostgreSQL GIN index)
+- Transcript and summary search using MySQL-compatible queries
 - WebVTT export
 - Frontend UI migration to `@base-ui/react` (Feb 2026)
 - README, ARCHITECTURE.md, TROUBLESHOOTING.md, CLAUDE.md

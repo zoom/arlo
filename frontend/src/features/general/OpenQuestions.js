@@ -95,9 +95,17 @@ export default function OpenQuestions({ segments, onJumpToSegment, showDemoData 
 
   return (
     <Card className={`open-questions ${collapsed ? 'feature-collapsed' : ''}`}>
-      <button
+      <div
         className="open-questions-header feature-collapse-header"
+        role="button"
+        tabIndex={0}
         onClick={() => toggleCollapsed('open-questions')}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleCollapsed('open-questions');
+          }
+        }}
         aria-expanded={!collapsed}
       >
         <div className="open-questions-title">
@@ -125,7 +133,7 @@ export default function OpenQuestions({ segments, onJumpToSegment, showDemoData 
             <ChevronUp size={16} className="feature-chevron" />
           )}
         </div>
-      </button>
+      </div>
 
       {!collapsed && (
       <>

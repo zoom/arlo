@@ -184,25 +184,25 @@ docker-compose restart backend
 
 ### Issue: "Can't reach database server"
 
-**Cause:** PostgreSQL not ready or connection string wrong.
+**Cause:** MySQL not ready or connection string wrong.
 
 **Solutions:**
 
-1. **Wait for PostgreSQL to be healthy:**
+1. **Wait for MySQL to be healthy:**
    ```bash
    docker-compose ps
-   # postgres should show "healthy"
+   # mysql should show "healthy"
    ```
 
 2. **Check DATABASE_URL in .env:**
    ```bash
    # For Docker
-   DATABASE_URL=postgresql://postgres:postgres@postgres:5432/meeting_assistant
+   DATABASE_URL=mysql://arlo:arlo@mysql:3306/meeting_assistant
    ```
 
 3. **Restart services:**
    ```bash
-   docker-compose restart postgres backend
+   docker-compose restart mysql backend
    ```
 
 ### Issue: "Table does not exist"
@@ -367,7 +367,9 @@ docker-compose restart backend
 1. **Check if using free models (no API key needed):**
    ```bash
    # .env should have:
-   DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
+   DEFAULT_MODEL=openai/gpt-oss-120b:free
+   FALLBACK_MODEL=google/gemma-4-31b-it:free
+   FALLBACK_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
    ```
 
 2. **Check backend logs for AI errors:**

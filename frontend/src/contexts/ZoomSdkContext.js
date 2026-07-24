@@ -11,11 +11,6 @@ export const isTestMode = checkIsTestMode();
 export function ZoomSdkProvider({ children }) {
   // Use state for isTestMode so it can update after SDK loads
   const initialTestMode = checkIsTestMode();
-  console.log('ZoomSdkProvider init:', {
-    initialTestMode,
-    zoomSdkAvailable: !!window.zoomSdk,
-    hasTestParam: window.location.search.includes('test=true')
-  });
 
   const [isTestModeState, setIsTestModeState] = useState(initialTestMode);
   const [sdkConfigured, setSdkConfigured] = useState(initialTestMode);
@@ -31,15 +26,12 @@ export function ZoomSdkProvider({ children }) {
     const sdkAvailable = !!window.zoomSdk;
     const testModeNow = !sdkAvailable || window.location.search.includes('test=true');
 
-    console.log('useEffect check:', { testModeNow, isTestModeState, sdkAvailable });
     if (!testModeNow && isTestModeState) {
       // SDK became available - update state
-      console.log('SDK detected after initial render - updating isTestModeState to false');
       setIsTestModeState(false);
     }
 
     if (testModeNow) {
-      console.log('Running in test mode (outside Zoom)');
       return;
     }
 
@@ -57,9 +49,12 @@ export function ZoomSdkProvider({ children }) {
             'authorize',
             'onAuthorized',
             'promptAuthorize',
-            'callZoomApi',
-            'onMessage',
-            'postMessage',
+            'startRTMS',
+            'stopRTMS',
+            'pauseRTMS',
+            'resumeRTMS',
+            'getRTMSStatus',
+            'onRTMSStatusChange',
             'showNotification',
             'sendMessageToChat',
             'openUrl',
@@ -163,8 +158,10 @@ export function ZoomSdkProvider({ children }) {
                 capabilities: [
                   'getMeetingContext', 'getMeetingUUID', 'getRunningContext',
                   'getUserContext', 'getMeetingParticipants', 'authorize',
-                  'onAuthorized', 'promptAuthorize', 'callZoomApi',
-                  'onMessage', 'postMessage', 'showNotification',
+                  'onAuthorized', 'promptAuthorize', 'startRTMS',
+                  'stopRTMS', 'pauseRTMS', 'resumeRTMS',
+                  'getRTMSStatus', 'onRTMSStatusChange',
+                  'showNotification',
                   'sendMessageToChat', 'openUrl', 'onRunningContextChange',
                   'onMyUserContextChange', 'sendAppInvitationToAllParticipants',
                   'sendAppInvitation', 'showAppInvitationDialog', 'onSendAppInvitation',
@@ -173,6 +170,15 @@ export function ZoomSdkProvider({ children }) {
               });
             } catch (err) {
               console.warn('Re-config after elevation failed:', err);
+            }
+
+            if (context === 'inMeeting') {
+              try {
+                const meetingData = await fetchMeetingContext();
+                setMeetingContext(meetingData);
+              } catch (err) {
+                console.warn('Meeting context refresh after authorization failed:', err);
+              }
             }
           }
         });

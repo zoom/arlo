@@ -10,7 +10,7 @@
 [![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
 [![Zoom RTMS](https://img.shields.io/badge/Zoom-RTMS-2D8CFF.svg)](https://www.zoom.com/en/realtime-media-streams/)
 
-[Get Started](#-quick-start) · [See Demos](#-see-it-in-action) · [Features](#-features) · [Troubleshooting](#-troubleshooting)
+[Get Started](#-quick-start) · [See Demos](#-see-it-in-action) · [Features](#-features) · [Deploy](#deployment-options) · [Troubleshooting](#-troubleshooting)
 
 </div>
 
@@ -92,7 +92,7 @@ Before you begin, ensure you have:
 | Requirement | Why You Need It |
 |-------------|-----------------|
 | **[Node.js 20+](https://nodejs.org/)** | Runtime for backend services |
-| **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** | Runs PostgreSQL and all services |
+| **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** | Runs MySQL and all services |
 | **[ngrok](https://ngrok.com/)** | Creates secure tunnels for Zoom webhooks |
 | **[Zoom Account](https://marketplace.zoom.us/)** | To create and configure your Zoom App |
 
@@ -223,7 +223,7 @@ docker-compose up --build
 ```
 
 Wait for all services to start:
-- PostgreSQL database
+- MySQL 8.0 database
 - Backend API (port 3000)
 - Frontend (port 3001)
 - RTMS service (port 3002)
@@ -241,6 +241,83 @@ Wait for all services to start:
    - Generate meeting summaries
    - Extract action items
    - Ask questions about your meeting
+
+---
+
+## Deployment Options
+
+Arlo includes first-cut deployment templates in [`deploy/`](./deploy/) for AWS and self-hosted environments. The recommended scalable path today is the AWS Terraform stack because it separates the Zoom App web/API tier from per-stream RTMS workers.
+
+| Target | Path | Format | Intended Use |
+|--------|------|--------|--------------|
+| **AWS** | [`deploy/aws/terraform`](./deploy/aws/terraform) | Terraform | Scalable ECS/Fargate deployment with per-RTMS-stream workers |
+| **AWS quick start** | [`deploy/aws/cloudformation.yml`](./deploy/aws/cloudformation.yml) | CloudFormation YAML | Simpler AWS bootstrap, less complete than Terraform |
+| **Self-hosted VM** | [`deploy/selfhost`](./deploy/selfhost) | Docker Compose + nginx | Ubuntu/Debian VM or Proxmox-style deployment |
+
+### Recommended AWS Terraform Architecture
+
+The AWS Terraform stack provisions:
+
+- CloudFront and an Application Load Balancer for HTTPS/FQDN access to the Zoom App, backend API, webhooks, and browser WebSocket endpoint.
+- ECS/Fargate services for the frontend, backend, and RTMS control plane.
+- One ECS/Fargate RTMS worker task per active RTMS stream. The worker connects to Zoom RTMS signaling/media and publishes realtime events to Valkey.
+- Amazon RDS MySQL for persisted meetings/transcripts, ElastiCache Serverless Valkey for realtime fanout/replay, DynamoDB for RTMS control state, ECR for images, and KMS/SSM Parameter Store for secrets.
+- Private RTMS worker subnets by default, with NAT egress for Zoom/OpenRouter access and no public worker IPs.
+
+Realtime transcript and participant identity fields stored in Valkey are app-encrypted with AES-256-GCM. The RTMS worker calls KMS `GenerateDataKey` once per stream, caches the plaintext data key in memory, and stores only encrypted sensitive payload fields in Valkey. Routing metadata such as meeting UUID/session/stream IDs remains plaintext so the backend can perform lookup and fanout. MySQL persistence is not app-layer encrypted by this starter stack.
+
+CloudWatch application logs are disabled by default in the Terraform variables to keep idle operating cost low. Enable explicit logging only if you have a retention/cost policy.
+
+```mermaid
+flowchart LR
+  zoomClient["Zoom Client\nZoom App WebView"] --> cloudfront["CloudFront\nHTTPS FQDN"]
+  zoomWebhook["Zoom RTMS Webhooks"] --> cloudfront
+  cloudfront --> alb["Application Load Balancer"]
+
+  alb --> frontend["Frontend\nECS/Fargate Service"]
+  alb --> backend["Backend API + WebSocket\nECS/Fargate Service"]
+  alb --> rtmsControl["RTMS Control Plane\nECS/Fargate Service"]
+
+  rtmsControl --> dynamodb["DynamoDB\nRTMS control state"]
+  rtmsControl --> ecsRunTask["ECS RunTask\nlaunch per-stream worker"]
+  ecsRunTask --> rtmsWorker["RTMS Worker\nECS/Fargate Task"]
+
+  rtmsWorker --> zoomRtms["Zoom RTMS\nSignaling + Media"]
+  rtmsWorker --> valkey["ElastiCache Serverless Valkey\nrealtime encrypted events"]
+  backend --> valkey
+  backend --> rds["RDS MySQL 8.0\npersisted meetings/transcripts"]
+
+  backend --> browserWs["Browser WebSocket fanout\nsingle-user delivery"]
+  browserWs --> zoomClient
+
+  kms["KMS"] --> rtmsWorker
+  kms --> backend
+  ssm["SSM Parameter Store\nruntime secrets"] --> backend
+  ssm --> rtmsControl
+  ssm --> rtmsWorker
+  ecr["ECR Images"] --> frontend
+  ecr --> backend
+  ecr --> rtmsControl
+  ecr --> rtmsWorker
+```
+
+### AWS Deployment Flow
+
+```bash
+cd deploy/aws/terraform
+cp terraform.tfvars.example terraform.tfvars
+cp secrets.auto.tfvars.example secrets.auto.tfvars
+
+# Fill in image URIs, domain settings, and non-secret deployment variables.
+# Store runtime secrets through SSM/KMS rather than committing them.
+./put-secrets.sh
+
+terraform init
+terraform plan
+terraform apply
+```
+
+Do not commit `terraform.tfvars`, `secrets.auto.tfvars`, `.terraform/`, or Terraform state files from a real deployment.
 
 ---
 
@@ -329,7 +406,7 @@ docker-compose restart backend
 
 **"Can't reach database server"**
 ```bash
-docker-compose restart postgres backend
+docker-compose restart mysql backend
 ```
 
 **Tables don't exist**
@@ -399,6 +476,7 @@ arlo/
 ├── backend/           # Express API server + Prisma ORM
 ├── frontend/          # React Zoom App (CRA)
 ├── rtms/              # RTMS transcript ingestion service
+├── deploy/            # Cloud and self-host deployment templates
 ├── docs/              # Documentation
 └── docker-compose.yml # Development environment
 ```
@@ -419,9 +497,10 @@ npm run db:studio                    # Open Prisma database GUI
 |-------|------------|
 | Frontend | React 18, Zoom Apps SDK, Base UI |
 | Backend | Node.js 20, Express, Prisma |
-| Database | PostgreSQL 15 |
+| Database | MySQL 8.0 |
 | AI | OpenRouter (free models available) |
-| Real-time | WebSocket + RTMS SDK |
+| Real-time | WebSocket + RTMS SDK; Valkey for scalable deployments |
+| Cloud Deployment | Terraform, Docker Compose |
 
 ---
 
@@ -461,15 +540,16 @@ ZOOM_HOST=zoomgov.com
 
 ## Production Deployment
 
-This reference implementation is designed for **learning and prototyping**. Before production deployment:
+This reference implementation is designed for **learning and prototyping**. For production-like AWS tests, prefer the Terraform deployment under [`deploy/aws/terraform`](./deploy/aws/terraform) instead of the local Docker Compose flow.
 
 | Area | Development | Production Recommendation |
 |------|-------------|---------------------------|
-| **Credentials** | `.env` file | Secrets manager (AWS, Vault, Azure) |
-| **Tokens** | PostgreSQL + AES | Add encryption at rest |
-| **Sessions** | In-memory | Redis or database-backed |
-| **HTTPS** | ngrok tunnel | Load balancer with TLS |
-| **WebSockets** | Single instance | Redis pub/sub for scaling |
+| **Credentials** | `.env` file | KMS-backed SSM Parameter Store, Secrets Manager, Vault, or cloud equivalent |
+| **Tokens** | MySQL + AES | Database encryption at rest plus stricter app-layer policy for sensitive fields |
+| **Sessions** | In-memory | Valkey/Redis or database-backed shared state |
+| **HTTPS** | ngrok tunnel | CloudFront, load balancer, or reverse proxy with TLS |
+| **WebSockets** | Single instance | Shared realtime bus and per-user fanout routing |
+| **RTMS workers** | Single local process | Per-stream container workers with cleanup and TTLs |
 
 See [Known Limitations](#known-limitations) for additional considerations.
 

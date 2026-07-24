@@ -9,14 +9,13 @@ const DemoDataContext = createContext(null);
  */
 export function DemoDataProvider({ children }) {
   const [showDemoData, setShowDemoDataState] = useState(() => {
-    // Default to true (show demo data) for first-time users
-    const stored = localStorage.getItem('arlo-show-demo-data');
-    return stored === null ? true : JSON.parse(stored);
+    const stored = localStorage.getItem('arlo-show-demo-data-v2');
+    return stored === null ? false : JSON.parse(stored);
   });
 
   // Persist to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('arlo-show-demo-data', JSON.stringify(showDemoData));
+    localStorage.setItem('arlo-show-demo-data-v2', JSON.stringify(showDemoData));
   }, [showDemoData]);
 
   const setShowDemoData = useCallback((value) => {

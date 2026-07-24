@@ -35,6 +35,34 @@ if (process.env.REDIS_ENCRYPTION_KEY.length !== 32) {
   process.exit(1);
 }
 
+const freeOpenRouterModels = Object.freeze([
+  'google/gemma-4-31b-it:free',
+  'openai/gpt-oss-120b:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+]);
+
+function parseCsv(value) {
+  return (value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function freeModelOrDefault(model, defaultModel) {
+  if (!model) return defaultModel;
+  if (freeOpenRouterModels.includes(model)) return model;
+  console.warn(`Ignoring non-free OpenRouter model "${model}". Allowed models: ${freeOpenRouterModels.join(', ')}`);
+  return defaultModel;
+}
+
+const defaultOpenRouterModel = freeModelOrDefault(process.env.DEFAULT_MODEL, freeOpenRouterModels[0]);
+const fallbackOpenRouterModel = freeModelOrDefault(process.env.FALLBACK_MODEL, freeOpenRouterModels[1]);
+const fallbackOpenRouterModels = [...new Set([
+  ...parseCsv(process.env.FALLBACK_MODELS).map((model) => freeModelOrDefault(model, null)).filter(Boolean),
+  fallbackOpenRouterModel,
+  freeOpenRouterModels[2],
+])];
+
 // =============================================================================
 // CONFIGURATION EXPORT
 // =============================================================================
@@ -62,12 +90,20 @@ module.exports = {
 
   // Redis
   redisUrl: process.env.REDIS_URL || null,
+  realtimeKeyPrefix: process.env.REALTIME_KEY_PREFIX || 'arlo:realtime',
+  realtimeChannelPrefix: process.env.REALTIME_CHANNEL_PREFIX || 'arlo:realtime',
+  realtimeChannelPatterns: parseCsv(process.env.REALTIME_CHANNEL_PATTERNS),
+  realtimeActiveTtlSeconds: parseInt(process.env.REALTIME_ACTIVE_TTL_SECONDS || '86400', 10),
+  realtimeCompletedTtlSeconds: parseInt(process.env.REALTIME_COMPLETED_TTL_SECONDS || '3600', 10),
+  realtimeReplayLimit: parseInt(process.env.REALTIME_REPLAY_LIMIT || '250', 10),
 
   // AI Configuration
   aiEnabled: process.env.AI_ENABLED === 'true',
   openrouterApiKey: process.env.OPENROUTER_API_KEY || null,
-  defaultModel: process.env.DEFAULT_MODEL || 'google/gemini-2.0-flash-thinking-exp:free',
-  fallbackModel: process.env.FALLBACK_MODEL || 'meta-llama/llama-3.2-3b-instruct:free',
+  defaultModel: defaultOpenRouterModel,
+  fallbackModel: fallbackOpenRouterModel,
+  fallbackModels: fallbackOpenRouterModels,
+  allowedOpenRouterModels: freeOpenRouterModels,
 
   // Feature Flags
   extractionEnabled: process.env.EXTRACTION_ENABLED === 'true',
@@ -78,9 +114,12 @@ module.exports = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3001',
+  frontendUpstreamUrl: process.env.FRONTEND_UPSTREAM_URL || 'http://frontend:3000',
+  trustProxyHops: parseInt(process.env.TRUST_PROXY_HOPS || '0', 10),
 
   // RTMS
-  rtmsWebhookSecret: process.env.RTMS_WEBHOOK_SECRET || null,
+  rtmsWebhookSecret: process.env.ZOOM_WEBHOOK_SECRET_TOKEN || process.env.RTMS_WEBHOOK_SECRET || null,
+  internalWebhookSecret: process.env.INTERNAL_WEBHOOK_SECRET || null,
   rtmsPort: parseInt(process.env.RTMS_PORT || '3002', 10),
 
   // Logging
@@ -91,10 +130,6 @@ module.exports = {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
-
-  // Rate Limiting
-  rateLimitFree: parseInt(process.env.RATE_LIMIT_FREE || '10', 10),
-  rateLimitPremium: parseInt(process.env.RATE_LIMIT_PREMIUM || '100', 10),
 
   // File Storage
   vttStoragePath: process.env.VTT_STORAGE_PATH || './storage/vtt',

@@ -1,21 +1,22 @@
 version: '3.8'
 
 services:
-  # PostgreSQL Database
-  postgres:
-    image: postgres:15-alpine
-    container_name: arlo-meeting-assistant-postgres
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: arlo-meeting-assistant-mysql
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: meeting_assistant
+      MYSQL_DATABASE: meeting_assistant
+      MYSQL_USER: ${MYSQL_USER:-arlo}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-arlo}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-change-me-root}
     ports:
-      - "5432:5432"
+      - "3306:3306"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u\"$${MYSQL_USER}\" -p\"$${MYSQL_PASSWORD}\""]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -47,7 +48,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/meeting_assistant
+      DATABASE_URL: ${DATABASE_URL:-mysql://arlo:arlo@mysql:3306/meeting_assistant}
       REDIS_URL: redis://redis:6379
       NODE_ENV: development
     ports:
@@ -57,7 +58,7 @@ services:
       - /app/node_modules
       - ./storage:/app/storage
     depends_on:
-      postgres:
+      mysql:
         condition: service_healthy
     command: sh -c "npx prisma generate && npx prisma db push && npm run dev"
 
@@ -96,7 +97,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/meeting_assistant
+      DATABASE_URL: ${DATABASE_URL:-mysql://arlo:arlo@mysql:3306/meeting_assistant}
       BACKEND_URL: http://backend:3000
       # RTMS SDK requires these specific variable names
       ZM_RTMS_CLIENT: ${ZOOM_CLIENT_ID}
@@ -114,7 +115,7 @@ services:
     command: npm start
 
 volumes:
-  postgres_data:
+  mysql_data:
     driver: local
   redis_data:
     driver: local

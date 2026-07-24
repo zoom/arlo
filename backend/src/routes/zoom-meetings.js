@@ -35,6 +35,13 @@ router.get('/', requireAuth, async (req, res) => {
     res.json({ meetings });
   } catch (error) {
     console.error('Error fetching upcoming meetings:', error.response?.data || error.message);
+    if (error.response?.status === 400 || error.response?.status === 403) {
+      return res.json({
+        meetings: [],
+        unavailable: true,
+        reason: 'Zoom meeting list permission is not available',
+      });
+    }
     res.status(error.response?.status || 500).json({
       error: 'Failed to fetch upcoming meetings',
     });

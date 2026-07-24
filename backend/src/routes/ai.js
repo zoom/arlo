@@ -194,7 +194,7 @@ router.post('/action-items', requireAuth, async (req, res) => {
  * Extract SOAP notes from healthcare transcript (healthcare vertical)
  */
 router.post('/extract-soap', requireAuth, async (req, res) => {
-  const { meetingId, transcript, currentSoap } = req.body;
+  const { meetingId, transcript, currentSoap, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -208,7 +208,7 @@ router.post('/extract-soap', requireAuth, async (req, res) => {
     console.log(`🏥 Extracting SOAP notes for meeting: ${meetingId || 'live'}`);
 
     // Extract SOAP notes using AI
-    const soapNotes = await extractSOAPNotes(transcript, currentSoap || {});
+    const soapNotes = await extractSOAPNotes(transcript, currentSoap || {}, { model });
 
     res.json(soapNotes);
   } catch (error) {
@@ -284,7 +284,7 @@ router.post('/chat', requireAuth, async (req, res) => {
       meetingTitle = 'Recent Meetings';
     }
 
-    console.log(`🤖 Chat question: "${question.substring(0, 50)}..."`);
+    console.log(`🤖 Chat question received: bytes=${Buffer.byteLength(question, 'utf8')}`);
 
     // Get AI response
     const answer = await chatWithTranscript(question, transcript, meetingTitle);
@@ -397,6 +397,8 @@ router.get('/status', (req, res) => {
     hasApiKey: !!config.openrouterApiKey,
     defaultModel: config.defaultModel,
     fallbackModel: config.fallbackModel,
+    fallbackModels: config.fallbackModels,
+    allowedOpenRouterModels: config.allowedOpenRouterModels,
   });
 });
 
@@ -406,7 +408,7 @@ router.get('/status', (req, res) => {
  * Used for real-time customer sentiment tracking in support calls
  */
 router.post('/sentiment', optionalAuth, async (req, res) => {
-  const { text } = req.body;
+  const { text, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -417,7 +419,7 @@ router.post('/sentiment', optionalAuth, async (req, res) => {
   }
 
   try {
-    const result = await analyzeSentiment(text.trim());
+    const result = await analyzeSentiment(text.trim(), { model });
     res.json(result);
   } catch (error) {
     console.error('❌ Sentiment analysis error:', error.message);
@@ -431,7 +433,7 @@ router.post('/sentiment', optionalAuth, async (req, res) => {
  * Used when we have segments but the meeting isn't saved to DB yet
  */
 router.post('/summary-live', optionalAuth, async (req, res) => {
-  const { transcript, title } = req.body;
+  const { transcript, title, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -443,7 +445,7 @@ router.post('/summary-live', optionalAuth, async (req, res) => {
 
   try {
     console.log(`🤖 Generating live summary (${transcript.length} chars)`);
-    const summary = await generateSummary(transcript.trim(), title || 'Live Meeting');
+    const summary = await generateSummary(transcript.trim(), title || 'Live Meeting', { model });
 
     res.json({
       summary,
@@ -461,7 +463,7 @@ router.post('/summary-live', optionalAuth, async (req, res) => {
  * Used for real-time key moment detection during meetings
  */
 router.post('/key-moment', optionalAuth, async (req, res) => {
-  const { text } = req.body;
+  const { text, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -472,15 +474,14 @@ router.post('/key-moment', optionalAuth, async (req, res) => {
   }
 
   try {
-    const result = await extractKeyMoment(text.trim());
-    if (result) {
-      res.json(result);
-    } else {
-      res.json({ skip: true });
-    }
+    const result = await extractKeyMoment(text.trim(), { model });
+    res.json(result);
   } catch (error) {
     console.error('❌ Key moment extraction error:', error.message);
-    res.status(500).json({ error: 'Key moment extraction failed' });
+    res.status(502).json({
+      error: 'Key moment extraction failed across all configured models',
+      code: 'KEY_MOMENT_MODELS_FAILED',
+    });
   }
 });
 

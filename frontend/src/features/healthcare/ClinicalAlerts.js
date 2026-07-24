@@ -109,9 +109,17 @@ export default function ClinicalAlerts({ segments, patientInfo, showDemoData = t
 
   return (
     <Card className={`clinical-alerts ${collapsed ? 'feature-collapsed' : ''}`}>
-      <button
+      <div
         className="clinical-alerts-header feature-collapse-header"
+        role="button"
+        tabIndex={0}
         onClick={() => toggleCollapsed('clinical-alerts')}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleCollapsed('clinical-alerts');
+          }
+        }}
         aria-expanded={!collapsed}
       >
         <div className="clinical-alerts-title">
@@ -135,7 +143,7 @@ export default function ClinicalAlerts({ segments, patientInfo, showDemoData = t
             <ChevronUp size={16} className="feature-chevron" />
           )}
         </div>
-      </button>
+      </div>
 
       {!collapsed && (
       <div className="clinical-alerts-list">

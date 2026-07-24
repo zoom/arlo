@@ -44,7 +44,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function GuestInMeetingView() {
   const { id } = useParams();
   const { zoomSdk, meetingContext, userContextStatus, isTestMode } = useZoomSdk();
-  const { ws, connectWebSocket, rtmsActive, viewers } = useMeeting();
+  const { rtmsActive, viewers } = useMeeting();
 
   // Meeting ID: prefer SDK context, fall back to URL param
   const meetingId = meetingContext?.meetingUUID || id;
@@ -76,11 +76,8 @@ export default function GuestInMeetingView() {
       .finally(() => setLoading(false));
   }, [meetingId]);
 
-  // Connect WebSocket for live transcript (anonymous — null token)
-  useEffect(() => {
-    if (!meetingId || ws) return;
-    connectWebSocket(null, meetingId);
-  }, [meetingId, ws, connectWebSocket]);
+  // Live WebSocket transcript requires an authenticated Zoom App session.
+  // Guests can still view data only when public links are explicitly enabled server-side.
 
   // Load historical transcript segments
   useEffect(() => {
@@ -114,53 +111,6 @@ export default function GuestInMeetingView() {
       })
       .catch(() => {});
   }, [meetingId]);
-
-  // Listen for WebSocket messages
-  useEffect(() => {
-    if (!ws) return;
-
-    const handleMessage = (event) => {
-      const message = JSON.parse(event.data);
-
-      if (message.type === 'transcript.segment') {
-        const { segment } = message.data;
-        setSegments(prev => {
-          if (prev.some(s => s.seqNo === segment.seqNo)) return prev;
-          return [...prev, segment];
-        });
-
-        if (followLive && transcriptRef.current) {
-          requestAnimationFrame(() => {
-            if (transcriptRef.current) {
-              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-            }
-          });
-        }
-      }
-
-      if (message.type === 'participant.event') {
-        const evt = message.data.event;
-        setParticipantEvents(prev => [...prev, evt]);
-
-        if (followLive && transcriptRef.current) {
-          requestAnimationFrame(() => {
-            if (transcriptRef.current) {
-              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-            }
-          });
-        }
-      }
-
-      if (message.type === 'meeting.status') {
-        if (message.data.status === 'rtms_stopped') {
-          setMeetingEnded(true);
-        }
-      }
-    };
-
-    ws.addEventListener('message', handleMessage);
-    return () => ws.removeEventListener('message', handleMessage);
-  }, [ws, followLive]);
 
   // Scroll detection
   const handleScroll = useCallback(() => {
