@@ -261,7 +261,7 @@ The AWS Terraform stack provisions:
 - CloudFront and an Application Load Balancer for HTTPS/FQDN access to the Zoom App, backend API, webhooks, and browser WebSocket endpoint.
 - ECS/Fargate services for the frontend, backend, and RTMS control plane.
 - One ECS/Fargate RTMS worker task per active RTMS stream. The worker connects to Zoom RTMS signaling/media and publishes realtime events to Valkey.
-- Amazon RDS MySQL for persisted meetings/transcripts, ElastiCache Serverless Valkey for realtime fanout/replay, DynamoDB for RTMS control state, ECR for images, and KMS/SSM Parameter Store for secrets.
+- Amazon RDS MySQL for persisted meetings/transcripts, ElastiCache Serverless Valkey for realtime fanout/replay, DynamoDB for RTMS control state, and KMS/SSM Parameter Store for secrets. Container images are built and pushed to ECR separately; Terraform consumes their image URIs.
 - Private RTMS worker subnets by default, with NAT egress for Zoom/OpenRouter access and no public worker IPs.
 
 Realtime transcript and participant identity fields stored in Valkey are app-encrypted with AES-256-GCM. The RTMS worker calls KMS `GenerateDataKey` once per stream, caches the plaintext data key in memory, and stores only encrypted sensitive payload fields in Valkey. Routing metadata such as meeting UUID/session/stream IDs remains plaintext so the backend can perform lookup and fanout. MySQL persistence is not app-layer encrypted by this starter stack.
@@ -303,21 +303,55 @@ flowchart LR
 
 ### AWS Deployment Flow
 
+The complete guide, including ECR image publishing, mock-environment isolation,
+custom-domain/ACM configuration, and secret bootstrap, is in
+[`deploy/aws/terraform/README.md`](./deploy/aws/terraform/README.md).
+
 ```bash
 cd deploy/aws/terraform
 cp terraform.tfvars.example terraform.tfvars
-cp secrets.auto.tfvars.example secrets.auto.tfvars
 
-# Fill in image URIs, domain settings, and non-secret deployment variables.
-# Store runtime secrets through SSM/KMS rather than committing them.
-./put-secrets.sh
-
+# Edit terraform.tfvars with the ECR image URIs and non-secret settings.
+# Build and push the four images before applying Terraform.
 terraform init
-terraform plan
-terraform apply
+terraform apply -target=aws_kms_key.secrets -target=aws_kms_alias.secrets
+
+# Export the required secret values in this shell. Do not commit them.
+export AWS_REGION=us-east-1
+export SSM_PREFIX=/arlo/prod
+export KMS_KEY_ID=alias/arlo-prod
+export ZOOM_CLIENT_ID='...'
+export ZOOM_CLIENT_SECRET='...'
+export ZOOM_WEBHOOK_SECRET_TOKEN='...'
+export SESSION_SECRET="$(openssl rand -hex 32)"
+export REDIS_ENCRYPTION_KEY="$(openssl rand -hex 16)"
+export INTERNAL_WEBHOOK_SECRET="$(openssl rand -hex 32)"
+
+# If create_database=true, let Terraform create RDS and its database-url parameter:
+SKIP_DATABASE_URL=true ./put-secrets.sh
+# If create_database=false, use the existing remote MySQL URL instead:
+# export DATABASE_URL='mysql://USER:PASSWORD@HOST:3306/arlo?connection_limit=5'
+# ./put-secrets.sh
+
+terraform fmt -check
+terraform validate
+terraform plan -out=arlo.tfplan
+terraform apply arlo.tfplan
+
+terraform output -raw cloudfront_domain_name
+terraform output -raw zoom_rtms_webhook_url
 ```
 
-Do not commit `terraform.tfvars`, `secrets.auto.tfvars`, `.terraform/`, or Terraform state files from a real deployment.
+For a mock deployment, use a separate Terraform state/backend key and set a
+unique environment, VPC CIDR, SSM prefix, and KMS alias. Do not reuse the
+production state. With `create_database = true`, the mock stack creates an
+isolated encrypted RDS MySQL instance; with `create_database = false`, provide
+the remote database URL at `/arlo/mock/database-url` and ensure VPC connectivity
+before starting ECS.
+
+Do not commit `terraform.tfvars`, `secrets.auto.tfvars`, `.terraform/`, or
+Terraform state files from a real deployment. Terraform does not create ECR
+repositories, build Docker images, or push image tags.
 
 ---
 

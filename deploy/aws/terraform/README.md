@@ -11,6 +11,79 @@ This template is the AWS-first deployment shape for scaling Arlo RTMS:
 - KMS encrypts the DynamoDB table and SSM `SecureString` secrets.
 - CloudWatch logs are disabled by default to avoid log spend.
 
+## Prerequisites
+
+Install and verify:
+
+- AWS CLI with permission to manage the target account and region.
+- Terraform >= 1.6.
+- Docker with permission to build images and push to ECR.
+- A unique VPC CIDR for this environment.
+- Zoom credentials and an Arlo-compatible MySQL connection, either created by
+  this stack or supplied through SSM.
+
+Confirm the AWS account before applying:
+
+```bash
+export AWS_REGION=us-east-1
+aws sts get-caller-identity
+```
+
+The command must return the account intended for this environment. Do not use
+the production Terraform state for a mock deployment.
+
+## Container Images and ECR
+
+Terraform does not build or push images. It expects these four image URIs in
+`terraform.tfvars`:
+
+- `arlo-backend`
+- `arlo-frontend`
+- `arlo-rtms-control`
+- `arlo-rtms-worker`
+
+Create the repositories once, if they do not already exist:
+
+```bash
+export AWS_REGION=us-east-1
+export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+aws ecr get-login-password --region "$AWS_REGION" \
+  | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+for repository in arlo-backend arlo-frontend arlo-rtms-control arlo-rtms-worker; do
+  aws ecr describe-repositories \
+    --region "$AWS_REGION" \
+    --repository-names "$repository" >/dev/null 2>&1 || \
+  aws ecr create-repository \
+    --region "$AWS_REGION" \
+    --repository-name "$repository" >/dev/null
+done
+```
+
+Build and push an immutable Git-tagged release. The RTMS control and worker
+tasks use the same Dockerfile; `RTMS_WORKER_MODE` selects the runtime mode.
+
+```bash
+export IMAGE_TAG="$(git rev-parse --short HEAD)"
+
+docker build -t "$ECR_REGISTRY/arlo-backend:$IMAGE_TAG" ./backend
+docker build -t "$ECR_REGISTRY/arlo-frontend:$IMAGE_TAG" ./frontend
+docker build -t "$ECR_REGISTRY/arlo-rtms-control:$IMAGE_TAG" ./rtms
+docker tag "$ECR_REGISTRY/arlo-rtms-control:$IMAGE_TAG" \
+  "$ECR_REGISTRY/arlo-rtms-worker:$IMAGE_TAG"
+
+docker push "$ECR_REGISTRY/arlo-backend:$IMAGE_TAG"
+docker push "$ECR_REGISTRY/arlo-frontend:$IMAGE_TAG"
+docker push "$ECR_REGISTRY/arlo-rtms-control:$IMAGE_TAG"
+docker push "$ECR_REGISTRY/arlo-rtms-worker:$IMAGE_TAG"
+```
+
+Use the four resulting URIs, including `IMAGE_TAG`, for `backend_image`,
+`frontend_image`, `rtms_control_image`, and `rtms_worker_image`. Avoid using
+`latest` for production because ECS will not reliably detect an unchanged tag.
+
 ## Network Hardening
 
 ### Admin-Provisioned VPCs
@@ -104,6 +177,31 @@ cp terraform.tfvars.example terraform.tfvars
 Edit `terraform.tfvars` with image URIs, `public_url`, and optional
 `certificate_arn`/Route53 values.
 
+For a new mock environment, use a separate Terraform state directory or a
+separate remote-backend state key. Set at least these values so it cannot share
+production names or networking:
+
+```hcl
+environment          = "mock"
+vpc_cidr             = "10.43.0.0/16"
+ssm_parameter_prefix = "/arlo/mock"
+kms_alias_name       = "alias/arlo-mock"
+public_url           = ""
+custom_domain_name   = ""
+route53_zone_id      = ""
+certificate_arn       = ""
+```
+
+With an empty `public_url`, Terraform uses the CloudFront distribution's native
+HTTPS hostname after apply. A mock stack should use a separate MySQL database;
+the default `create_database = true` creates one. If `create_database = false`,
+write a dedicated `/arlo/mock/database-url` SecureString and provide network
+connectivity to that remote database before starting ECS.
+
+For a mock stack, after editing `terraform.tfvars` and pushing the images, run
+the normal validation and apply flow below. Keep its state and secret prefix
+separate from production.
+
 For production, create the KMS key first, then write secrets directly to SSM so
 they do not enter Terraform state:
 
@@ -121,9 +219,23 @@ export SESSION_SECRET="$(openssl rand -hex 32)"
 export REDIS_ENCRYPTION_KEY="$(openssl rand -hex 16)"
 export INTERNAL_WEBHOOK_SECRET="$(openssl rand -hex 32)"
 
+# If create_database=true, Terraform creates RDS and its database-url parameter.
 SKIP_DATABASE_URL=true ./put-secrets.sh
-terraform apply
+# If create_database=false, supply the existing remote MySQL URL instead:
+# export DATABASE_URL='mysql://USER:PASSWORD@HOST:3306/arlo?connection_limit=5'
+# ./put-secrets.sh
+terraform fmt -check
+terraform validate
+terraform plan -out=arlo.tfplan
+terraform apply arlo.tfplan
 ```
+
+For a mock stack with `create_database = true`, use the same flow after changing
+the values above and use `SSM_PREFIX=/arlo/mock` and
+`KMS_KEY_ID=alias/arlo-mock` when running `put-secrets.sh`. If the mock stack
+creates RDS, keep `SKIP_DATABASE_URL=true`; Terraform creates the database URL
+parameter during the full apply. If `create_database = false`, export
+`DATABASE_URL` and run `./put-secrets.sh` without `SKIP_DATABASE_URL=true`.
 
 For a disposable bootstrap, copy `secrets.auto.tfvars.example` to
 `secrets.auto.tfvars` and fill it in. That is easier, but Terraform state will
@@ -141,3 +253,26 @@ use a custom domain plus an ACM certificate:
 
 Without `certificate_arn`, Terraform creates an HTTP listener only. That is for
 bootstrap testing, not production Zoom webhook delivery.
+
+## Outputs and Teardown
+
+After apply, retrieve the public endpoints:
+
+```bash
+terraform output -raw cloudfront_domain_name
+terraform output -raw zoom_rtms_webhook_url
+terraform output -raw alb_dns_name
+```
+
+Use the CloudFront URL for the Zoom App and webhook configuration. The ALB DNS
+name is the CloudFront origin and is not the production viewer endpoint.
+
+To remove a disposable mock stack, first verify the selected Terraform state:
+
+```bash
+terraform workspace show
+terraform destroy
+```
+
+ECR repositories and images created outside this Terraform root are not removed
+by `terraform destroy`.
