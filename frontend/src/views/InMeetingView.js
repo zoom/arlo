@@ -12,7 +12,9 @@ import useZoomAuth from '../hooks/useZoomAuth';
 import { useDemoData } from '../hooks/useDemoData';
 import { useFeatureLayout } from '../hooks/useFeatureLayout';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
+import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import ArloResponsePanel from '../components/ArloResponsePanel';
+import ComplianceAdvisor from '../components/ComplianceAdvisor';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
@@ -105,6 +107,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   // In guest mode, use 'general' vertical to show all features
   const effectiveVerticalId = isGuestMode ? 'general' : verticalId;
   const { showDemoData } = useDemoData();
+  const { complianceEnabled } = useComplianceSettings();
   const { getFeatureOrder, updateFeatureOrder, hasCustomOrder, resetFeatureOrder } = useFeatureLayout();
 
   // Vertical-specific features (use effectiveVerticalId for guests)
@@ -1166,6 +1169,15 @@ export default function InMeetingView({ isGuestMode = false }) {
                 <span className="text-xs">Reset Order</span>
               </button>
             </div>
+          )}
+
+          {/* Compliance Advisor - Cross-vertical compliance monitoring */}
+          {complianceEnabled && (
+            <ComplianceAdvisor
+              segments={segments}
+              vertical={effectiveVerticalId === 'general' ? 'notes' : effectiveVerticalId}
+              enabled={complianceEnabled && rtmsActive}
+            />
           )}
 
           {/* Draggable feature cards */}

@@ -18,10 +18,12 @@ import {
   Terminal,
   Volume2,
   Code,
+  Shield,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useVertical } from '../contexts/VerticalContext';
 import { useDemoData } from '../hooks/useDemoData';
+import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import { useMeeting } from '../contexts/MeetingContext';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -72,6 +74,7 @@ export default function SettingsView() {
   const { theme, toggleTheme } = useTheme();
   const { vertical, clearVertical } = useVertical();
   const { showDemoData, setShowDemoData } = useDemoData();
+  const { complianceEnabled, setComplianceEnabled } = useComplianceSettings();
   const { meetingId, rtmsActive, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
   const [apiStartSuccess, setApiStartSuccess] = useState(false);
   const [autoOpen, setAutoOpen] = useState(true);
@@ -890,6 +893,37 @@ export default function SettingsView() {
                   id="show-ai-prompts"
                   checked={showAIPrompts}
                   onChange={(e) => setShowAIPrompts(e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+                <span className="settings-toggle-thumb" />
+              </label>
+            </div>
+
+            <hr className="settings-separator" />
+
+            {/* Compliance Advisor Toggle */}
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <div className="settings-dev-header">
+                  <Shield size={16} />
+                  <label className="text-sans font-medium" htmlFor="compliance-advisor">
+                    Compliance Advisor
+                  </label>
+                </div>
+                <p className="text-sans text-sm text-muted">
+                  Real-time compliance monitoring with vertical-specific rules.
+                  Detects potential compliance risks based on conversation content.
+                </p>
+                <p className="text-sans text-xs text-muted" style={{ marginTop: 4 }}>
+                  Healthcare: HIPAA/PHI • Legal: Privilege/Ethics • Sales: Promises/Pricing • Support: SLA/Refunds
+                </p>
+              </div>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  id="compliance-advisor"
+                  checked={complianceEnabled}
+                  onChange={(e) => setComplianceEnabled(e.target.checked)}
                 />
                 <span className="settings-toggle-track" />
                 <span className="settings-toggle-thumb" />
