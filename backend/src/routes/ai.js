@@ -30,6 +30,7 @@ const {
   extractKeyMoment,
   generateSuggestions,
 } = require('../services/openrouter');
+const { getAllPrompts, getPrompt, getPromptsList } = require('../services/promptsMetadata');
 
 router.use(devAuthBypass);
 
@@ -237,6 +238,40 @@ router.post('/key-moment', optionalAuth, async (req, res) => {
     console.error('Key moment extraction error:', error.message);
     res.status(500).json({ error: 'Key moment extraction failed' });
   }
+});
+
+/**
+ * GET /api/ai/prompts
+ * Get list of all AI prompts - For developer mode
+ */
+router.get('/prompts', (req, res) => {
+  res.json({
+    prompts: getPromptsList(),
+    description: 'AI prompts used by Arlo. Enable "Show AI Prompts" in settings to see these in the UI.',
+  });
+});
+
+/**
+ * GET /api/ai/prompts/:promptId
+ * Get details of a specific prompt - For developer mode
+ */
+router.get('/prompts/:promptId', (req, res) => {
+  const { promptId } = req.params;
+  const prompt = getPrompt(promptId);
+
+  if (!prompt) {
+    return res.status(404).json({ error: 'Prompt not found' });
+  }
+
+  res.json(prompt);
+});
+
+/**
+ * GET /api/ai/prompts-all
+ * Get all prompts with full details - For developer mode
+ */
+router.get('/prompts-all', (req, res) => {
+  res.json(getAllPrompts());
 });
 
 module.exports = router;

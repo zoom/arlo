@@ -58,6 +58,8 @@ services:
       - .env
     environment:
       BACKEND_URL: http://backend:3000
+      # Override PORT from .env to avoid conflict with backend's PORT=3000
+      PORT: 3002
       # RTMS maps ZOOM_* → ZM_RTMS_* at startup (see rtms/src/index.js); no duplicate vars needed here.
       # ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, and ZOOM_WEBHOOK_TOKEN come from env_file (.env)
       # RTMS SDK v1.0 logging (replaces configureLogger())

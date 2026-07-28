@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { FileText, ChevronDown, ChevronUp, Sparkles, RefreshCw } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import PromptInfo from '../../components/PromptInfo';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './MeetingSummary.css';
 
@@ -140,6 +141,7 @@ export default function MeetingSummary({ segments, meetingId, showDemoData = tru
         <div className="meeting-summary-title">
           <FileText size={18} className="meeting-summary-icon" />
           <h3 className="text-serif font-medium">Meeting Summary</h3>
+          <PromptInfo promptId="summary" className="prompt-info-badge" />
           {isGenerating ? (
             <span className="meeting-summary-generating-badge">
               <Sparkles size={10} />

@@ -17,6 +17,7 @@ import {
   Headphones,
   Terminal,
   Volume2,
+  Code,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useVertical } from '../contexts/VerticalContext';
@@ -86,6 +87,10 @@ export default function SettingsView() {
   const [showVoiceResponses, setShowVoiceResponses] = useState(true);
   const voiceResponsesMountedRef = useRef(false);
 
+  // Developer tools state
+  const [showAIPrompts, setShowAIPrompts] = useState(false);
+  const showAIPromptsMountedRef = useRef(false);
+
   // Chat notifications state
   const [chatNotificationsEnabled, setChatNotificationsEnabled] = useState(true);
   const [notifyOnStart, setNotifyOnStart] = useState(true);
@@ -137,6 +142,10 @@ export default function SettingsView() {
       const cachedVoiceResponses = localStorage.getItem('arlo-voice-responses');
       if (cachedVoiceResponses !== null) {
         setShowVoiceResponses(JSON.parse(cachedVoiceResponses));
+      }
+      const cachedShowAIPrompts = localStorage.getItem('arlo-show-ai-prompts');
+      if (cachedShowAIPrompts !== null) {
+        setShowAIPrompts(JSON.parse(cachedShowAIPrompts));
       }
     } catch {}
 
@@ -227,6 +236,21 @@ export default function SettingsView() {
       body: JSON.stringify({ showVoiceResponses }),
     }).catch(() => {});
   }, [showVoiceResponses]);
+
+  // Save show AI prompts preference on change (skip initial mount)
+  useEffect(() => {
+    if (!showAIPromptsMountedRef.current) {
+      showAIPromptsMountedRef.current = true;
+      return;
+    }
+    localStorage.setItem('arlo-show-ai-prompts', JSON.stringify(showAIPrompts));
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ showAIPrompts }),
+    }).catch(() => {});
+  }, [showAIPrompts]);
 
   // Fetch upcoming meetings for auto-open section
   useEffect(() => {
@@ -840,6 +864,37 @@ export default function SettingsView() {
                 <span className="text-sans text-sm">{apiActionError}</span>
               </div>
             )}
+
+            <hr className="settings-separator" />
+
+            {/* Show AI Prompts Toggle */}
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <div className="settings-dev-header">
+                  <Code size={16} />
+                  <label className="text-sans font-medium" htmlFor="show-ai-prompts">
+                    Show AI Prompts
+                  </label>
+                </div>
+                <p className="text-sans text-sm text-muted">
+                  Display the prompts powering AI features. When enabled, an info icon
+                  appears next to AI-powered components showing the exact prompt used.
+                </p>
+                <p className="text-sans text-xs text-muted" style={{ marginTop: 4 }}>
+                  Useful for developers exploring how Arlo works.
+                </p>
+              </div>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  id="show-ai-prompts"
+                  checked={showAIPrompts}
+                  onChange={(e) => setShowAIPrompts(e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+                <span className="settings-toggle-thumb" />
+              </label>
+            </div>
           </div>
         </Card>
       </section>
