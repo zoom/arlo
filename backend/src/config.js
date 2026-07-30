@@ -15,7 +15,6 @@ const requiredEnvVars = [
   'PUBLIC_URL',
   'DATABASE_URL',
   'SESSION_SECRET',
-  'REDIS_ENCRYPTION_KEY',
 ];
 
 // Validate required variables
@@ -27,11 +26,23 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-// Validate encryption key length (must be 32 characters for AES-256)
-if (process.env.REDIS_ENCRYPTION_KEY.length !== 32) {
-  console.error('❌ REDIS_ENCRYPTION_KEY must be exactly 32 characters');
-  console.error(`   Current length: ${process.env.REDIS_ENCRYPTION_KEY.length}`);
-  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(16).toString(\'hex\'))"');
+const tokenEncryptionKey = process.env.TOKEN_ENCRYPTION_KEY || process.env.REDIS_ENCRYPTION_KEY;
+const legacyTokenEncryptionKey = process.env.REDIS_ENCRYPTION_KEY || tokenEncryptionKey;
+
+if (!tokenEncryptionKey) {
+  console.error('❌ Missing TOKEN_ENCRYPTION_KEY (or legacy REDIS_ENCRYPTION_KEY)');
+  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+
+if (!/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/i.test(tokenEncryptionKey)) {
+  console.error('❌ TOKEN_ENCRYPTION_KEY must be 32 or 64 hexadecimal characters');
+  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+
+if (!/^(?:[0-9a-f]{32}|[0-9a-f]{64})$/i.test(legacyTokenEncryptionKey)) {
+  console.error('❌ REDIS_ENCRYPTION_KEY must be 32 or 64 hexadecimal characters');
   process.exit(1);
 }
 
@@ -86,7 +97,8 @@ module.exports = {
 
   // Security
   sessionSecret: process.env.SESSION_SECRET,
-  encryptionKey: process.env.REDIS_ENCRYPTION_KEY,
+  encryptionKey: tokenEncryptionKey,
+  legacyEncryptionKey: legacyTokenEncryptionKey,
 
   // Redis
   redisUrl: process.env.REDIS_URL || null,

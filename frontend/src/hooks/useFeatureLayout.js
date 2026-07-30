@@ -27,6 +27,7 @@ const DEFAULT_FEATURE_ORDER = {
     'privilege-markers',
   ],
   sales: [
+    'filler-word-alert',
     'qualification-signals',
     'competitor-mentions',
     'commitments',
@@ -107,7 +108,14 @@ export function FeatureLayoutProvider({ children }) {
 
   // Get feature order for a vertical (returns default if no custom order)
   const getFeatureOrder = useCallback((verticalId) => {
-    return featureOrder[verticalId] || DEFAULT_FEATURE_ORDER[verticalId] || [];
+    const defaultOrder = DEFAULT_FEATURE_ORDER[verticalId] || [];
+    const customOrder = featureOrder[verticalId];
+    if (!customOrder) return defaultOrder;
+
+    // Preserve customization while adding features introduced after it was saved.
+    const validCustomOrder = customOrder.filter(id => defaultOrder.includes(id));
+    const missingFeatures = defaultOrder.filter(id => !validCustomOrder.includes(id));
+    return [...validCustomOrder, ...missingFeatures];
   }, [featureOrder]);
 
   // Update feature order for a vertical

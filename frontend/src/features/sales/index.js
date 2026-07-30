@@ -9,3 +9,4 @@ export { default as DealTracker } from './DealTracker';
 export { default as CompetitorMentions } from './CompetitorMentions';
 export { default as CommitmentsPanel } from './CommitmentsPanel';
 export { default as QualificationSignals } from './QualificationSignals';
+export { default as FillerWordAlert } from './FillerWordAlert';
