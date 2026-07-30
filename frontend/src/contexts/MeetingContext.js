@@ -32,21 +32,6 @@ function withTimeout(promise, timeoutMs, message) {
   ]);
 }
 
-function pickRtmsSessionId(statusResponse) {
-  const sessions = statusResponse?.rtmsStatus ||
-    statusResponse?.sessions ||
-    statusResponse?.rtmsSessions ||
-    [];
-  const list = Array.isArray(sessions) ? sessions : [sessions].filter(Boolean);
-  const active = list.find((session) => ['connecting', 'started', 'resumed', 'paused'].includes(session?.status)) ||
-    list[0];
-  return active?.rtmsSessionId ||
-    active?.sessionId ||
-    active?.rtms_stream_id ||
-    active?.streamId ||
-    null;
-}
-
 function pickMeetingID(meetingContext) {
   const candidate = meetingContext?.meetingID ||
     meetingContext?.meetingId ||
@@ -76,7 +61,6 @@ function buildWebSocketUrl(meetingId, token, metadata = {}) {
 
   const params = new URLSearchParams({ meeting_uuid: meetingId });
   if (token) params.set('token', token);
-  if (metadata.sessionId) params.set('session_id', metadata.sessionId);
   if (metadata.meetingID) params.set('meetingid', metadata.meetingID);
   return `${base}?${params.toString()}`;
 }
@@ -87,7 +71,6 @@ export function MeetingProvider({ children }) {
   const [rtmsActive, setRtmsActive] = useState(false);
   const [rtmsPaused, setRtmsPaused] = useState(false);
   const [rtmsLoading, setRtmsLoading] = useState(false);
-  const [rtmsSessionId, setRtmsSessionId] = useState(null);
   const [ws, setWs] = useState(null);
   const [viewers, setViewers] = useState(null);
 
@@ -105,7 +88,6 @@ export function MeetingProvider({ children }) {
   const reconnectAttemptRef = useRef(0);
   const wsRef = useRef(null);
   const rtmsActiveRef = useRef(rtmsActive);
-  const rtmsSessionIdRef = useRef(rtmsSessionId);
   const isGuestRef = useRef(isGuest);
   const userContextRef = useRef(userContext);
   const meetingContextRef = useRef(meetingContext);
@@ -116,7 +98,6 @@ export function MeetingProvider({ children }) {
   authUserRef.current = user;
 
   useEffect(() => { rtmsActiveRef.current = rtmsActive; }, [rtmsActive]);
-  useEffect(() => { rtmsSessionIdRef.current = rtmsSessionId; }, [rtmsSessionId]);
 
   const meetingId = meetingContext?.meetingUUID;
 
@@ -217,25 +198,6 @@ export function MeetingProvider({ children }) {
   const sendChatNoticeRef = useRef(sendChatNotice);
   useEffect(() => { sendChatNoticeRef.current = sendChatNotice; }, [sendChatNotice]);
 
-  const refreshRtmsSessionId = useCallback(async () => {
-    if (!zoomSdk) return rtmsSessionIdRef.current;
-
-    try {
-      const response = typeof zoomSdk.callZoomApi === 'function'
-        ? await zoomSdk.callZoomApi('getRTMSStatus')
-        : await zoomSdk.getRTMSStatus?.();
-      const nextSessionId = pickRtmsSessionId(response);
-      if (nextSessionId && nextSessionId !== rtmsSessionIdRef.current) {
-        rtmsSessionIdRef.current = nextSessionId;
-        setRtmsSessionId(nextSessionId);
-      }
-      return nextSessionId || rtmsSessionIdRef.current;
-    } catch (error) {
-      console.warn('getRTMSStatus failed:', error);
-      return rtmsSessionIdRef.current;
-    }
-  }, [zoomSdk]);
-
   const connectWebSocket = useCallback(async (token, meetingId) => {
     if (!meetingId || meetingId === 'undefined' || meetingId === 'null') {
       console.error('Cannot connect WebSocket without valid meeting ID');
@@ -251,12 +213,6 @@ export function MeetingProvider({ children }) {
       return existingSocket;
     }
 
-    const resolvedRtmsSessionId = rtmsSessionIdRef.current || await refreshRtmsSessionId();
-    if (!resolvedRtmsSessionId) {
-      console.warn('Skipping WebSocket connection until RTMS session id is available');
-      return null;
-    }
-
     if (existingSocket && existingSocket.readyState !== WebSocket.CLOSED) {
       existingSocket.shouldReconnect = false;
       existingSocket.close();
@@ -266,14 +222,12 @@ export function MeetingProvider({ children }) {
 
     const sdkMeeting = meetingContextRef.current;
     const sessionMetadata = {
-      sessionId: resolvedRtmsSessionId,
       meetingID: pickMeetingID(sdkMeeting),
     };
 
     const wsUrl = buildWebSocketUrl(meetingId, token, sessionMetadata);
     const socket = new WebSocket(wsUrl);
     socket.meetingId = meetingId;
-    socket.rtmsStreamId = sessionMetadata.sessionId;
     socket.shouldReconnect = true;
     wsRef.current = socket;
 
@@ -289,8 +243,6 @@ export function MeetingProvider({ children }) {
           meetingUUID: meetingId,
           participantName,
           isGuest: !!isGuestRef.current,
-          sessionId: sessionMetadata.sessionId,
-          rtmsStreamId: sessionMetadata.sessionId,
           meetingID: sessionMetadata.meetingID,
         },
       }));
@@ -367,38 +319,7 @@ export function MeetingProvider({ children }) {
     setWs(socket);
     return socket;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clearWebSocketTimers, markWebSocketAlive, refreshRtmsSessionId, startWebSocketHeartbeat]);
-
-  useEffect(() => {
-    if (!zoomSdk || !meetingId) return;
-    refreshRtmsSessionId();
-  }, [meetingId, refreshRtmsSessionId, zoomSdk]);
-
-  useEffect(() => {
-    if (!zoomSdk?.onRTMSStatusChange || !meetingId) return;
-    try {
-      zoomSdk.onRTMSStatusChange((event) => {
-        const nextSessionId = pickRtmsSessionId({ rtmsStatus: [event] });
-        if (nextSessionId) {
-          rtmsSessionIdRef.current = nextSessionId;
-          setRtmsSessionId(nextSessionId);
-        }
-        if (event?.status === 'started' || event?.status === 'resumed') {
-          setRtmsActive(true);
-          setRtmsPaused(false);
-        } else if (event?.status === 'paused') {
-          setRtmsPaused(true);
-        } else if (event?.status === 'stopped') {
-          setRtmsActive(false);
-          setRtmsPaused(false);
-          setRtmsSessionId(null);
-          rtmsSessionIdRef.current = null;
-        }
-      });
-    } catch (error) {
-      console.warn('onRTMSStatusChange registration failed:', error);
-    }
-  }, [meetingId, zoomSdk]);
+  }, [clearWebSocketTimers, markWebSocketAlive, startWebSocketHeartbeat]);
 
   const startRTMS = useCallback(async (isAutoStart = false) => {
     if (rtmsLoading || !zoomSdk) return;
@@ -418,7 +339,6 @@ export function MeetingProvider({ children }) {
         audioOptions: { rawAudio: false },
         transcriptOptions: { caption: true },
       }), RTMS_START_TIMEOUT_MS, 'Timed out waiting for Zoom to start RTMS');
-      await refreshRtmsSessionId();
 
       setRtmsActive(true);
       if (!meetingStartTimeRef.current) {
@@ -444,7 +364,6 @@ export function MeetingProvider({ children }) {
       if (error?.code === '10308') {
         // 10308 = RTMS already running — treat as success
         setRtmsActive(true);
-        await refreshRtmsSessionId();
         hasBeenActiveRef.current = true;
         if (!meetingStartTimeRef.current) {
           meetingStartTimeRef.current = Date.now();
@@ -466,7 +385,7 @@ export function MeetingProvider({ children }) {
     } finally {
       setRtmsLoading(false);
     }
-  }, [rtmsLoading, zoomSdk, meetingId, refreshRtmsSessionId, sendChatNotice]);
+  }, [rtmsLoading, zoomSdk, meetingId, sendChatNotice]);
 
   const stopRTMS = useCallback(async () => {
     if (rtmsLoading || !zoomSdk) return;
@@ -615,7 +534,6 @@ export function MeetingProvider({ children }) {
     rtmsLoading,
     ws,
     meetingId,
-    rtmsSessionId,
     meetingStartTime: meetingStartTimeRef.current,
     autoStartAttemptedRef,
     viewers,
@@ -626,7 +544,7 @@ export function MeetingProvider({ children }) {
     connectWebSocket,
     setWs,
     setTitleUserRenamed,
-  }), [rtmsActive, rtmsPaused, rtmsLoading, ws, meetingId, rtmsSessionId, viewers, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [rtmsActive, rtmsPaused, rtmsLoading, ws, meetingId, viewers, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

@@ -294,21 +294,21 @@ variable "ai_enabled" {
 variable "default_model" {
   description = "Default OpenRouter model."
   type        = string
-  default     = "google/gemma-4-31b-it:free"
+  default     = "openai/gpt-oss-20b:free"
 }
 
 variable "fallback_model" {
   description = "Backward-compatible first fallback OpenRouter model."
   type        = string
-  default     = "openai/gpt-oss-120b:free"
+  default     = "nvidia/nemotron-3-super-120b-a12b:free"
 }
 
 variable "fallback_models" {
   description = "Ordered fallback OpenRouter models."
   type        = list(string)
   default = [
-    "openai/gpt-oss-120b:free",
-    "nvidia/nemotron-3-ultra-550b-a55b:free"
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "google/gemma-4-31b-it:free"
   ]
 }
 

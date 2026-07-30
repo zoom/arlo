@@ -160,7 +160,12 @@ function normalizeKeyMomentType(type) {
     .trim()
     .toLowerCase()
     .replace(/[\s-]+/g, '_');
-  const normalized = KEY_MOMENT_TYPE_ALIASES[key] || key;
+  const embeddedType = [...KEY_MOMENT_TYPES, ...Object.keys(KEY_MOMENT_TYPE_ALIASES)]
+    .find((candidate) => key.split('_').includes(candidate));
+  const normalized = KEY_MOMENT_TYPE_ALIASES[key] ||
+    KEY_MOMENT_TYPE_ALIASES[embeddedType] ||
+    embeddedType ||
+    key;
   return KEY_MOMENT_TYPES.has(normalized) ? normalized : null;
 }
 
@@ -559,7 +564,7 @@ Output ONLY valid JSON, no markdown.`;
     try {
       const result = await callOpenRouter(prompt, systemPrompt, {
         models: [model],
-        maxTokens: 150,
+        maxTokens: 300,
         temperature: 0.1,
         parseResponse: parseKeyMomentResponse,
       });

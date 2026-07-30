@@ -252,9 +252,9 @@ DATABASE_URL=mysql://...   # MySQL connection string
 SESSION_SECRET=...              # 64 chars: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 REDIS_ENCRYPTION_KEY=...        # 32 chars: node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
 OPENROUTER_API_KEY=...          # Optional; only free OpenRouter models are configured
-DEFAULT_MODEL=openai/gpt-oss-120b:free
-FALLBACK_MODEL=google/gemma-4-31b-it:free
-FALLBACK_MODELS=google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
+DEFAULT_MODEL=openai/gpt-oss-20b:free
+FALLBACK_MODEL=nvidia/nemotron-3-super-120b-a12b:free
+FALLBACK_MODELS=nvidia/nemotron-3-super-120b-a12b:free,google/gemma-4-31b-it:free
 ```
 
 ## Common Development Workflows

@@ -93,7 +93,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function InMeetingView() {
   useParams(); // id available from route but meetingId comes from context
   const navigate = useNavigate();
-  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, rtmsSessionId, connectWebSocket, viewers, setTitleUserRenamed } = useMeeting();
+  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -175,9 +175,9 @@ export default function InMeetingView() {
 
   // Connect WebSocket when authenticated and meeting is available
   useEffect(() => {
-    if (!isAuthenticated || !wsToken || ws || !meetingId || !rtmsSessionId) return;
+    if (!isAuthenticated || !wsToken || ws || !meetingId) return;
     connectWebSocket(wsToken, meetingId);
-  }, [isAuthenticated, ws, meetingId, rtmsSessionId, wsToken, connectWebSocket]);
+  }, [isAuthenticated, ws, meetingId, wsToken, connectWebSocket]);
 
   // Load existing transcript segments from DB (for auto-started RTMS sessions)
   const historicalLoadedRef = useRef(false);

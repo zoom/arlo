@@ -36,11 +36,11 @@ zoom_app_id    = ""
 rtms_client_id = ""
 
 ai_enabled     = false
-default_model  = "openai/gpt-oss-120b:free"
-fallback_model = "google/gemma-4-31b-it:free"
+default_model  = "openai/gpt-oss-20b:free"
+fallback_model = "nvidia/nemotron-3-super-120b-a12b:free"
 fallback_models = [
-  "google/gemma-4-31b-it:free",
-  "nvidia/nemotron-3-ultra-550b-a55b:free"
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "google/gemma-4-31b-it:free"
 ]
 
 # Keep these at 1+ to avoid sleeping. ECS replaces failed tasks.

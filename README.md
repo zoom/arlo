@@ -81,7 +81,7 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 | **Dark Mode** | Automatic OS detection with manual toggle |
 | **Industry Verticals** | Specialized modes: Arlo for Notes, Healthcare, Legal, Sales, and Support |
 
-> **AI features use OpenRouter.** The application allowlist currently contains `openai/gpt-oss-120b:free`, `google/gemma-4-31b-it:free`, and `nvidia/nemotron-3-ultra-550b-a55b:free`. An `OPENROUTER_API_KEY` is optional for development, but free-provider rate limits can still cause failures without one.
+> **AI features use OpenRouter.** The application allowlist currently contains `openai/gpt-oss-20b:free`, `nvidia/nemotron-3-super-120b-a12b:free`, and `google/gemma-4-31b-it:free`. An `OPENROUTER_API_KEY` is optional for development, but free-provider rate limits can still cause failures without one.
 
 ---
 
@@ -193,8 +193,8 @@ Add these OAuth scopes:
 
 - Click **Add APIs** and enable the capabilities listed in
   [`ZoomSdkContext.js`](./frontend/src/contexts/ZoomSdkContext.js), including
-  `getMeetingUUID`, `getMeetingContext`, `getUserContext`, `getRTMSStatus`,
-  `onRTMSStatusChange`, `startRTMS`, `stopRTMS`, and the notification/chat APIs.
+  `getMeetingUUID`, `getMeetingContext`, `getUserContext`, `startRTMS`,
+  `stopRTMS`, and the notification/chat APIs.
 - Enable **In-Client OAuth** and **Guest Mode** if those surfaces are used.
 - **Enable RTMS → Transcripts** (requires RTMS approval)
 

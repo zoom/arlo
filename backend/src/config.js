@@ -36,9 +36,9 @@ if (process.env.REDIS_ENCRYPTION_KEY.length !== 32) {
 }
 
 const freeOpenRouterModels = Object.freeze([
+  'openai/gpt-oss-20b:free',
+  'nvidia/nemotron-3-super-120b-a12b:free',
   'google/gemma-4-31b-it:free',
-  'openai/gpt-oss-120b:free',
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
 ]);
 
 function parseCsv(value) {

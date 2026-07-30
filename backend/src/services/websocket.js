@@ -374,10 +374,16 @@ async function handleWebSocketMessage(ws, data) {
               meetingId,
               sessionId: ws.rtmsStreamId,
               rtmsStreamId: ws.rtmsStreamId,
+              appUserId: ws.appUserId,
+              zoomUserId: ws.zoomUserId,
             });
 
-            if (realtimeSession?.rtmsMeetingId && realtimeSession.rtmsMeetingId !== meetingId) {
-              ws.rtmsMeetingId = realtimeSession.rtmsMeetingId;
+            if (realtimeSession) {
+              ws.rtmsMeetingId = realtimeSession.rtmsMeetingId || realtimeSession.meetingId || meetingId;
+              if (realtimeSession.rtmsStreamId) {
+                ws.rtmsStreamId = realtimeSession.rtmsStreamId;
+                addToSetMap(sessionConnections, ws.rtmsStreamId, ws);
+              }
             }
           } catch (error) {
             console.warn('⚠️ Valkey client session registration failed:', error.message);

@@ -73,7 +73,7 @@ clone. It tests the local Docker Compose path, not the AWS Terraform stack.
   `frontend/src/contexts/ZoomSdkContext.js`, especially:
   `getMeetingUUID`, `getMeetingContext`, `getRunningContext`, `getUserContext`,
   `authorize`, `onAuthorized`, `startRTMS`, `stopRTMS`, `pauseRTMS`,
-  `resumeRTMS`, `getRTMSStatus`, and `onRTMSStatusChange`.
+  and `resumeRTMS`.
 - [ ] Enable the RTMS transcript capability/feature for the app if it is
   required by the account's Marketplace configuration.
 - [ ] Add only the OAuth scopes required by the features being tested. The

@@ -135,19 +135,20 @@ DNS name is an origin/testing address, not the recommended Zoom App URL.
 
 ### Start
 
-1. The Zoom App obtains the current meeting UUID with `getMeetingUUID()` and
-   reads the RTMS session/stream identifier from `getRTMSStatus()`.
+1. The Zoom App obtains the current meeting UUID with `getMeetingUUID()`.
 2. The browser opens an authenticated WebSocket using the meeting UUID and
-   RTMS session ID. The current URL shape is:
+   signed session token. The current URL shape is:
 
    ```text
-   wss://HOST/ws?meeting_uuid=<meeting UUID>&session_id=<RTMS session/stream ID>&meetingid=<numeric meeting ID>&token=<signed session token>
+   wss://HOST/ws?meeting_uuid=<meeting UUID>&meetingid=<numeric meeting ID>&token=<signed session token>
    ```
 
    `meetingid` is optional and is the numeric Zoom meeting number. It is not
-   used in place of `meeting_uuid` for realtime routing.
+   used in place of `meeting_uuid` for realtime routing. The backend uses the
+   authenticated Zoom user identity to resolve the authoritative RTMS stream
+   in Valkey; the browser does not supply a stream ID.
 3. The app calls `zoomSdk.callZoomApi('startRTMS', ...)` with transcript
-   captions enabled. The app also listens for `onRTMSStatusChange`.
+   captions enabled.
 4. Zoom sends `meeting.rtms_started` to `/api/rtms/webhook`. The backend
    verifies the Zoom HMAC signature and forwards the event to the RTMS service
    using the internal HMAC secret.
@@ -307,8 +308,8 @@ The main mounted routes are:
 | POST | `/api/rtms/webhook` | Zoom-signed RTMS webhook receiver |
 
 Most AI endpoints require `AI_ENABLED=true`. The configured model allowlist is
-free-only: `openai/gpt-oss-120b:free`, `google/gemma-4-31b-it:free`, and
-`nvidia/nemotron-3-ultra-550b-a55b:free`. The service tries the selected model
+free-only: `openai/gpt-oss-20b:free`, `nvidia/nemotron-3-super-120b-a12b:free`,
+and `google/gemma-4-31b-it:free`. The service tries the selected model
 and configured fallback models. Summary generation falls back to an extractive
 summary if all model calls fail; key-moment extraction returns an error after
 all configured models fail.

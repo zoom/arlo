@@ -73,11 +73,11 @@ Parameters:
     Description: Optional OpenRouter API key.
   DefaultModel:
     Type: String
-    Default: openai/gpt-oss-120b:free
+    Default: openai/gpt-oss-20b:free
     Description: Default free OpenRouter model.
   FallbackModel:
     Type: String
-    Default: google/gemma-4-31b-it:free
+    Default: nvidia/nemotron-3-super-120b-a12b:free
     Description: Fallback free OpenRouter model.
   AiEnabled:
     Type: String

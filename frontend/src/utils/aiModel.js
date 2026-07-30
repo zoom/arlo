@@ -1,9 +1,9 @@
 export const AI_MODEL_STORAGE_KEY = 'arlo-ai-model';
 
 export const FREE_OPENROUTER_MODELS = [
+  { value: 'openai/gpt-oss-20b:free', label: 'OpenAI gpt-oss-20b (free)' },
+  { value: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'NVIDIA Nemotron 3 Super 120B (free)' },
   { value: 'google/gemma-4-31b-it:free', label: 'Google Gemma 4 31B (free)' },
-  { value: 'openai/gpt-oss-120b:free', label: 'OpenAI gpt-oss-120b (free)' },
-  { value: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'NVIDIA Nemotron 3 Ultra 550B (free)' },
 ];
 
 export function getPreferredAiModel() {

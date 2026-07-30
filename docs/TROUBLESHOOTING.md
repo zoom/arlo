@@ -77,7 +77,7 @@ Production WebSockets require the signed `wsToken` returned by the auth flow.
 The browser should connect with a URL shaped like:
 
 ```text
-wss://HOST/ws?meeting_uuid=<meeting UUID>&session_id=<RTMS session ID>&meetingid=<optional numeric meeting ID>&token=<signed token>
+wss://HOST/ws?meeting_uuid=<meeting UUID>&meetingid=<optional numeric meeting ID>&token=<signed token>
 ```
 
 The current frontend does not need to send `app_user_id` or `zoom_user_id` in
@@ -89,8 +89,9 @@ anonymous socket, but production must not enable `ALLOW_ANONYMOUS_WS`.
 ### The browser stays on "Connecting"
 
 1. Confirm the Zoom App has a meeting UUID from `getMeetingUUID()`.
-2. Confirm `getRTMSStatus()` returns an active session/stream ID. The frontend
-   intentionally waits for this before opening `/ws`.
+2. Confirm the authenticated browser opens `/ws` and receives a `subscribed`
+   message. The backend resolves the RTMS stream from the token's Zoom user
+   identity; the browser does not need an RTMS session ID.
 3. Confirm the URL does not contain `:3000` when the public endpoint is
    CloudFront or ngrok. Use the public host and `/ws` path.
 4. For a reverse proxy, forward WebSocket upgrades. CloudFront must have a
@@ -211,8 +212,8 @@ the control-plane/backend logs. MySQL meeting history is intentionally retained.
 - Summary-live rejects transcript text shorter than 50 characters.
 - Key-moment rejects text shorter than 10 characters.
 - The backend tries only the free allowlist:
-  `openai/gpt-oss-120b:free`, `google/gemma-4-31b-it:free`, and
-  `nvidia/nemotron-3-ultra-550b-a55b:free`.
+  `openai/gpt-oss-20b:free`, `nvidia/nemotron-3-super-120b-a12b:free`, and
+  `google/gemma-4-31b-it:free`.
 - Key-moment retries the configured model chain and returns 502 only after all
   models fail or return invalid structured output.
 - Summary generation returns an extractive fallback when model calls fail.
