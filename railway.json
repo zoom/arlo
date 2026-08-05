@@ -1,0 +1,92 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "numReplicas": 1,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  },
+  "services": {
+    "backend": {
+      "source": {
+        "repo": "https://github.com/zoom/arlo",
+        "branch": "main",
+        "rootDirectory": "backend"
+      },
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "Dockerfile"
+      },
+      "deploy": {
+        "startCommand": "npm start",
+        "healthcheckPath": "/health"
+      },
+      "variables": {
+        "NODE_ENV": "production",
+        "PORT": "3000",
+        "DATABASE_URL": "${{Postgres.DATABASE_URL}}",
+        "ZOOM_CLIENT_ID": { "description": "Your Zoom App Client ID", "required": true },
+        "ZOOM_CLIENT_SECRET": { "description": "Your Zoom App Client Secret", "required": true },
+        "ZOOM_WEBHOOK_TOKEN": { "description": "Your Zoom Webhook Secret Token", "required": true },
+        "SESSION_SECRET": { "generator": "secret" },
+        "TOKEN_ENCRYPTION_KEY": { "generator": "secret" },
+        "FRONTEND_URL": "${{frontend.RAILWAY_PRIVATE_DOMAIN}}:${{frontend.PORT}}",
+        "RTMS_HOST": "${{rtms.RAILWAY_PRIVATE_DOMAIN}}",
+        "RTMS_PORT": "${{rtms.PORT}}"
+      }
+    },
+    "frontend": {
+      "source": {
+        "repo": "https://github.com/zoom/arlo",
+        "branch": "main",
+        "rootDirectory": "frontend"
+      },
+      "build": {
+        "buildCommand": "npm install && npm run build"
+      },
+      "deploy": {
+        "startCommand": "npx serve -s build -l $PORT"
+      },
+      "variables": {
+        "PORT": "3001",
+        "NODE_OPTIONS": "--max-old-space-size=384",
+        "GENERATE_SOURCEMAP": "false"
+      },
+      "networking": {
+        "internal": true
+      }
+    },
+    "rtms": {
+      "source": {
+        "repo": "https://github.com/zoom/arlo",
+        "branch": "main",
+        "rootDirectory": "rtms"
+      },
+      "build": {
+        "builder": "DOCKERFILE",
+        "dockerfilePath": "Dockerfile"
+      },
+      "deploy": {
+        "startCommand": "npm start"
+      },
+      "variables": {
+        "PORT": "3002",
+        "ZOOM_CLIENT_ID": "${{backend.ZOOM_CLIENT_ID}}",
+        "ZOOM_CLIENT_SECRET": "${{backend.ZOOM_CLIENT_SECRET}}",
+        "ZOOM_WEBHOOK_TOKEN": "${{backend.ZOOM_WEBHOOK_TOKEN}}",
+        "BACKEND_HOST": "${{backend.RAILWAY_PRIVATE_DOMAIN}}",
+        "BACKEND_PORT": "${{backend.PORT}}",
+        "ZM_RTMS_LOG_LEVEL": "info",
+        "LOG_LEVEL": "info"
+      },
+      "networking": {
+        "internal": true
+      }
+    },
+    "Postgres": {
+      "plugin": "postgresql"
+    }
+  }
+}
