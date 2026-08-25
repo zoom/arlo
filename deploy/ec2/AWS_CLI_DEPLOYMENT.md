@@ -5,12 +5,37 @@ existing single EC2 host without opening SSH. It uses ECR for images, Systems
 Manager Parameter Store for secrets, KMS for parameter encryption, and Systems
 Manager Run Command for host installation and updates.
 
-It does not provision the VPC, EC2 instance, ALB, CloudFront distribution, or
-Aurora cluster. Provision those resources first. The EC2 instance requires:
+## Where commands run
 
-- Linux x86_64, Docker Engine, Docker Compose v2, AWS CLI v2, and the SSM Agent.
-- An instance profile that permits ECR pulls, `ssm:GetParameter` under the
-  selected parameter prefix, and `kms:Decrypt` for the parameter KMS key.
+Run every command in this guide on your **operator workstation**, from a clone
+of this repository. Do not open a shell or SSH session on EC2. Commands that
+must run on EC2 are sent there by `aws ssm send-command`; those blocks are
+explicitly labeled as remote SSM execution.
+
+Your operator workstation needs:
+
+- Git, AWS CLI v2, Docker with Buildx, `jq`, GNU `base64`, and `curl`.
+- An AWS SSO profile or named access-key profile with deployment permissions.
+
+The EC2 instance needs:
+
+- Linux x86_64, Docker Engine, Docker Compose v2, AWS CLI v2, and SSM Agent.
+- An instance profile for ECR pull, scoped SSM parameter reads, and KMS decrypt.
+- SSM status `Online`; SSH and public application ingress should remain closed.
+
+## Choose a path
+
+| Situation | Follow these steps |
+| --- | --- |
+| New deployment with no Arlo parameters | Complete Steps 1-10. |
+| Existing deployment with parameters | Complete Steps 1-2, use **Reuse an existing parameter set**, then continue at Step 6. |
+| Application-only update | Reuse the same variables and parameters, then complete Steps 6-10. |
+| Rotate one secret | Complete Steps 1-2, then run only the relevant command in Step 5. |
+
+This guide does not provision the VPC, EC2 instance, ALB, CloudFront
+distribution, or Aurora cluster. Provision those resources first. The network
+must provide:
+
 - Outbound HTTPS access to AWS, Zoom, and OpenRouter.
 - Network access to the Aurora MySQL writer endpoint on port 3306.
 - Inbound ports 3000-3001 only from the ALB security group. Do not open SSH.
@@ -19,6 +44,8 @@ The database schema must already exist. Application startup intentionally does
 not run `prisma db push`.
 
 ## 1. Configure AWS credentials
+
+**Run on:** operator workstation
 
 AWS IAM Identity Center (SSO) is recommended for an operator workstation:
 
@@ -47,7 +74,12 @@ export AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output te
 aws sts get-caller-identity
 ```
 
+**Expected result:** the intended AWS account and operator role. Stop if either
+is incorrect.
+
 ## 2. Set deployment variables
+
+**Run on:** operator workstation
 
 Run these commands from a clone of the `ec2-main-deployment` branch:
 
@@ -63,6 +95,14 @@ export IMAGE_TAG="$(git rev-parse --short=12 HEAD)-$(date -u +%Y%m%d%H%M%S)"
 export ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 ```
 
+Replace both `REPLACE_ME` values before continuing. Print the non-secret values
+to catch mistakes:
+
+```bash
+printf 'Instance: %s\nURL: %s\nPrefix: %s\nRegion: %s\n' \
+  "$INSTANCE_ID" "$PUBLIC_URL" "$PARAMETER_PREFIX" "$AWS_REGION"
+```
+
 `PUBLIC_URL` is the externally visible CloudFront or custom-domain URL, without
 a trailing slash. Configure Zoom Marketplace with matching values:
 
@@ -71,6 +111,11 @@ a trailing slash. Configure Zoom Marketplace with matching values:
 - Webhook endpoint: `${PUBLIC_URL}/api/rtms/webhook`
 
 ## 3. Prepare the deployment environment
+
+**Run on:** operator workstation, new deployments only
+
+**Existing deployment:** skip this step and follow
+[Reuse an existing parameter set](#reuse-an-existing-parameter-set).
 
 The production host does not use a plaintext secret `.env` file. Use a local
 `.env.deploy` only to stage values before uploading them to encrypted SSM
@@ -103,10 +148,15 @@ source ./.env.deploy
 set +a
 ```
 
+**Expected result:** no output from the placeholder check. Do not print the
+loaded variables.
+
 Use single quotes around values in `.env.deploy`. Percent-encode reserved
 characters in the database password before putting it in `DATABASE_URL`.
 
 ## 4. Create or verify the KMS key
+
+**Run on:** operator workstation; key creation may require an AWS administrator
 
 Reuse an existing customer-managed key when available:
 
@@ -114,6 +164,8 @@ Reuse an existing customer-managed key when available:
 aws kms describe-key --key-id "$KMS_KEY_ID" \
   --query 'KeyMetadata.[KeyId,KeyState]' --output table
 ```
+
+**Expected result:** the key state is `Enabled`.
 
 For a new account, an authorized administrator can create the key and alias:
 
@@ -131,6 +183,8 @@ operator role needs encryption and parameter-management permissions but should
 not be used by the application containers.
 
 ### KMS access model
+
+**Configure from:** operator workstation and AWS IAM/KMS administration
 
 KMS does not store the database URL, Zoom secrets, or OpenRouter key. Parameter
 Store holds their encrypted values. KMS holds a non-exportable encryption key
@@ -197,6 +251,8 @@ aws kms list-grants --key-id "$KMS_KEY_ID" \
 
 ### Reuse an existing parameter set
 
+**Run on:** operator workstation, existing deployments only
+
 For an update to an existing deployment, do not create `.env.deploy` and do
 not run the upload commands unless a secret actually needs changing. List the
 existing parameter metadata without decrypting values:
@@ -208,6 +264,9 @@ aws ssm describe-parameters \
   --query 'Parameters[].{Name:Name,Type:Type,KeyId:KeyId,Version:Version,Modified:LastModifiedDate}' \
   --output table
 ```
+
+**Expected result:** one metadata row for each required name below. This command
+does not request decrypted values.
 
 Confirm these required names exist under the selected prefix:
 
@@ -229,6 +288,11 @@ the application after rotation before changing any other secret. Avoid commands
 that print decrypted values to a terminal, log, ticket, or shell transcript.
 
 ## 5. Upload secrets to Parameter Store
+
+**Run on:** operator workstation, new deployments or intentional secret rotation only
+
+**Existing deployment:** skip this step when all required parameters already
+exist. Building and deploying images does not overwrite Parameter Store.
 
 The following function updates KMS-encrypted `SecureString` parameters. AWS CLI
 arguments are not written to shell history because the values come from shell
@@ -259,6 +323,9 @@ if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
 fi
 ```
 
+**Expected result:** one `Updated` line per uploaded parameter and no secret
+values in the output.
+
 Clear the loaded values when the upload finishes:
 
 ```bash
@@ -271,6 +338,8 @@ staging copy after confirming the SSM parameter versions.
 
 ## 6. Create ECR repositories
 
+**Run on:** operator workstation
+
 ```bash
 for repository in arlo-frontend arlo-backend arlo-rtms; do
   aws ecr describe-repositories --repository-names "$repository" >/dev/null 2>&1 ||
@@ -281,10 +350,15 @@ for repository in arlo-frontend arlo-backend arlo-rtms; do
 done
 ```
 
+**Expected result:** all three repositories exist. Existing repositories are
+reused without modification.
+
 Configure lifecycle policies separately according to the required rollback
 retention. Never delete an image currently referenced by `/etc/arlo/images.env`.
 
 ## 7. Build and push immutable images
+
+**Run on:** operator workstation; Docker builds run locally and push to ECR
 
 The current EC2 deployment is x86_64, so build for `linux/amd64`. Do not reuse
 an existing tag:
@@ -319,6 +393,9 @@ for repository in arlo-frontend arlo-backend arlo-rtms; do
 done
 ```
 
+**Expected result:** three image digest tables, all using the same immutable
+`IMAGE_TAG`.
+
 For a completely empty Aurora database, initialize the schema as a separate,
 reviewed deployment operation before starting Arlo. The repository does not
 contain a production migration history, so coordinate this step with the DBA
@@ -327,6 +404,11 @@ Do not run it automatically on every restart. Skip this operation when using an
 existing Arlo database.
 
 ## 8. Install or update the EC2 service through SSM
+
+**Run on:** operator workstation
+
+The `aws ssm send-command` call in this step executes the generated command
+list remotely as root on EC2. You do not log in to EC2.
 
 Create the non-secret host environment file locally. This is the only
 environment file copied to EC2:
@@ -392,11 +474,19 @@ aws ssm get-command-invocation \
   --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}'
 ```
 
+**Expected result:** SSM reports `Success`. If it reports another status, read
+`Error` and do not continue to verification.
+
 The same procedure performs an update. It writes immutable image tags, backs
 up the previous image environment, pulls images in `start.sh`, and restarts the
 Compose stack. It does not alter Aurora data or run schema changes.
 
 ## 9. Verify the deployment
+
+**Run on:** operator workstation
+
+The public `curl` runs locally. The service, Compose, and localhost checks are
+executed remotely on EC2 by SSM.
 
 ```bash
 curl --fail --show-error --silent "${PUBLIC_URL}/health"
@@ -414,10 +504,18 @@ aws ssm get-command-invocation \
   --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}'
 ```
 
+**Expected result:** the public endpoint returns a health JSON object, SSM
+reports `Success`, and all three Compose services are running.
+
 Also verify the ALB target groups are healthy and complete a Zoom OAuth and
 RTMS test. A health endpoint alone does not prove Zoom media connectivity.
 
 ## 10. Roll back
+
+**Run on:** operator workstation
+
+The rollback commands are executed remotely on EC2 by SSM. No SSH session is
+required.
 
 The installation command preserves the previous image file. Roll back without
 SSH:
@@ -435,6 +533,9 @@ aws ssm get-command-invocation \
   --command-id "$ROLLBACK_ID" --instance-id "$INSTANCE_ID" \
   --query '{Status:Status,Output:StandardOutputContent,Error:StandardErrorContent}'
 ```
+
+**Expected result:** SSM reports `Success`; repeat Step 9 to verify the rolled
+back version.
 
 Do not remove old ECR images until the new deployment and rollback path have
 been validated.
