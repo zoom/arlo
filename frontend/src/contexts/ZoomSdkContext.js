@@ -1,93 +1,137 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 
 const ZoomSdkContext = createContext();
+const SDK_PROBE_TIMEOUT_MS = 4000;
 
-// Check if running outside Zoom - evaluated dynamically
-const checkIsTestMode = () => !window.zoomSdk || window.location.search.includes('test=true');
+const isForcedBrowserMode = () => window.location.search.includes('test=true');
 
 // Legacy export for backwards compatibility
-export const isTestMode = checkIsTestMode();
+export const isTestMode = isForcedBrowserMode();
+
+export function probeZoomSdk(zoomSdk, timeoutMs = SDK_PROBE_TIMEOUT_MS) {
+  if (!zoomSdk?.config) {
+    return Promise.reject(new Error('Zoom Apps SDK is unavailable'));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error('Zoom Apps SDK configuration timed out'));
+    }, timeoutMs);
+
+    Promise.resolve().then(() => zoomSdk.config({
+      capabilities: [
+        'getMeetingContext',
+        'getMeetingUUID',
+        'getRunningContext',
+        'getUserContext',
+        'getMeetingParticipants',
+        'authorize',
+        'onAuthorized',
+        'promptAuthorize',
+        'startRTMS',
+        'stopRTMS',
+        'pauseRTMS',
+        'resumeRTMS',
+        'showNotification',
+        'sendMessageToChat',
+        'openUrl',
+        'onRunningContextChange',
+        'onMyUserContextChange',
+        'sendAppInvitationToAllParticipants',
+        'sendAppInvitation',
+        'showAppInvitationDialog',
+        'onSendAppInvitation',
+      ],
+      version: '0.16.0',
+    })).then(
+      response => {
+        clearTimeout(timeoutId);
+        resolve(response);
+      },
+      error => {
+        clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
+}
+
+export async function getZoomUserContext(zoomSdk, runningContext) {
+  if (runningContext !== 'inMeeting') {
+    return null;
+  }
+
+  return zoomSdk.getUserContext();
+}
 
 export function ZoomSdkProvider({ children }) {
-  // Use state for isTestMode so it can update after SDK loads
-  const initialTestMode = checkIsTestMode();
-
-  const [isTestModeState, setIsTestModeState] = useState(initialTestMode);
-  const [sdkConfigured, setSdkConfigured] = useState(initialTestMode);
+  const forcedBrowserMode = isForcedBrowserMode();
+  const [environment, setEnvironment] = useState(forcedBrowserMode ? 'browser' : 'detecting');
+  const [sdkConfigured, setSdkConfigured] = useState(false);
   const [sdkError, setSdkError] = useState(null);
-  const [runningContext, setRunningContext] = useState(initialTestMode ? 'test' : null);
+  const [runningContext, setRunningContext] = useState(forcedBrowserMode ? 'test' : null);
   const [meetingContext, setMeetingContext] = useState(null);
   const [userContext, setUserContext] = useState(null);
   // null = SDK not loaded yet, true = guest, false = authorized user
-  const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
+  const [isGuest, setIsGuest] = useState(forcedBrowserMode ? false : null);
+  const initializationStarted = useRef(false);
 
   useEffect(() => {
-    // Re-check if SDK is available now (might have loaded after initial render)
-    const sdkAvailable = !!window.zoomSdk;
-    const testModeNow = !sdkAvailable || window.location.search.includes('test=true');
-
-    if (!testModeNow && isTestModeState) {
-      // SDK became available - update state
-      setIsTestModeState(false);
-    }
-
-    if (testModeNow) {
+    if (forcedBrowserMode || initializationStarted.current) {
       return;
     }
+    initializationStarted.current = true;
 
     const zoomSdk = window.zoomSdk;
 
+    function applyBrowserFallback(error) {
+      if (error) {
+        console.info('Zoom Apps SDK unavailable; using browser mode:', error.message);
+      }
+      setEnvironment('browser');
+      setSdkConfigured(false);
+      setSdkError(null);
+      setRunningContext('browser');
+      setMeetingContext(null);
+      setUserContext(null);
+      setIsGuest(false);
+    }
+
     async function configureSdk() {
+      let configuredInZoom = false;
+
       try {
-        const configResponse = await zoomSdk.config({
-          capabilities: [
-            'getMeetingContext',
-            'getMeetingUUID',
-            'getRunningContext',
-            'getUserContext',
-            'getMeetingParticipants',
-            'authorize',
-            'onAuthorized',
-            'promptAuthorize',
-            'startRTMS',
-            'stopRTMS',
-            'pauseRTMS',
-            'resumeRTMS',
-            'showNotification',
-            'sendMessageToChat',
-            'openUrl',
-            'onRunningContextChange',
-            'onMyUserContextChange',
-            'sendAppInvitationToAllParticipants',
-            'sendAppInvitation',
-            'showAppInvitationDialog',
-            'onSendAppInvitation',
-          ],
-          version: '0.16.0',
-        });
+        const configResponse = await probeZoomSdk(zoomSdk);
+        configuredInZoom = true;
 
         console.log('SDK Configured:', configResponse);
+        setEnvironment('zoom');
         setSdkConfigured(true);
-        setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
         // Get running context
         const contextResponse = await zoomSdk.getRunningContext();
         const context = contextResponse.context || contextResponse;
         setRunningContext(context);
 
-        // Get user context
-        let user = null;
-        try {
-          user = await zoomSdk.getUserContext();
-          setUserContext(user);
-        } catch (err) {
-          console.warn('getUserContext failed (may be guest):', err);
-          setUserContext({ status: 'unauthenticated' });
+        async function refreshUserContext(activeContext) {
+          if (activeContext !== 'inMeeting') {
+            setUserContext(null);
+            setIsGuest(false);
+            return;
+          }
+
+          try {
+            const user = await getZoomUserContext(zoomSdk, activeContext);
+            setUserContext(user);
+            setIsGuest(user?.status !== 'authorized');
+          } catch (err) {
+            console.warn('getUserContext failed (may be guest):', err);
+            setUserContext({ status: 'unauthenticated' });
+            setIsGuest(true);
+          }
         }
 
-        // Derive guest status: authorized = not guest, anything else = guest
-        const userStatus = user?.status;
-        setIsGuest(userStatus !== 'authorized');
+        await refreshUserContext(context);
 
         async function fetchMeetingContext() {
           let data = {};
@@ -135,9 +179,11 @@ export function ZoomSdkProvider({ children }) {
           const newContext = event.runningContext;
           setRunningContext(newContext);
           if (newContext === 'inMeeting') {
+            await refreshUserContext(newContext);
             const meetingData = await fetchMeetingContext();
             setMeetingContext(meetingData);
           } else {
+            await refreshUserContext(newContext);
             setMeetingContext(null);
           }
         });
@@ -180,17 +226,23 @@ export function ZoomSdkProvider({ children }) {
           }
         });
       } catch (error) {
+        if (!configuredInZoom) {
+          applyBrowserFallback(error);
+          return;
+        }
+
         console.error('SDK Configuration Error:', error);
         setSdkError(error.message);
-        setRunningContext('error'); // Fallback so routing can proceed
+        setRunningContext('error');
+        setIsGuest(false);
       }
     }
 
     configureSdk();
-  }, [isTestModeState]);
+  }, [forcedBrowserMode]);
 
-  // Get current SDK reference for context value
-  const zoomSdk = window.zoomSdk;
+  const zoomSdk = environment === 'zoom' ? window.zoomSdk : null;
+  const isTestModeState = environment === 'browser';
 
   const contextValue = useMemo(() => ({
     zoomSdk,

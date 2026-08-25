@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const prisma = require('../lib/prisma');
 const { generatePKCE, generateState, encryptToken, decryptToken, generateToken } = require('../services/auth');
-const { requireAuth, devAuthBypass } = require('../middleware/auth');
+const { requireAuth, optionalAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
 
 const router = express.Router();
@@ -433,6 +433,47 @@ router.get('/me', devAuthBypass, requireAuth, async (req, res) => {
   } catch (error) {
     console.error('Get user error:', error);
     res.status(500).json({ error: 'Failed to get user' });
+  }
+});
+
+/**
+ * GET /api/auth/session
+ * Probe the current session without treating a missing cookie as an error.
+ */
+router.get('/session', devAuthBypass, optionalAuth, async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
+  if (!req.user) {
+    return res.json({ authenticated: false, user: null });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        zoomUserId: true,
+        email: true,
+        displayName: true,
+        avatarUrl: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) {
+      return res.json({ authenticated: false, user: null });
+    }
+
+    const wsToken = generateToken({
+      userId: user.id,
+      zoomUserId: user.zoomUserId,
+      exp: Date.now() + 24 * 60 * 60 * 1000,
+    });
+
+    return res.json({ authenticated: true, user, wsToken });
+  } catch (error) {
+    console.error('Get session error:', error);
+    return res.status(500).json({ error: 'Failed to get session' });
   }
 });
 

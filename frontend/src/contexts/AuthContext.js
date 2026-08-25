@@ -10,13 +10,15 @@ export function AuthProvider({ children }) {
 
   const checkAuth = useCallback(async () => {
     try {
-      const response = await fetch('/api/auth/me', { credentials: 'include' });
+      const response = await fetch('/api/auth/session', { credentials: 'include' });
       if (response.ok) {
         const data = await response.json();
-        setUser(data.user);
-        if (data.wsToken) setWsToken(data.wsToken);
-        setIsAuthenticated(true);
-        return data.user;
+        if (data.authenticated && data.user) {
+          setUser(data.user);
+          if (data.wsToken) setWsToken(data.wsToken);
+          setIsAuthenticated(true);
+          return data.user;
+        }
       }
     } catch {
       // Not authenticated
