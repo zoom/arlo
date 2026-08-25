@@ -168,7 +168,7 @@ module.exports = {
   // AI Configuration
   aiEnabled: process.env.AI_ENABLED === 'true',
   openrouterApiKey: process.env.OPENROUTER_API_KEY || null,
-  defaultModel: process.env.DEFAULT_MODEL || 'google/gemini-2.0-flash-thinking-exp:free',
+  defaultModel: process.env.DEFAULT_MODEL || 'z-ai/glm-5.2:free',
   fallbackModel: process.env.FALLBACK_MODEL || 'meta-llama/llama-3.2-3b-instruct:free',
 
   // Feature Flags

@@ -25,7 +25,7 @@ export TOKEN_ENCRYPTION_KEY="$(read_parameter "${PARAMETER_PREFIX}/redis-encrypt
 export OPENROUTER_API_KEY="$(read_parameter "${PARAMETER_PREFIX}/openrouter-api-key")"
 
 export PUBLIC_URL="${PUBLIC_URL:-https://d3k9b5xygup21i.cloudfront.net}"
-export DEFAULT_MODEL="${DEFAULT_MODEL:-openai/gpt-oss-120b:free}"
+export DEFAULT_MODEL="${DEFAULT_MODEL:-z-ai/glm-5.2:free}"
 export FALLBACK_MODEL="${FALLBACK_MODEL:-google/gemma-4-31b-it:free}"
 
 export FRONTEND_IMAGE="${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}"
