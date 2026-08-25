@@ -130,6 +130,104 @@ Review the key policy and grant only the EC2 instance role `kms:Decrypt`. The
 operator role needs encryption and parameter-management permissions but should
 not be used by the application containers.
 
+### KMS access model
+
+KMS does not store the database URL, Zoom secrets, or OpenRouter key. Parameter
+Store holds their encrypted values. KMS holds a non-exportable encryption key
+and performs cryptographic operations after IAM and key-policy authorization.
+No user, container, or administrator can download the plaintext KMS key.
+
+Use these access boundaries:
+
+- Deployment operators need `kms:Encrypt` and `kms:DescribeKey` to create or
+  update parameters. They do not need `kms:Decrypt` for routine deployments.
+- The EC2 instance role needs `kms:Decrypt` and `ssm:GetParameter` only for
+  `${PARAMETER_PREFIX}/*` so `start.sh` can resolve runtime secrets.
+- The application containers receive only the resolved environment variables.
+  Do not attach AWS credentials or a separate IAM role to the containers.
+- Do not grant broad `kms:*`, `ssm:GetParameter*`, or administrator policies to
+  application identities. Retain a separately audited break-glass role if
+  plaintext retrieval is operationally required.
+
+Restrict the KMS decrypt permission with the Parameter Store encryption
+context as well as the key ARN. The instance-role condition should follow this
+pattern, with the account, region, and key ARN replaced:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": "kms:Decrypt",
+  "Resource": "arn:aws:kms:us-east-1:ACCOUNT_ID:key/KEY_ID",
+  "Condition": {
+    "StringLike": {
+      "kms:EncryptionContext:PARAMETER_ARN":
+        "arn:aws:ssm:us-east-1:ACCOUNT_ID:parameter/arlo/prod/*"
+    }
+  }
+}
+```
+
+Docker bridge networks can otherwise attempt to reach the EC2 Instance
+Metadata Service and obtain the host role. Require IMDSv2 and set the response
+hop limit to one so host services continue to work but ordinary bridged
+containers cannot retrieve instance-role credentials:
+
+```bash
+aws ec2 modify-instance-metadata-options \
+  --instance-id "$INSTANCE_ID" \
+  --http-endpoint enabled \
+  --http-tokens required \
+  --http-put-response-hop-limit 1
+```
+
+Root on the EC2 host can inspect container environment variables and can use
+the instance role. Limit SSM session and Run Command access to trusted
+operators; KMS encryption does not protect against a fully compromised host.
+
+To confirm a deployment role has metadata/encryption access without exposing a
+secret, use `describe-key` and inspect grants. Do not add `--with-decryption`
+during routine verification:
+
+```bash
+aws kms describe-key --key-id "$KMS_KEY_ID" \
+  --query 'KeyMetadata.[KeyId,KeyState]' --output table
+aws kms list-grants --key-id "$KMS_KEY_ID" \
+  --query 'Grants[].{Grantee:GranteePrincipal,Operations:Operations}'
+```
+
+### Reuse an existing parameter set
+
+For an update to an existing deployment, do not create `.env.deploy` and do
+not run the upload commands unless a secret actually needs changing. List the
+existing parameter metadata without decrypting values:
+
+```bash
+aws ssm describe-parameters \
+  --parameter-filters \
+    "Key=Path,Option=Recursive,Values=${PARAMETER_PREFIX}" \
+  --query 'Parameters[].{Name:Name,Type:Type,KeyId:KeyId,Version:Version,Modified:LastModifiedDate}' \
+  --output table
+```
+
+Confirm these required names exist under the selected prefix:
+
+- `database-url`
+- `zoom-client-id`
+- `zoom-client-secret`
+- `zoom-webhook-secret-token`
+- `session-secret`
+- `token-encryption-key`, or legacy `redis-encryption-key`
+
+`openrouter-api-key` is optional. If the required parameters exist, continue
+at ECR image creation/build and set the same `PARAMETER_PREFIX` in
+`/etc/arlo/images.env`. At startup, EC2 retrieves the existing values; image
+updates do not overwrite them.
+
+To rotate one existing value, use the upload function in the next section only
+for that parameter. `--overwrite` creates a new SSM parameter version. Verify
+the application after rotation before changing any other secret. Avoid commands
+that print decrypted values to a terminal, log, ticket, or shell transcript.
+
 ## 5. Upload secrets to Parameter Store
 
 The following function updates KMS-encrypted `SecureString` parameters. AWS CLI
