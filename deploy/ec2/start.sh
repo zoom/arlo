@@ -16,7 +16,7 @@ read_parameter() {
 }
 
 # Keep decrypted values in this process environment; do not write a plaintext env file.
-export DATABASE_URL="$(read_parameter "${PARAMETER_PREFIX}/aurora-database-url")"
+export DATABASE_URL="$(read_parameter "${PARAMETER_PREFIX}/database-url")"
 export ZOOM_CLIENT_ID="$(read_parameter "${PARAMETER_PREFIX}/zoom-client-id")"
 export ZOOM_CLIENT_SECRET="$(read_parameter "${PARAMETER_PREFIX}/zoom-client-secret")"
 export ZOOM_WEBHOOK_TOKEN="$(read_parameter "${PARAMETER_PREFIX}/zoom-webhook-secret-token")"

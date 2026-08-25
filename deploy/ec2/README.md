@@ -2,14 +2,14 @@
 
 This deployment runs the frontend, backend, and RTMS services on one private
 x86 EC2 instance. CloudFront and the existing ALB remain the public entrypoint.
-Aurora MySQL is external to the Compose stack.
+The existing RDS MySQL database is external to the Compose stack.
 
 ## Required SSM parameters
 
 All sensitive parameters are `SecureString` values encrypted with
 `alias/arlo-prod`:
 
-- `/arlo/prod/aurora-database-url`
+- `/arlo/prod/database-url`
 - `/arlo/prod/zoom-client-id`
 - `/arlo/prod/zoom-client-secret`
 - `/arlo/prod/zoom-webhook-secret-token`
@@ -17,9 +17,9 @@ All sensitive parameters are `SecureString` values encrypted with
 - `/arlo/prod/redis-encryption-key`
 - `/arlo/prod/openrouter-api-key`
 
-The Aurora parameter must contain the least-privilege application connection
-string, not the cluster master credential. The service refuses to start when
-that parameter is absent.
+The database parameter must contain the existing least-privilege application
+connection string, not a database master credential. The service refuses to
+start when that parameter is absent.
 
 ## Host files
 
@@ -40,5 +40,5 @@ RTMS_IMAGE=ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms:TAG
 
 Then run `systemctl daemon-reload` and `systemctl enable --now arlo`.
 
-Do not run `prisma db push` during application startup. Apply a reviewed schema
-migration to Aurora before starting the backend.
+Do not run `prisma db push` during application startup. This deployment uses
+the schema and data already present in the existing RDS MySQL database.
