@@ -12,6 +12,38 @@ of this repository. Do not open a shell or SSH session on EC2. Commands that
 must run on EC2 are sent there by `aws ssm send-command`; those blocks are
 explicitly labeled as remote SSM execution.
 
+### Why this deployment does not use SSH
+
+SSH would require an inbound port 22 rule, host key maintenance, user accounts,
+and distribution and rotation of SSH private keys. A public SSH endpoint also
+creates a continuously scanned network entry point. Arlo does not need that
+exposure for deployment or routine administration.
+
+AWS Systems Manager replaces SSH for this deployment:
+
+1. SSM Agent runs on EC2 and establishes an outbound HTTPS control channel to
+   AWS. No inbound management port is required.
+2. The operator authenticates to AWS with SSO or a named AWS CLI profile.
+3. `aws ssm send-command` sends an approved command document to the agent.
+4. The agent executes the deployment commands on EC2 and returns status,
+   standard output, and errors to the operator workstation.
+5. IAM controls who may target the instance, and AWS API activity provides a
+   more useful audit trail than shared SSH keys.
+
+The EC2 security group should therefore have no port 22 rule. SSM requires the
+agent to be running, an instance role with `AmazonSSMManagedInstanceCore` or an
+equivalent least-privilege policy, and outbound HTTPS access to the SSM service
+endpoints. This deployment gets that outbound access through the EC2 Elastic
+IP and Internet Gateway; private deployments can instead use appropriate VPC
+endpoints.
+
+SSM is privileged administration, not a reduction in responsibility. Restrict
+`ssm:SendCommand`, `ssm:StartSession`, and instance targeting to trusted roles,
+require MFA through the identity provider, and do not allow arbitrary operators
+to run commands as root. If SSM is offline, restore its agent, IAM role, DNS, or
+outbound connectivity from the AWS control plane rather than opening SSH as a
+permanent workaround.
+
 Your operator workstation needs:
 
 - Git, AWS CLI v2, Docker with Buildx, `jq`, GNU `base64`, and `curl`.
