@@ -1,7 +1,7 @@
 # Engineering Release Note (ERN)
 
 **Application:** Arlo Meeting Assistant
-**Client ID (Production):** `dAYlkAqpSg6cAleyy2dHQ`
+**Client ID (Production):** Supplied at runtime through encrypted configuration
 **Version:** 1.0.0
 **Date:** 2026-05-14
 **Classification:** Internal / Security Review

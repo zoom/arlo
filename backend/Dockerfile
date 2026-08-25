@@ -23,5 +23,5 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
-# Start server
-CMD ["npm", "run", "dev"]
+# Schema changes are applied as a separate deployment step in production.
+CMD ["node", "src/server.js"]

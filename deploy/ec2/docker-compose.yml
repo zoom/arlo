@@ -1,0 +1,72 @@
+services:
+  frontend:
+    image: ${FRONTEND_IMAGE}
+    restart: unless-stopped
+    mem_limit: 512m
+    ports:
+      - "3001:3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  backend:
+    image: ${BACKEND_IMAGE}
+    restart: unless-stopped
+    mem_limit: 2g
+    depends_on:
+      frontend:
+        condition: service_started
+      rtms:
+        condition: service_started
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL}
+      FRONTEND_URL: http://frontend:3000
+      RTMS_SERVICE_URL: http://rtms:3002
+      DATABASE_URL: ${DATABASE_URL}
+      ZOOM_CLIENT_ID: ${ZOOM_CLIENT_ID}
+      ZOOM_CLIENT_SECRET: ${ZOOM_CLIENT_SECRET}
+      ZOOM_WEBHOOK_TOKEN: ${ZOOM_WEBHOOK_TOKEN}
+      SESSION_SECRET: ${SESSION_SECRET}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      DEFAULT_MODEL: ${DEFAULT_MODEL}
+      FALLBACK_MODEL: ${FALLBACK_MODEL}
+      AI_ENABLED: "true"
+      EXTRACTION_ENABLED: "false"
+      PUBLIC_LINKS_ENABLED: "false"
+      DISABLE_MEETING_PERSISTENCE: "false"
+      NODE_ENV: production
+      PORT: "3000"
+      LOG_LEVEL: info
+      CORS_ORIGINS: ${PUBLIC_URL}
+    ports:
+      - "3000:3000"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rtms:
+    image: ${RTMS_IMAGE}
+    restart: unless-stopped
+    mem_limit: 4g
+    environment:
+      BACKEND_URL: http://backend:3000
+      ZOOM_CLIENT_ID: ${ZOOM_CLIENT_ID}
+      ZOOM_CLIENT_SECRET: ${ZOOM_CLIENT_SECRET}
+      ZOOM_WEBHOOK_TOKEN: ${ZOOM_WEBHOOK_TOKEN}
+      NODE_ENV: production
+      PORT: "3002"
+      RTMS_PORT: "3002"
+      LOG_LEVEL: info
+      ZM_RTMS_LOG_LEVEL: info
+    expose:
+      - "3002"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
