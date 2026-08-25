@@ -247,8 +247,8 @@ Rate Limiting:
 Default Configuration:
 {
   provider: 'OpenRouter',
-  defaultModel: 'google/gemini-2.0-flash-thinking-exp:free',
-  fallbackModel: 'meta-llama/llama-3.2-3b-instruct:free',
+  defaultModel: 'z-ai/glm-5.2:free',
+  fallbackModel: 'google/gemma-4-31b-it:free',
   requiresKey: false,  // Works without API key
   rateLimits: {
     free: { requests: 10, per: '1m' },
@@ -698,7 +698,8 @@ DATABASE_URL                           # Postgres connection string
 SESSION_SECRET                         # 64-char random string
 REDIS_ENCRYPTION_KEY                   # 32-char random string (token encryption)
 OPENROUTER_API_KEY                     # Optional (free models work without)
-DEFAULT_MODEL                          # Default: google/gemini-2.0-flash-thinking-exp:free
+OPENROUTER_MODELS                     # Ordered free-model allowlist
+DEFAULT_MODEL                          # Default: z-ai/glm-5.2:free
 ```
 
 ---
@@ -752,8 +753,8 @@ DEFAULT_MODEL                          # Default: google/gemini-2.0-flash-thinki
 
 ### AI
 - **Provider**: OpenRouter
-- **Default Model**: google/gemini-2.0-flash-thinking-exp (free, no API key required)
-- **Fallback**: meta-llama/llama-3.2-3b-instruct:free
+- **Default Model**: z-ai/glm-5.2:free
+- **Fallback**: google/gemma-4-31b-it:free, followed by nvidia/nemotron-3-ultra-550b-a55b:free
 - **Features**: RAG via Postgres FTS, summarization, action items
 
 ### DevOps

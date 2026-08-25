@@ -246,7 +246,9 @@ DATABASE_URL=mysql://...        # MySQL connection string
 SESSION_SECRET=...              # 64 chars: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 TOKEN_ENCRYPTION_KEY=...        # 64 chars (AES-256): node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 OPENROUTER_API_KEY=...          # Optional — free models work without it
-DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
+OPENROUTER_MODELS=z-ai/glm-5.2:free,google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
+DEFAULT_MODEL=z-ai/glm-5.2:free
+FALLBACK_MODEL=google/gemma-4-31b-it:free
 LOG_LEVEL=info                  # Set to 'debug' to enable transcript/PII logging
 ```
 

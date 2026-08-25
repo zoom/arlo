@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Eye,
-  EyeOff,
   CheckCircle2,
   XCircle,
   MessageSquare,
@@ -24,8 +22,13 @@ import { useDemoData } from '../hooks/useDemoData';
 import { useMeeting } from '../contexts/MeetingContext';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
-import Input from '../components/ui/Input';
 import Textarea from '../components/ui/Textarea';
+import {
+  DEFAULT_FREE_OPENROUTER_MODELS,
+  formatModelLabel,
+  getPreferredAiModel,
+  setPreferredAiModel,
+} from '../utils/aiModel';
 import './SettingsView.css';
 
 // Icon mapping for verticals
@@ -35,27 +38,6 @@ const VERTICAL_ICONS = {
   legal: Scale,
   sales: TrendingUp,
   support: Headphones,
-};
-
-const MODELS = {
-  openrouter: [
-    { value: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
-    { value: 'openai/gpt-4', label: 'GPT-4' },
-    { value: 'openai/gpt-4-turbo', label: 'GPT-4 Turbo' },
-  ],
-  anthropic: [
-    { value: 'claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
-    { value: 'claude-3-opus', label: 'Claude 3 Opus' },
-    { value: 'claude-3-sonnet', label: 'Claude 3 Sonnet' },
-  ],
-  openai: [
-    { value: 'gpt-4', label: 'GPT-4' },
-    { value: 'gpt-4-turbo', label: 'GPT-4 Turbo' },
-    { value: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo' },
-  ],
-  custom: [
-    { value: 'custom-model', label: 'Custom Model' },
-  ],
 };
 
 const DEFAULT_MESSAGES = {
@@ -76,10 +58,8 @@ export default function SettingsView() {
   const [autoOpen, setAutoOpen] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
   const [settingsUpcoming, setSettingsUpcoming] = useState([]);
-  const [provider, setProvider] = useState('openrouter');
-  const [apiKey, setApiKey] = useState('');
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [model, setModel] = useState('anthropic/claude-3.5-sonnet');
+  const [availableModels, setAvailableModels] = useState(DEFAULT_FREE_OPENROUTER_MODELS);
+  const [model, setModel] = useState(getPreferredAiModel);
   const [testStatus, setTestStatus] = useState('idle');
 
   // Voice commands state
@@ -158,6 +138,29 @@ export default function SettingsView() {
         }
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/ai/status', { credentials: 'include' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((status) => {
+        if (!active || !status) return;
+        const models = (status.allowedOpenRouterModels || [])
+          .filter((candidate) => String(candidate).endsWith(':free'));
+        if (models.length === 0) return;
+        setAvailableModels(models);
+        setModel((current) => {
+          const selected = models.includes(current)
+            ? current
+            : (models.includes(status.defaultModel) ? status.defaultModel : models[0]);
+          return setPreferredAiModel(selected);
+        });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   function applyNoticesState(notices) {
@@ -264,19 +267,27 @@ export default function SettingsView() {
       ' · ' + date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
-  const handleProviderChange = (newProvider) => {
-    setProvider(newProvider);
-    const firstModel = MODELS[newProvider]?.[0]?.value || '';
-    setModel(firstModel);
+  const handleModelChange = (newModel) => {
+    setModel(setPreferredAiModel(newModel));
   };
 
-  const handleTestConnection = () => {
+  const handleTestConnection = async () => {
     setTestStatus('testing');
-    // TODO: Replace with actual API test call
-    setTimeout(() => {
-      setTestStatus('success');
-      setTimeout(() => setTestStatus('idle'), 3000);
-    }, 1500);
+    try {
+      const response = await fetch('/api/ai/key-moment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          text: 'The team agreed to complete the database migration by Friday.',
+          model,
+        }),
+      });
+      setTestStatus(response.ok ? 'success' : 'error');
+    } catch {
+      setTestStatus('error');
+    }
+    setTimeout(() => setTestStatus('idle'), 3000);
   };
 
   return (
@@ -469,45 +480,15 @@ export default function SettingsView() {
               <select
                 id="provider"
                 className="settings-select"
-                value={provider}
-                onChange={(e) => handleProviderChange(e.target.value)}
+                value="openrouter"
+                disabled
               >
                 <option value="openrouter">OpenRouter</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="openai">OpenAI</option>
-                <option value="custom">Custom</option>
               </select>
               <p className="settings-field-help">
-                Choose your preferred AI provider for meeting summaries and insights
+                This deployment uses the server-managed OpenRouter API key and free models only.
               </p>
             </div>
-
-            {provider !== 'openrouter' && (
-              <div className="settings-field">
-                <label className="text-sans font-medium" htmlFor="api-key">
-                  API Key
-                </label>
-                <div className="settings-api-key-wrapper">
-                  <Input
-                    id="api-key"
-                    type={showApiKey ? 'text' : 'password'}
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-..."
-                  />
-                  <button
-                    type="button"
-                    className="settings-api-key-toggle"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                  >
-                    {showApiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-                <p className="settings-field-help">
-                  Your API key is stored locally and never sent to Arlo&apos;s servers
-                </p>
-              </div>
-            )}
 
             <div className="settings-field">
               <label className="text-sans font-medium" htmlFor="model">
@@ -517,16 +498,16 @@ export default function SettingsView() {
                 id="model"
                 className="settings-select"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => handleModelChange(e.target.value)}
               >
-                {(MODELS[provider] || []).map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
+                {availableModels.map((modelId) => (
+                  <option key={modelId} value={modelId}>
+                    {formatModelLabel(modelId)}
                   </option>
                 ))}
               </select>
               <p className="settings-field-help">
-                Select the AI model to use for processing meeting data
+                The selected model is tried first; Arlo automatically falls back to the other configured free models.
               </p>
             </div>
 

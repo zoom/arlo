@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Zap, ExternalLink, Star, StarOff, ChevronDown, ChevronUp, Sparkles } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { getPreferredAiModel } from '../../utils/aiModel';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './KeyMoments.css';
 
@@ -26,7 +27,7 @@ async function analyzeKeyMomentAI(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, model: getPreferredAiModel() }),
     });
 
     if (!response.ok) {

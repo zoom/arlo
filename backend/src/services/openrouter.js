@@ -15,8 +15,9 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
  * @returns {Promise<string>} The AI response text
  */
 async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
-  const model = options.model || config.defaultModel;
+  const models = buildModelChain(options.model);
   const maxTokens = options.maxTokens || 2048;
+  const timeoutMs = options.timeoutMs || 20000;
 
   const headers = {
     'Content-Type': 'application/json',
@@ -35,40 +36,55 @@ async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
   }
   messages.push({ role: 'user', content: prompt });
 
-  try {
-    const response = await fetch(OPENROUTER_API_URL, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model,
-        messages,
-        max_tokens: maxTokens,
-        temperature: 0.7,
-      }),
-    });
+  let lastError;
+  for (const model of models) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(OPENROUTER_API_URL, {
+        method: 'POST',
+        headers,
+        signal: controller.signal,
+        body: JSON.stringify({
+          model,
+          messages,
+          max_tokens: maxTokens,
+          temperature: 0.7,
+        }),
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('❌ OpenRouter API error:', response.status, errorText);
-
-      // Try fallback model if primary fails
-      if (model !== config.fallbackModel) {
-        console.log('🔄 Trying fallback model:', config.fallbackModel);
-        return callOpenRouter(prompt, systemPrompt, {
-          ...options,
-          model: config.fallbackModel,
-        });
+      if (!response.ok) {
+        lastError = new Error(`OpenRouter API error: ${response.status}`);
+        console.error(`❌ OpenRouter API error for ${model}:`, response.status);
+        continue;
       }
 
-      throw new Error(`OpenRouter API error: ${response.status}`);
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      if (content.trim()) return content;
+      lastError = new Error(`OpenRouter returned an empty response for ${model}`);
+    } catch (error) {
+      lastError = error;
+      console.error(`❌ OpenRouter call failed for ${model}:`, error.message);
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
-  } catch (error) {
-    console.error('❌ OpenRouter call failed:', error.message);
-    throw error;
   }
+
+  throw lastError || new Error('OpenRouter call failed across all configured models');
+}
+
+function buildModelChain(preferredModel) {
+  const requested = String(preferredModel || '').trim();
+  const preferred = config.allowedOpenRouterModels.includes(requested) ? requested : null;
+  if (requested && !preferred) {
+    console.warn(`Ignoring unsupported OpenRouter model request "${requested}"`);
+  }
+  return [...new Set([
+    preferred || config.defaultModel,
+    config.defaultModel,
+    ...config.fallbackModels,
+  ].filter(Boolean))];
 }
 
 /**
@@ -77,7 +93,7 @@ async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
  * @param {string} meetingTitle - Meeting title for context
  * @returns {Promise<object>} Summary object with sections
  */
-async function generateSummary(transcript, meetingTitle = 'Meeting') {
+async function generateSummary(transcript, meetingTitle = 'Meeting', options = {}) {
   const systemPrompt = `You are an expert meeting assistant. Your job is to create clear, concise meeting summaries.
 Focus on the key points, decisions made, and important discussions.
 Format your response as JSON with the following structure:
@@ -94,7 +110,7 @@ Only output valid JSON, no markdown or explanation.`;
 ${transcript}`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1024 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1024, model: options.model });
 
     // Strip markdown code fences if present (e.g., ```json ... ```)
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -123,7 +139,7 @@ ${transcript}`;
  * @param {string} transcript - Full transcript text
  * @returns {Promise<array>} Array of action items
  */
-async function extractActionItems(transcript) {
+async function extractActionItems(transcript, options = {}) {
   const systemPrompt = `You are an expert at identifying action items from meeting transcripts.
 Extract specific, actionable tasks that were mentioned or assigned during the meeting.
 For each action item, identify who it was assigned to if mentioned.
@@ -140,7 +156,7 @@ Only output valid JSON array, no markdown or explanation.`;
 ${transcript}`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1024 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1024, model: options.model });
 
     // Strip markdown code fences if present (e.g., ```json ... ```)
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -167,7 +183,7 @@ ${transcript}`;
  * @param {string} meetingTitle - Meeting title for context
  * @returns {Promise<string>} AI response
  */
-async function chatWithTranscript(question, transcript, meetingTitle = 'Meeting') {
+async function chatWithTranscript(question, transcript, meetingTitle = 'Meeting', options = {}) {
   const systemPrompt = `You are a helpful meeting assistant. Answer questions about the meeting based on the transcript provided.
 Be specific and cite relevant parts of the conversation when possible.
 If the answer is not in the transcript, say so clearly.
@@ -181,7 +197,7 @@ ${transcript}
 Question: ${question}`;
 
   try {
-    return await callOpenRouter(prompt, systemPrompt, { maxTokens: 512 });
+    return await callOpenRouter(prompt, systemPrompt, { maxTokens: 512, model: options.model });
   } catch (error) {
     console.error('❌ Chat failed:', error.message);
     throw error;
@@ -193,7 +209,7 @@ Question: ${question}`;
  * @param {string} recentTranscript - Last few minutes of transcript
  * @returns {Promise<array>} Array of suggestion objects
  */
-async function generateSuggestions(recentTranscript) {
+async function generateSuggestions(recentTranscript, options = {}) {
   const systemPrompt = `You are a real-time meeting assistant. Based on the recent transcript, generate 1-2 brief, actionable suggestions or observations.
 Examples: "Clarify the timeline for the feature release", "Assign an owner for the database migration task"
 Format as JSON array: [{"type": "suggestion", "text": "brief text"}]
@@ -202,7 +218,7 @@ Only output valid JSON array.`;
   const prompt = `Recent transcript:\n\n${recentTranscript}`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 256 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 256, model: options.model });
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
     try {
       const parsed = JSON.parse(cleaned);
@@ -222,7 +238,7 @@ Only output valid JSON array.`;
  * @param {string} currentTitle - Current meeting title for context
  * @returns {Promise<string>} Generated title (under 60 chars)
  */
-async function generateTitle(content, currentTitle = 'Meeting') {
+async function generateTitle(content, currentTitle = 'Meeting', options = {}) {
   const systemPrompt = `You are an expert at creating concise, descriptive meeting titles.
 Given the meeting content, generate a short, meaningful title that captures the main topic or purpose.
 Rules:
@@ -240,7 +256,7 @@ ${content.substring(0, 3000)}
 Generate a better, more descriptive title:`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 64 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 64, model: options.model });
     // Clean up: remove quotes, trim whitespace, truncate if needed
     return response.replace(/^["']|["']$/g, '').trim().substring(0, 60);
   } catch (error) {
@@ -255,7 +271,7 @@ Generate a better, more descriptive title:`;
  * @param {object} currentSoap - Current SOAP data (for incremental updates)
  * @returns {Promise<object>} SOAP notes object with subjective, objective, assessment, plan
  */
-async function extractSOAPNotes(transcript, currentSoap = {}) {
+async function extractSOAPNotes(transcript, currentSoap = {}, options = {}) {
   const systemPrompt = `You are a clinical documentation assistant helping healthcare providers document patient encounters.
 Extract SOAP notes from the transcript. Be accurate and use clinical terminology.
 
@@ -295,7 +311,7 @@ P: ${currentSoap.plan || '(empty)'}
 ` : ''}`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1536 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 1536, model: options.model });
 
     // Strip markdown code fences if present
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
@@ -330,7 +346,7 @@ P: ${currentSoap.plan || '(empty)'}
  * @param {string} text - The text to analyze
  * @returns {Promise<object>} Sentiment analysis result
  */
-async function analyzeSentiment(text) {
+async function analyzeSentiment(text, options = {}) {
   const systemPrompt = `You are an expert sentiment analyzer for customer support calls.
 Analyze the customer's emotional state from their speech.
 
@@ -356,7 +372,7 @@ Output ONLY valid JSON, no markdown.`;
   const prompt = `Analyze sentiment: "${text}"`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 100 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 100, model: options.model });
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
     try {
@@ -381,7 +397,7 @@ Output ONLY valid JSON, no markdown.`;
  * @param {string} text - Recent transcript text to analyze
  * @returns {Promise<object|null>} Key moment object or null if no significant moment
  */
-async function extractKeyMoment(text) {
+async function extractKeyMoment(text, options = {}) {
   const systemPrompt = `You are an expert at identifying key moments in meetings.
 Analyze the text and determine if it contains a significant moment worth highlighting.
 
@@ -407,7 +423,7 @@ Output ONLY valid JSON, no markdown.`;
   const prompt = `Is this a key moment? "${text}"`;
 
   try {
-    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 150 });
+    const response = await callOpenRouter(prompt, systemPrompt, { maxTokens: 150, model: options.model });
     const cleaned = response.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
     try {
