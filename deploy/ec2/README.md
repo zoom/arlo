@@ -1,8 +1,13 @@
 # Single-host AWS EC2 deployment
 
-This deployment runs the frontend, backend, and RTMS services on one private
-x86 EC2 instance. CloudFront and the existing ALB remain the public entrypoint.
-The existing RDS MySQL database is external to the Compose stack.
+This deployment runs the frontend, backend, and RTMS services on one x86 EC2
+instance. CloudFront and the ALB remain the public application entrypoint. The
+Aurora MySQL database is external to the Compose stack.
+
+The EC2 instance uses an Elastic IP for outbound Zoom, OpenRouter, SSM, and ECR
+access without a NAT Gateway. Its security group must allow ports 3000-3001
+only from the ALB security group; do not permit public ingress or SSH. The ALB
+continues to reach the instance over its private VPC address.
 
 ## Required SSM parameters
 
@@ -30,15 +35,19 @@ Install these files with root ownership:
 - `arlo.service` -> `/etc/systemd/system/arlo.service`
 
 Create `/etc/arlo/images.env` with mode `0600` containing immutable ECR image
-references:
+references. The model variables are optional runtime settings and must contain
+only free OpenRouter model IDs:
 
 ```dotenv
 FRONTEND_IMAGE=ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/arlo-frontend:TAG
 BACKEND_IMAGE=ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/arlo-backend:TAG
 RTMS_IMAGE=ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms:TAG
+OPENROUTER_MODELS=z-ai/glm-5.2:free,google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
+DEFAULT_MODEL=z-ai/glm-5.2:free
+FALLBACK_MODEL=google/gemma-4-31b-it:free
 ```
 
 Then run `systemctl daemon-reload` and `systemctl enable --now arlo`.
 
 Do not run `prisma db push` during application startup. This deployment uses
-the schema and data already present in the existing RDS MySQL database.
+the schema and data already present in the Aurora MySQL database.

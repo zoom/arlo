@@ -25,6 +25,7 @@ export TOKEN_ENCRYPTION_KEY="$(read_parameter "${PARAMETER_PREFIX}/redis-encrypt
 export OPENROUTER_API_KEY="$(read_parameter "${PARAMETER_PREFIX}/openrouter-api-key")"
 
 export PUBLIC_URL="${PUBLIC_URL:-https://d3k9b5xygup21i.cloudfront.net}"
+export OPENROUTER_MODELS="${OPENROUTER_MODELS:-z-ai/glm-5.2:free,google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free}"
 export DEFAULT_MODEL="${DEFAULT_MODEL:-z-ai/glm-5.2:free}"
 export FALLBACK_MODEL="${FALLBACK_MODEL:-google/gemma-4-31b-it:free}"
 

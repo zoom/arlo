@@ -3,6 +3,7 @@ import { FileText, ChevronDown, ChevronUp, Sparkles, RefreshCw } from 'lucide-re
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
+import { getPreferredAiModel } from '../../utils/aiModel';
 import './MeetingSummary.css';
 
 /**
@@ -27,7 +28,7 @@ async function generateSummaryAI(transcript, title) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ transcript, title }),
+      body: JSON.stringify({ transcript, title, model: getPreferredAiModel() }),
     });
 
     if (!response.ok) {

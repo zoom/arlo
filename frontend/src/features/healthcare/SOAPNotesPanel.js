@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { FileText, ChevronDown, ChevronRight, ChevronUp, Loader2, RefreshCw, Check, AlertCircle, Tag, ClipboardCheck, LayoutTemplate } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { getPreferredAiModel } from '../../utils/aiModel';
 import Button from '../../components/ui/Button';
 import Textarea from '../../components/ui/Textarea';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
@@ -190,6 +191,7 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoDa
           meetingId,
           transcript: transcriptText,
           currentSoap: soapData,
+          model: getPreferredAiModel(),
         }),
       });
 

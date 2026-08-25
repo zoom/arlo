@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Activity, TrendingUp, TrendingDown, Minus, Sparkles } from 'lucide-react';
 import Card from '../../components/ui/Card';
+import { getPreferredAiModel } from '../../utils/aiModel';
 import './SentimentMeter.css';
 
 /**
@@ -27,7 +28,7 @@ async function analyzeSentimentAI(text) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, model: getPreferredAiModel() }),
     });
 
     if (!response.ok) {

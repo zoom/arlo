@@ -82,7 +82,7 @@ async function getTranscriptText(meetingId) {
  * Generate meeting summary
  */
 router.post('/summary', requireAuth, async (req, res) => {
-  const { meetingId } = req.body;
+  const { meetingId, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -120,7 +120,7 @@ router.post('/summary', requireAuth, async (req, res) => {
     console.log(`🤖 Generating summary for meeting: ${meeting.title}`);
 
     // Generate summary
-    const summary = await generateSummary(transcript, meeting.title);
+    const summary = await generateSummary(transcript, meeting.title, { model });
 
     // Cache the summary
     try {
@@ -148,7 +148,7 @@ router.post('/summary', requireAuth, async (req, res) => {
  * Extract action items from meeting
  */
 router.post('/action-items', requireAuth, async (req, res) => {
-  const { meetingId } = req.body;
+  const { meetingId, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -176,7 +176,7 @@ router.post('/action-items', requireAuth, async (req, res) => {
     console.log(`🤖 Extracting action items for meeting: ${meeting.title}`);
 
     // Extract action items
-    const actionItems = await extractActionItems(transcript);
+    const actionItems = await extractActionItems(transcript, { model });
 
     res.json({
       meetingId: meeting.id,
@@ -194,7 +194,7 @@ router.post('/action-items', requireAuth, async (req, res) => {
  * Extract SOAP notes from healthcare transcript (healthcare vertical)
  */
 router.post('/extract-soap', requireAuth, async (req, res) => {
-  const { meetingId, transcript, currentSoap } = req.body;
+  const { meetingId, transcript, currentSoap, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -208,7 +208,7 @@ router.post('/extract-soap', requireAuth, async (req, res) => {
     console.log(`🏥 Extracting SOAP notes for meeting: ${meetingId || 'live'}`);
 
     // Extract SOAP notes using AI
-    const soapNotes = await extractSOAPNotes(transcript, currentSoap || {});
+    const soapNotes = await extractSOAPNotes(transcript, currentSoap || {}, { model });
 
     res.json(soapNotes);
   } catch (error) {
@@ -222,7 +222,7 @@ router.post('/extract-soap', requireAuth, async (req, res) => {
  * Chat with transcripts (RAG-based Q&A)
  */
 router.post('/chat', requireAuth, async (req, res) => {
-  const { meetingId, question } = req.body;
+  const { meetingId, question, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -287,7 +287,7 @@ router.post('/chat', requireAuth, async (req, res) => {
     console.log(`🤖 Chat question: "${question.substring(0, 50)}..."`);
 
     // Get AI response
-    const answer = await chatWithTranscript(question, transcript, meetingTitle);
+    const answer = await chatWithTranscript(question, transcript, meetingTitle, { model });
 
     res.json({
       meetingId: meetingId || null,
@@ -305,7 +305,7 @@ router.post('/chat', requireAuth, async (req, res) => {
  * Generate a descriptive meeting title from transcript or summary
  */
 router.post('/generate-title', requireAuth, async (req, res) => {
-  const { meetingId } = req.body;
+  const { meetingId, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -338,7 +338,7 @@ router.post('/generate-title', requireAuth, async (req, res) => {
 
     console.log(`🤖 Generating title for meeting: ${meeting.title}`);
 
-    const title = await generateTitle(content, meeting.title);
+    const title = await generateTitle(content, meeting.title, { model });
 
     res.json({ title });
   } catch (error) {
@@ -355,7 +355,7 @@ const suggestRateLimit = new Map();
  * Get real-time AI suggestions during meeting (for in-meeting use)
  */
 router.post('/suggest', optionalAuth, async (req, res) => {
-  const { meetingId, recentTranscript } = req.body;
+  const { meetingId, recentTranscript, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -377,7 +377,7 @@ router.post('/suggest', optionalAuth, async (req, res) => {
   try {
     const { generateSuggestions } = require('../services/openrouter');
 
-    const suggestions = await generateSuggestions(recentTranscript);
+    const suggestions = await generateSuggestions(recentTranscript, { model });
 
     res.json({ suggestions });
   } catch (error) {
@@ -397,6 +397,8 @@ router.get('/status', (req, res) => {
     hasApiKey: !!config.openrouterApiKey,
     defaultModel: config.defaultModel,
     fallbackModel: config.fallbackModel,
+    fallbackModels: config.fallbackModels,
+    allowedOpenRouterModels: config.allowedOpenRouterModels,
   });
 });
 
@@ -406,7 +408,7 @@ router.get('/status', (req, res) => {
  * Used for real-time customer sentiment tracking in support calls
  */
 router.post('/sentiment', optionalAuth, async (req, res) => {
-  const { text } = req.body;
+  const { text, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -417,7 +419,7 @@ router.post('/sentiment', optionalAuth, async (req, res) => {
   }
 
   try {
-    const result = await analyzeSentiment(text.trim());
+    const result = await analyzeSentiment(text.trim(), { model });
     res.json(result);
   } catch (error) {
     console.error('❌ Sentiment analysis error:', error.message);
@@ -431,7 +433,7 @@ router.post('/sentiment', optionalAuth, async (req, res) => {
  * Used when we have segments but the meeting isn't saved to DB yet
  */
 router.post('/summary-live', optionalAuth, async (req, res) => {
-  const { transcript, title } = req.body;
+  const { transcript, title, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -443,7 +445,7 @@ router.post('/summary-live', optionalAuth, async (req, res) => {
 
   try {
     console.log(`🤖 Generating live summary (${transcript.length} chars)`);
-    const summary = await generateSummary(transcript.trim(), title || 'Live Meeting');
+    const summary = await generateSummary(transcript.trim(), title || 'Live Meeting', { model });
 
     res.json({
       summary,
@@ -461,7 +463,7 @@ router.post('/summary-live', optionalAuth, async (req, res) => {
  * Used for real-time key moment detection during meetings
  */
 router.post('/key-moment', optionalAuth, async (req, res) => {
-  const { text } = req.body;
+  const { text, model } = req.body;
 
   if (!config.aiEnabled) {
     return res.status(503).json({ error: 'AI features are disabled' });
@@ -472,7 +474,7 @@ router.post('/key-moment', optionalAuth, async (req, res) => {
   }
 
   try {
-    const result = await extractKeyMoment(text.trim());
+    const result = await extractKeyMoment(text.trim(), { model });
     if (result) {
       res.json(result);
     } else {

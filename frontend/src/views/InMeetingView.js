@@ -4,6 +4,7 @@ import { Tabs, ScrollArea } from '@base-ui/react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw, MonitorPlay, Volume2 } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
+import { getPreferredAiModel } from '../utils/aiModel';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import { useToast } from '../contexts/ToastContext';
@@ -742,7 +743,7 @@ export default function InMeetingView({ isGuestMode = false }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ meetingId }),
+        body: JSON.stringify({ meetingId, model: getPreferredAiModel() }),
       });
       if (res.ok) {
         const data = await res.json();

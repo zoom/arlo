@@ -367,7 +367,8 @@ docker-compose restart backend
 1. **Check if using free models (no API key needed):**
    ```bash
    # .env should have:
-   DEFAULT_MODEL=google/gemini-2.0-flash-thinking-exp:free
+   DEFAULT_MODEL=z-ai/glm-5.2:free
+   FALLBACK_MODEL=google/gemma-4-31b-it:free
    ```
 
 2. **Check backend logs for AI errors:**

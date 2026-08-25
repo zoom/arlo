@@ -116,6 +116,48 @@ if (!encryptionKeyRaw) {
 
 const encryptionKey = resolveEncryptionKey(encryptionKeyRaw);
 
+const defaultOpenRouterModels = Object.freeze([
+  'z-ai/glm-5.2:free',
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
+]);
+
+function parseCsv(value) {
+  return (value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+const configuredOpenRouterModels = parseCsv(process.env.OPENROUTER_MODELS);
+const allowedOpenRouterModels = Object.freeze(
+  [...new Set(configuredOpenRouterModels.length > 0
+    ? configuredOpenRouterModels
+    : defaultOpenRouterModels)]
+    .filter((model) => model.endsWith(':free'))
+);
+
+if (allowedOpenRouterModels.length === 0) {
+  console.error('OPENROUTER_MODELS must contain at least one :free model');
+  process.exit(1);
+}
+
+function allowedModelOrDefault(model, defaultModel) {
+  if (!model) return defaultModel;
+  if (allowedOpenRouterModels.includes(model)) return model;
+  console.warn(`Ignoring unsupported OpenRouter model "${model}"`);
+  return defaultModel;
+}
+
+const defaultOpenRouterModel = allowedModelOrDefault(
+  process.env.DEFAULT_MODEL,
+  allowedOpenRouterModels[0]
+);
+const fallbackOpenRouterModel = allowedModelOrDefault(
+  process.env.FALLBACK_MODEL,
+  allowedOpenRouterModels[1] || allowedOpenRouterModels[0]
+);
+
 // Validate placeholder against the raw env value, not the decoded/normalized key.
 if (/^your_.*_here$/i.test(encryptionKeyRaw)) {
   console.error('❌ TOKEN_ENCRYPTION_KEY contains a placeholder value');
@@ -168,8 +210,10 @@ module.exports = {
   // AI Configuration
   aiEnabled: process.env.AI_ENABLED === 'true',
   openrouterApiKey: process.env.OPENROUTER_API_KEY || null,
-  defaultModel: process.env.DEFAULT_MODEL || 'z-ai/glm-5.2:free',
-  fallbackModel: process.env.FALLBACK_MODEL || 'meta-llama/llama-3.2-3b-instruct:free',
+  defaultModel: defaultOpenRouterModel,
+  fallbackModel: fallbackOpenRouterModel,
+  fallbackModels: allowedOpenRouterModels.filter((model) => model !== defaultOpenRouterModel),
+  allowedOpenRouterModels,
 
   // Feature Flags
   extractionEnabled: process.env.EXTRACTION_ENABLED === 'true',

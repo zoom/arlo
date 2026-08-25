@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { getPreferredAiModel } from '../utils/aiModel';
 import { Tabs, ScrollArea } from '@base-ui/react';
 import { Download, Trash2, Pencil, Check, X, Loader2, Sparkles } from 'lucide-react';
 import Card from '../components/ui/Card';
@@ -100,7 +101,7 @@ export default function MeetingDetailView() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ meetingId: id }),
+          body: JSON.stringify({ meetingId: id, model: getPreferredAiModel() }),
         });
         if (res.ok) {
           const data = await res.json();
@@ -113,7 +114,7 @@ export default function MeetingDetailView() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ meetingId: id }),
+          body: JSON.stringify({ meetingId: id, model: getPreferredAiModel() }),
         });
         if (aiRes.ok) {
           const data = await aiRes.json();
@@ -138,7 +139,7 @@ export default function MeetingDetailView() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ meetingId: id, question }),
+        body: JSON.stringify({ meetingId: id, question, model: getPreferredAiModel() }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -228,7 +229,7 @@ export default function MeetingDetailView() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ meetingId: id }),
+        body: JSON.stringify({ meetingId: id, model: getPreferredAiModel() }),
       });
       if (res.ok) {
         const data = await res.json();
