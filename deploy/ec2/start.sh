@@ -15,16 +15,29 @@ read_parameter() {
     --output text
 }
 
+read_optional_parameter() {
+  aws ssm get-parameter \
+    --region "$AWS_REGION" \
+    --name "$1" \
+    --with-decryption \
+    --query 'Parameter.Value' \
+    --output text 2>/dev/null || true
+}
+
 # Keep decrypted values in this process environment; do not write a plaintext env file.
 export DATABASE_URL="$(read_parameter "${PARAMETER_PREFIX}/database-url")"
 export ZOOM_CLIENT_ID="$(read_parameter "${PARAMETER_PREFIX}/zoom-client-id")"
 export ZOOM_CLIENT_SECRET="$(read_parameter "${PARAMETER_PREFIX}/zoom-client-secret")"
 export ZOOM_WEBHOOK_TOKEN="$(read_parameter "${PARAMETER_PREFIX}/zoom-webhook-secret-token")"
 export SESSION_SECRET="$(read_parameter "${PARAMETER_PREFIX}/session-secret")"
-export TOKEN_ENCRYPTION_KEY="$(read_parameter "${PARAMETER_PREFIX}/redis-encryption-key")"
-export OPENROUTER_API_KEY="$(read_parameter "${PARAMETER_PREFIX}/openrouter-api-key")"
+TOKEN_ENCRYPTION_KEY="$(read_optional_parameter "${PARAMETER_PREFIX}/token-encryption-key")"
+if [[ -z "$TOKEN_ENCRYPTION_KEY" ]]; then
+  TOKEN_ENCRYPTION_KEY="$(read_parameter "${PARAMETER_PREFIX}/redis-encryption-key")"
+fi
+export TOKEN_ENCRYPTION_KEY
+export OPENROUTER_API_KEY="$(read_optional_parameter "${PARAMETER_PREFIX}/openrouter-api-key")"
 
-export PUBLIC_URL="${PUBLIC_URL:-https://d3k9b5xygup21i.cloudfront.net}"
+export PUBLIC_URL="${PUBLIC_URL:?PUBLIC_URL is required}"
 export OPENROUTER_MODELS="${OPENROUTER_MODELS:-z-ai/glm-5.2:free,google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free}"
 export DEFAULT_MODEL="${DEFAULT_MODEL:-z-ai/glm-5.2:free}"
 export FALLBACK_MODEL="${FALLBACK_MODEL:-google/gemma-4-31b-it:free}"

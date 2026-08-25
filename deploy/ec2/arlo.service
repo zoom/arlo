@@ -7,8 +7,6 @@ Wants=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=/etc/arlo/images.env
-Environment=AWS_REGION=us-east-1
-Environment=PUBLIC_URL=https://d3k9b5xygup21i.cloudfront.net
 ExecStart=/opt/arlo/start.sh
 ExecStop=/usr/bin/docker compose -f /opt/arlo/docker-compose.yml down
 Restart=on-failure

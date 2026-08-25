@@ -1,5 +1,8 @@
 # Single-host AWS EC2 deployment
 
+For complete first-deployment, update, verification, and rollback commands, see
+[Manual AWS CLI deployment](AWS_CLI_DEPLOYMENT.md).
+
 This deployment runs the frontend, backend, and RTMS services on one x86 EC2
 instance. CloudFront and the ALB remain the public application entrypoint. The
 Aurora MySQL database is external to the Compose stack.
@@ -19,8 +22,12 @@ All sensitive parameters are `SecureString` values encrypted with
 - `/arlo/prod/zoom-client-secret`
 - `/arlo/prod/zoom-webhook-secret-token`
 - `/arlo/prod/session-secret`
-- `/arlo/prod/redis-encryption-key`
+- `/arlo/prod/token-encryption-key`
 - `/arlo/prod/openrouter-api-key`
+
+Existing deployments may continue using `/arlo/prod/redis-encryption-key`; the
+startup script checks that legacy parameter when `token-encryption-key` is not
+present. The OpenRouter parameter is optional.
 
 The database parameter must contain the existing least-privilege application
 connection string, not a database master credential. The service refuses to
@@ -42,6 +49,9 @@ only free OpenRouter model IDs:
 FRONTEND_IMAGE=ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/arlo-frontend:TAG
 BACKEND_IMAGE=ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/arlo-backend:TAG
 RTMS_IMAGE=ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms:TAG
+AWS_REGION=us-east-1
+PARAMETER_PREFIX=/arlo/prod
+PUBLIC_URL=https://your-public-domain.example
 OPENROUTER_MODELS=z-ai/glm-5.2:free,google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
 DEFAULT_MODEL=z-ai/glm-5.2:free
 FALLBACK_MODEL=google/gemma-4-31b-it:free
