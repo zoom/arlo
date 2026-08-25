@@ -12,7 +12,7 @@ import { useZoomSdk } from '../contexts/ZoomSdkContext';
  */
 export default function useZoomAuth() {
   const { login } = useAuth();
-  const { zoomSdk } = useZoomSdk();
+  const { zoomSdk, sdkConfigured, sdkError } = useZoomSdk();
   const [isAuthorizing, setIsAuthorizing] = useState(false);
   const [error, setError] = useState(null);
   const authInFlightRef = useRef(false);
@@ -31,6 +31,9 @@ export default function useZoomAuth() {
 
   const authorize = useCallback(async () => {
     if (!zoomSdk) throw new Error('Zoom SDK not available');
+    if (!sdkConfigured) {
+      throw new Error(sdkError || 'Zoom SDK is still initializing');
+    }
     // Prevent duplicate authorize() calls from double-clicks or strict-mode re-renders.
     if (authInFlightRef.current) return;
 
@@ -195,7 +198,7 @@ export default function useZoomAuth() {
       authInFlightRef.current = false; // Always release, including thrown authorize() errors.
       setIsAuthorizing(false);
     }
-  }, [zoomSdk, login]);
+  }, [zoomSdk, sdkConfigured, sdkError, login]);
 
   return { authorize, isAuthorizing, error };
 }

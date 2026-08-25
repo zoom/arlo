@@ -11,7 +11,13 @@ import './AuthView.css';
 export default function AuthView() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading, login } = useAuth();
-  const { isTestMode: isBrowser, runningContext, meetingContext } = useZoomSdk();
+  const {
+    isTestMode: isBrowser,
+    sdkConfigured,
+    sdkError,
+    runningContext,
+    meetingContext,
+  } = useZoomSdk();
   const { authorize, isAuthorizing, error } = useZoomAuth();
 
   // Some marketplace app types lack in-client authorize; detect and use browser OAuth instead.
@@ -62,6 +68,10 @@ export default function AuthView() {
       window.location.href = '/api/auth/start';
       return;
     }
+    if (!sdkConfigured) {
+      console.warn('Zoom SDK authorization blocked until config completes');
+      return;
+    }
     console.log('Using in-client OAuth');
     try {
       await authorize();
@@ -78,7 +88,11 @@ export default function AuthView() {
   };
 
   // Show spinner while session is being restored or authenticated but waiting for SDK
-  if (isLoading || (isAuthenticated && runningContext === null)) {
+  if (
+    isLoading ||
+    (isAuthenticated && runningContext === null) ||
+    (!isBrowser && !sdkConfigured && !sdkError)
+  ) {
     return (
       <div className="auth-view">
         <div className="auth-content">
@@ -102,13 +116,18 @@ export default function AuthView() {
           </p>
         </div>
 
-        {error && (
+        {(sdkError || error) && (
           <p className="text-sm" style={{ color: 'var(--color-danger, #ef4444)' }}>
-            {error}
+            {sdkError || error}
           </p>
         )}
 
-        <Button size="lg" onClick={handleConnect} disabled={isAuthorizing} className="auth-btn">
+        <Button
+          size="lg"
+          onClick={handleConnect}
+          disabled={isAuthorizing || (!isBrowser && !sdkConfigured)}
+          className="auth-btn"
+        >
           {isAuthorizing ? 'Connecting...' : 'Connect with Zoom'}
         </Button>
       </div>
