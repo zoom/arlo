@@ -170,8 +170,8 @@ export default function InMeetingView({ isGuestMode = false }) {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [displayTitle, setDisplayTitle] = useState(null);
-  // Always default to "assist" tab (features page) when entering a meeting
-  const [activeTab, setActiveTab] = useState('assist');
+  // Default to transcript tab - the live transcript is the "wow moment"
+  const [activeTab, setActiveTab] = useState('transcript');
   const [voiceCommandsEnabled, setVoiceCommandsEnabled] = useState(true);
   const [showResponsePanel, setShowResponsePanel] = useState(true);
   const [voiceResponsesEnabled, setVoiceResponsesEnabled] = useState(() => {
@@ -230,12 +230,11 @@ export default function InMeetingView({ isGuestMode = false }) {
   }, [isGuestMode, isAuthenticated, ws, effectiveMeetingId, wsToken, connectWebSocket]);
 
   // Load existing transcript segments from DB (for auto-started RTMS sessions)
+  // Load immediately for all users to show transcript as fast as possible
   const historicalLoadedRef = useRef(false);
   useEffect(() => {
     const loadMeetingId = effectiveMeetingId;
-    // For guests, load immediately; for auth users, wait for rtmsActive
     if (!loadMeetingId || historicalLoadedRef.current) return;
-    if (!isGuestMode && !rtmsActive) return;
     historicalLoadedRef.current = true;
 
     fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(loadMeetingId)}/transcript`, {
@@ -254,14 +253,14 @@ export default function InMeetingView({ isGuestMode = false }) {
         }
       })
       .catch(() => {});
-  }, [isGuestMode, rtmsActive, effectiveMeetingId]);
+  }, [effectiveMeetingId]);
 
   // Load existing participant events from DB (for mid-meeting app opens)
+  // Load immediately for all users
   const historicalEventsLoadedRef = useRef(false);
   useEffect(() => {
     const loadMeetingId = effectiveMeetingId;
     if (!loadMeetingId || historicalEventsLoadedRef.current) return;
-    if (!isGuestMode && !rtmsActive) return;
     historicalEventsLoadedRef.current = true;
 
     fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(loadMeetingId)}/participant-events`, {
@@ -280,7 +279,7 @@ export default function InMeetingView({ isGuestMode = false }) {
         }
       })
       .catch(() => {});
-  }, [isGuestMode, rtmsActive, effectiveMeetingId]);
+  }, [effectiveMeetingId]);
 
   // Listen for transcript segments
   useEffect(() => {
@@ -855,15 +854,15 @@ export default function InMeetingView({ isGuestMode = false }) {
         />
       )}
 
-      {/* Tabs: Arlo Assist (default) | Transcript */}
+      {/* Tabs: Transcript (default) | Arlo Assist */}
       <Tabs.Root
         value={activeTab}
         onValueChange={(value) => setActiveTab(value)}
         className="in-meeting-tabs"
       >
         <Tabs.List className="tabs-list" data-cols="2">
-          <Tabs.Tab value="assist" className="tab-trigger">Arlo Assist</Tabs.Tab>
           <Tabs.Tab value="transcript" className="tab-trigger">Transcript</Tabs.Tab>
+          <Tabs.Tab value="assist" className="tab-trigger">Arlo Assist</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="transcript" className="in-meeting-tab-panel">

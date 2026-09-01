@@ -142,19 +142,22 @@ export function MeetingProvider({ children }) {
         case 'transcript.segment':
           if (!rtmsActiveRef.current) {
             setRtmsActive(true);
+            hasBeenActiveRef.current = true;
             if (!meetingStartTimeRef.current) {
               meetingStartTimeRef.current = Date.now();
+            }
+            // Send chat notice on first actual transcript data (not on rtms_started webhook)
+            if (!startNoticeSentRef.current) {
+              startNoticeSentRef.current = true;
+              sendChatNoticeRef.current('start');
             }
           }
           break;
         case 'meeting.status':
           if (message.data.status === 'rtms_started') {
+            // Don't send chat notice here - wait for actual transcript data
             setRtmsActive(true);
             hasBeenActiveRef.current = true;
-            if (!startNoticeSentRef.current) {
-              startNoticeSentRef.current = true;
-              sendChatNoticeRef.current('start');
-            }
           } else if (message.data.status === 'rtms_stopped') {
             setRtmsActive(false);
             setRtmsPaused(false);
@@ -399,15 +402,12 @@ export function MeetingProvider({ children }) {
         .then(data => {
           if (cancelled) return;
           if (data?.meeting?.status === 'ongoing') {
+            // Set state but don't send chat notice - wait for actual transcript data
             console.log('REST status check: meeting is ongoing, setting rtmsActive');
             setRtmsActive(true);
             hasBeenActiveRef.current = true;
             if (!meetingStartTimeRef.current) {
               meetingStartTimeRef.current = Date.now();
-            }
-            if (!startNoticeSentRef.current) {
-              startNoticeSentRef.current = true;
-              sendChatNoticeRef.current('start');
             }
           } else if (++attempt < maxAttempts) {
             // Meeting record may not exist yet — retry after 1s

@@ -144,8 +144,8 @@ router.get('/callback', async (req, res) => {
       zoomUser = {
         id: tokenPayload.uid,
         email: tokenPayload.email || `${tokenPayload.uid}@zoom.user`,
-        first_name: tokenPayload.first_name || 'Zoom',
-        last_name: tokenPayload.last_name || 'User',
+        first_name: tokenPayload.first_name || '',
+        last_name: tokenPayload.last_name || '',
         pic_url: null,
       };
     }
@@ -331,8 +331,8 @@ router.post('/callback', async (req, res) => {
       zoomUser = {
         id: tokenPayload.uid,
         email: tokenPayload.email || `${tokenPayload.uid}@zoom.user`,
-        first_name: tokenPayload.first_name || 'Zoom',
-        last_name: tokenPayload.last_name || 'User',
+        first_name: tokenPayload.first_name || '',
+        last_name: tokenPayload.last_name || '',
         pic_url: null,
       };
     }

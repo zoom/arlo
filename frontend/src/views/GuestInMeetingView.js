@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { ScrollArea } from '@base-ui/react';
-import { Sparkles, ChevronDown, ArrowDown, X, Lock, LogIn, LogOut, Mic, MicOff, Pause, Play, Eye } from 'lucide-react';
+import { Sparkles, ChevronDown, ArrowDown, X, Lock, LogIn, LogOut, Mic, MicOff, Pause, Play, Eye, Clock, UserCheck } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import OwlIcon from '../components/OwlIcon';
@@ -246,9 +246,21 @@ export default function GuestInMeetingView() {
               onScroll={handleScroll}
             >
               {timelineItems.length === 0 && (
-                <div className="guest-transcript-empty">
-                  <LoadingSpinner size={24} />
-                  <p className="text-serif text-sm text-muted">Waiting for transcript...</p>
+                <div className="guest-pending-state">
+                  <div className="guest-pending-icon">
+                    <Clock size={32} className="text-muted" />
+                  </div>
+                  <div className="guest-pending-content">
+                    <h3 className="text-serif font-medium">Awaiting host response</h3>
+                    <p className="text-sans text-sm text-muted">
+                      Access to the live transcript has been requested.
+                      Waiting for host approval.
+                    </p>
+                  </div>
+                  <div className="guest-pending-status">
+                    <LoadingSpinner size={14} />
+                    <span className="text-sans text-xs text-muted">Host hasn't responded yet</span>
+                  </div>
                 </div>
               )}
               {timelineItems.map((item) => {

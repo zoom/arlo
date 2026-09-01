@@ -1,14 +1,15 @@
+/* GuestNoMeetingView - Simplified for 375px Zoom App panel */
+
 .guest-no-meeting {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  height: 100vh;
-  overflow-y: auto;
-  padding: 24px 16px;
+  min-height: 100vh;
+  padding: 24px 20px;
 }
 
 .guest-content {
-  max-width: 400px;
+  max-width: 320px;
   width: 100%;
   text-align: center;
   display: flex;
@@ -23,97 +24,54 @@
   gap: 8px;
 }
 
-/* What is Arlo card */
-.guest-what-card {
-  text-align: left;
+.guest-tagline {
+  font-size: 0.9375rem;
+  line-height: 1.5;
 }
 
-.guest-what-card p {
-  padding: 20px;
-  color: var(--muted-foreground);
-}
-
-/* Feature cards */
-.guest-features {
+/* CTA stack - primary action + guest link */
+.guest-cta-stack {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  text-align: left;
+  align-items: center;
+  gap: 16px;
   width: 100%;
 }
 
-.guest-feature-inner {
-  padding: 16px;
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+.guest-btn-primary {
+  width: 100%;
 }
 
-.guest-feature-icon {
+.guest-link-btn {
+  background: none;
+  border: none;
   color: var(--accent);
-  margin-top: 2px;
-  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  transition: background-color 0.15s ease;
 }
 
-.guest-feature-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.guest-link-btn:hover {
+  background-color: var(--muted);
+  text-decoration: none;
 }
 
-/* Comparison table */
-.guest-comparison-table {
-  width: 100%;
-  border-collapse: collapse;
+/* Brief feature summary */
+.guest-features-brief {
+  padding: 16px;
+  background: var(--muted);
+  border-radius: var(--radius-lg);
   text-align: left;
 }
 
-.guest-comparison-table th {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+.guest-features-brief p {
+  line-height: 1.6;
 }
 
-.guest-comparison-table th:nth-child(2),
-.guest-comparison-table th:nth-child(3) {
-  text-align: center;
-}
-
-.guest-comparison-table td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-}
-
-.guest-comparison-table td:nth-child(2),
-.guest-comparison-table td:nth-child(3) {
-  text-align: center;
-}
-
-.guest-comparison-table tbody tr:nth-child(odd) {
-  background: color-mix(in srgb, var(--muted) 50%, transparent);
-}
-
-.guest-check-icon {
-  color: #16a34a;
-}
-
-.dark .guest-check-icon {
-  color: #4ade80;
-}
-
-.guest-dash-icon {
-  color: var(--muted-foreground);
-}
-
-/* CTA buttons */
-.guest-cta-row {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  width: 100%;
-}
-
-.guest-btn {
-  width: 100%;
+.guest-features-brief strong {
+  color: var(--foreground);
 }

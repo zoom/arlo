@@ -1,7 +1,7 @@
 {
     "display_information": {
         "description": "AI meeting assistant with live transcription",
-        "display_name": "Arlo Meeting Assistant",
+        "display_name": "Arlo | Meeting Assistant Demo",
         "long_description": "Arlo is an intelligent meeting companion that lives inside Zoom. It captures real-time transcripts using RTMS (Realtime Media Streams) without requiring a meeting bot, and provides AI-powered summaries, action items, transcript search, and meeting highlights."
     },
     "oauth_information": {
