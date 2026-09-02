@@ -30,6 +30,7 @@ import OnboardingView from './views/OnboardingView';
 import OAuthErrorView from './views/OAuthErrorView';
 import NotFoundView from './views/NotFoundView';
 import VerticalSelectorView from './views/VerticalSelectorView';
+import IconShowcaseView from './views/IconShowcaseView';
 
 
 /**
@@ -199,6 +200,9 @@ function App() {
                       <Route path="/guest/:id" element={<GuestInMeetingView />} />
                       {/* Guest full meeting view - same features as authenticated, but read-only */}
                       <Route path="/guest-meeting/:id" element={<InMeetingView isGuestMode={true} />} />
+
+                      {/* Dev/design routes */}
+                      <Route path="/icon-showcase" element={<IconShowcaseView />} />
 
                       {/* Authenticated routes (inside AppShell, requires vertical selection) */}
                       <Route element={

@@ -1,0 +1,59 @@
+.icon-showcase {
+  padding: 32px 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.icon-showcase-header {
+  margin-bottom: 32px;
+}
+
+.icon-showcase-header h1 {
+  margin-bottom: 8px;
+}
+
+.icon-showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.icon-variant-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+}
+
+.icon-variant-card h3 {
+  margin-bottom: 4px;
+}
+
+.icon-variant-card > p {
+  margin-bottom: 16px;
+}
+
+.icon-sizes-row {
+  display: flex;
+  gap: 16px;
+}
+
+.icon-bg {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 20px;
+  border-radius: var(--radius);
+}
+
+.icon-bg-light {
+  background: #fafafa;
+  border: 1px solid #e5e5e5;
+}
+
+.icon-bg-dark {
+  background: #0a0a0a;
+  border: 1px solid #333;
+}
