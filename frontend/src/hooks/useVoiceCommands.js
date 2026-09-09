@@ -94,16 +94,15 @@ export function useVoiceCommands({
     setIsProcessing(true);
     setLastCommand(command);
 
-    // Add user command to responses (show full phrase including "Hey Arlo")
-    const displayText = command.fullText || command.rawText;
+    // Add user command to responses (just the command, not "Hey Arlo")
     setResponses(prev => [...prev, {
       type: 'user',
-      text: displayText,
+      text: command.rawText,
       timestamp: Date.now(),
     }]);
 
     // Show acknowledgment toast
-    addToast(`🎤 Heard: "${displayText}"`, 'info', 3000);
+    addToast(`🎤 Heard: "${command.rawText}"`, 'info', 3000);
 
     try {
       const callbacks = callbacksRef.current;
