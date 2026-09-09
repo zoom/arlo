@@ -187,6 +187,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   });
   const transcriptRef = useRef(null);
   const inviteDropdownRef = useRef(null);
+  // eslint-disable-next-line no-unused-vars
   const meetingSummaryRef = useRef(null);
   // eslint-disable-next-line no-unused-vars
   const decisionsLogRef = useRef(null);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { ScrollArea } from '@base-ui/react';
-import { Sparkles, ChevronDown, ArrowDown, X, Lock, LogIn, LogOut, Mic, MicOff, Pause, Play, Eye, Clock, UserCheck } from 'lucide-react';
+import { Sparkles, ChevronDown, ArrowDown, X, Lock, LogIn, LogOut, Mic, MicOff, Pause, Play, Eye, Clock } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import OwlIcon from '../components/OwlIcon';
