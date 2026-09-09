@@ -363,6 +363,12 @@ export default function InMeetingView({ isGuestMode = false }) {
       .map(seg => `${seg.speakerName || 'Unknown'}: ${seg.text}`)
       .join('\n');
 
+    console.log('[VoiceSummarize] Transcript length:', transcriptText.length, 'chars, segments:', segments.length);
+
+    if (transcriptText.trim().length < 50) {
+      return 'Need more conversation to summarize. Keep talking and try again in a moment.';
+    }
+
     try {
       const response = await fetch('/api/ai/summary-live', {
         method: 'POST',
@@ -372,7 +378,11 @@ export default function InMeetingView({ isGuestMode = false }) {
       });
 
       if (!response.ok) {
-        throw new Error('Summary generation failed');
+        const errorData = await response.json().catch(() => ({}));
+        if (response.status === 400 && errorData.error?.includes('min 50 chars')) {
+          return 'Need more conversation to summarize. Keep talking and try again in a moment.';
+        }
+        throw new Error(errorData.error || 'Summary generation failed');
       }
 
       const data = await response.json();
