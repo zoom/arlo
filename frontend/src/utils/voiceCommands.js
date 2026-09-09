@@ -83,10 +83,14 @@ export function detectTrigger(text) {
     const index = lowerText.indexOf(phrase);
     if (index !== -1) {
       // Get text after trigger and strip leading punctuation/whitespace
-      const textAfterTrigger = text
+      let textAfterTrigger = text
         .substring(index + phrase.length)
         .replace(/^[\s,.:;!?]+/, '') // Remove leading punctuation
         .trim();
+      // Capitalize first letter
+      if (textAfterTrigger.length > 0) {
+        textAfterTrigger = textAfterTrigger.charAt(0).toUpperCase() + textAfterTrigger.slice(1);
+      }
       return {
         triggerIndex: index,
         triggerPhrase: phrase.trim(),
