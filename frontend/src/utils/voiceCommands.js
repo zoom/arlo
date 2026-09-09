@@ -27,7 +27,7 @@ const TRIGGER_PHRASES = [
 // Command definitions with aliases and patterns
 export const COMMANDS = {
   summarize: {
-    aliases: ['summarize', 'summary', 'sum up', 'recap', 'give me a summary', 'what happened'],
+    aliases: ['summarize', 'summary', 'sum up', 'recap', 'give me a summary', 'what happened', 'highlights', 'meeting highlights', 'give me the highlights', 'key points', 'key takeaways'],
     description: 'Generate a meeting summary',
     action: 'SUMMARIZE',
   },
