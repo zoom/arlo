@@ -101,6 +101,7 @@ services:
     environment:
       DATABASE_URL: mysql://arlo:arlo@mysql:3306/meeting_assistant
       BACKEND_URL: http://backend:3000
+      PORT: 3002
       # RTMS maps ZOOM_* → ZM_RTMS_* at startup (see rtms/src/index.js); no duplicate vars needed here.
       # ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, and ZOOM_WEBHOOK_TOKEN come from env_file (.env)
       # RTMS SDK v1.0 logging (replaces configureLogger())
