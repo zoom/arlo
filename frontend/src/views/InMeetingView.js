@@ -354,13 +354,36 @@ export default function InMeetingView({ isGuestMode = false }) {
 
   // Voice command callbacks
   const handleVoiceSummarize = useCallback(async () => {
-    // Switch to assist tab and trigger summary refresh
-    setActiveTab('assist');
-    if (meetingSummaryRef.current?.refresh) {
-      meetingSummaryRef.current.refresh();
+    // Build transcript text from segments
+    if (segments.length === 0) {
+      return 'No transcript available yet. Start speaking to generate content.';
     }
-    addToast('Summary generated! Check Arlo Assist tab.', 'success', 3000);
-  }, [addToast]);
+
+    const transcriptText = segments
+      .map(seg => `${seg.speakerName || 'Unknown'}: ${seg.text}`)
+      .join('\n');
+
+    try {
+      const response = await fetch('/api/ai/summary-live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ transcript: transcriptText }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Summary generation failed');
+      }
+
+      const data = await response.json();
+      // Also switch to assist tab
+      setActiveTab('assist');
+      return data.summary || 'Summary generated! Check Arlo Assist tab for details.';
+    } catch (error) {
+      console.error('Voice summary error:', error);
+      return 'Failed to generate summary. Please try again.';
+    }
+  }, [segments]);
 
   const handleVoiceActionItems = useCallback(async () => {
     setActiveTab('assist');
@@ -458,11 +481,39 @@ export default function InMeetingView({ isGuestMode = false }) {
   }, [segments, addToast]);
 
   const handleVoiceAsk = useCallback(async (question) => {
-    if (!question) return;
-    // For now, show that we received the question
-    // In the future, this could trigger the AI chat
-    addToast(`Question received: "${question}" - AI chat coming soon!`, 'info', 4000);
-  }, [addToast]);
+    if (!question) return 'Please ask a question.';
+
+    // Build transcript context
+    const transcriptText = segments.length > 0
+      ? segments.map(seg => `${seg.speakerName || 'Unknown'}: ${seg.text}`).join('\n')
+      : '';
+
+    if (!transcriptText) {
+      return 'No transcript available yet. Start speaking to provide context for your question.';
+    }
+
+    try {
+      const response = await fetch('/api/ai/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          transcript: transcriptText,
+          prompt: question,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('AI request failed');
+      }
+
+      const data = await response.json();
+      return data.suggestion || data.response || 'I couldn\'t find a specific answer. Try rephrasing your question.';
+    } catch (error) {
+      console.error('Voice ask error:', error);
+      return 'Failed to process question. Please try again.';
+    }
+  }, [segments]);
 
   // Initialize voice commands hook
   // eslint-disable-next-line no-unused-vars
