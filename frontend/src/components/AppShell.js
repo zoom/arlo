@@ -71,12 +71,19 @@ export default function AppShell() {
   }, [searchQuery]);
 
   const handleBack = useCallback(() => {
+    // From meeting view, go back to vertical selector
+    if (location.pathname === '/meeting' || location.pathname.startsWith('/meeting/')) {
+      clearVertical();
+      navigate('/select-vertical');
+      return;
+    }
+    // Otherwise use browser history
     if (window.history.length > 1) {
       navigate(-1);
     } else {
       navigate('/home');
     }
-  }, [navigate]);
+  }, [navigate, location.pathname, clearVertical]);
 
   const handleResultClick = (result) => {
     setSearchOpen(false);

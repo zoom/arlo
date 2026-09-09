@@ -116,9 +116,12 @@ if (!encryptionKeyRaw) {
 const encryptionKey = resolveEncryptionKey(encryptionKeyRaw);
 
 const defaultOpenRouterModels = Object.freeze([
-  'meta-llama/llama-3.2-3b-instruct:free',
-  'google/gemma-2-9b-it:free',
-  'qwen/qwen-2-7b-instruct:free',
+  'nex-agi/nex-n2.5-mini:free',
+  'nvidia/nemotron-3.5-lightning:free',
+  'google/gemma-4-31b-it:free',
+  'thinkingmachines/inkling:free',
+  'poolside/laguna-s-2.1:free',
+  'liquid/lfm-2.5-2.6b:free',
 ]);
 
 function parseCsv(value) {
