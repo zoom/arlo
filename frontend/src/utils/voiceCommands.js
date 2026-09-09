@@ -82,7 +82,11 @@ export function detectTrigger(text) {
   for (const phrase of TRIGGER_PHRASES) {
     const index = lowerText.indexOf(phrase);
     if (index !== -1) {
-      const textAfterTrigger = text.substring(index + phrase.length).trim();
+      // Get text after trigger and strip leading punctuation/whitespace
+      const textAfterTrigger = text
+        .substring(index + phrase.length)
+        .replace(/^[\s,.:;!?]+/, '') // Remove leading punctuation
+        .trim();
       return {
         triggerIndex: index,
         triggerPhrase: phrase.trim(),
