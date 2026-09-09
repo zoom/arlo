@@ -117,7 +117,7 @@ export function parseCommand(text) {
     .replace(/^(please|can you|could you|would you|i need you to|i want you to)\s*/i, '')
     .trim();
 
-  // Try to match each command
+  // Try to match each command by exact alias
   for (const [commandKey, commandDef] of Object.entries(COMMANDS)) {
     for (const alias of commandDef.aliases) {
       if (cleanedText.startsWith(alias)) {
@@ -133,6 +133,27 @@ export function parseCommand(text) {
           rawText: text,
         };
       }
+    }
+  }
+
+  // Keyword-based fallback matching for common commands
+  const keywordMatches = [
+    { keywords: ['summary', 'summarize', 'recap', 'highlights', 'key points', 'takeaways'], command: 'summarize' },
+    { keywords: ['action items', 'action item', 'tasks', 'todos', 'to-dos'], command: 'actionItems' },
+    { keywords: ['decisions', 'decided', 'decision'], command: 'decisions' },
+    { keywords: ['questions', 'open questions'], command: 'questions' },
+  ];
+
+  for (const { keywords, command } of keywordMatches) {
+    if (keywords.some(kw => cleanedText.includes(kw))) {
+      const commandDef = COMMANDS[command];
+      return {
+        command,
+        action: commandDef.action,
+        description: commandDef.description,
+        parameter: null,
+        rawText: text,
+      };
     }
   }
 
