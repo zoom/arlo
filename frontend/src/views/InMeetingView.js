@@ -378,6 +378,23 @@ export default function InMeetingView({ isGuestMode = false }) {
       const data = await response.json();
       // Also switch to assist tab
       setActiveTab('assist');
+
+      // Format the summary object into readable text
+      if (data.summary && typeof data.summary === 'object') {
+        const { overview, keyPoints, decisions, nextSteps } = data.summary;
+        let formatted = overview || '';
+
+        if (keyPoints && keyPoints.length > 0) {
+          formatted += '\n\n**Key Points:**\n' + keyPoints.map(p => `• ${p}`).join('\n');
+        }
+        if (decisions && decisions.length > 0) {
+          formatted += '\n\n**Decisions:**\n' + decisions.map(d => `• ${d}`).join('\n');
+        }
+        if (nextSteps && nextSteps.length > 0) {
+          formatted += '\n\n**Next Steps:**\n' + nextSteps.map(s => `• ${s}`).join('\n');
+        }
+        return formatted || 'Summary generated! Check Arlo Assist tab for details.';
+      }
       return data.summary || 'Summary generated! Check Arlo Assist tab for details.';
     } catch (error) {
       console.error('Voice summary error:', error);
