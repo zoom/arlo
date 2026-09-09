@@ -1,6 +1,6 @@
 const express = require('express');
 const axios = require('axios');
-const prisma = require('../lib/prisma');
+const { userStore, tokenStore } = require('../lib/memoryStore');
 const { generatePKCE, generateState, encryptToken, decryptToken, generateToken } = require('../services/auth');
 const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
@@ -151,40 +151,22 @@ router.get('/callback', async (req, res) => {
     }
 
     // Check if user already exists (for first-install detection)
-    const existingUser = await prisma.user.findUnique({
-      where: { zoomUserId: zoomUser.id },
-    });
-    const isFirstInstall = !existingUser;
+    const isFirstInstall = !userStore.exists(zoomUser.id);
 
-    // Create or update user
-    const user = await prisma.user.upsert({
-      where: { zoomUserId: zoomUser.id },
-      create: {
-        zoomUserId: zoomUser.id,
-        email: zoomUser.email,
-        displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
-        avatarUrl: zoomUser.pic_url,
-      },
-      update: {
-        email: zoomUser.email,
-        displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
-        avatarUrl: zoomUser.pic_url,
-      },
+    // Create or update user (in-memory only - no persistent storage)
+    const user = userStore.upsert(zoomUser.id, {
+      email: zoomUser.email,
+      displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
+      avatarUrl: zoomUser.pic_url,
     });
 
-    // Store encrypted tokens (delete old tokens first)
+    // Store encrypted tokens in memory (cleared on server restart)
     const expiresAt = new Date(Date.now() + expires_in * 1000);
-    await prisma.userToken.deleteMany({
-      where: { userId: user.id },
-    });
-    await prisma.userToken.create({
-      data: {
-        userId: user.id,
-        accessToken: encryptToken(access_token),
-        refreshToken: encryptToken(refresh_token),
-        expiresAt,
-        scopes: scope.split(' '),
-      },
+    tokenStore.store(user.id, {
+      accessToken: encryptToken(access_token),
+      refreshToken: encryptToken(refresh_token),
+      expiresAt,
+      scopes: scope.split(' '),
     });
 
     // Generate session JWT (24 hours)
@@ -337,35 +319,20 @@ router.post('/callback', async (req, res) => {
       };
     }
 
-    // Create or update user
-    const user = await prisma.user.upsert({
-      where: { zoomUserId: zoomUser.id },
-      create: {
-        zoomUserId: zoomUser.id,
-        email: zoomUser.email,
-        displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
-        avatarUrl: zoomUser.pic_url,
-      },
-      update: {
-        email: zoomUser.email,
-        displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
-        avatarUrl: zoomUser.pic_url,
-      },
+    // Create or update user (in-memory only - no persistent storage)
+    const user = userStore.upsert(zoomUser.id, {
+      email: zoomUser.email,
+      displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
+      avatarUrl: zoomUser.pic_url,
     });
 
-    // Store encrypted tokens (delete old tokens first)
+    // Store encrypted tokens in memory (cleared on server restart)
     const expiresAt = new Date(Date.now() + expires_in * 1000);
-    await prisma.userToken.deleteMany({
-      where: { userId: user.id },
-    });
-    await prisma.userToken.create({
-      data: {
-        userId: user.id,
-        accessToken: encryptToken(access_token),
-        refreshToken: encryptToken(refresh_token),
-        expiresAt,
-        scopes: scope.split(' '),
-      },
+    tokenStore.store(user.id, {
+      accessToken: encryptToken(access_token),
+      refreshToken: encryptToken(refresh_token),
+      expiresAt,
+      scopes: scope.split(' '),
     });
 
     // Generate JWT for session (24 hours)
@@ -396,6 +363,8 @@ router.post('/callback', async (req, res) => {
       },
       wsToken, // Still return for WebSocket connections
       expiresAt: expiresAt.toISOString(),
+      // Include demo mode flag so frontend knows data isn't persisted
+      demoMode: config.demoMode,
     });
   } catch (error) {
     console.error('OAuth callback error:', error.response?.data || error.message);
@@ -417,23 +386,23 @@ router.get('/me', async (req, res) => {
       });
     });
 
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: {
-        id: true,
-        zoomUserId: true,
-        email: true,
-        displayName: true,
-        avatarUrl: true,
-        createdAt: true,
-      },
-    });
+    const user = userStore.findById(req.user.id);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json({ user });
+    res.json({
+      user: {
+        id: user.id,
+        zoomUserId: user.zoomUserId,
+        email: user.email,
+        displayName: user.displayName,
+        avatarUrl: user.avatarUrl,
+        createdAt: user.createdAt,
+      },
+      demoMode: config.demoMode,
+    });
   } catch (error) {
     console.error('Get user error:', error);
     if (error.message === 'Unauthorized') {
@@ -459,11 +428,8 @@ router.post('/refresh', async (req, res) => {
 
     const userId = req.user.id;
 
-    // Get user token
-    const userToken = await prisma.userToken.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-    });
+    // Get user token from memory store
+    const userToken = tokenStore.get(userId);
 
     if (!userToken) {
       return res.status(404).json({ error: 'No token found' });
@@ -496,16 +462,13 @@ router.post('/refresh', async (req, res) => {
 
     const { access_token, refresh_token: new_refresh_token, expires_in, scope } = tokenResponse.data;
 
-    // Update token
+    // Update token in memory store
     const expiresAt = new Date(Date.now() + expires_in * 1000);
-    await prisma.userToken.update({
-      where: { id: userToken.id },
-      data: {
-        accessToken: encryptToken(access_token),
-        refreshToken: encryptToken(new_refresh_token),
-        expiresAt,
-        scopes: scope.split(' '),
-      },
+    tokenStore.update(userId, {
+      accessToken: encryptToken(access_token),
+      refreshToken: encryptToken(new_refresh_token),
+      expiresAt,
+      scopes: scope.split(' '),
     });
 
     res.json({
@@ -527,8 +490,21 @@ router.post('/refresh', async (req, res) => {
  */
 router.get('/settings', (req, res) => {
   res.json({
-    meetingPersistenceEnabled: !config.disableMeetingPersistence,
-    demoMode: config.disableMeetingPersistence,
+    // In demo mode, no data is persisted
+    demoMode: config.demoMode,
+    meetingPersistenceEnabled: false, // Always false in demo mode - no data stored
+    // Features available in demo mode
+    features: {
+      liveTranscription: true,      // Works - real-time only
+      realtimeAISuggestions: true,  // Works - in-memory only
+      demoData: true,               // Works - sample data for demos
+      meetingHistory: false,        // Disabled - requires database
+      search: false,                // Disabled - requires database
+      upcomingMeetings: false,      // Disabled - requires database
+      autoOpen: false,              // Disabled - requires database
+      aiChat: false,                // Disabled - requires database
+    },
+    privacyNotice: 'Your meeting data is processed in real-time and never stored. All data exists only in memory during your active session and is automatically cleared when you leave.',
   });
 });
 
@@ -546,10 +522,8 @@ router.post('/logout', async (req, res) => {
       });
     });
 
-    // Delete user tokens from database
-    await prisma.userToken.deleteMany({
-      where: { userId: req.user.id },
-    });
+    // Delete user tokens from memory
+    tokenStore.delete(req.user.id);
 
     // Clear session cookie
     res.clearCookie('sessionToken', {

@@ -1,7 +1,7 @@
 {
   "name": "arlo-meeting-assistant",
-  "version": "0.9.0",
-  "description": "Arlo - Open-source Zoom Apps meeting assistant with RTMS and AI",
+  "version": "1.0.0-demo",
+  "description": "Arlo - Open-source Zoom Apps meeting assistant with RTMS and AI (Demo Mode - No Database)",
   "engines": {
     "node": ">=20"
   },
@@ -23,10 +23,6 @@
     "setup:backend": "cd backend && npm install",
     "setup:frontend": "cd frontend && npm install",
     "setup:rtms": "cd rtms && npm install",
-    "db:migrate": "cd backend && npx prisma migrate dev",
-    "db:reset": "cd backend && npx prisma migrate reset",
-    "db:studio": "cd backend && npx prisma studio",
-    "db:generate": "cd backend && npx prisma generate",
     "test:smoke": "node tests/smoke.test.js",
     "test": "npm run test:smoke"
   },

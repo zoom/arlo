@@ -4,6 +4,7 @@ import Card from '../../components/ui/Card';
 import { getPreferredAiModel } from '../../utils/aiModel';
 import Button from '../../components/ui/Button';
 import Textarea from '../../components/ui/Textarea';
+import PromptInfo from '../../components/PromptInfo';
 import { useFeatureLayout } from '../../hooks/useFeatureLayout';
 import './SOAPNotesPanel.css';
 
@@ -345,6 +346,7 @@ export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoDa
         <div className="soap-header-left">
           <FileText size={18} className="soap-header-icon" />
           <h3 className="text-serif font-medium">SOAP Notes</h3>
+          <PromptInfo promptId="soapNotes" className="prompt-info-badge" />
           {isLive && <span className="feature-live-badge">Live</span>}
         </div>
 

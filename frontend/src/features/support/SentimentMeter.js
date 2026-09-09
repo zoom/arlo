@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Activity, TrendingUp, TrendingDown, Minus, Sparkles } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import { getPreferredAiModel } from '../../utils/aiModel';
+import PromptInfo from '../../components/PromptInfo';
 import './SentimentMeter.css';
 
 /**
@@ -168,6 +169,7 @@ export default function SentimentMeter({ segments, showDemoData = true }) {
         <div className="sentiment-title">
           <Activity size={18} className="sentiment-icon" />
           <h3 className="text-serif font-medium">Customer Sentiment</h3>
+          <PromptInfo promptId="sentiment" className="prompt-info-badge" />
           {isAnalyzing ? (
             <span className="sentiment-analyzing-badge">
               <Sparkles size={10} />
