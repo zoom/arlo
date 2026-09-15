@@ -114,6 +114,9 @@ if (!encryptionKeyRaw) {
 }
 
 const encryptionKey = resolveEncryptionKey(encryptionKeyRaw);
+const legacyEncryptionKey = resolveEncryptionKey(
+  process.env.REDIS_ENCRYPTION_KEY || encryptionKeyRaw
+);
 
 const defaultOpenRouterModels = Object.freeze([
   'nex-agi/nex-n2.5-mini:free',
@@ -180,6 +183,11 @@ if (encryptionKey.length === 32) {
   process.exit(1);
 }
 
+if (legacyEncryptionKey.length !== 32 && legacyEncryptionKey.length !== 64) {
+  console.error('❌ REDIS_ENCRYPTION_KEY must be 32 or 64 hexadecimal characters');
+  process.exit(1);
+}
+
 // =============================================================================
 // CONFIGURATION EXPORT
 // =============================================================================
@@ -205,6 +213,7 @@ module.exports = {
   // Security
   sessionSecret: process.env.SESSION_SECRET,
   encryptionKey: encryptionKey,
+  legacyEncryptionKey: legacyEncryptionKey,
 
   // Redis
   redisUrl: process.env.REDIS_URL || null,

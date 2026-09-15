@@ -14,5 +14,5 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
-# Schema changes are applied as a separate deployment step in production.
+# Start the database-free production server directly.
 CMD ["node", "src/server.js"]

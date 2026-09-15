@@ -65,15 +65,14 @@ The EC2 instance needs:
 | Rotate one secret | Complete Steps 1-2, then run only the relevant command in Step 5. |
 
 This guide does not provision the VPC, EC2 instance, ALB, CloudFront
-distribution, or Aurora cluster. Provision those resources first. The network
+distribution. Provision those resources first. The network
 must provide:
 
 - Outbound HTTPS access to AWS, Zoom, and OpenRouter.
-- Network access to the Aurora MySQL writer endpoint on port 3306.
 - Inbound ports 3000-3001 only from the ALB security group. Do not open SSH.
 
-The database schema must already exist. Application startup intentionally does
-not run `prisma db push`.
+The current `main` application is database-free demo mode. Data exists only in
+process memory and is lost when the backend restarts.
 
 ## 1. Configure AWS credentials
 
@@ -158,8 +157,7 @@ cp deploy/ec2/.env.deploy.example .env.deploy
 chmod 600 .env.deploy
 ```
 
-Edit `.env.deploy`. Use the Aurora cluster endpoint and a least-privilege
-database account, not the Aurora master account. Generate independent secrets:
+Edit `.env.deploy` and generate independent secrets:
 
 ```bash
 openssl rand -hex 32
@@ -183,8 +181,7 @@ set +a
 **Expected result:** no output from the placeholder check. Do not print the
 loaded variables.
 
-Use single quotes around values in `.env.deploy`. Percent-encode reserved
-characters in the database password before putting it in `DATABASE_URL`.
+Use single quotes around values in `.env.deploy`.
 
 ## 4. Create or verify the KMS key
 
@@ -218,7 +215,7 @@ not be used by the application containers.
 
 **Configure from:** operator workstation and AWS IAM/KMS administration
 
-KMS does not store the database URL, Zoom secrets, or OpenRouter key. Parameter
+KMS does not store the Zoom secrets or OpenRouter key. Parameter
 Store holds their encrypted values. KMS holds a non-exportable encryption key
 and performs cryptographic operations after IAM and key-policy authorization.
 No user, container, or administrator can download the plaintext KMS key.
@@ -302,7 +299,6 @@ does not request decrypted values.
 
 Confirm these required names exist under the selected prefix:
 
-- `database-url`
 - `zoom-client-id`
 - `zoom-client-secret`
 - `zoom-webhook-secret-token`
@@ -343,7 +339,6 @@ put_secure_parameter() {
   printf 'Updated %s/%s\n' "$PARAMETER_PREFIX" "$name"
 }
 
-put_secure_parameter database-url "$DATABASE_URL"
 put_secure_parameter zoom-client-id "$ZOOM_CLIENT_ID"
 put_secure_parameter zoom-client-secret "$ZOOM_CLIENT_SECRET"
 put_secure_parameter zoom-webhook-secret-token "$ZOOM_WEBHOOK_TOKEN"
@@ -361,7 +356,7 @@ values in the output.
 Clear the loaded values when the upload finishes:
 
 ```bash
-unset DATABASE_URL ZOOM_CLIENT_ID ZOOM_CLIENT_SECRET ZOOM_WEBHOOK_TOKEN
+unset ZOOM_CLIENT_ID ZOOM_CLIENT_SECRET ZOOM_WEBHOOK_TOKEN
 unset SESSION_SECRET TOKEN_ENCRYPTION_KEY OPENROUTER_API_KEY
 ```
 
@@ -428,13 +423,6 @@ done
 **Expected result:** three image digest tables, all using the same immutable
 `IMAGE_TAG`.
 
-For a completely empty Aurora database, initialize the schema as a separate,
-reviewed deployment operation before starting Arlo. The repository does not
-contain a production migration history, so coordinate this step with the DBA
-and run `npx prisma db push --skip-generate` from the newly built backend image.
-Do not run it automatically on every restart. Skip this operation when using an
-existing Arlo database.
-
 ## 8. Install or update the EC2 service through SSM
 
 **Run on:** operator workstation
@@ -453,9 +441,9 @@ RTMS_IMAGE=${ECR_REGISTRY}/arlo-rtms:${IMAGE_TAG}
 AWS_REGION=${AWS_REGION}
 PARAMETER_PREFIX=${PARAMETER_PREFIX}
 PUBLIC_URL=${PUBLIC_URL}
-OPENROUTER_MODELS=z-ai/glm-5.2:free,google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
-DEFAULT_MODEL=z-ai/glm-5.2:free
-FALLBACK_MODEL=google/gemma-4-31b-it:free
+OPENROUTER_MODELS=nex-agi/nex-n2.5-mini:free,nvidia/nemotron-3.5-lightning:free,google/gemma-4-31b-it:free,thinkingmachines/inkling:free,poolside/laguna-s-2.1:free,liquid/lfm-2.5-2.6b:free
+DEFAULT_MODEL=nex-agi/nex-n2.5-mini:free
+FALLBACK_MODEL=nvidia/nemotron-3.5-lightning:free
 EOF
 chmod 600 /tmp/arlo-images.env
 ```
@@ -511,7 +499,7 @@ aws ssm get-command-invocation \
 
 The same procedure performs an update. It writes immutable image tags, backs
 up the previous image environment, pulls images in `start.sh`, and restarts the
-Compose stack. It does not alter Aurora data or run schema changes.
+Compose stack. It does not modify application secrets.
 
 ## 9. Verify the deployment
 

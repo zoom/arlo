@@ -25,7 +25,6 @@ read_optional_parameter() {
 }
 
 # Keep decrypted values in this process environment; do not write a plaintext env file.
-export DATABASE_URL="$(read_parameter "${PARAMETER_PREFIX}/database-url")"
 export ZOOM_CLIENT_ID="$(read_parameter "${PARAMETER_PREFIX}/zoom-client-id")"
 export ZOOM_CLIENT_SECRET="$(read_parameter "${PARAMETER_PREFIX}/zoom-client-secret")"
 export ZOOM_WEBHOOK_TOKEN="$(read_parameter "${PARAMETER_PREFIX}/zoom-webhook-secret-token")"
@@ -38,9 +37,9 @@ export TOKEN_ENCRYPTION_KEY
 export OPENROUTER_API_KEY="$(read_optional_parameter "${PARAMETER_PREFIX}/openrouter-api-key")"
 
 export PUBLIC_URL="${PUBLIC_URL:?PUBLIC_URL is required}"
-export OPENROUTER_MODELS="${OPENROUTER_MODELS:-z-ai/glm-5.2:free,google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free}"
-export DEFAULT_MODEL="${DEFAULT_MODEL:-z-ai/glm-5.2:free}"
-export FALLBACK_MODEL="${FALLBACK_MODEL:-google/gemma-4-31b-it:free}"
+export OPENROUTER_MODELS="${OPENROUTER_MODELS:-nex-agi/nex-n2.5-mini:free,nvidia/nemotron-3.5-lightning:free,google/gemma-4-31b-it:free,thinkingmachines/inkling:free,poolside/laguna-s-2.1:free,liquid/lfm-2.5-2.6b:free}"
+export DEFAULT_MODEL="${DEFAULT_MODEL:-nex-agi/nex-n2.5-mini:free}"
+export FALLBACK_MODEL="${FALLBACK_MODEL:-nvidia/nemotron-3.5-lightning:free}"
 
 export FRONTEND_IMAGE="${FRONTEND_IMAGE:?FRONTEND_IMAGE is required}"
 export BACKEND_IMAGE="${BACKEND_IMAGE:?BACKEND_IMAGE is required}"

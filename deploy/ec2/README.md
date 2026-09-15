@@ -5,7 +5,8 @@ For complete first-deployment, update, verification, and rollback commands, see
 
 This deployment runs the frontend, backend, and RTMS services on one x86 EC2
 instance. CloudFront and the ALB remain the public application entrypoint. The
-Aurora MySQL database is external to the Compose stack.
+current `main` application runs in demo mode and does not use a database or
+persist users, OAuth tokens, meetings, transcripts, or generated artifacts.
 
 The EC2 instance uses an Elastic IP for outbound Zoom, OpenRouter, SSM, and ECR
 access without a NAT Gateway. Its security group must allow ports 3000-3001
@@ -17,7 +18,6 @@ continues to reach the instance over its private VPC address.
 All sensitive parameters are `SecureString` values encrypted with
 `alias/arlo-prod`:
 
-- `/arlo/prod/database-url`
 - `/arlo/prod/zoom-client-id`
 - `/arlo/prod/zoom-client-secret`
 - `/arlo/prod/zoom-webhook-secret-token`
@@ -28,10 +28,6 @@ All sensitive parameters are `SecureString` values encrypted with
 Existing deployments may continue using `/arlo/prod/redis-encryption-key`; the
 startup script checks that legacy parameter when `token-encryption-key` is not
 present. The OpenRouter parameter is optional.
-
-The database parameter must contain the existing least-privilege application
-connection string, not a database master credential. The service refuses to
-start when that parameter is absent.
 
 ## Host files
 
@@ -52,12 +48,12 @@ RTMS_IMAGE=ACCOUNT.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms:TAG
 AWS_REGION=us-east-1
 PARAMETER_PREFIX=/arlo/prod
 PUBLIC_URL=https://your-public-domain.example
-OPENROUTER_MODELS=z-ai/glm-5.2:free,google/gemma-4-31b-it:free,nvidia/nemotron-3-ultra-550b-a55b:free
-DEFAULT_MODEL=z-ai/glm-5.2:free
-FALLBACK_MODEL=google/gemma-4-31b-it:free
+OPENROUTER_MODELS=nex-agi/nex-n2.5-mini:free,nvidia/nemotron-3.5-lightning:free,google/gemma-4-31b-it:free,thinkingmachines/inkling:free,poolside/laguna-s-2.1:free,liquid/lfm-2.5-2.6b:free
+DEFAULT_MODEL=nex-agi/nex-n2.5-mini:free
+FALLBACK_MODEL=nvidia/nemotron-3.5-lightning:free
 ```
 
 Then run `systemctl daemon-reload` and `systemctl enable --now arlo`.
 
-Do not run `prisma db push` during application startup. This deployment uses
-the schema and data already present in the Aurora MySQL database.
+Restarting the backend clears its in-memory users and OAuth tokens, so users may
+need to authorize the Zoom App again after a deployment or host restart.

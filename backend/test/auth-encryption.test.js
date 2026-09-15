@@ -22,6 +22,15 @@ function encryptLegacy(token) {
   return `${iv.toString('hex')}:${ciphertext}`;
 }
 
+function encryptUnversionedGcm(token) {
+  const key = Buffer.from(process.env.REDIS_ENCRYPTION_KEY, 'hex');
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-128-gcm', key, iv);
+  let ciphertext = cipher.update(token, 'utf8', 'hex');
+  ciphertext += cipher.final('hex');
+  return `${iv.toString('hex')}:${cipher.getAuthTag().toString('hex')}:${ciphertext}`;
+}
+
 test('writes versioned AES-256-GCM tokens and reads them back', () => {
   const encrypted = encryptToken('access-token-value');
 
@@ -33,6 +42,19 @@ test('decrypts legacy CBC tokens with the separate legacy key', () => {
   const encrypted = encryptLegacy('legacy-refresh-token');
 
   assert.equal(decryptToken(encrypted), 'legacy-refresh-token');
+});
+
+test('decrypts unversioned AES-128-GCM tokens from existing deployments', () => {
+  const config = require('../src/config');
+  const currentKey = config.encryptionKey;
+  config.encryptionKey = process.env.REDIS_ENCRYPTION_KEY;
+
+  try {
+    const encrypted = encryptUnversionedGcm('legacy-gcm-token');
+    assert.equal(decryptToken(encrypted), 'legacy-gcm-token');
+  } finally {
+    config.encryptionKey = currentKey;
+  }
 });
 
 test('supports deriving a GCM key from a deployed 16-byte legacy secret', () => {
