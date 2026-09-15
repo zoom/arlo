@@ -1,7 +1,8 @@
 const WebSocket = require('ws');
 const url = require('url');
 const { verifyToken } = require('./auth');
-const prisma = require('../lib/prisma');
+
+// Demo mode: No database - meeting data is not persisted
 
 // Store active connections
 const connections = new Map(); // meetingId -> Set of WebSocket connections
@@ -183,54 +184,8 @@ async function handleWebSocketMessage(ws, data) {
         // Broadcast updated presence to all viewers in this meeting
         broadcastPresence(meetingId);
 
-        // Check current meeting status and inform the subscriber
-        console.log(`📡 WS subscribe: looking up meeting by zoomMeetingId="${meetingId}"`);
-        prisma.meeting.findUnique({
-          where: { zoomMeetingId: meetingId },
-        }).then(meeting => {
-          if (!meeting && ws.userId) {
-            // Fallback: SDK UUID may differ from RTMS UUID — find user's ongoing meeting
-            return prisma.meeting.findFirst({
-              where: { ownerId: ws.userId, status: 'ongoing' },
-              orderBy: { startTime: 'desc' },
-            });
-          }
-          return meeting;
-        }).then(meeting => {
-          if (!meeting) {
-            console.log(`📡 WS subscribe: no meeting found for zoomMeetingId="${meetingId}"`);
-            return;
-          }
-
-          // If found via fallback (different UUID), cross-register under RTMS UUID
-          // so transcript broadcasts (keyed by RTMS UUID) reach this client
-          if (meeting.zoomMeetingId !== meetingId) {
-            const rtmsUuid = meeting.zoomMeetingId;
-            console.log(`📡 WS UUID fallback: SDK "${meetingId}" → RTMS "${rtmsUuid}"`);
-            if (!connections.has(rtmsUuid)) {
-              connections.set(rtmsUuid, new Set());
-            }
-            connections.get(rtmsUuid).add(ws);
-            // Track the RTMS UUID on the socket for cleanup on disconnect
-            ws.rtmsMeetingId = rtmsUuid;
-          }
-
-          console.log(`📡 WS subscribe: found meeting id=${meeting.id}, status="${meeting.status}" for zoomMeetingId="${meetingId}"`);
-          if (ws.readyState !== WebSocket.OPEN) return;
-          if (meeting.status === 'ongoing') {
-            ws.send(JSON.stringify({
-              type: 'meeting.status',
-              data: { meetingId, status: 'rtms_started', timestamp: new Date().toISOString() },
-            }));
-          } else if (meeting.status === 'completed') {
-            ws.send(JSON.stringify({
-              type: 'meeting.status',
-              data: { meetingId, status: 'rtms_stopped', timestamp: new Date().toISOString() },
-            }));
-          }
-        }).catch(err => {
-          console.warn(`⚠️ WS subscribe: failed to look up zoomMeetingId="${meetingId}":`, err.message);
-        });
+        // Demo mode: No database lookup - meeting status comes from RTMS events
+        console.log(`📡 WS subscribe: demo mode - waiting for RTMS events for meetingId="${meetingId}"`);
       }
       break;
 

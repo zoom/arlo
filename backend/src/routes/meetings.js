@@ -1,674 +1,169 @@
+/**
+ * Meetings Routes - Demo Mode
+ *
+ * SECURITY: In demo mode, meeting data is never persisted.
+ * These routes return demo-mode responses indicating features
+ * are available in the full version.
+ */
 const express = require('express');
-const prisma = require('../lib/prisma');
 const { requireAuth, optionalAuth, devAuthBypass } = require('../middleware/auth');
+const config = require('../config');
 
 const router = express.Router();
 
-// Apply auth middleware to all routes
-// IMPORTANT: devAuthBypass must run BEFORE requireAuth so it can set req.user in dev mode
-router.use(devAuthBypass); // Allow dev mode query param bypass
-// NOTE: Not using requireAuth on GET routes to allow anonymous access to meetings
+router.use(devAuthBypass);
 
-/**
- * Find a meeting by Zoom meeting UUID, with fallback for SDK/RTMS UUID mismatch.
- * The Zoom SDK provides a different UUID than the RTMS webhook — when the exact
- * match fails, falls back to the user's most recent ongoing meeting.
- */
-async function findMeetingByZoomId(zoomMeetingId, userId, findOptions = {}) {
-  let meeting = await prisma.meeting.findUnique({
-    where: { zoomMeetingId },
-    ...findOptions,
+// Demo mode response helper
+function demoModeResponse(res, feature) {
+  return res.json({
+    demoMode: true,
+    feature,
+    message: `${feature} is not available in demo mode. In the full version, this feature allows you to access your meeting history and transcripts.`,
+    available: false,
   });
-  if (meeting) return meeting;
-
-  // Fallback: SDK UUID may differ from RTMS UUID
-  if (userId) {
-    meeting = await prisma.meeting.findFirst({
-      where: { ownerId: userId, status: 'ongoing' },
-      orderBy: { startTime: 'desc' },
-      ...findOptions,
-    });
-    if (meeting) {
-      console.log(`📡 UUID fallback: SDK "${zoomMeetingId}" → RTMS "${meeting.zoomMeetingId}"`);
-    }
-  }
-  return meeting;
 }
 
 /**
  * GET /api/meetings
- * List meetings (all meetings if no auth, user's meetings if authenticated)
+ * List meetings - Returns empty in demo mode
  */
 router.get('/', optionalAuth, async (req, res) => {
-  try {
-    const { from, to, limit = 50, cursor } = req.query;
-
-    // Build where clause — show only the authenticated user's meetings
-    const where = {};
-    if (req.user) {
-      where.ownerId = req.user.id;
-    } else {
-      // Unauthenticated users see nothing
-      return res.json({ meetings: [], total: 0, cursor: null });
-    }
-
-    if (from) where.startTime = { ...where.startTime, gte: new Date(from) };
-    if (to) where.startTime = { ...where.startTime, lte: new Date(to) };
-
-    const meetings = await prisma.meeting.findMany({
-      where,
-      include: {
-        speakers: {
-          select: { id: true, displayName: true, label: true },
-        },
-        _count: {
-          select: {
-            segments: true,
-            highlights: true,
-          },
-        },
-      },
-      orderBy: { startTime: 'desc' },
-      take: parseInt(limit),
-      ...(cursor && { skip: 1, cursor: { id: cursor } }),
-    });
-
-    const total = await prisma.meeting.count({ where });
-
-    res.json({
-      meetings,
-      total,
-      cursor: meetings.length > 0 ? meetings[meetings.length - 1].id : null,
-    });
-  } catch (error) {
-    console.error('Get meetings error:', error);
-    res.status(500).json({ error: 'Failed to fetch meetings' });
-  }
+  // In demo mode, return empty list with explanation
+  return res.json({
+    meetings: [],
+    total: 0,
+    cursor: null,
+    demoMode: true,
+    message: 'Meeting history is not available in demo mode. Your meeting data is never stored - all transcription happens in real-time only.',
+  });
 });
 
 /**
  * PATCH /api/meetings/by-zoom-id/:zoomMeetingId/topic
- * Update meeting title from Zoom SDK meeting topic.
- * Only overwrites generic "Meeting M/D/YYYY" titles.
+ * Update meeting title - Accepts but doesn't persist in demo mode
  */
 router.patch('/by-zoom-id/:zoomMeetingId/topic', optionalAuth, async (req, res) => {
-  try {
-    const { zoomMeetingId } = req.params;
-    const { title, meetingNumber, force } = req.body;
-
-    if (!title || title.trim().length === 0) {
-      return res.status(400).json({ error: 'Title is required' });
-    }
-
-    // force=true requires authentication (explicit user rename)
-    if (force && !req.user) {
-      return res.status(401).json({ error: 'Authentication required for explicit rename' });
-    }
-
-    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id);
-
-    if (!meeting) {
-      // Explicit renames require a persisted row; auto-sync can wait for RTMS to create one.
-      if (force) {
-        return res.status(404).json({ error: 'Meeting not found' });
-      }
-      // RTMS may auto-start before the DB record exists; 202 lets the client retry.
-      return res.status(202).json({
-        updated: false,
-        pending: true,
-        message: 'Meeting is not persisted yet. Retry shortly.',
-      });
-    }
-
-    // Build update data
-    const data = {};
-
-    if (force) {
-      // Explicit user rename — always update
-      data.title = title.trim();
-    } else {
-      // Auto-sync — only update if current title matches the generic date pattern
-      const genericPattern = /^Meeting \d{1,2}\/\d{1,2}\/\d{2,4}$/;
-      if (genericPattern.test(meeting.title)) {
-        data.title = title.trim();
-      }
-    }
-
-    // Store the numeric meeting number if provided and not already set
-    if (meetingNumber && !meeting.zoomMeetingNumber) {
-      data.zoomMeetingNumber = String(meetingNumber);
-    }
-
-    if (Object.keys(data).length === 0) {
-      return res.json({ meeting, updated: false });
-    }
-
-    const updated = await prisma.meeting.update({
-      where: { id: meeting.id },
-      data,
-    });
-
-    console.log(`Updated meeting: title="${meeting.title}" → "${updated.title}", meetingNumber=${updated.zoomMeetingNumber || 'n/a'}`);
-    res.json({ meeting: updated, updated: true });
-  } catch (error) {
-    console.error('Update meeting topic error:', error);
-    res.status(500).json({ error: 'Failed to update meeting topic' });
-  }
+  // Accept the request but explain it won't be persisted
+  return res.json({
+    updated: false,
+    demoMode: true,
+    message: 'Meeting titles are not persisted in demo mode.',
+  });
 });
 
 /**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId
- * Get meeting details by Zoom meeting UUID
- *
- * Security: Authenticated users can only access their own meetings.
- * Guests can access ongoing meetings only (for in-meeting view).
+ * Get meeting details by Zoom ID - Demo mode response
  */
 router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
-  try {
-    const { zoomMeetingId } = req.params;
-
-    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id, {
-      include: {
-        speakers: {
-          select: { id: true, displayName: true, label: true },
-        },
-        highlights: req.user ? true : false, // Guests don't see highlights
-        _count: {
-          select: { segments: true },
-        },
-      },
-    });
-
-    if (!meeting) {
-      // Empty payload with pending=true avoids 404 noise while RTMS bootstraps the record.
-      return res.json({
-        meeting: null,
-        pending: true,
-        message: 'Meeting is not available yet',
-      });
-    }
-
-    // Authenticated users: verify ownership
-    if (req.user && meeting.ownerId !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    // Guests: only allow access to ongoing meetings
-    if (!req.user && meeting.status !== 'ongoing') {
-      return res.status(403).json({ error: 'Guests can only access live meetings' });
-    }
-
-    res.json({ meeting });
-  } catch (error) {
-    console.error('Get meeting by zoom ID error:', error);
-    res.status(500).json({ error: 'Failed to fetch meeting' });
-  }
+  return res.json({
+    meeting: null,
+    demoMode: true,
+    pending: false,
+    message: 'Meeting details are not stored in demo mode. Live transcription works in real-time via WebSocket.',
+  });
 });
 
 /**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId/transcript
- * Get transcript segments by Zoom meeting UUID (for InMeetingView before DB ID is known)
- *
- * Security: Authenticated users can only access their own meetings.
- * Guests can access ongoing meetings only (for in-meeting view).
+ * Get transcript by Zoom ID - Returns empty in demo mode
+ * Note: Live transcripts come via WebSocket, not this endpoint
  */
 router.get('/by-zoom-id/:zoomMeetingId/transcript', optionalAuth, async (req, res) => {
-  try {
-    const { zoomMeetingId } = req.params;
-    const { limit = 500 } = req.query;
-
-    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id);
-
-    if (!meeting) {
-      // Return empty segments instead of 404 so the in-meeting UI can poll until RTMS creates the record.
-      return res.json({
-        segments: [],
-        meetingDbId: null,
-        pending: true,
-      });
-    }
-
-    // Authenticated users: verify ownership
-    if (req.user && meeting.ownerId !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    // Guests: only allow access to ongoing meetings
-    if (!req.user && meeting.status !== 'ongoing') {
-      return res.status(403).json({ error: 'Guests can only access live meetings' });
-    }
-
-    const segments = await prisma.transcriptSegment.findMany({
-      where: { meetingId: meeting.id },
-      include: { speaker: true },
-      orderBy: { seqNo: 'asc' },
-      take: parseInt(limit),
-    });
-
-    const serializedSegments = segments.map(seg => ({
-      speakerId: seg.speaker?.zoomParticipantId || 'unknown',
-      speakerLabel: seg.speaker?.displayName || seg.speaker?.label || 'Speaker',
-      text: seg.text,
-      tStartMs: Number(seg.tStartMs),
-      tEndMs: Number(seg.tEndMs),
-      seqNo: seg.seqNo.toString(),
-    }));
-
-    res.json({ segments: serializedSegments, meetingDbId: meeting.id });
-  } catch (error) {
-    console.error('Get transcript by zoom ID error:', error);
-    res.status(500).json({ error: 'Failed to fetch transcript' });
-  }
+  return res.json({
+    segments: [],
+    meetingDbId: null,
+    demoMode: true,
+    message: 'Transcript history is not stored in demo mode. Live transcripts are streamed via WebSocket during the meeting.',
+  });
 });
 
 /**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId/participant-events
- * Get participant events by Zoom meeting UUID (for InMeetingView before DB ID is known)
- *
- * Security: Authenticated users can only access their own meetings.
- * Guests can access ongoing meetings only (for in-meeting view).
+ * Get participant events - Returns empty in demo mode
  */
 router.get('/by-zoom-id/:zoomMeetingId/participant-events', optionalAuth, async (req, res) => {
-  try {
-    const { zoomMeetingId } = req.params;
-
-    const meeting = await findMeetingByZoomId(zoomMeetingId, req.user?.id);
-
-    if (!meeting) {
-      // Same pending pattern as transcript: timeline is empty until the meeting record exists.
-      return res.json({
-        events: [],
-        pending: true,
-      });
-    }
-
-    // Authenticated users: verify ownership
-    if (req.user && meeting.ownerId !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-
-    // Guests: only allow access to ongoing meetings
-    if (!req.user && meeting.status !== 'ongoing') {
-      return res.status(403).json({ error: 'Guests can only access live meetings' });
-    }
-
-    const events = await prisma.participantEvent.findMany({
-      where: { meetingId: meeting.id },
-      orderBy: { timestamp: 'asc' },
-    });
-
-    const serializedEvents = events.map(e => ({
-      id: e.id,
-      eventType: e.eventType,
-      participantName: e.participantName,
-      participantId: e.participantId,
-      timestamp: Number(e.timestamp),
-    }));
-
-    res.json({ events: serializedEvents });
-  } catch (error) {
-    console.error('Get participant events by zoom ID error:', error);
-    res.status(500).json({ error: 'Failed to fetch participant events' });
-  }
+  return res.json({
+    events: [],
+    demoMode: true,
+    message: 'Participant events are not stored in demo mode.',
+  });
 });
 
 /**
  * GET /api/meetings/:id
- * Get meeting details
+ * Get meeting by ID - Not available in demo mode
  */
 router.get('/:id', optionalAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const where = { id };
-    if (req.user) {
-      where.ownerId = req.user.id;
-    }
-
-    const meeting = await prisma.meeting.findFirst({
-      where,
-      include: {
-        speakers: true,
-        highlights: true,
-        _count: {
-          select: {
-            segments: true,
-          },
-        },
-      },
-    });
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
-
-    res.json({ meeting });
-  } catch (error) {
-    console.error('Get meeting error:', error);
-    res.status(500).json({ error: 'Failed to fetch meeting' });
-  }
+  return demoModeResponse(res, 'Meeting details');
 });
 
 /**
  * GET /api/meetings/:id/transcript
- * Get meeting transcript segments
+ * Get transcript - Not available in demo mode
  */
 router.get('/:id/transcript', optionalAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { from_ms, to_ms, limit = 100, after_seq } = req.query;
-
-    // Verify meeting exists and user owns it
-    const meetingWhere = { id };
-    if (req.user) {
-      meetingWhere.ownerId = req.user.id;
-    }
-
-    const meeting = await prisma.meeting.findFirst({
-      where: meetingWhere,
-    });
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
-
-    const where = {
-      meetingId: id,
-      ...(from_ms && { tStartMs: { gte: parseInt(from_ms) } }),
-      ...(to_ms && { tEndMs: { lte: parseInt(to_ms) } }),
-      ...(after_seq && { seqNo: { gt: BigInt(after_seq) } }),
-    };
-
-    const segments = await prisma.transcriptSegment.findMany({
-      where,
-      include: {
-        speaker: true,
-      },
-      orderBy: { seqNo: 'asc' },
-      take: parseInt(limit),
-    });
-
-    // Convert BigInt to Number for JSON serialization
-    const serializedSegments = segments.map(seg => ({
-      ...seg,
-      seqNo: seg.seqNo.toString(),
-      tStartMs: Number(seg.tStartMs),
-      tEndMs: Number(seg.tEndMs),
-    }));
-
-    res.json({
-      segments: serializedSegments,
-      cursor: segments.length > 0 ? segments[segments.length - 1].seqNo.toString() : null,
-    });
-  } catch (error) {
-    console.error('Get transcript error:', error);
-    res.status(500).json({ error: 'Failed to fetch transcript' });
-  }
+  return res.json({
+    segments: [],
+    cursor: null,
+    demoMode: true,
+    message: 'Transcript history is not available in demo mode.',
+  });
 });
 
 /**
  * GET /api/meetings/:id/participant-events
- * Get participant join/leave events for a meeting
+ * Get participant events - Not available in demo mode
  */
 router.get('/:id/participant-events', optionalAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const where = { id };
-    if (req.user) {
-      where.ownerId = req.user.id;
-    }
-
-    const meeting = await prisma.meeting.findFirst({
-      where,
-    });
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
-
-    const events = await prisma.participantEvent.findMany({
-      where: { meetingId: id },
-      orderBy: { timestamp: 'asc' },
-    });
-
-    const serializedEvents = events.map(e => ({
-      id: e.id,
-      eventType: e.eventType,
-      participantName: e.participantName,
-      participantId: e.participantId,
-      timestamp: Number(e.timestamp),
-    }));
-
-    res.json({ events: serializedEvents });
-  } catch (error) {
-    console.error('Get participant events error:', error);
-    res.status(500).json({ error: 'Failed to fetch participant events' });
-  }
+  return res.json({
+    events: [],
+    demoMode: true,
+    message: 'Participant events are not available in demo mode.',
+  });
 });
 
 /**
  * PATCH /api/meetings/:id
- * Update meeting (rename, etc.)
+ * Update meeting - Not available in demo mode
  */
 router.patch('/:id', requireAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { title } = req.body;
-
-    if (!title || title.trim().length === 0) {
-      return res.status(400).json({ error: 'Title is required' });
-    }
-
-    // Verify ownership — users can only rename their own meetings
-    const meeting = await prisma.meeting.findFirst({
-      where: { id, ownerId: req.user.id },
-    });
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
-
-    const updated = await prisma.meeting.update({
-      where: { id: meeting.id },
-      data: { title: title.trim() },
-    });
-
-    res.json({ meeting: updated });
-  } catch (error) {
-    console.error('Update meeting error:', error);
-    res.status(500).json({ error: 'Failed to update meeting' });
-  }
+  return demoModeResponse(res, 'Meeting updates');
 });
 
 /**
  * GET /api/meetings/:id/vtt
- * Export meeting transcript as WebVTT file
+ * Export VTT - Not available in demo mode
  */
 router.get('/:id/vtt', requireAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Get meeting with segments (ownership check)
-    const meeting = await prisma.meeting.findFirst({
-      where: { id, ownerId: req.user.id },
-      include: {
-        segments: {
-          orderBy: { seqNo: 'asc' },
-          include: { speaker: true },
-        },
-      },
-    });
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
-
-    if (meeting.segments.length === 0) {
-      return res.status(400).json({ error: 'No transcript available' });
-    }
-
-    // Generate WebVTT content
-    let vtt = 'WEBVTT\n\n';
-
-    meeting.segments.forEach((segment, index) => {
-      const startTime = formatVTTTime(Number(segment.tStartMs));
-      const endTime = formatVTTTime(Number(segment.tEndMs) || Number(segment.tStartMs) + 5000);
-      const speaker = segment.speaker?.displayName || segment.speaker?.label || 'Speaker';
-
-      vtt += `${index + 1}\n`;
-      vtt += `${startTime} --> ${endTime}\n`;
-      vtt += `<v ${speaker}>${segment.text}\n\n`;
-    });
-
-    // Set headers for file download
-    const filename = `${meeting.title.replace(/[^a-z0-9]/gi, '_')}_transcript.vtt`;
-    res.setHeader('Content-Type', 'text/vtt');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(vtt);
-  } catch (error) {
-    console.error('VTT export error:', error);
-    res.status(500).json({ error: 'Failed to export transcript' });
-  }
+  return res.status(400).json({
+    error: 'VTT export is not available in demo mode',
+    demoMode: true,
+    message: 'Transcript exports require meeting history, which is not stored in demo mode.',
+  });
 });
 
 /**
- * Helper: Format milliseconds to VTT timestamp (HH:MM:SS.mmm)
- */
-function formatVTTTime(ms) {
-  const hours = Math.floor(ms / 3600000);
-  const minutes = Math.floor((ms % 3600000) / 60000);
-  const seconds = Math.floor((ms % 60000) / 1000);
-  const milliseconds = ms % 1000;
-
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(milliseconds).padStart(3, '0')}`;
-}
-
-/**
  * GET /api/meetings/:id/export/markdown
- * Export meeting transcript as Markdown file
+ * Export Markdown - Not available in demo mode
  */
 router.get('/:id/export/markdown', requireAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const meeting = await prisma.meeting.findFirst({
-      where: { id, ownerId: req.user.id },
-      include: {
-        speakers: true,
-        highlights: true,
-        segments: {
-          orderBy: { seqNo: 'asc' },
-          include: { speaker: true },
-        },
-      },
-    });
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
-
-    // Build Markdown content
-    let md = `# ${meeting.title}\n\n`;
-
-    const dateStr = new Date(meeting.startTime).toLocaleDateString('en-US', {
-      weekday: 'long',
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
-
-    const durationMs = meeting.duration ||
-      (meeting.endTime ? new Date(meeting.endTime) - new Date(meeting.startTime) : null);
-    const durationMin = durationMs ? Math.round(durationMs / 60000) : null;
-
-    md += `**Date:** ${dateStr}`;
-    if (durationMin) md += ` | **Duration:** ${durationMin} min`;
-    md += '\n\n';
-
-    // Participants
-    if (meeting.speakers.length > 0) {
-      md += `## Participants\n\n`;
-      meeting.speakers.forEach((s) => {
-        md += `- ${s.displayName || s.label}\n`;
-      });
-      md += '\n';
-    }
-
-    // Summary (cached)
-    if (meeting.summary) {
-      md += `## Summary\n\n`;
-      if (meeting.summary.overview) {
-        md += `${meeting.summary.overview}\n\n`;
-      }
-      if (meeting.summary.keyPoints?.length > 0) {
-        md += `### Key Points\n\n`;
-        meeting.summary.keyPoints.forEach((p) => { md += `- ${p}\n`; });
-        md += '\n';
-      }
-    }
-
-    // Highlights
-    if (meeting.highlights.length > 0) {
-      md += `## Highlights\n\n`;
-      meeting.highlights.forEach((h) => {
-        md += `- **${h.title}**`;
-        if (h.notes) md += `: ${h.notes}`;
-        md += '\n';
-      });
-      md += '\n';
-    }
-
-    // Transcript
-    if (meeting.segments.length > 0) {
-      md += `## Transcript\n\n`;
-      meeting.segments.forEach((seg) => {
-        const speaker = seg.speaker?.displayName || seg.speaker?.label || 'Speaker';
-        const ms = Number(seg.tStartMs);
-        const mins = Math.floor(ms / 60000);
-        const secs = Math.floor((ms % 60000) / 1000);
-        const ts = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
-        md += `**[${ts}] ${speaker}:** ${seg.text}\n\n`;
-      });
-    }
-
-    const filename = `${meeting.title.replace(/[^a-z0-9]/gi, '_')}_transcript.md`;
-    res.setHeader('Content-Type', 'text/markdown');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.send(md);
-  } catch (error) {
-    console.error('Markdown export error:', error);
-    res.status(500).json({ error: 'Failed to export transcript' });
-  }
+  return res.status(400).json({
+    error: 'Markdown export is not available in demo mode',
+    demoMode: true,
+    message: 'Transcript exports require meeting history, which is not stored in demo mode.',
+  });
 });
 
 /**
  * DELETE /api/meetings/:id
- * Delete a meeting
+ * Delete meeting - Not available in demo mode
  */
 router.delete('/:id', requireAuth, async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Verify ownership — users can only delete their own meetings
-    const meeting = await prisma.meeting.findFirst({
-      where: { id, ownerId: req.user.id },
-    });
-
-    if (!meeting) {
-      return res.status(404).json({ error: 'Meeting not found' });
-    }
-
-    // Delete meeting (cascades to segments, speakers, etc.)
-    await prisma.meeting.delete({
-      where: { id },
-    });
-
-    res.json({ message: 'Meeting deleted successfully' });
-  } catch (error) {
-    console.error('Delete meeting error:', error);
-    res.status(500).json({ error: 'Failed to delete meeting' });
-  }
+  return res.json({
+    demoMode: true,
+    message: 'Nothing to delete - meetings are not stored in demo mode.',
+  });
 });
 
 module.exports = router;

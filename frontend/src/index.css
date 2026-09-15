@@ -37,26 +37,26 @@
   --radius-xl: calc(var(--radius) + 6px);
 }
 
-/* Dark mode */
+/* Dark mode - improved contrast */
 .dark {
-  --background: #0a0a0a;
+  --background: #09090b;
   --foreground: #fafafa;
-  --card: #171717;
+  --card: #18181b;
   --card-foreground: #fafafa;
   --primary: #fafafa;
-  --primary-foreground: #0a0a0a;
-  --secondary: #262626;
+  --primary-foreground: #09090b;
+  --secondary: #27272a;
   --secondary-foreground: #fafafa;
-  --muted: #262626;
-  --muted-foreground: #a3a3a3;
-  --accent: #3b82f6;
-  --accent-foreground: #ffffff;
-  --destructive: #ef4444;
-  --destructive-foreground: #ffffff;
-  --border: #262626;
-  --input: #262626;
-  --input-background: #171717;
-  --ring: #3b82f6;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --accent: #60a5fa;
+  --accent-foreground: #09090b;
+  --destructive: #f87171;
+  --destructive-foreground: #09090b;
+  --border: #3f3f46;
+  --input: #3f3f46;
+  --input-background: #18181b;
+  --ring: #60a5fa;
 }
 
 /* =============================================================================

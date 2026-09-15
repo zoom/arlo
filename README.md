@@ -85,6 +85,8 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 | **Meeting Highlights** | Create bookmarks with timestamps for key moments |
 | **Export Options** | Download WebVTT files or Markdown summaries |
 | **Dark Mode** | Automatic OS detection with manual toggle |
+| **Filler Word Coach** | Real-time detection of filler words with audio alerts (Sales vertical) |
+| **Show AI Prompts** | Developer tool to inspect the AI prompts powering each feature |
 | **Industry Verticals** | Specialized modes: Arlo for Notes, Healthcare, Legal, Sales, and Support |
 
 > **AI features work out of the box** — no API key required! Arlo uses [OpenRouter](https://openrouter.ai/) with free models (Gemini, Llama). Optional: add your own `OPENROUTER_API_KEY` for higher rate limits.
@@ -366,6 +368,20 @@ Arlo includes specialized modes demonstrating RTMS capabilities for different in
 <img src="./docs/images/sales-qualification.png" alt="Deal Qualification" width="70%">
 </p>
 
+#### Filler Word Coach
+
+Real-time filler word detection with audio alerts to help improve speaking cadence during sales calls and pitches.
+
+| Feature | Description |
+|---------|-------------|
+| **Live Detection** | Detects filler words ("um", "like", "you know", "basically", etc.) in real-time |
+| **Audio Alerts** | Plays a subtle beep when filler words are detected (can be muted) |
+| **Statistics** | Tracks frequency of each filler word with visual breakdown |
+| **Customizable** | Add or remove words from the detection list |
+| **Recent History** | Shows your last 5 detections with timestamps |
+
+**Default tracked words:** "so", "like", "you know", "basically", "actually", "literally", "um", "uh", "er", "ah", "right", "okay so", "i mean", "kind of", "sort of"
+
 ---
 
 ### Arlo for Support
@@ -378,6 +394,38 @@ Arlo includes specialized modes demonstrating RTMS capabilities for different in
 </p>
 
 > **Building your own vertical?** Fork this repo and customize the frontend components in `frontend/src/features/` for your specific use case.
+
+---
+
+## Developer Tools
+
+Arlo includes built-in tools to help developers understand how the AI features work.
+
+### Show AI Prompts
+
+Enable this setting to reveal the exact prompts powering each AI feature. When enabled, small info icons appear next to AI-powered components (Meeting Summary, SOAP Notes, Sentiment Meter, etc.). Click the icon to see:
+
+- **System Prompt** — The instructions given to the AI
+- **User Prompt Template** — How user input is formatted
+- **Output Format** — Expected response structure
+- **Copy to Clipboard** — Easily copy prompts for your own experiments
+
+**To enable:**
+1. Go to **Settings** (gear icon)
+2. Scroll to **Developer Tools** section
+3. Toggle **"Show AI Prompts"** on
+
+This is useful for:
+- Understanding how Arlo's AI features work under the hood
+- Learning prompt engineering techniques
+- Customizing prompts for your own fork
+
+### API Endpoints for Prompts
+
+```
+GET /api/ai/prompts          # List all available prompts
+GET /api/ai/prompts/:id      # Get specific prompt (summary, sentiment, soapNotes, etc.)
+```
 
 ---
 

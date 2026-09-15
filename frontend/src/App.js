@@ -63,8 +63,8 @@ function RootView() {
       return;
     }
 
-    // Inside Zoom: wait for SDK to determine guest status
-    if (isGuest === null) return; // SDK still loading
+    // Inside Zoom: wait for SDK to determine guest status and auth check to complete
+    if (isGuest === null || isLoading) return; // SDK or auth still loading
 
     console.log('RootView routing:', { isGuest, runningContext, meetingContext });
 
@@ -95,15 +95,31 @@ function RootView() {
         navigate('/guest', { replace: true });
       }
     } else {
-      // Authorized user — route to auth for token exchange
-      navigate('/auth', { replace: true });
+      // Authorized user — check if already has a session to avoid re-auth
+      if (isAuthenticated) {
+        // User already has a valid session, skip auth view
+        const inMeeting = runningContext === 'inMeeting';
+        const routeId = meetingContext?.meetingUUID || meetingContext?.meetingID;
+        if (inMeeting && routeId) {
+          console.log('Authorized user with session, routing to meeting:', routeId);
+          navigate(`/meeting/${encodeURIComponent(routeId)}`, { replace: true });
+        } else if (!isVerticalSelected) {
+          navigate('/select-vertical', { replace: true });
+        } else {
+          navigate('/home', { replace: true });
+        }
+      } else {
+        // Needs to complete OAuth flow to get session
+        navigate('/auth', { replace: true });
+      }
     }
   }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate, isVerticalSelected, sdkError]);
 
   // Show spinner while loading
-  // Also wait if guest is in meeting but meetingContext hasn't been set yet (null means still loading)
+  // Wait for: auth check, SDK guest status, and meetingContext (if in meeting)
   const waitingForMeetingContext = !isBrowser && isGuest && runningContext === 'inMeeting' && meetingContext === null;
-  if (isLoading || (!isBrowser && isGuest === null) || waitingForMeetingContext) {
+  const waitingForSdk = !isBrowser && (isGuest === null || isLoading);
+  if (isLoading || waitingForSdk || waitingForMeetingContext) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
         <LoadingSpinner />

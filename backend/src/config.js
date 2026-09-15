@@ -14,7 +14,6 @@ const requiredEnvVars = [
   'ZOOM_CLIENT_SECRET',
   'ZOOM_WEBHOOK_TOKEN',
   // PUBLIC_URL is resolved separately (explicit value or injected external URL).
-  'DATABASE_URL',
   'SESSION_SECRET',
 ];
 
@@ -117,9 +116,12 @@ if (!encryptionKeyRaw) {
 const encryptionKey = resolveEncryptionKey(encryptionKeyRaw);
 
 const defaultOpenRouterModels = Object.freeze([
-  'z-ai/glm-5.2:free',
+  'nex-agi/nex-n2.5-mini:free',
+  'nvidia/nemotron-3.5-lightning:free',
   'google/gemma-4-31b-it:free',
-  'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'thinkingmachines/inkling:free',
+  'poolside/laguna-s-2.1:free',
+  'liquid/lfm-2.5-2.6b:free',
 ]);
 
 function parseCsv(value) {
@@ -197,8 +199,8 @@ module.exports = {
   zoomOAuthUrl: `https://${process.env.ZOOM_HOST || 'zoom.us'}/oauth`,
   zoomApiUrl: `https://api.${process.env.ZOOM_HOST || 'zoom.us'}/v2`,
 
-  // Database
-  databaseUrl: process.env.DATABASE_URL,
+  // Demo Mode - no database, no persistent storage
+  demoMode: process.env.DEMO_MODE === 'true',
 
   // Security
   sessionSecret: process.env.SESSION_SECRET,

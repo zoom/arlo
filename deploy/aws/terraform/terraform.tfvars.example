@@ -1,0 +1,69 @@
+aws_region  = "us-east-1"
+name_prefix = "arlo"
+environment = "prod"
+owner       = "arlo-assistant"
+
+# The current supported public endpoint is the native CloudFront HTTPS hostname
+# created by this stack. Leave these empty until CloudFront custom-domain
+# aliases and an ACM viewer certificate are added to the Terraform module.
+public_url         = ""
+custom_domain_name = ""
+route53_zone_id    = ""
+certificate_arn    = ""
+
+# Push these images to ECR first. Terraform does not build or push images.
+backend_image      = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-backend:REPLACE_WITH_GIT_TAG"
+frontend_image     = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-frontend:REPLACE_WITH_GIT_TAG"
+rtms_control_image = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms-control:REPLACE_WITH_GIT_TAG"
+rtms_worker_image  = "123456789012.dkr.ecr.us-east-1.amazonaws.com/arlo-rtms-worker:REPLACE_WITH_GIT_TAG"
+
+ssm_parameter_prefix = "/arlo/prod"
+kms_alias_name       = "alias/arlo-prod"
+
+# Create a small encrypted AWS RDS MySQL database and write DATABASE_URL into SSM.
+create_database          = true
+db_instance_class        = "db.t4g.micro"
+db_engine_version        = "8.0.46"
+db_port                  = 3306
+db_allocated_storage     = 20
+db_backup_retention_days = 1
+db_deletion_protection   = false
+db_skip_final_snapshot   = true
+db_connection_limit      = 5
+
+zoom_host      = "zoom.us"
+zoom_app_id    = ""
+rtms_client_id = ""
+
+ai_enabled     = false
+default_model  = "openai/gpt-oss-20b:free"
+fallback_model = "nvidia/nemotron-3-super-120b-a12b:free"
+fallback_models = [
+  "nvidia/nemotron-3-super-120b-a12b:free",
+  "google/gemma-4-31b-it:free"
+]
+
+# Keep these at 1+ to avoid sleeping. ECS replaces failed tasks.
+backend_desired_count      = 1
+backend_single_subnet      = true
+backend_subnet_index       = 0
+frontend_desired_count     = 1
+frontend_single_subnet     = true
+frontend_subnet_index      = 1
+rtms_control_desired_count = 1
+
+# Production hardening: CloudFront/ALB are public; ECS tasks run in private subnets.
+app_services_assign_public_ip = false
+rtms_worker_assign_public_ip  = false
+
+# Capacity for a large RTMS worker fleet: one /20 has roughly 4,000 usable IPs.
+use_scalable_rtms_worker_subnets = true
+rtms_worker_private_subnet_cidrs = [
+  "10.42.64.0/20"
+]
+# Cost-conscious default: both private AZs use one shared NAT gateway.
+nat_gateway_per_az = false
+
+# Disabled by default to avoid CloudWatch log spend.
+enable_cloudwatch_logs        = false
+cloudwatch_log_retention_days = 1

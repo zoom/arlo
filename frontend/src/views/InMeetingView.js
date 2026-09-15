@@ -13,7 +13,9 @@ import useZoomAuth from '../hooks/useZoomAuth';
 import { useDemoData } from '../hooks/useDemoData';
 import { useFeatureLayout } from '../hooks/useFeatureLayout';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
+import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import ArloResponsePanel from '../components/ArloResponsePanel';
+import ComplianceAdvisor from '../components/ComplianceAdvisor';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
@@ -106,6 +108,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   // In guest mode, use 'general' vertical to show all features
   const effectiveVerticalId = isGuestMode ? 'general' : verticalId;
   const { showDemoData } = useDemoData();
+  const { complianceEnabled } = useComplianceSettings();
   const { getFeatureOrder, updateFeatureOrder, hasCustomOrder, resetFeatureOrder } = useFeatureLayout();
 
   // Vertical-specific features (use effectiveVerticalId for guests)
@@ -170,8 +173,8 @@ export default function InMeetingView({ isGuestMode = false }) {
   const [isSavingTitle, setIsSavingTitle] = useState(false);
   const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
   const [displayTitle, setDisplayTitle] = useState(null);
-  // Always default to "assist" tab (features page) when entering a meeting
-  const [activeTab, setActiveTab] = useState('assist');
+  // Default to transcript tab - the live transcript is the "wow moment"
+  const [activeTab, setActiveTab] = useState('transcript');
   const [voiceCommandsEnabled, setVoiceCommandsEnabled] = useState(true);
   const [showResponsePanel, setShowResponsePanel] = useState(true);
   const [voiceResponsesEnabled, setVoiceResponsesEnabled] = useState(() => {
@@ -184,6 +187,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   });
   const transcriptRef = useRef(null);
   const inviteDropdownRef = useRef(null);
+  // eslint-disable-next-line no-unused-vars
   const meetingSummaryRef = useRef(null);
   // eslint-disable-next-line no-unused-vars
   const decisionsLogRef = useRef(null);
@@ -230,12 +234,11 @@ export default function InMeetingView({ isGuestMode = false }) {
   }, [isGuestMode, isAuthenticated, ws, effectiveMeetingId, wsToken, connectWebSocket]);
 
   // Load existing transcript segments from DB (for auto-started RTMS sessions)
+  // Load immediately for all users to show transcript as fast as possible
   const historicalLoadedRef = useRef(false);
   useEffect(() => {
     const loadMeetingId = effectiveMeetingId;
-    // For guests, load immediately; for auth users, wait for rtmsActive
     if (!loadMeetingId || historicalLoadedRef.current) return;
-    if (!isGuestMode && !rtmsActive) return;
     historicalLoadedRef.current = true;
 
     fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(loadMeetingId)}/transcript`, {
@@ -254,14 +257,14 @@ export default function InMeetingView({ isGuestMode = false }) {
         }
       })
       .catch(() => {});
-  }, [isGuestMode, rtmsActive, effectiveMeetingId]);
+  }, [effectiveMeetingId]);
 
   // Load existing participant events from DB (for mid-meeting app opens)
+  // Load immediately for all users
   const historicalEventsLoadedRef = useRef(false);
   useEffect(() => {
     const loadMeetingId = effectiveMeetingId;
     if (!loadMeetingId || historicalEventsLoadedRef.current) return;
-    if (!isGuestMode && !rtmsActive) return;
     historicalEventsLoadedRef.current = true;
 
     fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(loadMeetingId)}/participant-events`, {
@@ -280,7 +283,7 @@ export default function InMeetingView({ isGuestMode = false }) {
         }
       })
       .catch(() => {});
-  }, [isGuestMode, rtmsActive, effectiveMeetingId]);
+  }, [effectiveMeetingId]);
 
   // Listen for transcript segments
   useEffect(() => {
@@ -352,13 +355,63 @@ export default function InMeetingView({ isGuestMode = false }) {
 
   // Voice command callbacks
   const handleVoiceSummarize = useCallback(async () => {
-    // Switch to assist tab and trigger summary refresh
-    setActiveTab('assist');
-    if (meetingSummaryRef.current?.refresh) {
-      meetingSummaryRef.current.refresh();
+    // Build transcript text from segments
+    if (segments.length === 0) {
+      return 'No transcript available yet. Start speaking to generate content.';
     }
-    addToast('Summary generated! Check Arlo Assist tab.', 'success', 3000);
-  }, [addToast]);
+
+    const transcriptText = segments
+      .map(seg => `${seg.speakerName || 'Unknown'}: ${seg.text}`)
+      .join('\n');
+
+    console.log('[VoiceSummarize] Transcript length:', transcriptText.length, 'chars, segments:', segments.length);
+
+    if (transcriptText.trim().length < 50) {
+      return 'Need more conversation to summarize. Keep talking and try again in a moment.';
+    }
+
+    try {
+      const response = await fetch('/api/ai/summary-live', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ transcript: transcriptText }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        if (response.status === 400 && errorData.error?.includes('min 50 chars')) {
+          return 'Need more conversation to summarize. Keep talking and try again in a moment.';
+        }
+        throw new Error(errorData.error || 'Summary generation failed');
+      }
+
+      const data = await response.json();
+      // Also switch to assist tab
+      setActiveTab('assist');
+
+      // Format the summary object into readable text
+      if (data.summary && typeof data.summary === 'object') {
+        const { overview, keyPoints, decisions, nextSteps } = data.summary;
+        let formatted = overview || '';
+
+        if (keyPoints && keyPoints.length > 0) {
+          formatted += '\n\n**Key Points:**\n' + keyPoints.map(p => `• ${p}`).join('\n');
+        }
+        if (decisions && decisions.length > 0) {
+          formatted += '\n\n**Decisions:**\n' + decisions.map(d => `• ${d}`).join('\n');
+        }
+        if (nextSteps && nextSteps.length > 0) {
+          formatted += '\n\n**Next Steps:**\n' + nextSteps.map(s => `• ${s}`).join('\n');
+        }
+        return formatted || 'Summary generated! Check Arlo Assist tab for details.';
+      }
+      return data.summary || 'Summary generated! Check Arlo Assist tab for details.';
+    } catch (error) {
+      console.error('Voice summary error:', error);
+      return 'Failed to generate summary. Please try again.';
+    }
+  }, [segments]);
 
   const handleVoiceActionItems = useCallback(async () => {
     setActiveTab('assist');
@@ -456,11 +509,39 @@ export default function InMeetingView({ isGuestMode = false }) {
   }, [segments, addToast]);
 
   const handleVoiceAsk = useCallback(async (question) => {
-    if (!question) return;
-    // For now, show that we received the question
-    // In the future, this could trigger the AI chat
-    addToast(`Question received: "${question}" - AI chat coming soon!`, 'info', 4000);
-  }, [addToast]);
+    if (!question) return 'Please ask a question.';
+
+    // Build transcript context
+    const transcriptText = segments.length > 0
+      ? segments.map(seg => `${seg.speakerName || 'Unknown'}: ${seg.text}`).join('\n')
+      : '';
+
+    if (!transcriptText) {
+      return 'No transcript available yet. Start speaking to provide context for your question.';
+    }
+
+    try {
+      const response = await fetch('/api/ai/suggest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          transcript: transcriptText,
+          prompt: question,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('AI request failed');
+      }
+
+      const data = await response.json();
+      return data.suggestion || data.response || 'I couldn\'t find a specific answer. Try rephrasing your question.';
+    } catch (error) {
+      console.error('Voice ask error:', error);
+      return 'Failed to process question. Please try again.';
+    }
+  }, [segments]);
 
   // Initialize voice commands hook
   // eslint-disable-next-line no-unused-vars
@@ -855,15 +936,15 @@ export default function InMeetingView({ isGuestMode = false }) {
         />
       )}
 
-      {/* Tabs: Arlo Assist (default) | Transcript */}
+      {/* Tabs: Transcript (default) | Arlo Assist */}
       <Tabs.Root
         value={activeTab}
         onValueChange={(value) => setActiveTab(value)}
         className="in-meeting-tabs"
       >
         <Tabs.List className="tabs-list" data-cols="2">
-          <Tabs.Tab value="assist" className="tab-trigger">Arlo Assist</Tabs.Tab>
           <Tabs.Tab value="transcript" className="tab-trigger">Transcript</Tabs.Tab>
+          <Tabs.Tab value="assist" className="tab-trigger">Arlo Assist</Tabs.Tab>
         </Tabs.List>
 
         <Tabs.Panel value="transcript" className="in-meeting-tab-panel">
@@ -1167,6 +1248,15 @@ export default function InMeetingView({ isGuestMode = false }) {
                 <span className="text-xs">Reset Order</span>
               </button>
             </div>
+          )}
+
+          {/* Compliance Advisor - Cross-vertical compliance monitoring */}
+          {complianceEnabled && (
+            <ComplianceAdvisor
+              segments={segments}
+              vertical={effectiveVerticalId === 'general' ? 'notes' : effectiveVerticalId}
+              enabled={complianceEnabled && rtmsActive}
+            />
           )}
 
           {/* Draggable feature cards */}

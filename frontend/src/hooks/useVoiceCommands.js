@@ -94,7 +94,7 @@ export function useVoiceCommands({
     setIsProcessing(true);
     setLastCommand(command);
 
-    // Add user command to responses
+    // Add user command to responses (just the command, not "Hey Arlo")
     setResponses(prev => [...prev, {
       type: 'user',
       text: command.rawText,

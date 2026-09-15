@@ -15,10 +15,13 @@ import {
   Headphones,
   Terminal,
   Volume2,
+  Code,
+  Shield,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { useVertical } from '../contexts/VerticalContext';
 import { useDemoData } from '../hooks/useDemoData';
+import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import { useMeeting } from '../contexts/MeetingContext';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -53,6 +56,7 @@ export default function SettingsView() {
   const { theme, toggleTheme } = useTheme();
   const { vertical, clearVertical } = useVertical();
   const { showDemoData, setShowDemoData } = useDemoData();
+  const { complianceEnabled, setComplianceEnabled } = useComplianceSettings();
   const { meetingId, rtmsActive, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
   const [apiStartSuccess, setApiStartSuccess] = useState(false);
   const [autoOpen, setAutoOpen] = useState(true);
@@ -65,6 +69,10 @@ export default function SettingsView() {
   // Voice commands state
   const [showVoiceResponses, setShowVoiceResponses] = useState(true);
   const voiceResponsesMountedRef = useRef(false);
+
+  // Developer tools state
+  const [showAIPrompts, setShowAIPrompts] = useState(false);
+  const showAIPromptsMountedRef = useRef(false);
 
   // Chat notifications state
   const [chatNotificationsEnabled, setChatNotificationsEnabled] = useState(true);
@@ -117,6 +125,10 @@ export default function SettingsView() {
       const cachedVoiceResponses = localStorage.getItem('arlo-voice-responses');
       if (cachedVoiceResponses !== null) {
         setShowVoiceResponses(JSON.parse(cachedVoiceResponses));
+      }
+      const cachedShowAIPrompts = localStorage.getItem('arlo-show-ai-prompts');
+      if (cachedShowAIPrompts !== null) {
+        setShowAIPrompts(JSON.parse(cachedShowAIPrompts));
       }
     } catch {}
 
@@ -230,6 +242,21 @@ export default function SettingsView() {
       body: JSON.stringify({ showVoiceResponses }),
     }).catch(() => {});
   }, [showVoiceResponses]);
+
+  // Save show AI prompts preference on change (skip initial mount)
+  useEffect(() => {
+    if (!showAIPromptsMountedRef.current) {
+      showAIPromptsMountedRef.current = true;
+      return;
+    }
+    localStorage.setItem('arlo-show-ai-prompts', JSON.stringify(showAIPrompts));
+    fetch('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ showAIPrompts }),
+    }).catch(() => {});
+  }, [showAIPrompts]);
 
   // Fetch upcoming meetings for auto-open section
   useEffect(() => {
@@ -821,6 +848,68 @@ export default function SettingsView() {
                 <span className="text-sans text-sm">{apiActionError}</span>
               </div>
             )}
+
+            <hr className="settings-separator" />
+
+            {/* Show AI Prompts Toggle */}
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <div className="settings-dev-header">
+                  <Code size={16} />
+                  <label className="text-sans font-medium" htmlFor="show-ai-prompts">
+                    Show AI Prompts
+                  </label>
+                </div>
+                <p className="text-sans text-sm text-muted">
+                  Display the prompts powering AI features. When enabled, an info icon
+                  appears next to AI-powered components showing the exact prompt used.
+                </p>
+                <p className="text-sans text-xs text-muted" style={{ marginTop: 4 }}>
+                  Useful for developers exploring how Arlo works.
+                </p>
+              </div>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  id="show-ai-prompts"
+                  checked={showAIPrompts}
+                  onChange={(e) => setShowAIPrompts(e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+                <span className="settings-toggle-thumb" />
+              </label>
+            </div>
+
+            <hr className="settings-separator" />
+
+            {/* Compliance Advisor Toggle */}
+            <div className="settings-toggle-row">
+              <div className="settings-toggle-text">
+                <div className="settings-dev-header">
+                  <Shield size={16} />
+                  <label className="text-sans font-medium" htmlFor="compliance-advisor">
+                    Compliance Advisor
+                  </label>
+                </div>
+                <p className="text-sans text-sm text-muted">
+                  Real-time compliance monitoring with vertical-specific rules.
+                  Detects potential compliance risks based on conversation content.
+                </p>
+                <p className="text-sans text-xs text-muted" style={{ marginTop: 4 }}>
+                  Healthcare: HIPAA/PHI • Legal: Privilege/Ethics • Sales: Promises/Pricing • Support: SLA/Refunds
+                </p>
+              </div>
+              <label className="settings-toggle">
+                <input
+                  type="checkbox"
+                  id="compliance-advisor"
+                  checked={complianceEnabled}
+                  onChange={(e) => setComplianceEnabled(e.target.checked)}
+                />
+                <span className="settings-toggle-track" />
+                <span className="settings-toggle-thumb" />
+              </label>
+            </div>
           </div>
         </Card>
       </section>

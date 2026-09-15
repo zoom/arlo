@@ -143,6 +143,51 @@
   padding: 48px 16px;
 }
 
+/* Pending state for host approval */
+.guest-pending-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.guest-pending-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  background: var(--muted);
+  border-radius: 50%;
+}
+
+.guest-pending-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 280px;
+}
+
+.guest-pending-content h3 {
+  font-size: 1.125rem;
+}
+
+.guest-pending-content p {
+  line-height: 1.6;
+}
+
+.guest-pending-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--muted);
+  border-radius: var(--radius-lg);
+}
+
 /* Collapsible summary */
 .guest-summary-details {
   background: var(--card);

@@ -9,7 +9,6 @@ const fs = require('fs');
 const path = require('path');
 const { initWebSocketServer } = require('./services/websocket');
 const config = require('./config');
-const prisma = require('./lib/prisma');
 const logger = require('./lib/logger');
 const { version } = require('../package.json');
 const rateLimit = require('express-rate-limit');
@@ -386,7 +385,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Environment: ${config.nodeEnv}`);
   console.log(`Port: ${PORT}`);
   console.log(`Public URL: ${config.publicUrl}`);
-  console.log(`Database: ${config.databaseUrl ? 'Connected' : 'Not configured'}`);
+  console.log(`Demo Mode: ENABLED (no data persistence)`);
   console.log(`AI Enabled: ${config.aiEnabled}`);
   console.log(`Default Model: ${config.defaultModel}`);
   console.log(`Log Level: ${logger.level}${logger.isDebug ? ' (request bodies will be logged)' : ''}`);
@@ -400,20 +399,16 @@ server.listen(PORT, '0.0.0.0', () => {
 process.on('SIGTERM', () => {
   console.log('SIGTERM received. Closing server gracefully...');
   server.close(() => {
-    prisma.$disconnect().then(() => {
-      console.log('Server closed');
-      process.exit(0);
-    });
+    console.log('Server closed');
+    process.exit(0);
   });
 });
 
 process.on('SIGINT', () => {
   console.log('SIGINT received. Closing server gracefully...');
   server.close(() => {
-    prisma.$disconnect().then(() => {
-      console.log('Server closed');
-      process.exit(0);
-    });
+    console.log('Server closed');
+    process.exit(0);
   });
 });
 
