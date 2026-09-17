@@ -1,0 +1,56 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  pre_build:
+    commands:
+      - set -euo pipefail
+      - COMMIT_SHA="$(tr -d '[:space:]' < .arlo-commit-sha)"
+      - '[[ "$COMMIT_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid source commit: $COMMIT_SHA"; exit 1; }'
+      - export COMMIT_SHA IMAGE_TAG="release-${COMMIT_SHA}"
+      - npm ci
+      - PUBLIC_URL=https://example.invalid ZOOM_CLIENT_ID=test ZOOM_CLIENT_SECRET=test ZOOM_WEBHOOK_TOKEN=test SESSION_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef TOKEN_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef REDIS_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef node --test backend/test/auth-encryption.test.js
+      - aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+  build:
+    commands:
+      - docker buildx build --load --platform linux/amd64 --provenance=false -t "${FRONTEND_REPOSITORY_URI}:${IMAGE_TAG}" frontend
+      - docker buildx build --load --platform linux/amd64 --provenance=false -t "${BACKEND_REPOSITORY_URI}:${IMAGE_TAG}" backend
+      - docker buildx build --load --platform linux/amd64 --provenance=false -t "${RTMS_REPOSITORY_URI}:${IMAGE_TAG}" rtms
+  post_build:
+    commands:
+      - set -euo pipefail
+      - '[[ "$CODEBUILD_BUILD_SUCCEEDING" == "1" ]] || { echo "Tests or image builds failed; nothing will be published"; exit 1; }'
+      - docker push "${FRONTEND_REPOSITORY_URI}:${IMAGE_TAG}"
+      - docker push "${BACKEND_REPOSITORY_URI}:${IMAGE_TAG}"
+      - docker push "${RTMS_REPOSITORY_URI}:${IMAGE_TAG}"
+      - mkdir -p release-bundle
+      - install -m 0644 deploy/ec2/docker-compose.yml release-bundle/docker-compose.yml
+      - install -m 0755 deploy/ec2/start.sh release-bundle/start.sh
+      - install -m 0644 deploy/ec2/arlo.service release-bundle/arlo.service
+      - |
+        printf '%s\n' \
+          "FRONTEND_IMAGE=${FRONTEND_REPOSITORY_URI}:${IMAGE_TAG}" \
+          "BACKEND_IMAGE=${BACKEND_REPOSITORY_URI}:${IMAGE_TAG}" \
+          "RTMS_IMAGE=${RTMS_REPOSITORY_URI}:${IMAGE_TAG}" \
+          "AWS_REGION=${AWS_REGION}" \
+          "PARAMETER_PREFIX=${PARAMETER_PREFIX}" \
+          "PUBLIC_URL=${PUBLIC_URL}" \
+          "OPENROUTER_MODELS=${OPENROUTER_MODELS}" \
+          "DEFAULT_MODEL=${DEFAULT_MODEL}" \
+          "FALLBACK_MODEL=${FALLBACK_MODEL}" \
+          "SOURCE_COMMIT=${COMMIT_SHA}" > release-bundle/images.env
+      - tar -C release-bundle -czf deployment.tar.gz .
+      - ARTIFACT_SHA256="$(sha256sum deployment.tar.gz | awk '{print $1}')"
+      - RELEASE_KEY="releases/${COMMIT_SHA}/deployment.tar.gz"
+      - aws s3 cp deployment.tar.gz "s3://${ARTIFACT_BUCKET}/${RELEASE_KEY}" --only-show-errors
+      - jq -n --arg bucket "$ARTIFACT_BUCKET" --arg key "$RELEASE_KEY" --arg sha256 "$ARTIFACT_SHA256" --arg commit "$COMMIT_SHA" '{bucket:$bucket,key:$key,sha256:$sha256,commit:$commit}' > release.json
+
+artifacts:
+  files:
+    - release.json
+  discard-paths: true

@@ -63,6 +63,19 @@ docker-compose.override.yml
 *.key
 .vercel
 
+# Terraform local state and plans
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfvars
+!*.tfvars.example
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
 # Internal docs (not for public repo)
 docs/DEMO_VIDEO_SCRIPT.md
 

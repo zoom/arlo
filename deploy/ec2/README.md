@@ -3,6 +3,10 @@
 For complete first-deployment, update, verification, and rollback commands, see
 [Manual AWS CLI deployment](AWS_CLI_DEPLOYMENT.md).
 
+For the scheduled AWS pull/build/deploy workflow, see
+[`pipeline/README.md`](pipeline/README.md). The manual procedure remains
+available for bootstrap and recovery.
+
 This deployment runs the frontend, backend, and RTMS services on one x86 EC2
 instance. CloudFront and the ALB remain the public application entrypoint. The
 current `main` application runs in demo mode and does not use a database or

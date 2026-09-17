@@ -1,0 +1,39 @@
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  build:
+    commands:
+      - |
+        set -euo pipefail
+        REMOTE_COMMIT="$(git ls-remote "$GITHUB_REPOSITORY_URL" "refs/heads/${GITHUB_BRANCH}" | awk '{print $1}')"
+        [[ "$REMOTE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "Could not resolve ${GITHUB_BRANCH}"; exit 1; }
+
+        DEPLOYED_COMMIT="$(aws ssm get-parameter --name "$DEPLOYED_COMMIT_PARAMETER" --query Parameter.Value --output text 2>/dev/null || true)"
+        if [[ "$REMOTE_COMMIT" == "$DEPLOYED_COMMIT" ]]; then
+          echo "Commit $REMOTE_COMMIT is already deployed"
+          exit 0
+        fi
+
+        ACTIVE_EXECUTIONS="$(aws codepipeline list-pipeline-executions --pipeline-name "$PIPELINE_NAME" --max-results 10 --query "length(pipelineExecutionSummaries[?status=='InProgress' || status=='Stopping'])" --output text)"
+        if [[ "$ACTIVE_EXECUTIONS" != "0" ]]; then
+          echo "Pipeline already has an active execution"
+          exit 0
+        fi
+
+        rm -rf repository source.zip
+        git clone --depth 1 --branch "$GITHUB_BRANCH" "$GITHUB_REPOSITORY_URL" repository
+        [[ "$(git -C repository rev-parse HEAD)" == "$REMOTE_COMMIT" ]] || { echo "Remote branch changed during checkout; retry next run"; exit 1; }
+        rm -rf repository/.git
+        printf '%s\n' "$REMOTE_COMMIT" > repository/.arlo-commit-sha
+        (cd repository && zip -qr ../source.zip .)
+
+        if [[ "${DRY_RUN:-false}" == "true" ]]; then
+          echo "Dry run: would deploy $REMOTE_COMMIT"
+          exit 0
+        fi
+
+        VERSION_ID="$(aws s3api put-object --bucket "$ARTIFACT_BUCKET" --key "$SOURCE_OBJECT_KEY" --body source.zip --query VersionId --output text)"
+        aws codepipeline start-pipeline-execution --name "$PIPELINE_NAME" --source-revisions "actionName=Source,revisionType=S3_OBJECT_VERSION_ID,revisionValue=${VERSION_ID}"
