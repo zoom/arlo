@@ -32,6 +32,7 @@ phases:
       - install -m 0644 deploy/ec2/docker-compose.yml release-bundle/docker-compose.yml
       - install -m 0755 deploy/ec2/start.sh release-bundle/start.sh
       - install -m 0644 deploy/ec2/arlo.service release-bundle/arlo.service
+      - install -m 0644 deploy/ec2/arlo-journald.conf release-bundle/arlo-journald.conf
       - |
         printf '%s\n' \
           "FRONTEND_IMAGE=${FRONTEND_REPOSITORY_URI}:${IMAGE_TAG}" \

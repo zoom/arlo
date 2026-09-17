@@ -43,7 +43,7 @@ actual_sha256="$(sha256sum "$work_dir/deployment.tar.gz" | awk '{print $1}')"
 
 mkdir -p "$work_dir/release"
 tar -C "$work_dir/release" -xzf "$work_dir/deployment.tar.gz"
-for required_file in docker-compose.yml start.sh arlo.service images.env; do
+for required_file in docker-compose.yml start.sh arlo.service arlo-journald.conf images.env; do
   [[ -f "$work_dir/release/$required_file" ]] || { echo "Release is missing $required_file"; exit 1; }
 done
 
@@ -64,6 +64,11 @@ rm -rf "$docker_config"
 unset DOCKER_CONFIG
 
 mkdir -p "$app_dir" "$env_dir" "$rollback_root" "$backup_dir"
+mkdir -p /etc/systemd/journald.conf.d
+if ! cmp -s "$work_dir/release/arlo-journald.conf" /etc/systemd/journald.conf.d/arlo-retention.conf; then
+  install -m 0644 "$work_dir/release/arlo-journald.conf" /etc/systemd/journald.conf.d/arlo-retention.conf
+  systemctl restart systemd-journald
+fi
 install -m 0644 "$app_dir/docker-compose.yml" "$backup_dir/docker-compose.yml"
 install -m 0755 "$app_dir/start.sh" "$backup_dir/start.sh"
 install -m 0644 /etc/systemd/system/arlo.service "$backup_dir/arlo.service"

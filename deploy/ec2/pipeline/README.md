@@ -48,7 +48,14 @@ aws s3api put-bucket-versioning --bucket "$STATE_BUCKET" \
 aws s3api put-bucket-encryption --bucket "$STATE_BUCKET" \
   --server-side-encryption-configuration \
   '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+aws s3api put-bucket-lifecycle-configuration --bucket "$STATE_BUCKET" \
+  --lifecycle-configuration \
+  file://deploy/ec2/pipeline/terraform/state-lifecycle.json
 ```
+
+The state lifecycle always preserves the current state, preserves at least ten
+noncurrent revisions, removes older noncurrent revisions after 90 days, and
+aborts incomplete uploads after seven days.
 
 Initialize and apply:
 

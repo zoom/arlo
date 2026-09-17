@@ -17,6 +17,11 @@ access without a NAT Gateway. Its security group must allow ports 3000-3001
 only from the ALB security group; do not permit public ingress or SSH. The ALB
 continues to reach the instance over its private VPC address.
 
+Install `arlo-journald.conf` as
+`/etc/systemd/journald.conf.d/arlo-retention.conf` and restart
+`systemd-journald`. This caps persistent system logs at 500 MB and 30 days.
+Automated pipeline deployments enforce the same configuration.
+
 ## Required SSM parameters
 
 All sensitive parameters are `SecureString` values encrypted with

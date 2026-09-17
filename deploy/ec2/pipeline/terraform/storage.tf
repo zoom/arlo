@@ -64,6 +64,34 @@ resource "aws_s3_bucket_lifecycle_configuration" "artifacts" {
       days = 30
     }
   }
+
+  rule {
+    id     = "expire-codepipeline-artifacts"
+    status = "Enabled"
+    filter {
+      prefix = "arlo-ec2-cicd-releas/"
+    }
+    expiration {
+      days = 30
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
+  }
+
+  rule {
+    id     = "clean-incomplete-uploads-and-delete-markers"
+    status = "Enabled"
+    filter {
+      prefix = ""
+    }
+    expiration {
+      expired_object_delete_marker = true
+    }
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
 }
 
 resource "aws_s3_bucket_policy" "artifacts" {

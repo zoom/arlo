@@ -1,0 +1,21 @@
+{
+  "Rules": [
+    {
+      "ID": "retain-current-state-and-prune-history",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "arlo/"
+      },
+      "Expiration": {
+        "ExpiredObjectDeleteMarker": true
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 90,
+        "NewerNoncurrentVersions": 10
+      },
+      "AbortIncompleteMultipartUpload": {
+        "DaysAfterInitiation": 7
+      }
+    }
+  ]
+}
