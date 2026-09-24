@@ -221,14 +221,8 @@ export function MeetingProvider({ children }) {
       }
       sessionStorage.removeItem(startingKey);
 
-      // Send chat notice: restart if previously active, otherwise start
-      if (hasBeenActiveRef.current) {
-        sendChatNotice('restart');
-      } else {
-        sendChatNotice('start');
-        hasBeenActiveRef.current = true;
-      }
-      startNoticeSentRef.current = true;
+      // Don't send chat notice here - wait for actual transcript data in transcript.segment handler
+      // This ensures we don't notify the meeting before the host has approved RTMS
 
       zoomSdk.showNotification({
         type: 'success',
@@ -238,14 +232,11 @@ export function MeetingProvider({ children }) {
     } catch (error) {
       if (error?.code === '10308') {
         // 10308 = RTMS already running — treat as success
+        // Don't send chat notice here - transcript.segment handler will send it when data arrives
         setRtmsActive(true);
         hasBeenActiveRef.current = true;
         if (!meetingStartTimeRef.current) {
           meetingStartTimeRef.current = Date.now();
-        }
-        if (!startNoticeSentRef.current) {
-          startNoticeSentRef.current = true;
-          sendChatNotice('start');
         }
         setTimeout(() => sessionStorage.removeItem(startingKey), 2000);
         setRtmsLoading(false);
@@ -255,7 +246,7 @@ export function MeetingProvider({ children }) {
     } finally {
       setRtmsLoading(false);
     }
-  }, [rtmsLoading, zoomSdk, meetingId, sendChatNotice]);
+  }, [rtmsLoading, zoomSdk, meetingId]);
 
   const stopRTMS = useCallback(async () => {
     if (rtmsLoading || !zoomSdk) return;

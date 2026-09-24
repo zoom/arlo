@@ -130,8 +130,8 @@ export default function OnboardingView() {
           </h1>
           <p className="text-sans text-muted">
             {isFirst
-              ? `Successfully connected to Zoom${user?.displayName ? ` as ${user.displayName}` : ''}!`
-              : `Good to see you again${user?.displayName ? `, ${user.displayName}` : ''}.`}
+              ? `Successfully connected to Zoom${user?.displayName?.trim() ? ` as ${user.displayName.trim()}` : ''}!`
+              : `Good to see you again${user?.displayName?.trim() ? `, ${user.displayName.trim()}` : ''}.`}
           </p>
         </div>
 
