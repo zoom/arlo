@@ -53,7 +53,7 @@ export default function SettingsView() {
   const { vertical, clearVertical } = useVertical();
   const { showDemoData, setShowDemoData } = useDemoData();
   const [autoOpen, setAutoOpen] = useState(true);
-  const [autoStart, setAutoStart] = useState(true);
+  const [autoStart, setAutoStart] = useState(false);
   const [settingsUpcoming, setSettingsUpcoming] = useState([]);
   const [provider, setProvider] = useState('openrouter');
   const [apiKey, setApiKey] = useState('');
@@ -62,7 +62,7 @@ export default function SettingsView() {
   const [testStatus, setTestStatus] = useState('idle');
 
   // Chat notifications state
-  const [chatNotificationsEnabled, setChatNotificationsEnabled] = useState(true);
+  const [chatNotificationsEnabled, setChatNotificationsEnabled] = useState(false);
   const [notifyOnStart, setNotifyOnStart] = useState(true);
   const [notifyOnPause, setNotifyOnPause] = useState(true);
   const [notifyOnResume, setNotifyOnResume] = useState(true);

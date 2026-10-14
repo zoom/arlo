@@ -139,7 +139,8 @@
                     "subscription_name": "Arlo RTMS Events",
                     "event_types": [
                         "meeting.rtms_started",
-                        "meeting.rtms_stopped"
+                        "meeting.rtms_stopped",
+                        "rtms.request_status"
                     ],
                     "development_webhook_url": "https://your-ngrok-url.ngrok-free.app/api/rtms/webhook",
                     "production_webhook_url": "https://your-ngrok-url.ngrok-free.app/api/rtms/webhook",
