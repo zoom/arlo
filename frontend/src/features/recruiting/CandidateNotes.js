@@ -25,28 +25,28 @@ const DEMO_PREP_CONTENT = {
 
 This session will last approximately 45 minutes. Feel free to ask questions at any time.`,
   prepNotes: [
-    'We'll start with introductions and a brief overview of the role',
-    'Be ready to discuss a challenging technical project you've worked on',
-    'We value concrete examples — think of specific situations you can share',
-    'At the end, you'll have time to ask us questions about the team and role',
+    "We'll start with introductions and a brief overview of the role",
+    "Be ready to discuss a challenging technical project you've worked on",
+    "We value concrete examples — think of specific situations you can share",
+    "At the end, you'll have time to ask us questions about the team and role",
   ],
   tips: [
-    'Take your time to think before answering — it's okay to pause',
-    'If you need clarification on a question, just ask',
-    'Use the STAR method: Situation, Task, Action, Result',
+    "Take your time to think before answering — it's okay to pause",
+    "If you need clarification on a question, just ask",
+    "Use the STAR method: Situation, Task, Action, Result",
   ],
   faq: [
     {
-      q: 'What is the team structure?',
-      a: 'You would join a team of 6 engineers working on our core platform. The team follows agile practices with 2-week sprints.',
+      q: "What is the team structure?",
+      a: "You would join a team of 6 engineers working on our core platform. The team follows agile practices with 2-week sprints.",
     },
     {
-      q: 'What is the interview process?',
-      a: 'Today is a technical screen. If we move forward, you'll have a virtual onsite with 4 sessions: system design, coding, behavioral, and team fit.',
+      q: "What is the interview process?",
+      a: "Today is a technical screen. If we move forward, you'll have a virtual onsite with 4 sessions: system design, coding, behavioral, and team fit.",
     },
     {
-      q: 'Is this position remote?',
-      a: 'Yes, this is a remote-first position. We have team members across multiple time zones and meet in person quarterly.',
+      q: "Is this position remote?",
+      a: "Yes, this is a remote-first position. We have team members across multiple time zones and meet in person quarterly.",
     },
   ],
 };
