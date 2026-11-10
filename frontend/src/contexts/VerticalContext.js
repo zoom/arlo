@@ -80,6 +80,30 @@ export const VERTICALS = {
       actionItem: 'Follow-up',
     },
   },
+  recruiting: {
+    id: 'recruiting',
+    name: 'Arlo for Recruiting',
+    tagline: 'Interview intelligence & hiring',
+    icon: 'recruiting',
+    accentColor: '#ea580c', // Orange
+    accentColorDark: '#f97316',
+    features: [
+      'consent',
+      'scorecard',
+      'interviewGuide',
+      'candidateContext',
+      'interviewerCoaching',
+      'questionTracker',
+      'highlights',
+      'virtualOnsite',
+    ],
+    aiPromptPrefix: 'You are Arlo, an interview intelligence assistant that helps hiring teams conduct better, more equitable interviews. Focus on structured evaluation, candidate experience, and interviewer effectiveness. Extract key moments, track competency coverage, and generate actionable feedback while maintaining objectivity.',
+    terminology: {
+      session: 'Interview',
+      participant: 'Candidate',
+      actionItem: 'Follow-up',
+    },
+  },
 };
 
 // Feature definitions with metadata
@@ -120,6 +144,16 @@ export const FEATURES = {
   resolution: { name: 'Resolution Tracker', description: 'Issue to resolution workflow' },
   agentAssist: { name: 'Agent Assist', description: 'Knowledge suggestions and compliance' },
   compliance: { name: 'Compliance Checklist', description: 'Required disclosures tracking' },
+
+  // Recruiting vertical
+  consent: { name: 'Recording Consent', description: 'Candidate opt-in/out and recording notification' },
+  scorecard: { name: 'Structured Scorecard', description: 'Competency-based evaluation with rubrics' },
+  interviewGuide: { name: 'Interview Guide', description: 'Live question prompts and coverage tracking' },
+  candidateContext: { name: 'Candidate Context', description: 'Resume, prior interviews, and hiring stage' },
+  interviewerCoaching: { name: 'Interviewer Coaching', description: 'Talk ratio, question quality, and bias alerts' },
+  questionTracker: { name: 'Question Tracker', description: 'Track which competencies have been assessed' },
+  highlights: { name: 'Key Moments', description: 'AI-detected highlights and candidate signals' },
+  virtualOnsite: { name: 'Virtual Onsite', description: 'Multi-interviewer rotation with segment splitting' },
 };
 
 const VerticalContext = createContext();

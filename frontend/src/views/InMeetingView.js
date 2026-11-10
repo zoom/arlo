@@ -49,6 +49,16 @@ import {
   ResolutionTracker,
   AgentAssist,
 } from '../features/support';
+// Recruiting vertical features
+import {
+  RecordingConsent,
+  InterviewScorecard,
+  InterviewerCoaching,
+  InterviewGuide,
+  CandidateContext,
+  FraudSignals,
+  CandidateNotes,
+} from '../features/recruiting';
 // General meeting features (default note-taker)
 import {
   MeetingSummary,
@@ -107,6 +117,14 @@ export default function InMeetingView() {
   const isLegal = verticalId === 'legal';
   const isSales = verticalId === 'sales';
   const isSupport = verticalId === 'support';
+  const isRecruiting = verticalId === 'recruiting';
+
+  // Recruiting role detection - determines interviewer vs candidate view
+  // In production, this would be based on meeting host status or user role
+  // For demo, we use a toggle or default to interviewer (host)
+  const [recruitingRole, setRecruitingRole] = useState('interviewer'); // 'interviewer' | 'candidate'
+  const isInterviewer = recruitingRole === 'interviewer';
+  const isCandidate = recruitingRole === 'candidate';
 
   // Get current feature order for this vertical
   const featureOrder = getFeatureOrder(verticalId);
@@ -439,7 +457,16 @@ export default function InMeetingView() {
     'open-questions': () => <OpenQuestions segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
     'smart-bookmarks': () => <SmartBookmarks segments={segments} showDemoData={showDemoData} onJumpToSegment={handleJumpToSegment} />,
     'participant-stats': () => <ParticipantStats segments={segments} showDemoData={showDemoData} />,
-  }), [segments, meetingId, showDemoData, rtmsActive, rtmsPaused, hasFeature, handleJumpToSegment]);
+
+    // Recruiting features - Interviewer view
+    'candidate-context': () => isInterviewer ? <CandidateContext showDemoData={showDemoData} /> : null,
+    'interview-guide': () => isInterviewer ? <InterviewGuide segments={segments} showDemoData={showDemoData} /> : null,
+    'interview-scorecard': () => isInterviewer ? <InterviewScorecard segments={segments} meetingId={meetingId} showDemoData={showDemoData} /> : null,
+    'interviewer-coaching': () => isInterviewer ? <InterviewerCoaching segments={segments} showDemoData={showDemoData} /> : null,
+    'fraud-signals': () => isInterviewer ? <FraudSignals segments={segments} showDemoData={showDemoData} /> : null,
+    // Recruiting features - Candidate view
+    'candidate-notes': () => isCandidate ? <CandidateNotes showDemoData={showDemoData} /> : null,
+  }), [segments, meetingId, showDemoData, rtmsActive, rtmsPaused, hasFeature, handleJumpToSegment, isInterviewer, isCandidate]);
 
   // Render draggable features for current vertical
   const renderDraggableFeatures = useCallback(() => {
@@ -560,6 +587,19 @@ export default function InMeetingView() {
 
   return (
     <div className="in-meeting-view">
+      {/* Recording consent banner for recruiting vertical */}
+      {isRecruiting && (
+        <RecordingConsent
+          isRecording={rtmsActive}
+          isPaused={rtmsPaused}
+          onStop={stopRTMS}
+          onPause={pauseRTMS}
+          onResume={resumeRTMS}
+          meetingId={meetingId}
+          showDemoData={showDemoData}
+        />
+      )}
+
       {/* Meeting header */}
       <div className="in-meeting-header">
         <div className="live-indicator-row">
@@ -879,6 +919,27 @@ export default function InMeetingView() {
             </div>
           </Card>
 
+          {/* Recruiting role toggle - switch between interviewer and candidate views */}
+          {isRecruiting && (
+            <div className="recruiting-role-toggle">
+              <span className="text-xs text-muted">View as:</span>
+              <div className="role-toggle-buttons">
+                <button
+                  className={`role-toggle-btn ${isInterviewer ? 'active' : ''}`}
+                  onClick={() => setRecruitingRole('interviewer')}
+                >
+                  Interviewer
+                </button>
+                <button
+                  className={`role-toggle-btn ${isCandidate ? 'active' : ''}`}
+                  onClick={() => setRecruitingRole('candidate')}
+                >
+                  Candidate
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Feature reorder toolbar */}
           {hasCustomOrder(verticalId) && (
             <div className="feature-reorder-toolbar">
@@ -897,28 +958,30 @@ export default function InMeetingView() {
           {/* Draggable feature cards */}
           {renderDraggableFeatures()}
 
-          {/* Notes section (outside drag area) */}
-          <Card className="assist-card">
-            <div className="assist-card-inner">
-              <h3 className="text-serif font-medium">
-                {isLegal ? 'Deposition Notes' : isSales ? 'Call Notes' : isSupport ? 'Case Notes' : 'Notes'}
-              </h3>
-              <Textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder={
-                  isLegal ? 'Attorney notes, follow-up questions, impeachment points...' :
-                  isSales ? 'Key takeaways, objections to address, follow-up items...' :
-                  isSupport ? 'Issue summary, troubleshooting steps, resolution notes...' :
-                  'Meeting notes...'
-                }
-                className="assist-notes"
-              />
-            </div>
-          </Card>
+          {/* Notes section (outside drag area) - hidden for recruiting vertical */}
+          {!isRecruiting && (
+            <Card className="assist-card">
+              <div className="assist-card-inner">
+                <h3 className="text-serif font-medium">
+                  {isLegal ? 'Deposition Notes' : isSales ? 'Call Notes' : isSupport ? 'Case Notes' : 'Notes'}
+                </h3>
+                <Textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder={
+                    isLegal ? 'Attorney notes, follow-up questions, impeachment points...' :
+                    isSales ? 'Key takeaways, objections to address, follow-up items...' :
+                    isSupport ? 'Issue summary, troubleshooting steps, resolution notes...' :
+                    'Meeting notes...'
+                  }
+                  className="assist-notes"
+                />
+              </div>
+            </Card>
+          )}
 
           {/* Action Items (General vertical only) */}
-          {!isHealthcare && !isLegal && !isSales && !isSupport && (
+          {!isHealthcare && !isLegal && !isSales && !isSupport && !isRecruiting && (
             <Card className="assist-card">
               <div className="assist-card-inner">
                 <h3 className="text-serif font-medium">{getTerm('actionItem')}s</h3>

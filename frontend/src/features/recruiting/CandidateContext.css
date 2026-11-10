@@ -1,0 +1,235 @@
+/* Candidate Context Styles */
+
+.candidate-context {
+  padding: 16px;
+}
+
+/* Header */
+.candidate-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.candidate-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--bg-offset);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.candidate-info {
+  flex: 1;
+}
+
+.candidate-info h3 {
+  line-height: 1.2;
+}
+
+.stage-badge {
+  padding: 4px 10px;
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  font-weight: 500;
+  border-radius: 12px;
+}
+
+/* Stats */
+.candidate-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+
+.candidate-stat {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+/* Sections */
+.candidate-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.candidate-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.section-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.section-header:hover {
+  background: var(--bg-offset);
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-title svg {
+  color: var(--text-muted);
+}
+
+.section-content {
+  padding: 0 12px 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+/* Resume Grid */
+.resume-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.resume-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.resume-skills {
+  margin-bottom: 12px;
+}
+
+.skill-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.skill-tag {
+  padding: 2px 8px;
+  background: var(--bg-offset);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.resume-highlights {
+  margin-bottom: 0;
+}
+
+.highlights-list {
+  margin: 4px 0 0 0;
+  padding-left: 16px;
+}
+
+.highlights-list li {
+  margin-bottom: 4px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.highlights-list li:last-child {
+  margin-bottom: 0;
+}
+
+/* Prior Interviews */
+.prior-interview {
+  padding: 10px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+}
+
+.prior-interview:last-child {
+  margin-bottom: 0;
+}
+
+.interview-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.interview-type {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.verdict-badge {
+  padding: 2px 8px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.verdict-badge.advance {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.verdict-badge.hold {
+  background: rgba(245, 158, 11, 0.15);
+  color: #f59e0b;
+}
+
+.verdict-badge.reject {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.interview-notes {
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+/* Recruiter Notes */
+.recruiter-notes {
+  line-height: 1.5;
+  font-style: italic;
+}
+
+/* ATS Link */
+.candidate-ats-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  margin-top: 12px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.candidate-ats-link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

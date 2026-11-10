@@ -1,0 +1,156 @@
+/* Fraud Signals Styles */
+
+.fraud-signals {
+  overflow: hidden;
+}
+
+.fraud-signals-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.fraud-signals-header:hover {
+  background: var(--bg-offset);
+}
+
+.fraud-signals-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fraud-icon {
+  color: var(--accent);
+}
+
+.fraud-status-badge {
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.fraud-signals-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fraud-count {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  border-radius: 8px;
+}
+
+.fraud-count.flag {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.fraud-count.review {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+/* Content */
+.fraud-signals-content {
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Disclaimer */
+.fraud-disclaimer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  margin: 12px 0;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-sm);
+  color: #b45309;
+}
+
+.dark .fraud-disclaimer {
+  color: #fbbf24;
+}
+
+/* Signal Grid */
+.fraud-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+
+@media (max-width: 500px) {
+  .fraud-signal-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fraud-signal-item {
+  padding: 12px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--signal-color);
+}
+
+.fraud-signal-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.fraud-signal-header svg:first-child {
+  color: var(--text-muted);
+}
+
+.fraud-signal-status {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* Confidence Bar */
+.fraud-confidence {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.fraud-confidence-bar {
+  flex: 1;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.fraud-confidence-fill {
+  height: 100%;
+  background: var(--signal-color);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Last Checked */
+.fraud-last-checked {
+  margin-top: 12px;
+  text-align: right;
+  font-style: italic;
+}

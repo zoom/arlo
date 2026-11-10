@@ -866,6 +866,52 @@
 }
 
 /* =============================================================================
+   RECRUITING VERTICAL ROLE TOGGLE
+   ============================================================================= */
+
+.recruiting-role-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+}
+
+.role-toggle-buttons {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--bg-offset);
+  border-radius: var(--radius);
+}
+
+.role-toggle-btn {
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.role-toggle-btn:hover {
+  color: var(--foreground);
+}
+
+.role-toggle-btn.active {
+  background: var(--card);
+  color: var(--foreground);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* =============================================================================
    DRAG AND DROP FEATURE REORDERING
    ============================================================================= */
 

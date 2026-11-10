@@ -1,0 +1,201 @@
+/* Interviewer Coaching Styles */
+
+.interviewer-coaching {
+  padding: 16px;
+}
+
+.coaching-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.coaching-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.coaching-icon {
+  color: var(--accent);
+}
+
+/* Talk Ratio Meter */
+.coaching-metric {
+  margin-bottom: 16px;
+}
+
+.metric-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.metric-status {
+  font-weight: 500;
+}
+
+.talk-ratio-bar {
+  position: relative;
+  height: 12px;
+  background: var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.talk-ratio-interviewer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.talk-ratio-target {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(16, 185, 129, 0.2);
+  border-left: 2px dashed #10b981;
+  border-right: 2px dashed #10b981;
+}
+
+.talk-ratio-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+/* Stats */
+.coaching-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.coaching-stat {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-sm);
+}
+
+.coaching-stat svg {
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.stat-icon {
+  font-size: 14px;
+  font-style: italic;
+}
+
+.stat-content {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  line-height: 1;
+}
+
+.stat-label {
+  margin-top: 2px;
+}
+
+/* Question Types */
+.coaching-question-types {
+  margin-bottom: 16px;
+}
+
+.question-type-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.question-type-tag {
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.question-type-tag.good {
+  background: rgba(16, 185, 129, 0.15);
+  color: #10b981;
+}
+
+.question-type-tag.bad {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* Alerts */
+.coaching-alerts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.coaching-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  border-radius: var(--radius-sm);
+}
+
+.alert-icon {
+  color: #ef4444;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.alert-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.alert-label {
+  color: #ef4444;
+}
+
+.alert-text {
+  font-style: italic;
+}
+
+/* Tips */
+.coaching-tips {
+  padding: 12px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-md);
+}
+
+.coaching-tips-list {
+  margin: 6px 0 0 0;
+  padding-left: 16px;
+}
+
+.coaching-tips-list li {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+}
+
+.coaching-tips-list li:last-child {
+  margin-bottom: 0;
+}

@@ -1,0 +1,199 @@
+/* Candidate Notes Styles */
+
+.candidate-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Welcome Card */
+.candidate-welcome {
+  padding: 16px;
+}
+
+.welcome-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.welcome-icon {
+  color: var(--accent);
+}
+
+.welcome-text h3 {
+  line-height: 1.2;
+}
+
+.welcome-message {
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+/* Tabs */
+.candidate-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-md);
+}
+
+.candidate-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.candidate-tab:hover {
+  color: var(--text);
+}
+
+.candidate-tab.active {
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.candidate-tab svg {
+  flex-shrink: 0;
+}
+
+/* Section Cards */
+.candidate-section-card {
+  padding: 16px;
+}
+
+.section-title {
+  margin-bottom: 12px;
+  color: var(--text);
+}
+
+/* Prep Notes */
+.prep-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.prep-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.prep-number {
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: white;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.prep-item span:last-child {
+  line-height: 1.5;
+  padding-top: 2px;
+}
+
+/* Tips */
+.tips-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tips-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  line-height: 1.5;
+}
+
+.tip-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: #f59e0b;
+}
+
+/* Personal Notes */
+.candidate-notes-textarea {
+  min-height: 160px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.notes-saved-indicator {
+  margin-top: 8px;
+  text-align: right;
+  color: #10b981;
+  font-style: italic;
+}
+
+/* FAQ */
+.faq-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.faq-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.faq-question {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  gap: 12px;
+}
+
+.faq-question:hover {
+  background: var(--bg-offset);
+}
+
+.faq-question svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.faq-answer {
+  padding: 0 12px 12px;
+  line-height: 1.6;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  margin-top: 0;
+}

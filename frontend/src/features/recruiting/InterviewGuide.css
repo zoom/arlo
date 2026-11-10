@@ -1,0 +1,209 @@
+/* Interview Guide Styles */
+
+.interview-guide {
+  padding: 16px;
+}
+
+.guide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.guide-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guide-icon {
+  color: var(--accent);
+}
+
+.guide-reset-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+}
+
+.guide-reset-btn:hover {
+  color: var(--text);
+  background: var(--bg-offset);
+}
+
+/* Coverage Bar */
+.guide-coverage {
+  margin-bottom: 16px;
+}
+
+.guide-coverage-bar {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+
+.guide-coverage-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Competencies */
+.guide-competencies {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+
+.guide-competency {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.guide-competency-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.guide-competency-header:hover {
+  background: var(--bg-offset);
+}
+
+.guide-competency-info {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.guide-chevron {
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.guide-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.guide-competency-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.guide-mini-bar {
+  width: 40px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.guide-mini-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+/* Questions */
+.guide-questions {
+  border-top: 1px solid var(--border);
+}
+
+.guide-question {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s ease;
+}
+
+.guide-question:last-child {
+  border-bottom: none;
+}
+
+.guide-question:hover {
+  background: var(--bg-offset);
+}
+
+.guide-question.asked {
+  opacity: 0.6;
+}
+
+.guide-question.asked .guide-question-text {
+  text-decoration: line-through;
+}
+
+.guide-question-check {
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--border);
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+  transition: all 0.15s ease;
+}
+
+.guide-question-check.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+.guide-question-text {
+  flex: 1;
+  line-height: 1.4;
+}
+
+.guide-question-type {
+  padding: 2px 6px;
+  background: var(--bg-offset);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+/* Follow-up */
+.guide-followup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.guide-followup-suggestion {
+  padding: 12px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+}
+
+.guide-followup-suggestion p {
+  margin-top: 4px;
+  line-height: 1.5;
+}

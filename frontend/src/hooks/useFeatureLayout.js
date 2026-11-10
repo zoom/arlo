@@ -47,6 +47,16 @@ const DEFAULT_FEATURE_ORDER = {
     'smart-bookmarks',
     'participant-stats',
   ],
+  // Recruiting vertical has role-based features
+  // Interviewer features are shown by default; candidate features are filtered in InMeetingView
+  recruiting: [
+    'candidate-context',
+    'interview-guide',
+    'interview-scorecard',
+    'interviewer-coaching',
+    'fraud-signals',
+    'candidate-notes', // Only shown to candidates
+  ],
 };
 
 export function FeatureLayoutProvider({ children }) {

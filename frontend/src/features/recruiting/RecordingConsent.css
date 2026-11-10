@@ -1,0 +1,218 @@
+/* Recording Consent Banner & Indicator */
+
+.consent-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.consent-banner {
+  max-width: 440px;
+  width: 100%;
+  background: var(--bg);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+.consent-banner-content {
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 16px;
+}
+
+.consent-icon-container {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.consent-icon {
+  color: white;
+}
+
+.consent-description {
+  line-height: 1.6;
+  max-width: 360px;
+}
+
+.consent-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-md);
+  width: 100%;
+}
+
+.consent-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+
+.consent-check {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.consent-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.consent-acknowledge-btn {
+  width: 100%;
+  justify-content: center;
+  padding: 12px 24px;
+  font-size: 16px;
+}
+
+.consent-stop-link {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 4px;
+}
+
+.consent-stop-link:hover {
+  color: var(--text);
+}
+
+/* Stop Confirmation Modal */
+.consent-confirm-modal {
+  max-width: 360px;
+  width: 100%;
+}
+
+.consent-confirm-content {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.consent-alert-icon {
+  color: #dc2626;
+}
+
+.consent-confirm-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 8px;
+  width: 100%;
+}
+
+.consent-confirm-actions button {
+  flex: 1;
+}
+
+.btn-destructive {
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+  color: white !important;
+}
+
+.btn-destructive:hover {
+  background: #b91c1c !important;
+}
+
+/* Compact Recording Indicator */
+.consent-indicator {
+  margin-bottom: 12px;
+}
+
+.consent-indicator-content {
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.consent-indicator-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.consent-recording-dot {
+  position: relative;
+  width: 10px;
+  height: 10px;
+}
+
+.consent-recording-dot-inner {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #dc2626;
+}
+
+.consent-recording-dot.paused .consent-recording-dot-inner {
+  background: #f59e0b;
+}
+
+.consent-recording-dot-ping {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: rgba(220, 38, 38, 0.4);
+  animation: consent-ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+@keyframes consent-ping {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  75%, 100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.consent-indicator-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.consent-stop-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s, background 0.15s;
+}
+
+.consent-stop-btn:hover {
+  color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+}

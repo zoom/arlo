@@ -1,0 +1,279 @@
+/* Interview Scorecard Styles */
+
+.interview-scorecard {
+  padding: 16px;
+}
+
+.scorecard-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.scorecard-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scorecard-icon {
+  color: var(--accent);
+}
+
+.scorecard-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scorecard-progress-bar {
+  width: 60px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.scorecard-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+/* Overall Score */
+.scorecard-overall {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+}
+
+.scorecard-score-display {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.scorecard-score-value {
+  font-size: 24px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  color: var(--text);
+}
+
+.scorecard-score-label {
+  font-weight: 400;
+}
+
+.scorecard-score-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.scorecard-score-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+/* Competencies */
+.scorecard-competencies {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.scorecard-competency {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.scorecard-competency.expanded {
+  border-color: var(--accent);
+}
+
+.scorecard-competency-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.scorecard-competency-header:hover {
+  background: var(--bg-offset);
+}
+
+.scorecard-competency-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scorecard-competency-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scorecard-rating-badge {
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  color: white;
+}
+
+.scorecard-competency-content {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scorecard-competency-desc {
+  line-height: 1.4;
+}
+
+/* Rating Buttons */
+.scorecard-ratings {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.scorecard-rating-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-muted);
+}
+
+.scorecard-rating-btn:hover {
+  border-color: var(--rating-color);
+  color: var(--rating-color);
+}
+
+.scorecard-rating-btn.selected {
+  background: var(--rating-color);
+  border-color: var(--rating-color);
+  color: white;
+}
+
+/* AI Section */
+.scorecard-ai-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scorecard-ai-suggestion {
+  padding: 10px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--accent);
+}
+
+.scorecard-ai-suggestion p {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.scorecard-apply-suggestion {
+  background: none;
+  border: none;
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.scorecard-apply-suggestion:hover {
+  color: var(--accent-dark);
+}
+
+/* Notes */
+.scorecard-notes,
+.scorecard-overall-notes {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.scorecard-notes:focus,
+.scorecard-overall-notes:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Recommendation */
+.scorecard-recommendation {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--bg-offset);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+}
+
+.scorecard-recommendation-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.scorecard-rec-btn {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-muted);
+}
+
+.scorecard-rec-btn:hover {
+  border-color: var(--rec-color);
+  color: var(--rec-color);
+}
+
+.scorecard-rec-btn.selected {
+  background: var(--rec-color);
+  border-color: var(--rec-color);
+  color: white;
+}
+
+/* Save Button */
+.scorecard-save {
+  display: flex;
+  justify-content: flex-end;
+}
