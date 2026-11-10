@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Shield, X, Check, AlertCircle, StopCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Shield, X, Check, AlertCircle, StopCircle, MessageSquare } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import { useZoomSdk } from '../../contexts/ZoomSdkContext';
 import './RecordingConsent.css';
 
 /**
@@ -16,9 +17,23 @@ import './RecordingConsent.css';
  * - Dismissible after acknowledgment
  * - Stop/pause controls accessible to all participants
  * - Persistent "recording active" indicator
+ * - Sends chat message to meeting participants (BrightHire requirement)
  */
 
 const CONSENT_STORAGE_KEY = 'arlo-recruiting-consent-ack';
+const CHAT_SENT_KEY = 'arlo-recruiting-chat-sent';
+
+// Chat message templates for interview recording notifications
+const CHAT_MESSAGES = {
+  start: `🔴 This interview is being recorded and transcribed.
+
+To stop or pause recording, open the Arlo app in your Zoom sidebar.
+
+Recording is used to help the hiring team review this interview. You may request deletion at any time.`,
+  pause: '⏸️ Interview recording has been paused.',
+  resume: '▶️ Interview recording has resumed.',
+  stop: '⏹️ Interview recording has been stopped.',
+};
 
 export default function RecordingConsent({
   isRecording,
@@ -30,15 +45,32 @@ export default function RecordingConsent({
   candidateName,
   showDemoData = true,
 }) {
+  const { zoomSdk } = useZoomSdk();
   const [showBanner, setShowBanner] = useState(false);
   const [acknowledged, setAcknowledged] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [chatSent, setChatSent] = useState(false);
+  const chatSentRef = useRef(false);
+
+  // Send a chat message to all meeting participants
+  const sendChatMessage = (messageType) => {
+    if (!zoomSdk?.sendMessageToChat) return;
+    const message = CHAT_MESSAGES[messageType];
+    if (!message) return;
+
+    zoomSdk.sendMessageToChat({ message }).catch((err) => {
+      console.log('Chat message send failed (may not have permission):', err);
+    });
+  };
 
   // Check if user has already acknowledged for this meeting
   useEffect(() => {
     if (!isRecording) {
       setShowBanner(false);
       setAcknowledged(false);
+      // Reset chat sent flag when recording stops
+      chatSentRef.current = false;
+      sessionStorage.removeItem(`${CHAT_SENT_KEY}-${meetingId}`);
       return;
     }
 
@@ -48,6 +80,16 @@ export default function RecordingConsent({
       setShowBanner(false);
     } else {
       setShowBanner(true);
+    }
+
+    // Send chat notification when recording starts (only once per session)
+    const chatAlreadySent = sessionStorage.getItem(`${CHAT_SENT_KEY}-${meetingId}`);
+    if (!chatAlreadySent && !chatSentRef.current) {
+      chatSentRef.current = true;
+      sessionStorage.setItem(`${CHAT_SENT_KEY}-${meetingId}`, 'true');
+      setChatSent(true);
+      // Small delay to ensure SDK is ready
+      setTimeout(() => sendChatMessage('start'), 500);
     }
   }, [isRecording, meetingId]);
 
@@ -62,8 +104,19 @@ export default function RecordingConsent({
   };
 
   const confirmStop = () => {
+    sendChatMessage('stop');
     onStop?.();
     setShowStopConfirm(false);
+  };
+
+  const handlePause = () => {
+    sendChatMessage('pause');
+    onPause?.();
+  };
+
+  const handleResume = () => {
+    sendChatMessage('resume');
+    onResume?.();
   };
 
   // Full-screen consent banner (shown before acknowledgment)
@@ -157,15 +210,21 @@ export default function RecordingConsent({
             <span className="text-sans text-sm">
               {isPaused ? 'Recording Paused' : 'Recording Active'}
             </span>
+            {chatSent && (
+              <span className="consent-chat-badge text-xs">
+                <MessageSquare size={10} />
+                Notified
+              </span>
+            )}
           </div>
 
           <div className="consent-indicator-controls">
             {isPaused ? (
-              <Button variant="outline" size="sm" onClick={onResume}>
+              <Button variant="outline" size="sm" onClick={handleResume}>
                 Resume
               </Button>
             ) : (
-              <Button variant="outline" size="sm" onClick={onPause}>
+              <Button variant="outline" size="sm" onClick={handlePause}>
                 Pause
               </Button>
             )}
