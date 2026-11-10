@@ -6,6 +6,7 @@ import {
   Scale,
   TrendingUp,
   Headphones,
+  Users,
   ChevronRight
 } from 'lucide-react';
 import { useVertical, VERTICALS } from '../contexts/VerticalContext';
@@ -19,6 +20,7 @@ const VERTICAL_ICONS = {
   legal: Scale,
   sales: TrendingUp,
   support: Headphones,
+  recruiting: Users,
 };
 
 // Colors for each vertical (used for icon backgrounds)
@@ -28,6 +30,7 @@ const VERTICAL_COLORS = {
   legal: { bg: 'rgba(30, 64, 175, 0.1)', color: '#1e40af' },
   sales: { bg: 'rgba(124, 58, 237, 0.1)', color: '#7c3aed' },
   support: { bg: 'rgba(37, 99, 235, 0.1)', color: '#2563eb' },
+  recruiting: { bg: 'rgba(234, 88, 12, 0.1)', color: '#ea580c' },
 };
 
 export default function VerticalSelectorView() {
