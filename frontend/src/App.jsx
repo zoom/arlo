@@ -66,7 +66,7 @@ function RootView() {
     // Inside Zoom: wait for SDK to determine guest status and auth check to complete
     if (isGuest === null || isLoading) return; // SDK or auth still loading
 
-    console.log('RootView routing:', { isGuest, runningContext, meetingContext });
+    console.log('RootView routing:', { isGuest, runningContext, hasMeetingContext: !!meetingContext });
 
     if (isGuest) {
       // Guest user — route to full meeting view (same as authenticated users)
@@ -74,7 +74,7 @@ function RootView() {
       const meetingUUID = meetingContext?.meetingUUID;
       const meetingID = meetingContext?.meetingID;
 
-      console.log('Guest routing check:', { inMeeting, meetingUUID, meetingID, meetingContext });
+      console.log('Guest routing check:', { inMeeting, hasMeetingId: !!(meetingUUID || meetingID) });
 
       // If we're in a meeting but don't have meeting context yet, wait for it
       // Give it a reasonable timeout (meetingContext should be set even if empty)
@@ -88,7 +88,7 @@ function RootView() {
 
       if (inMeeting && routeId) {
         // Send guests to full InMeetingView with all features
-        console.log('Guest routing to full meeting view:', routeId);
+        console.log('Guest routing to full meeting view');
         navigate(`/guest-meeting/${encodeURIComponent(routeId)}`, { replace: true });
       } else {
         console.log('Guest has no meeting ID, routing to /guest');
@@ -101,7 +101,7 @@ function RootView() {
         const inMeeting = runningContext === 'inMeeting';
         const routeId = meetingContext?.meetingUUID || meetingContext?.meetingID;
         if (inMeeting && routeId) {
-          console.log('Authorized user with session, routing to meeting:', routeId);
+          console.log('Authorized user with session, routing to meeting');
           navigate(`/meeting/${encodeURIComponent(routeId)}`, { replace: true });
         } else if (!isVerticalSelected) {
           navigate('/select-vertical', { replace: true });

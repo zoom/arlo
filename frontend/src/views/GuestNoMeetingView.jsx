@@ -16,10 +16,10 @@ export default function GuestNoMeetingView() {
     const meetingID = meetingContext?.meetingID;
     const routeId = meetingUUID || meetingID;
 
-    console.log('GuestNoMeetingView: checking redirect', { inMeeting, meetingUUID, meetingID, routeId });
+    console.log('GuestNoMeetingView: checking redirect', { inMeeting, hasMeetingId: !!routeId });
 
     if (inMeeting && routeId) {
-      console.log('GuestNoMeetingView: redirecting to full view with ID:', routeId);
+      console.log('GuestNoMeetingView: redirecting to the full view');
       navigate(`/guest-meeting/${encodeURIComponent(routeId)}`, { replace: true });
     }
   }, [runningContext, meetingContext, navigate]);

@@ -79,7 +79,7 @@ export function useVoiceCommands({
     const commandKey = `${command.action}-${command.parameter || ''}`;
     const lastExecution = recentCommands.get(commandKey);
     if (lastExecution && Date.now() - lastExecution < COMMAND_COOLDOWN) {
-      console.log('Voice command on cooldown:', commandKey);
+      console.log('Voice command on cooldown:', command.action);
       return;
     }
     recentCommands.set(commandKey, Date.now());
@@ -248,12 +248,10 @@ export function useVoiceCommands({
     const text = segment?.text;
     if (!text) return;
 
-    // Debug: log all incoming text to help diagnose detection issues
-    console.log('[VoiceCommands] Processing segment:', text.substring(0, 100));
-
     const command = processTranscriptForCommand(text);
     if (command) {
-      console.log('[VoiceCommands] Command detected:', command);
+      // Only the action: the command object carries what was said
+      console.log('[VoiceCommands] Command detected:', command.action);
       executeCommand(command);
     }
   }, [enabled, isProcessing, executeCommand]);

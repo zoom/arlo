@@ -154,7 +154,7 @@ export function ZoomSdkProvider({ children }) {
 
           try {
             const uuidResponse = await zoomSdk.getMeetingUUID();
-            console.log('getMeetingUUID response:', uuidResponse);
+            console.log('getMeetingUUID answered:', !!uuidResponse);
             if (uuidResponse) {
               meetingUUID = uuidResponse?.meetingUUID ||
                 uuidResponse?.uuid ||
@@ -166,7 +166,7 @@ export function ZoomSdkProvider({ children }) {
 
           try {
             const meeting = await zoomSdk.getMeetingContext();
-            console.log('getMeetingContext response:', meeting);
+            // Not logged: the response holds the meeting topic and ids
             if (!meetingUUID && meeting) {
               meetingUUID = meeting.meetingUUID || meeting.meetingId || meeting.uuid || meeting.id;
             }
@@ -186,11 +186,11 @@ export function ZoomSdkProvider({ children }) {
 
           // Use meetingID as fallback if no UUID available
           if (!data.meetingUUID && data.meetingID) {
-            console.log('Using meetingID as fallback identifier:', data.meetingID);
+            console.log('Using the numeric meeting ID as fallback identifier');
             data.meetingUUID = String(data.meetingID);
           }
 
-          console.log('Final meeting context:', data);
+          console.log('Meeting context ready:', { hasMeetingUUID: !!data.meetingUUID });
           return data;
         }
 

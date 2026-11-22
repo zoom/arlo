@@ -178,7 +178,7 @@ export default function useZoomAuth() {
       console.log('Calling zoomSdk.authorize with challenge...');
       try {
         const authorizeResult = await zoomSdk.authorize({ codeChallenge, state });
-        console.log('zoomSdk.authorize returned:', authorizeResult);
+        console.log('zoomSdk.authorize returned:', authorizeResult?.message || 'ok');
       } catch (authError) {
         console.error('zoomSdk.authorize failed:', authError);
         // Stop polling/listening if authorize() throws before onAuthorized fires.
