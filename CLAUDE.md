@@ -211,7 +211,7 @@ ZOOM_CLIENT_SECRET=...
 ZOOM_WEBHOOK_TOKEN=...          # For webhook verification
 PUBLIC_URL=https://...          # ngrok HTTPS URL
 SESSION_SECRET=...              # 64 chars: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-TOKEN_ENCRYPTION_KEY=...        # 64 chars (AES-256): node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+TOKEN_ENCRYPTION_KEY=...        # Required: 64 hex chars = 32 bytes (AES-256-GCM). 32-char keys and REDIS_ENCRYPTION_KEY are no longer accepted. node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 OPENROUTER_API_KEY=...          # Optional — free models work without it
 OPENROUTER_MODELS=nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3.5-lightning:free,google/gemma-4-31b-it:free
 DEFAULT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free

@@ -32,8 +32,8 @@ Use this checklist to verify that the Arlo reference implementation works correc
   # SESSION_SECRET (64 chars)
   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
-  # REDIS_ENCRYPTION_KEY (32 chars)
-  node -e "console.log(require('crypto').randomBytes(16).toString('hex'))"
+  # TOKEN_ENCRYPTION_KEY (64 hex chars = 32 bytes, AES-256-GCM)
+  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
   ```
 
 - [ ] Verify `.env` has all required values:
@@ -41,7 +41,7 @@ Use this checklist to verify that the Arlo reference implementation works correc
   - [ ] `ZOOM_CLIENT_SECRET`
   - [ ] `ZOOM_APP_ID`
   - [ ] `SESSION_SECRET`
-  - [ ] `REDIS_ENCRYPTION_KEY`
+  - [ ] `TOKEN_ENCRYPTION_KEY`
   - [ ] `PUBLIC_URL` (will be set after ngrok)
   - [ ] `DATABASE_URL` (default works for Docker)
 

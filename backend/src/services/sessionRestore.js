@@ -52,8 +52,6 @@ function sealSession({ user, refreshToken, scopes }) {
 /** Decrypt and validate a restore cookie. Returns the payload or null. */
 function openSession(cookieValue) {
   if (!isString(cookieValue, MAX_COOKIE_CHARS + 200)) return null;
-  // Only the authenticated format (iv:tag:ciphertext); never the legacy CBC path.
-  if (cookieValue.split(':').length !== 3) return null;
   try {
     const payload = JSON.parse(decryptToken(cookieValue));
     if (payload?.typ !== RESTORE_TYPE || payload.v !== 1) return null;

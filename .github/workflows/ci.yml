@@ -75,4 +75,5 @@ jobs:
           PUBLIC_URL: https://example.com
           DATABASE_URL: postgresql://postgres:postgres@postgres:5432/test
           SESSION_SECRET: testsecrettestsecrettestsecrettestsecrettestsecrettestsecret1234
-          REDIS_ENCRYPTION_KEY: testkeytestkeytestkey12345678901
+          # Build-time placeholder only (64 hex characters); not a real key
+          TOKEN_ENCRYPTION_KEY: 0000000000000000000000000000000000000000000000000000000000000000

@@ -38,69 +38,48 @@ function generateState() {
   return base64URLEncode(crypto.randomBytes(32));
 }
 
+const TOKEN_CIPHER = 'aes-256-gcm';
+
 /**
- * Encrypt access token for storage using authenticated AES-GCM.
- * Existing deployments may still use a 16-byte key, so select AES-128-GCM
- * until those records can be migrated to a versioned 32-byte key.
- * Format: iv:authTag:ciphertext (all hex-encoded)
+ * Encrypt a token with AES-256-GCM (authenticated encryption).
+ * Format: iv:authTag:ciphertext, all hex. A fresh 12-byte nonce every time.
  */
 function encryptToken(token) {
   const key = Buffer.from(config.encryptionKey, 'hex');
-  const algorithm = `aes-${key.length * 8}-gcm`;
   const iv = crypto.randomBytes(12); // GCM recommended IV size is 12 bytes
 
-  const cipher = crypto.createCipheriv(algorithm, key, iv);
+  const cipher = crypto.createCipheriv(TOKEN_CIPHER, key, iv);
   let encrypted = cipher.update(token, 'utf8', 'hex');
   encrypted += cipher.final('hex');
+  const authTag = cipher.getAuthTag(); // 16 bytes
 
-  // Get the authentication tag (16 bytes)
-  const authTag = cipher.getAuthTag();
-
-  // Return iv:authTag:ciphertext (all hex-encoded)
   return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
 }
 
 /**
- * Decrypt access token from storage using AES-256-GCM (authenticated encryption)
- * Supports both new format (iv:authTag:ciphertext) and legacy format (iv:ciphertext)
+ * Decrypt a token produced by encryptToken. Throws if it was modified, was
+ * made with another key, or is not in the iv:authTag:ciphertext format. The
+ * older unauthenticated CBC format (iv:ciphertext) is not accepted.
  */
 function decryptToken(encryptedToken) {
-  const key = Buffer.from(config.encryptionKey, 'hex');
-  const parts = encryptedToken.split(':');
-
-  // Check if this is the new GCM format (3 parts) or legacy CBC format (2 parts)
-  if (parts.length === 3) {
-    // New AES-256-GCM format: iv:authTag:ciphertext
-    const [ivHex, authTagHex, encrypted] = parts;
-    const iv = Buffer.from(ivHex, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
-
-    const algorithm = `aes-${key.length * 8}-gcm`;
-    const decipher = crypto.createDecipheriv(algorithm, key, iv);
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return decrypted;
-  } else if (parts.length === 2) {
-    // Legacy AES-128-CBC format: iv:ciphertext (for backwards compatibility during migration)
-    // This path will fail if the key is now 32 bytes instead of 16 bytes
-    console.warn('⚠️ Decrypting token in legacy CBC format — re-encryption recommended');
-    const [ivHex, encrypted] = parts;
-    const iv = Buffer.from(ivHex, 'hex');
-
-    // Use only first 16 bytes of key for legacy CBC (if key is 32 bytes)
-    const legacyKey = key.length > 16 ? key.slice(0, 16) : key;
-    const decipher = crypto.createDecipheriv('aes-128-cbc', legacyKey, iv);
-
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return decrypted;
-  } else {
+  const parts = typeof encryptedToken === 'string' ? encryptedToken.split(':') : [];
+  if (parts.length !== 3) {
     throw new Error('Invalid encrypted token format');
   }
+  const [ivHex, authTagHex, encrypted] = parts;
+  const iv = Buffer.from(ivHex, 'hex');
+  const authTag = Buffer.from(authTagHex, 'hex');
+  if (iv.length !== 12 || authTag.length !== 16) {
+    throw new Error('Invalid encrypted token format');
+  }
+
+  const key = Buffer.from(config.encryptionKey, 'hex');
+  const decipher = crypto.createDecipheriv(TOKEN_CIPHER, key, iv);
+  decipher.setAuthTag(authTag);
+
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
 }
 
 /**

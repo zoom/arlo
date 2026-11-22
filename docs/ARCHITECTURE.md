@@ -696,7 +696,7 @@ ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET    # From Zoom Marketplace
 PUBLIC_URL                             # Your public HTTPS URL
 DATABASE_URL                           # Postgres connection string
 SESSION_SECRET                         # 64-char random string
-REDIS_ENCRYPTION_KEY                   # 32-char random string (token encryption)
+TOKEN_ENCRYPTION_KEY                   # 64 hex characters = 32 bytes (AES-256-GCM token encryption)
 OPENROUTER_API_KEY                     # Optional (free models work without)
 OPENROUTER_MODELS                     # Ordered free-model allowlist
 DEFAULT_MODEL                          # Default: z-ai/glm-5.2:free

@@ -44,16 +44,20 @@ if (!process.env.RTMS_SERVICE_URL && process.env.RTMS_HOST && process.env.RTMS_P
   process.env.RTMS_SERVICE_URL = `http://${process.env.RTMS_HOST}:${process.env.RTMS_PORT}`;
 }
 
-// Hosted deploys may inject base64 keys; local dev typically uses 64-char hex.
+// The token encryption key must be 32 bytes (AES-256). Accepted forms: 64 hex
+// characters, or base64 of 32 bytes (some hosts generate secrets that way).
+// Returns the key as 64 hex characters, or null when it is neither.
 function resolveEncryptionKey(raw) {
-  if (/^[0-9a-f]{32}$/i.test(raw) || /^[0-9a-f]{64}$/i.test(raw)) {
-    return raw;
+  if (/^[0-9a-f]{64}$/i.test(raw)) {
+    return raw.toLowerCase();
   }
-  const decoded = Buffer.from(raw, 'base64');
-  if (decoded.length === 32) {
-    return decoded.toString('hex');
+  if (/^[A-Za-z0-9+/_-]+={0,2}$/.test(raw)) {
+    const decoded = Buffer.from(raw, 'base64');
+    if (decoded.length === 32) {
+      return decoded.toString('hex');
+    }
   }
-  return raw;
+  return null;
 }
 
 // Validate required variables
@@ -105,11 +109,15 @@ if (sessionSecret && /^your_.*_here$/i.test(sessionSecret)) {
   process.exit(1);
 }
 
-// Support new TOKEN_ENCRYPTION_KEY with REDIS_ENCRYPTION_KEY as fallback
-const encryptionKeyRaw = process.env.TOKEN_ENCRYPTION_KEY || process.env.REDIS_ENCRYPTION_KEY;
+const KEY_HELP = '   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"';
+const encryptionKeyRaw = process.env.TOKEN_ENCRYPTION_KEY;
 if (!encryptionKeyRaw) {
-  console.error('❌ Missing TOKEN_ENCRYPTION_KEY (or legacy REDIS_ENCRYPTION_KEY)');
-  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  console.error('❌ Missing TOKEN_ENCRYPTION_KEY');
+  if (process.env.REDIS_ENCRYPTION_KEY) {
+    console.error('   REDIS_ENCRYPTION_KEY is set, but that older 16-byte key is no longer used.');
+    console.error('   Set TOKEN_ENCRYPTION_KEY to a new 32-byte key instead.');
+  }
+  console.error(KEY_HELP);
   process.exit(1);
 }
 
@@ -169,16 +177,14 @@ if (/^your_.*_here$/i.test(encryptionKeyRaw)) {
   process.exit(1);
 }
 
-// Validate encryption key length
-// AES-256-GCM requires 32 bytes = 64 hex characters
-// Legacy AES-128-CBC used 16 bytes = 32 hex characters (still supported for migration)
-if (encryptionKey.length === 32) {
-  console.warn('⚠️ Using legacy 32-char encryption key (AES-128). Upgrade to 64-char key for AES-256-GCM:');
-  console.warn('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
-} else if (encryptionKey.length !== 64) {
-  console.error('❌ TOKEN_ENCRYPTION_KEY must be exactly 64 characters (32 bytes hex-encoded for AES-256)');
-  console.error(`   Current length: ${encryptionKey.length}`);
-  console.error('   Generate with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+// AES-256-GCM needs a 32-byte key. The 16-byte keys that older versions
+// accepted (AES-128) are refused: generate a new key. Nothing needs migrating,
+// because tokens only live in memory and in 24-hour session cookies; users
+// simply sign in again. The key itself is never printed.
+if (!encryptionKey) {
+  console.error('❌ TOKEN_ENCRYPTION_KEY must be a 32-byte key: 64 hex characters (or base64 of 32 bytes).');
+  console.error(`   The current value is ${encryptionKeyRaw.length} characters and is not a valid key.`);
+  console.error(KEY_HELP);
   process.exit(1);
 }
 

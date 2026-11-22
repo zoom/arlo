@@ -1,63 +1,93 @@
+// Token encryption: AES-256-GCM only, with a 32-byte key. The older 16-byte
+// key (AES-128) and the unauthenticated CBC format are no longer accepted.
+const h = require('./helpers');
+
+h.setTestEnv();
+
+const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
-const test = require('node:test');
-
-process.env.ZOOM_CLIENT_ID = 'test-client-id';
-process.env.ZOOM_CLIENT_SECRET = 'test-client-secret';
-process.env.PUBLIC_URL = 'https://arlo.example.test';
-process.env.DATABASE_URL = 'mysql://test:test@localhost:3306/test';
-process.env.SESSION_SECRET = 'test-session-secret';
-process.env.REDIS_ENCRYPTION_KEY = '00112233445566778899aabbccddeeff';
-process.env.TOKEN_ENCRYPTION_KEY =
-  'ffeeddccbbaa9988776655443322110000112233445566778899aabbccddeeff';
-
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 const { encryptToken, decryptToken } = require('../src/services/auth');
 
-function encryptLegacy(token) {
-  const key = Buffer.from(process.env.REDIS_ENCRYPTION_KEY, 'hex');
+test('tokens are encrypted with AES-256-GCM and read back', () => {
+  const encrypted = encryptToken('zoom-refresh-token');
+  const [iv, tag, ciphertext] = encrypted.split(':');
+  assert.equal(encrypted.split(':').length, 3);
+  assert.equal(iv.length, 24);   // 12-byte nonce
+  assert.equal(tag.length, 32);  // 16-byte authentication tag
+  assert.equal(ciphertext.includes('zoom-refresh-token'), false);
+  assert.equal(decryptToken(encrypted), 'zoom-refresh-token');
+
+  // The key in use is 32 bytes: decrypting by hand with AES-256-GCM works
+  const key = Buffer.from(process.env.TOKEN_ENCRYPTION_KEY, 'hex');
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(iv, 'hex'));
+  decipher.setAuthTag(Buffer.from(tag, 'hex'));
+  assert.equal(decipher.update(ciphertext, 'hex', 'utf8') + decipher.final('utf8'), 'zoom-refresh-token');
+});
+
+test('every encryption uses a fresh nonce', () => {
+  assert.notEqual(encryptToken('same'), encryptToken('same'));
+});
+
+test('a modified token is rejected, not decrypted to something else', () => {
+  const encrypted = encryptToken('zoom-refresh-token');
+  const [iv, tag, ciphertext] = encrypted.split(':');
+  const flip = (hex) => hex.slice(0, -1) + (hex.endsWith('0') ? '1' : '0');
+  assert.throws(() => decryptToken(`${iv}:${tag}:${flip(ciphertext)}`));
+  assert.throws(() => decryptToken(`${iv}:${flip(tag)}:${ciphertext}`));
+  assert.throws(() => decryptToken(`${flip(iv)}:${tag}:${ciphertext}`));
+});
+
+test('the legacy unauthenticated CBC format is refused', () => {
+  const key = Buffer.from(process.env.TOKEN_ENCRYPTION_KEY, 'hex').subarray(0, 16);
   const iv = crypto.randomBytes(16);
   const cipher = crypto.createCipheriv('aes-128-cbc', key, iv);
-  let ciphertext = cipher.update(token, 'utf8', 'hex');
-  ciphertext += cipher.final('hex');
-  return `${iv.toString('hex')}:${ciphertext}`;
+  const legacy = `${iv.toString('hex')}:${cipher.update('old-token', 'utf8', 'hex') + cipher.final('hex')}`;
+  assert.throws(() => decryptToken(legacy), /format/i);
+  assert.throws(() => decryptToken('not-a-token'), /format/i);
+});
+
+// Start-up validation, checked in a child process because config exits on failure.
+function startConfig(extraEnv) {
+  const env = {
+    PATH: process.env.PATH,
+    ZOOM_CLIENT_ID: 'test-client-id',
+    ZOOM_CLIENT_SECRET: 'test-client-secret-value',
+    ZOOM_WEBHOOK_TOKEN: 'test-webhook-token-value',
+    PUBLIC_URL: 'https://arlo.example.test',
+    SESSION_SECRET: crypto.randomBytes(32).toString('hex'),
+    NODE_ENV: 'test',
+    ...extraEnv,
+  };
+  return spawnSync(process.execPath, ['-e', "require('./src/config'); console.log('config ok')"], {
+    cwd: path.join(__dirname, '..'), env, encoding: 'utf8',
+  });
 }
+const hex = (bytes) => crypto.randomBytes(bytes).toString('hex');
 
-test('writes versioned AES-256-GCM tokens and reads them back', () => {
-  const encrypted = encryptToken('access-token-value');
-
-  assert.match(encrypted, /^v2:[0-9a-f]{24}:[0-9a-f]{32}:[0-9a-f]+$/);
-  assert.equal(decryptToken(encrypted), 'access-token-value');
+test('the server starts with a 32-byte key, as hex or base64', () => {
+  assert.equal(startConfig({ TOKEN_ENCRYPTION_KEY: hex(32) }).status, 0);
+  assert.equal(startConfig({ TOKEN_ENCRYPTION_KEY: crypto.randomBytes(32).toString('base64') }).status, 0);
 });
 
-test('decrypts legacy CBC tokens with the separate legacy key', () => {
-  const encrypted = encryptLegacy('legacy-refresh-token');
-
-  assert.equal(decryptToken(encrypted), 'legacy-refresh-token');
+test('the server refuses to start with a 16-byte (AES-128) key and says how to fix it', () => {
+  const result = startConfig({ TOKEN_ENCRYPTION_KEY: hex(16) });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /TOKEN_ENCRYPTION_KEY/);
+  assert.match(result.stderr, /64/);
+  assert.match(result.stderr, /randomBytes\(32\)/);
 });
 
-test('supports deriving a GCM key from a deployed 16-byte legacy secret', () => {
-  const config = require('../src/config');
-  const currentKey = config.encryptionKey;
-  config.encryptionKey = process.env.REDIS_ENCRYPTION_KEY;
-
-  try {
-    const encrypted = encryptToken('derived-key-token');
-    assert.equal(decryptToken(encrypted), 'derived-key-token');
-  } finally {
-    config.encryptionKey = currentKey;
-  }
+test('the old REDIS_ENCRYPTION_KEY variable is no longer a substitute', () => {
+  const result = startConfig({ REDIS_ENCRYPTION_KEY: hex(32) });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /TOKEN_ENCRYPTION_KEY/);
 });
 
-test('rejects modified GCM ciphertext', () => {
-  const encrypted = encryptToken('sensitive-token');
-  const parts = encrypted.split(':');
-  const lastNibble = parts[3].at(-1);
-  parts[3] = `${parts[3].slice(0, -1)}${lastNibble === '0' ? '1' : '0'}`;
-
-  assert.throws(() => decryptToken(parts.join(':')));
-});
-
-test('rejects malformed encrypted values', () => {
-  assert.throws(() => decryptToken('not-an-encrypted-token'));
-  assert.throws(() => encryptToken(''));
+test('the key is never echoed in a start-up error', () => {
+  const badKey = hex(16);
+  const result = startConfig({ TOKEN_ENCRYPTION_KEY: badKey });
+  assert.equal((result.stderr + result.stdout).includes(badKey), false);
 });
