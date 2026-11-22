@@ -12,6 +12,7 @@ import {
   statusFromRtmsStatusList,
   statusFromPoll,
   shouldAutoRestart,
+  canStartRtms,
 } from '../lib/rtmsMachine';
 
 const MeetingContext = createContext();
@@ -82,6 +83,8 @@ export function MeetingProvider({ children }) {
   rtmsRef.current = rtms;
   // When the pending start request expires (ms epoch), for the countdown in the UI
   const [rtmsRequestExpiresAt, setRtmsRequestExpiresAt] = useState(null);
+  // Counts start requests so a repeated request restarts the 60s countdown
+  const [startAttempt, setStartAttempt] = useState(0);
   // The request this client made and is waiting on. Chat notices and timeline
   // events fire when Zoom confirms it, and only on the client that asked.
   const localActionRef = useRef(null);
@@ -351,29 +354,42 @@ export function MeetingProvider({ children }) {
 
   // Poll getRTMSStatus while a start is unresolved (see STATUS_POLL_PHASES).
   const lastPolledStatusRef = useRef(null);
+  const lastPollLogRef = useRef(null);
   useEffect(() => {
-    if (!zoomSdk || !rtmsStatusSupported || !meetingId) return undefined;
+    // Polls even if zoomSdk.config did not accept the status APIs: the call
+    // then fails and the reason is logged once, which is worth knowing.
+    if (!zoomSdk || !meetingId) return undefined;
     if (!STATUS_POLL_PHASES.has(rtms.phase)) return undefined;
     let cancelled = false;
+    const logOnce = (line) => {
+      if (line === lastPollLogRef.current) return;
+      lastPollLogRef.current = line;
+      console.log(line);
+    };
     const poll = () => {
       Promise.resolve()
         .then(() => readRtmsStatus(zoomSdk))
         .then((response) => {
           if (cancelled) return;
+          // Raw session statuses (no ids), logged when they change: shows what
+          // the client reports when the host denies or allows the app.
+          const raw = Array.isArray(response?.rtmsStatus)
+            ? response.rtmsStatus.map((session) => String(session?.status)).join(', ')
+            : 'unexpected response';
+          logOnce(`getRTMSStatus poll: [${raw}]`);
           const polled = statusFromPoll(response?.rtmsStatus);
           if (polled === lastPolledStatusRef.current) return;
           lastPolledStatusRef.current = polled;
-          console.log('getRTMSStatus poll:', polled || 'no running session');
           if (polled) dispatchRtms({ type: 'STATUS', status: polled, source: 'sdk' });
         })
-        .catch(() => {});
+        .catch((error) => logOnce(`getRTMSStatus poll failed: ${error?.code ?? ''} ${error?.message ?? error}`));
     };
     const interval = setInterval(poll, STATUS_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [zoomSdk, rtmsStatusSupported, meetingId, rtms.phase]);
+  }, [zoomSdk, meetingId, rtms.phase]);
 
   // A request that Zoom never confirms must not hang silently.
   useEffect(() => {
@@ -393,7 +409,7 @@ export function MeetingProvider({ children }) {
     setRtmsRequestExpiresAt(Date.now() + START_REQUEST_EXPIRY_MS);
     const timer = setTimeout(() => dispatchRtms({ type: 'EXPIRE' }), START_REQUEST_EXPIRY_MS);
     return () => clearTimeout(timer);
-  }, [rtms.phase]);
+  }, [rtms.phase, startAttempt]);
 
   const notify = useCallback((type, message) => {
     try {
@@ -500,8 +516,8 @@ export function MeetingProvider({ children }) {
   }, [zoomSdk, rtmsStatusSupported]);
 
   const startRTMS = useCallback(async (isAutoStart = false) => {
-    const current = rtmsRef.current;
-    if (!zoomSdk || isRtmsBusy(current) || isRtmsActive(current)) return;
+    // Also allowed while a request is waiting on the host (see canStartRtms)
+    if (!zoomSdk || !canStartRtms(rtmsRef.current)) return;
 
     const startingKey = `rtms-starting-${meetingId}`;
     const alreadyStarting = sessionStorage.getItem(startingKey);
@@ -513,6 +529,7 @@ export function MeetingProvider({ children }) {
 
     startedHereRef.current = true;
     autoRestartedRef.current = false;
+    setStartAttempt((n) => n + 1);
     try {
       await requestRtms('start', START_OPTIONS);
     } finally {

@@ -8,6 +8,7 @@ import {
   statusFromRtmsStatusList,
   statusFromPoll,
   shouldAutoRestart,
+  canStartRtms,
 } from './rtmsMachine';
 
 const run = (events, from = initialRtmsState) => events.reduce(rtmsReducer, from);
@@ -375,4 +376,35 @@ describe('allowed by the host but not started (a refresh fixes it, so the app do
       expect(shouldAutoRestart({ ...stuck, phase })).toBe(false);
     },
   );
+});
+
+describe('Start stays available while waiting on the host', () => {
+  // Seen in a meeting: the host denied, then allowed Arlo while the countdown was
+  // still running. The client told the app nothing, so only the user can act.
+  const requested = run([request('start'), accepted('start')]);
+  const waiting = rtmsReducer(requested, { type: 'TIMEOUT' });
+
+  test('a fresh request cannot be doubled by a second click', () => {
+    expect(canStartRtms(requested)).toBe(false);
+  });
+
+  test('once it is clearly waiting on the host, the user may start again', () => {
+    expect(canStartRtms(waiting)).toBe(true);
+    const again = rtmsReducer(waiting, request('start'));
+    expect(again.phase).toBe('requested');
+    expect(again.waitingLong).toBe(false);
+  });
+
+  test('start is available when nothing is running and nothing is pending', () => {
+    for (const phase of ['idle', 'stopped', 'denied', 'failed', 'expired', 'stalled']) {
+      expect(canStartRtms({ ...initialRtmsState, phase })).toBe(true);
+    }
+  });
+
+  test('start is not available while running, starting, or with another request pending', () => {
+    for (const phase of ['active', 'paused', 'interrupted', 'starting']) {
+      expect(canStartRtms({ ...initialRtmsState, phase })).toBe(false);
+    }
+    expect(canStartRtms({ ...initialRtmsState, phase: 'stopped', pending: 'stop' })).toBe(false);
+  });
 });

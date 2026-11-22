@@ -212,3 +212,13 @@ export function statusFromPoll(list) {
 export function shouldAutoRestart({ phase, wantsTranscription, alreadyRetried }) {
   return phase === 'starting' && wantsTranscription === true && !alreadyRetried;
 }
+
+/**
+ * May the user press Start? Yes when nothing is running or pending, and also
+ * while a request is visibly waiting on the host: the client does not say when
+ * the host allows the app, and a second startRTMS is what starts it then.
+ */
+export function canStartRtms(state) {
+  if (state.phase === 'requested') return state.waitingLong === true;
+  return NOT_RUNNING_PHASES.has(state.phase) && state.pending === null;
+}

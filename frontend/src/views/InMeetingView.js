@@ -1004,6 +1004,15 @@ export default function InMeetingView({ isGuestMode = false }) {
               <div className="transcript-state-inner" role="status" aria-live="polite">
                 <LoadingSpinner size={32} />
                 <p className="text-serif text-muted">{requestingLabel}</p>
+                {/* Zoom does not tell the app when the host allows it, so the user can */}
+                {!isGuestMode && rtmsWaitingLong && (
+                  <>
+                    <p className="text-sans text-sm text-muted">Has the host allowed Arlo?</p>
+                    <Button variant="outline" onClick={() => startRTMS(false)}>
+                      Start Transcription
+                    </Button>
+                  </>
+                )}
               </div>
             </Card>
           )}
@@ -1245,6 +1254,12 @@ export default function InMeetingView({ isGuestMode = false }) {
                     <LoadingSpinner size={14} />
                     <span className="text-sans text-sm text-muted">{requestingLabel}</span>
                   </div>
+                  {!isGuestMode && rtmsWaitingLong && (
+                    <Button variant="outline" size="sm" onClick={() => startRTMS(false)}>
+                      <Mic size={14} />
+                      Start
+                    </Button>
+                  )}
                 </>
               ) : transcriptState === 'starting' ? (
                 <>
