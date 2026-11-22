@@ -31,8 +31,9 @@ services:
       dockerfile: Dockerfile
     container_name: arlo-meeting-assistant-frontend
     restart: unless-stopped
-    # Vite dev server. The app calls the API on its own origin (through the
-    # backend proxy), so it needs no API/WS URL variables.
+    # Serves a built bundle, rebuilt on every source change (see
+    # frontend/scripts/serve-built.mjs). The app calls the API on its own origin
+    # (through the backend proxy), so it needs no API/WS URL variables.
     ports:
       - "3001:3000"
     volumes:

@@ -23,9 +23,12 @@ export default defineConfig({
       usePolling: process.env.VITE_USE_POLLING === 'true',
     },
   },
+  // `npm start` (what Docker runs) serves the built bundle with this server
   preview: {
     host: '0.0.0.0',
     port: 3000,
+    strictPort: true,
+    allowedHosts: ['frontend', ...extraHosts],
   },
   build: {
     // Same folder CRA used: the backend serves it when present, and deploy

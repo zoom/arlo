@@ -14,5 +14,5 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
-# Start the Vite development server (host/port set in vite.config.js)
+# Serve the built bundle and rebuild on change (host/port set in vite.config.js)
 CMD ["npm", "start"]

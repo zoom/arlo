@@ -1,7 +1,7 @@
 {
   "name": "arlo-meeting-assistant-frontend",
   "version": "0.9.0",
-  "description": "Arlo — In-Meeting AI Assistant for Zoom",
+  "description": "Arlo \u2014 In-Meeting AI Assistant for Zoom",
   "engines": {
     "node": ">=20"
   },
@@ -16,7 +16,7 @@
     "serve": "^14.2.6"
   },
   "scripts": {
-    "start": "vite",
+    "start": "node scripts/serve-built.mjs",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",

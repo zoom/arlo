@@ -43,7 +43,7 @@ docker-compose down && docker-compose up --build  # Clean restart
 ```bash
 npm run dev              # Start all services concurrently (backend + frontend + rtms)
 npm run dev:backend      # Backend only (nodemon for auto-restart)
-npm run dev:frontend     # Frontend only (Vite dev server)
+npm run dev:frontend     # Frontend only (built bundle, rebuilt on change; `npm run dev -w frontend` for the Vite dev server)
 npm run dev:rtms         # RTMS service only
 npm run setup            # Install all workspace dependencies
 ```
@@ -56,7 +56,9 @@ npm test -w frontend         # Vitest unit + UI state tests (jsdom, Testing Libr
 npm run lint -w frontend     # ESLint
 ```
 
-Files that contain JSX use the `.jsx` extension (Vite requires it). Hot reload is off by default because the backend proxy does not forward WebSockets; reload the Zoom panel after a change, or set `VITE_HMR=true` when using the dev server directly on port 3001.
+Files that contain JSX use the `.jsx` extension (Vite requires it).
+
+The frontend container (`npm start`) serves a **built bundle** that is rebuilt on every source change (`frontend/scripts/serve-built.mjs`); reload the Zoom panel to see a change. It does not run Vite's dev server: unbundled modules through ngrok load slowly, and without the hot-reload WebSocket (the backend proxy does not forward it) the Zoom webview can mix cached and new modules and fail to mount. For the hot-reloading dev server in a normal browser, run `npm run dev -w frontend` (set `VITE_HMR=true`).
 
 ### ngrok (Required for Zoom App Testing)
 
