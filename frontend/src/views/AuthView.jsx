@@ -9,9 +9,11 @@ import Button from '../components/ui/Button';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import './AuthView.css';
 
-// One silent sign-in attempt per page load. Module-level so a remount of
-// AuthView (route change, StrictMode) cannot retry a failing authorize().
-let silentReauthAttempted = false;
+// At most one silent sign-in attempt per minute. Module-level so a remount of
+// AuthView (route change, StrictMode) cannot retry a failing authorize() in a
+// loop, while a session that expires hours later can still be renewed.
+const SILENT_REAUTH_INTERVAL_MS = 60000;
+let lastSilentReauthAt = -Infinity;
 
 export default function AuthView() {
   const navigate = useNavigate();
@@ -76,10 +78,10 @@ export default function AuthView() {
       sdkConfigured,
       sdkError,
       userContextStatus,
-      alreadyAttempted: silentReauthAttempted,
+      alreadyAttempted: Date.now() - lastSilentReauthAt < SILENT_REAUTH_INTERVAL_MS,
     })) return;
 
-    silentReauthAttempted = true;
+    lastSilentReauthAt = Date.now();
     setSilentState('running');
     authorize()
       .then(() => setSilentState('idle'))

@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { watchForSessionLoss } from '../lib/sessionWatch';
 
 const AuthContext = createContext();
 
@@ -28,6 +29,15 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     checkAuth().finally(() => setIsLoading(false));
   }, [checkAuth]);
+
+  // A session can end while the panel is open (it lasts 24 hours). When an API
+  // call is refused, ask the server; if the session really is gone the app
+  // falls back to the sign-in screen, which signs in silently inside Zoom.
+  const isAuthenticatedRef = useRef(isAuthenticated);
+  isAuthenticatedRef.current = isAuthenticated;
+  useEffect(() => watchForSessionLoss(() => {
+    if (isAuthenticatedRef.current) checkAuth();
+  }), [checkAuth]);
 
   // The session itself is an httpOnly cookie; JavaScript only keeps who is signed in.
   const login = useCallback((userData) => {
