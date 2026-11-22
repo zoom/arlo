@@ -37,6 +37,13 @@ const OPTIONAL_CAPABILITIES = [
   'runRenderingContext',
 ];
 
+// Confirmed RTMS state (connecting/started/paused/stopped). Requested on their own so an
+// app whose Marketplace config doesn't list them yet keeps the optional APIs above.
+const RTMS_STATUS_CAPABILITIES = [
+  'getRTMSStatus',
+  'onRTMSStatusChange',
+];
+
 // Check if running outside Zoom - evaluated dynamically
 const checkIsTestMode = () => !window.zoomSdk || window.location.search.includes('test=true');
 
@@ -58,6 +65,8 @@ export function ZoomSdkProvider({ children }) {
   const [runningContext, setRunningContext] = useState(initialTestMode ? 'test' : null);
   const [meetingContext, setMeetingContext] = useState(null);
   const [userContext, setUserContext] = useState(null);
+  // true once zoomSdk.config() accepted getRTMSStatus + onRTMSStatusChange
+  const [rtmsStatusSupported, setRtmsStatusSupported] = useState(false);
   // null = SDK not loaded yet, true = guest, false = authorized user
   const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
 
@@ -83,22 +92,30 @@ export function ZoomSdkProvider({ children }) {
     async function configureSdk() {
       try {
         // Some Zoom clients reject config when unsupported capabilities are requested.
-        // Try full capabilities first, then gracefully fall back to a core set.
+        // Try the largest set first, then fall back step by step to the core set.
+        const capabilitySets = [
+          [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES],
+          [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES],
+          CORE_CAPABILITIES,
+        ];
         let configResponse;
-        try {
-          configResponse = await zoomSdk.config({
-            capabilities: [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES],
-            version: '0.16.0',
-          });
-        } catch (fullConfigError) {
-          console.warn('Full capability set rejected, retrying with core capabilities only:', fullConfigError);
-          configResponse = await zoomSdk.config({
-            capabilities: CORE_CAPABILITIES,
-            version: '0.16.0',
-          });
+        let acceptedCapabilities = null;
+        for (let i = 0; i < capabilitySets.length; i += 1) {
+          try {
+            configResponse = await zoomSdk.config({
+              capabilities: capabilitySets[i],
+              version: '0.16.0',
+            });
+            acceptedCapabilities = capabilitySets[i];
+            break;
+          } catch (configError) {
+            if (i === capabilitySets.length - 1) throw configError;
+            console.warn('Capability set rejected, retrying with a smaller set:', configError);
+          }
         }
 
         console.log('SDK Configured:', configResponse);
+        setRtmsStatusSupported(acceptedCapabilities.includes('onRTMSStatusChange'));
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
@@ -196,17 +213,9 @@ export function ZoomSdkProvider({ children }) {
           // When user becomes authorized, re-configure SDK and fetch meeting context
           if (newStatus === 'authorized') {
             try {
+              // Same set the client accepted at startup (keeps RTMS status events).
               await zoomSdk.config({
-                capabilities: [
-                  'getAppContext', 'getMeetingContext', 'getMeetingUUID', 'getRunningContext',
-                  'getUserContext', 'getMeetingParticipants', 'authorize',
-                  'onAuthorized', 'promptAuthorize', 'callZoomApi',
-                  'onMessage', 'postMessage', 'showNotification',
-                  'sendMessageToChat', 'openUrl', 'onRunningContextChange',
-                  'onMyUserContextChange', 'sendAppInvitationToAllParticipants',
-                  'sendAppInvitation', 'showAppInvitationDialog', 'onSendAppInvitation',
-                  'startCollaborate', 'endCollaborate', 'joinCollaborate', 'leaveCollaborate', 'onCollaborateChange', 'runRenderingContext',
-                ],
+                capabilities: acceptedCapabilities,
                 version: '0.16.0',
               });
             } catch (err) {
@@ -239,8 +248,9 @@ export function ZoomSdkProvider({ children }) {
     userContext,
     userContextStatus: userContext?.status || null,
     isGuest,
+    rtmsStatusSupported,
     isTestMode: isTestModeState,
-  }), [zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, isTestModeState]);
+  }), [zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, isTestModeState]);
 
   return (
     <ZoomSdkContext.Provider value={contextValue}>

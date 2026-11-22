@@ -78,6 +78,8 @@
                     "stopRTMS",
                     "pauseRTMS",
                     "resumeRTMS",
+                    "getRTMSStatus",
+                    "onRTMSStatusChange",
                     "showNotification",
                     "sendMessageToChat",
                     "openUrl",

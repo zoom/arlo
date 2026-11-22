@@ -100,7 +100,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
-  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
+  const { ws, rtmsActive, rtmsPaused, rtmsLoading, rtmsPhase, rtmsError, rtmsWaitingLong, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -666,13 +666,22 @@ export default function InMeetingView({ isGuestMode = false }) {
 
   // Determine transcript state (initial_roster events don't count as displayable content)
   const hasContent = segments.length > 0 || participantEvents.some(e => e.eventType !== 'initial_roster');
+  // 'requesting' = asked Zoom, not confirmed yet (host may still have to approve)
   const transcriptState = rtmsPaused
     ? 'paused'
     : rtmsActive && hasContent
       ? 'live'
       : rtmsActive
         ? 'waiting'
-        : 'not-started';
+        : rtmsPhase === 'requested'
+          ? 'requesting'
+          : 'not-started';
+  const requestingLabel = rtmsWaitingLong ? 'Waiting for host approval…' : 'Requesting transcription…';
+  const liveLabel = rtmsPhase === 'interrupted' ? 'Reconnecting…' : 'Transcribing';
+  // Start was denied or failed: say why and offer Retry (the stream is not running)
+  const startError = !rtmsActive && rtmsError?.action === 'start' ? rtmsError.message : null;
+  // A pause/resume/stop that Zoom rejected or never confirmed
+  const controlError = rtmsActive && rtmsError ? rtmsError.message : null;
 
   // Merge transcript segments and participant events into a chronological timeline
   // Filter out initial_roster events — they're not real joins, just the SDK reporting existing participants
@@ -963,11 +972,25 @@ export default function InMeetingView({ isGuestMode = false }) {
                 <p className="text-serif text-muted">
                   {isGuestMode ? 'Waiting for host to start transcription...' : 'Transcription not started'}
                 </p>
+                {!isGuestMode && startError && (
+                  <p className="text-sans text-sm" role="alert" style={{ color: 'var(--color-danger, #ef4444)' }}>
+                    {startError}
+                  </p>
+                )}
                 {!isGuestMode && (
                   <Button onClick={() => startRTMS(false)} disabled={rtmsLoading}>
-                    {rtmsLoading ? 'Starting...' : 'Start Transcription'}
+                    {startError ? 'Retry' : 'Start Transcription'}
                   </Button>
                 )}
+              </div>
+            </Card>
+          )}
+
+          {transcriptState === 'requesting' && (
+            <Card className="transcript-state-card">
+              <div className="transcript-state-inner" role="status" aria-live="polite">
+                <LoadingSpinner size={32} />
+                <p className="text-serif text-muted">{requestingLabel}</p>
               </div>
             </Card>
           )}
@@ -993,10 +1016,15 @@ export default function InMeetingView({ isGuestMode = false }) {
                           <div className="recording-dot" />
                           <div className="recording-dot-ping" />
                         </div>
-                        <span className="text-sans text-sm text-muted">Transcribing</span>
+                        <span className="text-sans text-sm text-muted">{liveLabel}</span>
                       </>
                     ) : (
                       <span className="paused-badge text-sans">Paused</span>
+                    )}
+                    {controlError && (
+                      <span className="text-sans text-xs" role="alert" style={{ color: 'var(--color-danger, #ef4444)' }}>
+                        {controlError}
+                      </span>
                     )}
                   </div>
                   <div className="transcript-controls-buttons">
@@ -1178,14 +1206,23 @@ export default function InMeetingView({ isGuestMode = false }) {
               {transcriptState === 'not-started' ? (
                 <>
                   <span className="text-sans text-sm text-muted">
-                    {isGuestMode ? 'Waiting for host to start transcription...' : 'Transcription not started'}
+                    {isGuestMode
+                      ? 'Waiting for host to start transcription...'
+                      : (startError || 'Transcription not started')}
                   </span>
                   {!isGuestMode && (
                     <Button size="sm" onClick={() => startRTMS(false)} disabled={rtmsLoading}>
                       <Mic size={14} />
-                      {rtmsLoading ? 'Starting...' : 'Start'}
+                      {startError ? 'Retry' : 'Start'}
                     </Button>
                   )}
+                </>
+              ) : transcriptState === 'requesting' ? (
+                <>
+                  <div className="assist-status-live" role="status" aria-live="polite">
+                    <LoadingSpinner size={14} />
+                    <span className="text-sans text-sm text-muted">{requestingLabel}</span>
+                  </div>
                 </>
               ) : transcriptState === 'waiting' ? (
                 <>
@@ -1216,7 +1253,7 @@ export default function InMeetingView({ isGuestMode = false }) {
                       <div className="recording-dot" />
                       <div className="recording-dot-ping" />
                     </div>
-                    <span className="text-sans text-sm text-muted">Transcribing</span>
+                    <span className="text-sans text-sm text-muted">{liveLabel}</span>
                     <span className="text-sans text-xs text-muted">({segments.length})</span>
                     {/* Voice commands indicator - inline */}
                     <button

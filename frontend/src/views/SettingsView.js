@@ -57,7 +57,7 @@ export default function SettingsView() {
   const { vertical, clearVertical } = useVertical();
   const { showDemoData, setShowDemoData } = useDemoData();
   const { complianceEnabled, setComplianceEnabled } = useComplianceSettings();
-  const { meetingId, rtmsActive, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
+  const { meetingId, rtmsActive, rtmsLoading, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
   const [apiStartSuccess, setApiStartSuccess] = useState(false);
   const [autoOpen, setAutoOpen] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
@@ -821,7 +821,7 @@ export default function SettingsView() {
               </div>
               <Button
                 variant={rtmsActive ? 'destructive' : 'outline'}
-                disabled={!meetingId || apiActionLoading}
+                disabled={!meetingId || apiActionLoading || rtmsLoading}
                 onClick={async () => {
                   setApiStartSuccess(false);
                   const result = rtmsActive ? await stopRTMSViaAPI() : await startRTMSViaAPI();
@@ -839,7 +839,7 @@ export default function SettingsView() {
             {apiStartSuccess && (
               <div className="settings-api-feedback settings-api-success">
                 <CheckCircle2 size={14} />
-                <span className="text-sans text-sm">RTMS {rtmsActive ? 'stop' : 'start'} request sent successfully</span>
+                <span className="text-sans text-sm">Request sent. Waiting for Zoom to confirm…</span>
               </div>
             )}
             {apiActionError && (
