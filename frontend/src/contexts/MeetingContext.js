@@ -11,6 +11,7 @@ import {
   statusFromWs,
   statusFromRtmsStatusList,
   statusFromPoll,
+  shouldAutoRestart,
 } from '../lib/rtmsMachine';
 
 const MeetingContext = createContext();
@@ -23,6 +24,12 @@ const START_REQUEST_EXPIRY_MS = 60000;
 // Zoom's client says "started" but the server has seen no stream: how long to
 // show "Starting transcription…" before giving the Start button back.
 const STREAM_ARRIVAL_TIMEOUT_MS = 15000;
+// ...and how long before Arlo asks Zoom to start again by itself (once).
+const AUTO_RESTART_DELAY_MS = 6000;
+const START_OPTIONS = {
+  audioOptions: { rawAudio: false },
+  transcriptOptions: { caption: true },
+};
 // The client sends no event when the host denies a request or allows the app
 // later, so while a start is unresolved Arlo asks the client itself.
 const STATUS_POLL_INTERVAL_MS = 5000;
@@ -80,6 +87,7 @@ export function MeetingProvider({ children }) {
   const localActionRef = useRef(null);
   const startedHereRef = useRef(false);
   const alreadyRunningRef = useRef(false);
+  const autoRestartedRef = useRef(false);
   const isGuestRef = useRef(isGuest);
   const userContextRef = useRef(userContext);
   isGuestRef.current = isGuest;
@@ -109,6 +117,7 @@ export function MeetingProvider({ children }) {
       localActionRef.current = null;
       startedHereRef.current = false;
       alreadyRunningRef.current = false;
+      autoRestartedRef.current = false;
     } else {
       // Meeting ended — stop reconnecting, close WS, reset state
       shouldReconnectRef.current = false;
@@ -433,6 +442,7 @@ export function MeetingProvider({ children }) {
         postTimelineStatus('rtms_resumed');
       }
       alreadyRunningRef.current = false;
+      autoRestartedRef.current = false;
       localActionRef.current = null;
     } else if (next === 'paused') {
       if (local === 'pause') {
@@ -448,6 +458,7 @@ export function MeetingProvider({ children }) {
       localActionRef.current = null;
       startedHereRef.current = false;
       startNoticeSentRef.current = false;
+      autoRestartedRef.current = false;
     } else if (next === 'denied' || next === 'failed' || next === 'expired') {
       localActionRef.current = null;
       startedHereRef.current = false;
@@ -501,15 +512,34 @@ export function MeetingProvider({ children }) {
     sessionStorage.setItem(startingKey, Date.now().toString());
 
     startedHereRef.current = true;
+    autoRestartedRef.current = false;
     try {
-      await requestRtms('start', {
-        audioOptions: { rawAudio: false },
-        transcriptOptions: { caption: true },
-      });
+      await requestRtms('start', START_OPTIONS);
     } finally {
       sessionStorage.removeItem(startingKey);
     }
   }, [zoomSdk, meetingId, requestRtms]);
+
+  // Allowed by the host but not started: the client says "started", nothing
+  // streams. A panel reload fixes it by calling startRTMS again, so do that
+  // once for a user who asked for transcription (clicked Start, or auto-start).
+  useEffect(() => {
+    if (rtms.phase !== 'starting' || !zoomSdk || !ws) return undefined;
+    const timer = setTimeout(() => {
+      const wantsTranscription = !isGuestRef.current
+        && (startedHereRef.current || localStorage.getItem('arlo-auto-start') !== 'false');
+      if (!shouldAutoRestart({
+        phase: rtmsRef.current.phase,
+        wantsTranscription,
+        alreadyRetried: autoRestartedRef.current,
+      })) return;
+      autoRestartedRef.current = true;
+      startedHereRef.current = true;
+      console.log('RTMS allowed but not streaming: asking Zoom to start again');
+      requestRtms('start', START_OPTIONS);
+    }, AUTO_RESTART_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [rtms.phase, zoomSdk, ws, requestRtms]);
 
   const stopRTMS = useCallback(async () => {
     const current = rtmsRef.current;

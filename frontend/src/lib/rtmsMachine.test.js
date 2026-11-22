@@ -7,6 +7,7 @@ import {
   statusFromWs,
   statusFromRtmsStatusList,
   statusFromPoll,
+  shouldAutoRestart,
 } from './rtmsMachine';
 
 const run = (events, from = initialRtmsState) => events.reduce(rtmsReducer, from);
@@ -349,4 +350,29 @@ describe('polling getRTMSStatus (the client sends no event when the host denies 
     const next = rtmsReducer(expired, status(statusFromPoll([session('started')]), 'sdk'));
     expect(next.phase).toBe('starting');
   });
+});
+
+describe('allowed by the host but not started (a refresh fixes it, so the app does that itself)', () => {
+  // Seen in a meeting: after the host allows Arlo, reloading the panel starts
+  // transcription, because the reload simply calls startRTMS again.
+  const stuck = { phase: 'starting', wantsTranscription: true, alreadyRetried: false };
+
+  test('asks Zoom to start again when the client says started but no stream arrived', () => {
+    expect(shouldAutoRestart(stuck)).toBe(true);
+  });
+
+  test('only once per attempt, so a stream that never arrives cannot loop', () => {
+    expect(shouldAutoRestart({ ...stuck, alreadyRetried: true })).toBe(false);
+  });
+
+  test('never for someone who did not ask for transcription', () => {
+    expect(shouldAutoRestart({ ...stuck, wantsTranscription: false })).toBe(false);
+  });
+
+  test.each(['idle', 'requested', 'expired', 'denied', 'failed', 'stalled', 'stopped', 'active', 'paused'])(
+    'never from %s (an expired or denied request must not re-prompt the host on its own)',
+    (phase) => {
+      expect(shouldAutoRestart({ ...stuck, phase })).toBe(false);
+    },
+  );
 });

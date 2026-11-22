@@ -202,3 +202,13 @@ export function statusFromPoll(list) {
   const status = statusFromRtmsStatusList(list);
   return status === 'started' || status === 'paused' ? status : null;
 }
+
+/**
+ * "Allowed by the host but not started": the client reports the session as
+ * started, yet no stream reaches the server. Calling startRTMS again starts it
+ * (that is all a panel reload does), so the app does it once on its own.
+ * Never from an expired or denied request: that would re-prompt the host.
+ */
+export function shouldAutoRestart({ phase, wantsTranscription, alreadyRetried }) {
+  return phase === 'starting' && wantsTranscription === true && !alreadyRetried;
+}
