@@ -1,12 +1,17 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import useZoomAuth from '../hooks/useZoomAuth';
+import { shouldSilentReauth } from '../lib/silentReauth';
 import OwlIcon from '../components/OwlIcon';
 import Button from '../components/ui/Button';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
 import './AuthView.css';
+
+// One silent sign-in attempt per page load. Module-level so a remount of
+// AuthView (route change, StrictMode) cannot retry a failing authorize().
+let silentReauthAttempted = false;
 
 export default function AuthView() {
   const navigate = useNavigate();
@@ -17,8 +22,12 @@ export default function AuthView() {
     sdkError,
     runningContext,
     meetingContext,
+    userContextStatus,
+    isGuest,
   } = useZoomSdk();
   const { authorize, isAuthorizing, error } = useZoomAuth();
+  // 'idle' | 'running' | 'failed' — silent sign-in for users Zoom already reports as authorized
+  const [silentState, setSilentState] = useState('idle');
 
   // Some marketplace app types lack in-client authorize; detect and use browser OAuth instead.
   const isAuthorizeApiUnsupported = (err) => {
@@ -56,7 +65,33 @@ export default function AuthView() {
     }
   }, [login, navigate]);
 
+  // Zoom says the app is authorized but Arlo has no session (backend restarted):
+  // sign in without asking. authorize() is non-interactive in this state.
+  useEffect(() => {
+    if (window.location.search.includes('test=true')) return;
+    if (!shouldSilentReauth({
+      isBrowser,
+      authLoading: isLoading,
+      isAuthenticated,
+      sdkConfigured,
+      sdkError,
+      userContextStatus,
+      alreadyAttempted: silentReauthAttempted,
+    })) return;
+
+    silentReauthAttempted = true;
+    setSilentState('running');
+    authorize()
+      .then(() => setSilentState('idle'))
+      .catch((err) => {
+        // Fall back to the Connect button; the user decides what happens next.
+        console.warn('Silent sign-in failed:', err?.message || err);
+        setSilentState('failed');
+      });
+  }, [isBrowser, isLoading, isAuthenticated, sdkConfigured, sdkError, userContextStatus, authorize]);
+
   const handleConnect = async () => {
+    setSilentState('idle');
     console.log('handleConnect called:', {
       isBrowser,
       runningContext,
@@ -91,7 +126,9 @@ export default function AuthView() {
   if (
     isLoading ||
     (isAuthenticated && runningContext === null) ||
-    (!isBrowser && !sdkConfigured && !sdkError)
+    (!isBrowser && !sdkConfigured && !sdkError) ||
+    // SDK configured but user status not read yet: don't flash the Connect button
+    (!isBrowser && sdkConfigured && isGuest === null)
   ) {
     return (
       <div className="auth-view">
@@ -101,6 +138,21 @@ export default function AuthView() {
       </div>
     );
   }
+
+  if (silentState === 'running') {
+    return (
+      <div className="auth-view">
+        <div className="auth-content" role="status" aria-live="polite">
+          <LoadingSpinner size={48} />
+          <p className="text-muted">Signing you in…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const errorMessage = silentState === 'failed'
+    ? 'Could not sign you in automatically. Connect with Zoom to continue.'
+    : (sdkError || error);
 
   return (
     <div className="auth-view">
@@ -116,9 +168,9 @@ export default function AuthView() {
           </p>
         </div>
 
-        {(sdkError || error) && (
+        {errorMessage && (
           <p className="text-sm" style={{ color: 'var(--color-danger, #ef4444)' }}>
-            {sdkError || error}
+            {errorMessage}
           </p>
         )}
 

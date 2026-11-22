@@ -47,7 +47,7 @@ export default function useZoomAuth() {
       const response = await fetch('/api/auth/authorize');
       if (!response.ok) throw new Error('Failed to get auth challenge');
       const { codeChallenge, state } = await response.json();
-      console.log('Got PKCE challenge, state:', state);
+      console.log('Got PKCE challenge');
 
       // Helper to exchange code for session
       const exchangeCode = async (code) => {
@@ -146,7 +146,8 @@ export default function useZoomAuth() {
           if (resolved) return;
           resolved = true;
           cleanup();
-          console.log('onAuthorized event received:', event);
+          // Never log the event itself: it carries the OAuth authorization code.
+          console.log('onAuthorized event received');
           cleanupRef.current = null;
 
           const { code } = event;
