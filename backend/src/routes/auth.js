@@ -10,6 +10,7 @@ const {
 } = require('../services/zoomAppContext');
 const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
+const { setRestoreCookie, clearRestoreCookie } = require('../services/sessionRestore');
 
 const router = express.Router();
 
@@ -189,6 +190,8 @@ router.get('/callback', async (req, res) => {
       sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000,
     });
+    // Lets the server rebuild this session after a restart (see services/sessionRestore.js)
+    setRestoreCookie(res, { user, refreshToken: refresh_token, scopes: scope.split(' ') });
 
     // Redirect to frontend onboarding page
     const redirectUrl = isFirstInstall
@@ -358,6 +361,8 @@ router.post('/callback', async (req, res) => {
       sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
     });
+    // Lets the server rebuild this session after a restart (see services/sessionRestore.js)
+    setRestoreCookie(res, { user, refreshToken: refresh_token, scopes: scope.split(' ') });
 
     res.json({
       user: {
@@ -476,6 +481,11 @@ router.post('/refresh', async (req, res) => {
       expiresAt,
       scopes: scope.split(' '),
     });
+    // Zoom rotates the refresh token on use: keep the restore cookie current
+    const refreshedUser = userStore.findById(userId);
+    if (refreshedUser) {
+      setRestoreCookie(res, { user: refreshedUser, refreshToken: new_refresh_token, scopes: scope.split(' ') });
+    }
 
     res.json({
       message: 'Token refreshed',
@@ -537,6 +547,7 @@ router.post('/logout', async (req, res) => {
       secure: config.secureCookies,
       sameSite: 'lax',
     });
+    clearRestoreCookie(res);
 
     res.json({ message: 'Logged out successfully' });
   } catch (error) {

@@ -1,5 +1,6 @@
 const { verifySessionToken } = require('../services/auth');
 const config = require('../config');
+const { restoreIfMissing } = require('../services/sessionRestore');
 
 /**
  * Authentication middleware
@@ -24,6 +25,10 @@ function requireAuth(req, res, next) {
 
     // Verify token
     const payload = verifySessionToken(token);
+
+    // After a server restart the user is gone from memory; rebuild them from
+    // their encrypted restore cookie if they sent one.
+    restoreIfMissing(req, payload);
 
     // Attach user info to request
     req.user = {
@@ -52,6 +57,7 @@ function optionalAuth(req, res, next) {
 
     if (token) {
       const payload = verifySessionToken(token);
+      restoreIfMissing(req, payload);
       req.user = {
         id: payload.userId,
         zoomUserId: payload.zoomUserId,

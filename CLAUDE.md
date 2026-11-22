@@ -108,7 +108,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.jsx`) — sin
 7. Frontend: login(user, wsToken) → navigate to /home
 ```
 
-**Note:** Users must re-authenticate after server restart since tokens are stored in memory only.
+**Note:** Users and tokens are stored in memory only. A server restart is survived through an encrypted httpOnly `sessionRestore` cookie (user record + Zoom refresh token, AES-GCM with `TOKEN_ENCRYPTION_KEY`) that rebuilds the in-memory session on the next request; see `backend/src/services/sessionRestore.js`. Without that cookie, the app signs in silently when Zoom still reports the user as authorized.
 
 ## Key Files & Architecture Details
 
@@ -247,7 +247,7 @@ This demo mode version prioritizes security by never storing customer data:
 - **No database** — All data exists in memory only
 - **Tokens in memory** — OAuth tokens stored encrypted in memory, cleared on restart
 - **No persistent storage** — Meeting transcripts are broadcast but never saved
-- **Session cookies** — httpOnly, secure, SameSite=lax
+- **Session cookies** — httpOnly, secure, SameSite=lax. Three kinds that cannot stand in for each other: `sessionToken` (who you are), `meetingAccess` (which meeting you are in), `sessionRestore` (encrypted, rebuilds a session after a restart)
 - **HMAC verification** — All Zoom webhooks verified with timing-safe comparisons
 - **Rate limiting** — Global, auth, and AI endpoint limits via `express-rate-limit`
 - **WebSocket auth** — JWT token required for all connections
@@ -269,5 +269,5 @@ This demo mode version prioritizes security by never storing customer data:
 ## Known Issues
 
 - Frontend uses Vite + Vitest (migrated from CRA in Nov 2026), NOT Next.js
-- Users must re-authenticate after server restart (tokens in memory only)
+- Sessions survive a server restart via the `sessionRestore` cookie; a session older than 24 hours signs in again (silently, inside Zoom)
 - Features requiring stored data show "not available in demo mode" messaging

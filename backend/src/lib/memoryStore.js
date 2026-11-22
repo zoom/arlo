@@ -83,6 +83,27 @@ const userStore = {
   },
 
   /**
+   * Put back a user with their original id (session restore after a restart).
+   * Does nothing if the id or the Zoom user is already present.
+   */
+  restore(user) {
+    if (users.has(user.id) || usersByZoomId.has(user.zoomUserId)) return null;
+    const restored = {
+      id: user.id,
+      zoomUserId: user.zoomUserId,
+      email: user.email,
+      displayName: user.displayName,
+      avatarUrl: user.avatarUrl || null,
+      preferences: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    users.set(restored.id, restored);
+    usersByZoomId.set(restored.zoomUserId, restored.id);
+    return restored;
+  },
+
+  /**
    * Update user preferences
    */
   updatePreferences(userId, preferences) {
