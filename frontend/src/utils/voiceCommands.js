@@ -3,26 +3,16 @@
  * Detects "Arlo" or "Hey Arlo" trigger phrases and parses commands
  */
 
-// Trigger phrases to detect (case-insensitive)
-// More lenient matching to handle transcription variations
-const TRIGGER_PHRASES = [
-  'hey arlo',
-  'hey, arlo',
-  'hey. arlo',
-  'hi arlo',
-  'hi, arlo',
-  'hi. arlo',
-  'a arlo',  // common transcription of "hey"
-  'hay arlo',
-  'arlo,',
-  'arlo.',
-  'arlo ',
-  'arlo:',
-  // Handle common transcription errors
-  'carlo',
-  'harlo',
-  'hey carlo',
-];
+// The wake word, plus two common mis-transcriptions of it. Always matched as a
+// whole word, so names like "Carlos", "Marlo" or "Harlow" never trigger.
+const WAKE_WORD = '(?:arlo|carlo|harlo)';
+const AFTER = '[\\s,.:;!?]*';
+
+// "Hey Arlo" (also "hi", and "hay"/"a" as transcribed) works anywhere in a sentence.
+const GREETING_TRIGGER = new RegExp(`(?:^|[^a-z])(?:hey|hi|hay|a)[\\s,.]+(${WAKE_WORD})\\b${AFTER}`, 'i');
+// Bare "Arlo, ..." only counts when it starts the sentence: "I showed Arlo to
+// the team" is talking about Arlo, not to it.
+const BARE_TRIGGER = new RegExp(`(?:^|[.!?]\\s+)(${WAKE_WORD})\\b${AFTER}`, 'i');
 
 // Command definitions with aliases and patterns
 export const COMMANDS = {
@@ -77,29 +67,19 @@ export const COMMANDS = {
 export function detectTrigger(text) {
   if (!text || typeof text !== 'string') return null;
 
-  const lowerText = text.toLowerCase();
+  const match = GREETING_TRIGGER.exec(text) || BARE_TRIGGER.exec(text);
+  if (!match) return null;
 
-  for (const phrase of TRIGGER_PHRASES) {
-    const index = lowerText.indexOf(phrase);
-    if (index !== -1) {
-      // Get text after trigger and strip leading punctuation/whitespace
-      let textAfterTrigger = text
-        .substring(index + phrase.length)
-        .replace(/^[\s,.:;!?]+/, '') // Remove leading punctuation
-        .trim();
-      // Capitalize first letter
-      if (textAfterTrigger.length > 0) {
-        textAfterTrigger = textAfterTrigger.charAt(0).toUpperCase() + textAfterTrigger.slice(1);
-      }
-      return {
-        triggerIndex: index,
-        triggerPhrase: phrase.trim(),
-        textAfterTrigger,
-      };
-    }
+  let textAfterTrigger = text.substring(match.index + match[0].length).trim();
+  if (textAfterTrigger.length > 0) {
+    textAfterTrigger = textAfterTrigger.charAt(0).toUpperCase() + textAfterTrigger.slice(1);
   }
 
-  return null;
+  return {
+    triggerIndex: match.index,
+    triggerPhrase: match[0].trim().toLowerCase(),
+    textAfterTrigger,
+  };
 }
 
 /**

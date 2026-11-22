@@ -14,6 +14,7 @@ import { useDemoData } from '../hooks/useDemoData';
 import { useFeatureLayout } from '../hooks/useFeatureLayout';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
 import useSecondsLeft from '../hooks/useSecondsLeft';
+import { transcriptToText } from '../lib/transcript';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import ArloResponsePanel from '../components/ArloResponsePanel';
 import ComplianceAdvisor from '../components/ComplianceAdvisor';
@@ -101,7 +102,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
-  const { ws, rtmsActive, rtmsPaused, rtmsLoading, rtmsPhase, rtmsError, rtmsWaitingLong, rtmsRequestExpiresAt, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
+  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsLoading, rtmsPhase, rtmsError, rtmsWaitingLong, rtmsRequestExpiresAt, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -159,8 +160,6 @@ export default function InMeetingView({ isGuestMode = false }) {
   }, [isGuestMode, isTestMode, runningContext, navigate]);
 
   const { addToast } = useToast();
-  const [segments, setSegments] = useState([]);
-  const [participantEvents, setParticipantEvents] = useState([]);
   const [followLive, setFollowLive] = useState(true);
   const [suggestions, setSuggestions] = useState([]);
   const [notes, setNotes] = useState('');
@@ -235,101 +234,28 @@ export default function InMeetingView({ isGuestMode = false }) {
     }
   }, [isGuestMode, isAuthenticated, ws, effectiveMeetingId, wsToken, connectWebSocket]);
 
-  // Load existing transcript segments from DB (for auto-started RTMS sessions)
-  // Load immediately for all users to show transcript as fast as possible
-  const historicalLoadedRef = useRef(false);
+  // Keep the newest line in view while following live
   useEffect(() => {
-    const loadMeetingId = effectiveMeetingId;
-    if (!loadMeetingId || historicalLoadedRef.current) return;
-    historicalLoadedRef.current = true;
+    if (!followLive) return;
+    requestAnimationFrame(() => {
+      if (transcriptRef.current) {
+        transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+      }
+    });
+  }, [segments.length, participantEvents.length, followLive]);
 
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(loadMeetingId)}/transcript`, {
-      credentials: 'include',
-    })
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data?.segments?.length > 0) {
-          setSegments(prev => {
-            // Merge: DB segments first, then any WS segments not already present
-            const dbSeqs = new Set(data.segments.map(s => s.seqNo));
-            const newFromWs = prev.filter(s => !dbSeqs.has(String(s.seqNo)));
-            return [...data.segments, ...newFromWs];
-          });
-          console.log(`Loaded ${data.segments.length} historical segments from DB`);
-        }
-      })
-      .catch(() => {});
-  }, [effectiveMeetingId]);
-
-  // Load existing participant events from DB (for mid-meeting app opens)
-  // Load immediately for all users
-  const historicalEventsLoadedRef = useRef(false);
+  // AI suggestions pushed by the server
   useEffect(() => {
-    const loadMeetingId = effectiveMeetingId;
-    if (!loadMeetingId || historicalEventsLoadedRef.current) return;
-    historicalEventsLoadedRef.current = true;
-
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(loadMeetingId)}/participant-events`, {
-      credentials: 'include',
-    })
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data?.events?.length > 0) {
-          setParticipantEvents(prev => {
-            // Merge: DB events first, then any WS events not already present
-            const dbIds = new Set(data.events.map(e => e.id));
-            const newFromWs = prev.filter(e => !dbIds.has(e.id));
-            return [...data.events, ...newFromWs];
-          });
-          console.log(`Loaded ${data.events.length} historical participant events from DB`);
-        }
-      })
-      .catch(() => {});
-  }, [effectiveMeetingId]);
-
-  // Listen for transcript segments
-  useEffect(() => {
-    if (!ws) return;
-
+    if (!ws) return undefined;
     const handleMessage = (event) => {
       const message = JSON.parse(event.data);
-      if (message.type === 'transcript.segment') {
-        const { segment } = message.data;
-        setSegments((prev) => {
-          if (prev.some(s => s.seqNo === segment.seqNo)) return prev;
-          return [...prev, segment];
-        });
-
-        if (followLive && transcriptRef.current) {
-          requestAnimationFrame(() => {
-            if (transcriptRef.current) {
-              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-            }
-          });
-        }
-      }
-
-      if (message.type === 'participant.event') {
-        const evt = message.data.event;
-        setParticipantEvents((prev) => [...prev, evt]);
-
-        if (followLive && transcriptRef.current) {
-          requestAnimationFrame(() => {
-            if (transcriptRef.current) {
-              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-            }
-          });
-        }
-      }
-
       if (message.type === 'ai.suggestion') {
         setSuggestions((prev) => [...prev, message.data.suggestion].slice(-3));
       }
     };
-
     ws.addEventListener('message', handleMessage);
     return () => ws.removeEventListener('message', handleMessage);
-  }, [ws, followLive]);
+  }, [ws]);
 
   // Scroll detection
   const handleScroll = useCallback(() => {
@@ -362,9 +288,7 @@ export default function InMeetingView({ isGuestMode = false }) {
       return 'No transcript available yet. Start speaking to generate content.';
     }
 
-    const transcriptText = segments
-      .map(seg => `${seg.speakerName || 'Unknown'}: ${seg.text}`)
-      .join('\n');
+    const transcriptText = transcriptToText(segments);
 
     console.log('[VoiceSummarize] Transcript length:', transcriptText.length, 'chars, segments:', segments.length);
 
@@ -514,22 +438,21 @@ export default function InMeetingView({ isGuestMode = false }) {
     if (!question) return 'Please ask a question.';
 
     // Build transcript context
-    const transcriptText = segments.length > 0
-      ? segments.map(seg => `${seg.speakerName || 'Unknown'}: ${seg.text}`).join('\n')
-      : '';
+    const transcriptText = transcriptToText(segments);
 
     if (!transcriptText) {
       return 'No transcript available yet. Start speaking to provide context for your question.';
     }
 
     try {
-      const response = await fetch('/api/ai/suggest', {
+      const response = await fetch('/api/ai/ask-live', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
+          question,
           transcript: transcriptText,
-          prompt: question,
+          model: getPreferredAiModel(),
         }),
       });
 
@@ -538,7 +461,7 @@ export default function InMeetingView({ isGuestMode = false }) {
       }
 
       const data = await response.json();
-      return data.suggestion || data.response || 'I couldn\'t find a specific answer. Try rephrasing your question.';
+      return data.answer || 'I couldn\'t find a specific answer. Try rephrasing your question.';
     } catch (error) {
       console.error('Voice ask error:', error);
       return 'Failed to process question. Please try again.';
@@ -843,15 +766,21 @@ export default function InMeetingView({ isGuestMode = false }) {
     e.stopPropagation();
     setIsGeneratingTitle(true);
     try {
-      const res = await fetch('/api/ai/generate-title', {
+      const transcriptText = transcriptToText(segments);
+      if (transcriptText.trim().length < 50) {
+        addToast('Not enough conversation yet to suggest a title', 'info');
+        return;
+      }
+      const res = await fetch('/api/ai/title-live', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ meetingId, model: getPreferredAiModel() }),
+        body: JSON.stringify({ transcript: transcriptText, currentTitle: title, model: getPreferredAiModel() }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setEditedTitle(data.title);
+      const data = res.ok ? await res.json() : null;
+      // Only open the editor with a real title: an empty one used to crash on save
+      if (typeof data?.title === 'string' && data.title.trim()) {
+        setEditedTitle(data.title.trim());
         setIsEditingTitle(true);
       } else {
         addToast('Failed to generate title', 'error');

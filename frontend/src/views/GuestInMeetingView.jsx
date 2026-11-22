@@ -44,20 +44,17 @@ function InlineEventLabel({ eventType, name }) {
 export default function GuestInMeetingView() {
   const { id } = useParams();
   const { zoomSdk, meetingContext, userContextStatus, isTestMode } = useZoomSdk();
-  const { ws, connectWebSocket, rtmsActive, viewers } = useMeeting();
+  const { ws, connectWebSocket, rtmsActive, viewers, segments, participantEvents } = useMeeting();
 
   // Meeting ID: prefer SDK context, fall back to URL param
   const meetingId = meetingContext?.meetingUUID || id;
 
   const [meeting, setMeeting] = useState(null);
-  const [segments, setSegments] = useState([]);
-  const [participantEvents, setParticipantEvents] = useState([]);
   const [meetingEnded, setMeetingEnded] = useState(false);
   const [followLive, setFollowLive] = useState(true);
   const [ctaDismissed, setCtaDismissed] = useState(() => sessionStorage.getItem('guest-cta-dismissed') === 'true');
   const [loading, setLoading] = useState(true);
   const transcriptRef = useRef(null);
-  const historicalLoadedRef = useRef(false);
 
   // Fetch meeting details (title, summary) from backend
   useEffect(() => {
@@ -82,85 +79,30 @@ export default function GuestInMeetingView() {
     connectWebSocket(null, meetingId);
   }, [meetingId, ws, connectWebSocket]);
 
-  // Load historical transcript segments
+  // Keep the newest line in view while following live
   useEffect(() => {
-    if (!meetingId || historicalLoadedRef.current) return;
-    historicalLoadedRef.current = true;
+    if (!followLive) return;
+    requestAnimationFrame(() => {
+      if (transcriptRef.current) {
+        transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+      }
+    });
+  }, [segments.length, participantEvents.length, followLive]);
 
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/transcript`)
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data?.segments?.length > 0) {
-          setSegments(prev => {
-            const dbSeqs = new Set(data.segments.map(s => s.seqNo));
-            const newFromWs = prev.filter(s => !dbSeqs.has(String(s.seqNo)));
-            return [...data.segments, ...newFromWs];
-          });
-        }
-      })
-      .catch(() => {});
-
-    // Also load participant events
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/participant-events`)
-      .then(res => res.ok ? res.json() : null)
-      .then(data => {
-        if (data?.events?.length > 0) {
-          setParticipantEvents(prev => {
-            const dbIds = new Set(data.events.map(e => e.id));
-            const newFromWs = prev.filter(e => !dbIds.has(e.id));
-            return [...data.events, ...newFromWs];
-          });
-        }
-      })
-      .catch(() => {});
-  }, [meetingId]);
-
-  // Listen for WebSocket messages
+  // The stream stopping ends the guest's live view
   useEffect(() => {
-    if (!ws) return;
+    if (!ws) return undefined;
 
     const handleMessage = (event) => {
       const message = JSON.parse(event.data);
-
-      if (message.type === 'transcript.segment') {
-        const { segment } = message.data;
-        setSegments(prev => {
-          if (prev.some(s => s.seqNo === segment.seqNo)) return prev;
-          return [...prev, segment];
-        });
-
-        if (followLive && transcriptRef.current) {
-          requestAnimationFrame(() => {
-            if (transcriptRef.current) {
-              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-            }
-          });
-        }
-      }
-
-      if (message.type === 'participant.event') {
-        const evt = message.data.event;
-        setParticipantEvents(prev => [...prev, evt]);
-
-        if (followLive && transcriptRef.current) {
-          requestAnimationFrame(() => {
-            if (transcriptRef.current) {
-              transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
-            }
-          });
-        }
-      }
-
-      if (message.type === 'meeting.status') {
-        if (message.data.status === 'rtms_stopped') {
-          setMeetingEnded(true);
-        }
+      if (message.type === 'meeting.status' && message.data.status === 'rtms_stopped') {
+        setMeetingEnded(true);
       }
     };
 
     ws.addEventListener('message', handleMessage);
     return () => ws.removeEventListener('message', handleMessage);
-  }, [ws, followLive]);
+  }, [ws]);
 
   // Scroll detection
   const handleScroll = useCallback(() => {

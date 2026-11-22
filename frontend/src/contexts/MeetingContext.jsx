@@ -14,6 +14,7 @@ import {
   shouldAutoRestart,
   canStartRtms,
 } from '../lib/rtmsMachine';
+import { addSegment, mergeHistory } from '../lib/transcript';
 
 const MeetingContext = createContext();
 
@@ -63,6 +64,10 @@ export function MeetingProvider({ children }) {
   const rtmsLoading = isRtmsBusy(rtms);
   const [ws, setWs] = useState(null);
   const [viewers, setViewers] = useState(null);
+  // The live transcript and join/leave timeline live here, not in a view, so
+  // they keep filling while the user is on another screen and survive navigation.
+  const [segments, setSegments] = useState([]);
+  const [participantEvents, setParticipantEvents] = useState([]);
   // Server-verified meeting access (Zoom App Context). status:
   // 'idle' | 'verifying' | 'verified' | 'denied' | 'unavailable'
   const [meetingAccess, setMeetingAccess] = useState({ status: 'idle', isGuest: null, reason: null });
@@ -129,6 +134,8 @@ export function MeetingProvider({ children }) {
         reconnectTimerRef.current = null;
       }
       dispatchRtms({ type: 'RESET' });
+      setSegments([]);
+      setParticipantEvents([]);
       setWs(prev => {
         if (prev && prev.readyState !== WebSocket.CLOSED) {
           prev.close();
@@ -238,6 +245,7 @@ export function MeetingProvider({ children }) {
 
       switch (message.type) {
         case 'transcript.segment':
+          setSegments((prev) => addSegment(prev, message.data?.segment));
           dispatchRtms({ type: 'TRANSCRIPT' });
           // Tell the meeting chat once, on the first real transcript line, and only
           // from the client that started transcription (not from every open panel).
@@ -252,6 +260,11 @@ export function MeetingProvider({ children }) {
           if (status) dispatchRtms({ type: 'STATUS', status, source: 'server' });
           break;
         }
+        case 'participant.event':
+          if (message.data?.event) {
+            setParticipantEvents((prev) => [...prev, message.data.event]);
+          }
+          break;
         case 'rtms.request_status':
           // Zoom's webhook says why a request did not start (3 = host denied)
           console.log('RTMS request status from Zoom:', message.data?.status);
@@ -293,7 +306,6 @@ export function MeetingProvider({ children }) {
 
     setWs(socket);
     return socket;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const connectWebSocket = useCallback((token, meetingId) => {
@@ -682,6 +694,29 @@ export function MeetingProvider({ children }) {
     return () => { cancelled = true; };
   }, [isAuthenticated, meetingId, rtmsActive]);
 
+  // Stored transcript and timeline for this meeting, when the server keeps one
+  // (database mode). In demo mode these return nothing.
+  useEffect(() => {
+    if (!meetingId) return undefined;
+    let cancelled = false;
+    const load = (path) => fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/${path}`, {
+      credentials: 'include',
+    }).then((res) => (res.ok ? res.json() : null)).catch(() => null);
+
+    load('transcript').then((data) => {
+      if (cancelled || !Array.isArray(data?.segments) || data.segments.length === 0) return;
+      setSegments((live) => mergeHistory(data.segments, live));
+    });
+    load('participant-events').then((data) => {
+      if (cancelled || !Array.isArray(data?.events) || data.events.length === 0) return;
+      setParticipantEvents((live) => {
+        const storedIds = new Set(data.events.map((event) => event.id));
+        return [...data.events, ...live.filter((event) => !storedIds.has(event.id))];
+      });
+    });
+    return () => { cancelled = true; };
+  }, [meetingId]);
+
   // Send Zoom meeting topic to backend to replace generic "Meeting M/D/YYYY" title
   // Wait for rtmsActive so the meeting record exists in the DB before patching
   useEffect(() => {
@@ -725,6 +760,8 @@ export function MeetingProvider({ children }) {
     meetingStartTime: meetingStartTimeRef.current,
     autoStartAttemptedRef,
     viewers,
+    segments,
+    participantEvents,
     meetingAccess,
     verifyMeetingAccess,
     startRTMS,
@@ -738,7 +775,7 @@ export function MeetingProvider({ children }) {
     connectWebSocket,
     setWs,
     setTitleUserRenamed,
-  }), [rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, viewers, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, viewers, segments, participantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

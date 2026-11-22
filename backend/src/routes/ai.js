@@ -117,6 +117,64 @@ router.post('/generate-title', requireAuth, async (req, res) => {
   });
 });
 
+// Live endpoints: the client sends the transcript it already holds, so these
+// work in demo mode. The service is called through the module object so tests
+// can stub the LLM call.
+const openrouterService = require('../services/openrouter');
+const MAX_QUESTION_CHARS = 1000;
+const MAX_TITLE_CHARS = 200;
+const isText = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
+
+/**
+ * POST /api/ai/ask-live
+ * Answer a question about the live transcript (voice "Hey Arlo, ..." questions).
+ */
+router.post('/ask-live', requireAuth, async (req, res) => {
+  const { question, transcript, model } = req.body || {};
+  if (!config.aiEnabled) {
+    return res.status(503).json({ error: 'AI features are disabled' });
+  }
+  if (!isText(question, MAX_QUESTION_CHARS) || !isText(transcript, MAX_AI_BODY_CHARS)) {
+    return res.status(400).json({ error: 'question and transcript are required' });
+  }
+  try {
+    const answer = await openrouterService.chatWithTranscript(
+      question.trim(), transcript, 'Live meeting', { model: typeof model === 'string' ? model : undefined },
+    );
+    if (!isText(answer, MAX_AI_BODY_CHARS)) throw new Error('empty answer');
+    return res.json({ answer: answer.trim() });
+  } catch (error) {
+    console.error('ask-live failed:', error.message);
+    return res.status(502).json({ error: 'The AI service could not answer right now.' });
+  }
+});
+
+/**
+ * POST /api/ai/title-live
+ * Suggest a meeting title from the live transcript.
+ */
+router.post('/title-live', requireAuth, async (req, res) => {
+  const { transcript, currentTitle, model } = req.body || {};
+  if (!config.aiEnabled) {
+    return res.status(503).json({ error: 'AI features are disabled' });
+  }
+  if (!isText(transcript, MAX_AI_BODY_CHARS)) {
+    return res.status(400).json({ error: 'transcript is required' });
+  }
+  try {
+    const title = await openrouterService.generateTitle(
+      transcript,
+      isText(currentTitle, MAX_TITLE_CHARS) ? currentTitle : 'Meeting',
+      { model: typeof model === 'string' ? model : undefined },
+    );
+    if (!isText(title, MAX_TITLE_CHARS)) throw new Error('empty title');
+    return res.json({ title: title.trim() });
+  } catch (error) {
+    console.error('title-live failed:', error.message);
+    return res.status(502).json({ error: 'The AI service could not suggest a title right now.' });
+  }
+});
+
 // Rate limit: one suggest call per meeting per 5 minutes
 const suggestRateLimit = new Map();
 
