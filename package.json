@@ -40,5 +40,8 @@
   "license": "MIT",
   "devDependencies": {
     "concurrently": "^8.2.2"
+  },
+  "overrides": {
+    "qs": "^6.16.2"
   }
 }
