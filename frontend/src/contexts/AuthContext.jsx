@@ -5,7 +5,6 @@ const AuthContext = createContext();
 export function AuthProvider({ children }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
-  const [wsToken, setWsToken] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const checkAuth = useCallback(async () => {
@@ -30,21 +29,20 @@ export function AuthProvider({ children }) {
     checkAuth().finally(() => setIsLoading(false));
   }, [checkAuth]);
 
-  const login = useCallback((userData, token) => {
+  // The session itself is an httpOnly cookie; JavaScript only keeps who is signed in.
+  const login = useCallback((userData) => {
     setUser(userData);
     setIsAuthenticated(true);
-    if (token) setWsToken(token);
   }, []);
 
   const logout = useCallback(() => {
     setUser(null);
     setIsAuthenticated(false);
-    setWsToken(null);
   }, []);
 
   const contextValue = useMemo(() => ({
-    isAuthenticated, user, wsToken, isLoading, checkAuth, login, logout,
-  }), [isAuthenticated, user, wsToken, isLoading, checkAuth, login, logout]);
+    isAuthenticated, user, isLoading, checkAuth, login, logout,
+  }), [isAuthenticated, user, isLoading, checkAuth, login, logout]);
 
   return (
     <AuthContext.Provider value={contextValue}>

@@ -82,3 +82,22 @@ test('webhook signatures are checked against the bytes Zoom sent', async () => {
   // A signature over the re-serialized form is not a signature over what was sent
   assert.equal((await send(raw, sign(JSON.stringify(JSON.parse(raw))))).status, 401);
 });
+
+// A session token in a URL ends up in proxy and access logs. The WebSocket is
+// authenticated by cookies only.
+test('WebSocket ignores a session token passed in the URL', async () => {
+  const { generateToken } = require('../src/services/auth');
+  const session = generateToken({ userId: 'u-query', zoomUserId: 'z-query' });
+  const access = await h.postJson(url('/api/auth/meeting-access'), { appContext: h.makeAppContext(h.meetingPayload()) });
+  const wsBase = url('/ws').replace('http', 'ws');
+
+  const viaQuery = await h.openWs(`${wsBase}?meeting_id=m&token=${session}`, { cookie: access.cookie });
+  await h.wait(100);
+  viaQuery.socket.close();
+  assert.equal(viaQuery.messages.find((m) => m.type === 'connected')?.data?.isGuest, true);
+
+  const viaCookie = await h.openWs(`${wsBase}?meeting_id=m`, { cookie: `${access.cookie}; sessionToken=${session}` });
+  await h.wait(100);
+  viaCookie.socket.close();
+  assert.equal(viaCookie.messages.find((m) => m.type === 'connected')?.data?.isGuest, false);
+});

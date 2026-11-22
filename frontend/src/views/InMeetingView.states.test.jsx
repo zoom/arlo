@@ -183,3 +183,11 @@ describe('transport bar', () => {
     expect(screen.queryByRole('button', { name: 'Stop transcription' })).not.toBeInTheDocument();
   });
 });
+
+describe('WebSocket connection', () => {
+  test('carries no token in its URL (cookies authenticate it)', async () => {
+    await openMeeting();
+    expect(server().url).toContain('/ws?meeting_id=');
+    expect(server().url).not.toMatch(/token=/);
+  });
+});

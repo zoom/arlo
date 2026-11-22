@@ -96,7 +96,7 @@ Zoom RTMS WebSocket → RTMS Service → Backend (broadcast only, NO storage)
 
 ### Authentication Flow (Zoom OAuth PKCE)
 
-Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.jsx`) — single source of truth for auth.
+Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — single source of truth for auth.
 
 ```
 1. Frontend: GET /api/auth/authorize → { codeChallenge, state }
@@ -105,7 +105,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.jsx`) — sin
 4. Zoom fires onAuthorized → { code }
 5. Frontend: POST /api/auth/callback { code, state }
 6. Backend: Exchanges code for tokens, stores in memory (encrypted), creates session cookie
-7. Frontend: login(user, wsToken) → navigate to /home
+7. Frontend: login(user) → navigate to /home (the session token stays in the httpOnly cookie and is never returned to JavaScript)
 ```
 
 **Note:** Users and tokens are stored in memory only. A server restart is survived through an encrypted httpOnly `sessionRestore` cookie (user record + Zoom refresh token, AES-GCM with `TOKEN_ENCRYPTION_KEY`) that rebuilds the in-memory session on the next request; see `backend/src/services/sessionRestore.js`. Without that cookie, the app signs in silently when Zoom still reports the user as authorized.
@@ -125,7 +125,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.jsx`) — sin
 - `index.css` — Design tokens, typography (Source Serif 4 + Inter), light/dark theme variables
 - `views/` — 14 views (Auth, Home, MeetingsList, MeetingDetail, InMeeting, SearchResults, Settings, etc.)
 - `contexts/` — AuthContext (session), ZoomSdkContext (SDK init), MeetingContext (active meeting + WS), ServerSettingsContext (demo mode flags)
-- `hooks/useZoomAuth.jsx` — In-client OAuth PKCE flow hook
+- `hooks/useZoomAuth.js` — In-client OAuth PKCE flow hook
 - `components/AppShell.jsx` — Persistent header + `<Outlet />`
 
 ### Monorepo (npm workspaces)
@@ -191,10 +191,10 @@ import { Tabs } from '@base-ui/react/tabs';
 
 ## WebSocket Protocol
 
-**Security:** JWT token is required for all WebSocket connections.
+**Security:** every WebSocket connection is authenticated by httpOnly cookies sent on the handshake (`meetingAccess`, plus `sessionToken` for signed-in users). No token goes in the URL.
 
 ```
-Connection: ws://host/ws?meeting_id={uuid}&token={jwt}
+Connection: ws://host/ws?meeting_id={uuid}   (cookies authenticate; the server binds the socket to the verified meeting)
 Client → Server: { type: 'subscribe', meetingId: 'uuid' }
 Server → Client: { type: 'transcript.segment', data: { meetingId, segment: {...} } }
 Server → Client: { type: 'ai.suggestion', data: { meetingId, suggestion: {...} } }
@@ -250,7 +250,7 @@ This demo mode version prioritizes security by never storing customer data:
 - **Session cookies** — httpOnly, secure, SameSite=lax. Three kinds that cannot stand in for each other: `sessionToken` (who you are), `meetingAccess` (which meeting you are in), `sessionRestore` (encrypted, rebuilds a session after a restart)
 - **HMAC verification** — All Zoom webhooks verified with timing-safe comparisons
 - **Rate limiting** — Global, auth, and AI endpoint limits via `express-rate-limit`
-- **WebSocket auth** — JWT token required for all connections
+- **WebSocket auth** — verified meeting-access cookie required for all connections
 
 **Privacy Notice:** Your meeting data is processed in real-time and never stored. All data exists only in memory during your active session and is automatically cleared when you leave.
 

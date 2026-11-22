@@ -351,8 +351,8 @@ router.post('/callback', async (req, res) => {
       exp: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
     });
 
-    // Generate JWT for WebSocket auth (same token, but also returned for WS connections)
-    const wsToken = sessionToken;
+    // The session token stays in the httpOnly cookie. It is never returned to
+    // page JavaScript; the WebSocket is authenticated by the same cookie.
 
     // Set httpOnly cookie for session management
     res.cookie('sessionToken', sessionToken, {
@@ -372,7 +372,6 @@ router.post('/callback', async (req, res) => {
         displayName: user.displayName,
         avatarUrl: user.avatarUrl,
       },
-      wsToken, // Still return for WebSocket connections
       expiresAt: expiresAt.toISOString(),
       // Include demo mode flag so frontend knows data isn't persisted
       demoMode: config.demoMode,

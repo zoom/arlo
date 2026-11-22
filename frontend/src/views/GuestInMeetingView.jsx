@@ -76,7 +76,7 @@ export default function GuestInMeetingView() {
   // Connect WebSocket for live transcript (anonymous — null token)
   useEffect(() => {
     if (!meetingId || ws) return;
-    connectWebSocket(null, meetingId);
+    connectWebSocket(meetingId);
   }, [meetingId, ws, connectWebSocket]);
 
   // Keep the newest line in view while following live

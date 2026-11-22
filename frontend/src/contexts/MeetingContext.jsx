@@ -208,7 +208,7 @@ export function MeetingProvider({ children }) {
     }
   }, []);
 
-  const openSocket = useCallback((token, meetingId) => {
+  const openSocket = useCallback((meetingId) => {
 
     // Close existing socket before creating new one
     setWs(prev => {
@@ -223,10 +223,8 @@ export function MeetingProvider({ children }) {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const hostname = window.location.hostname;
-    let wsUrl = `${protocol}//${hostname}/ws?meeting_id=${encodeURIComponent(meetingId)}`;
-    if (token) {
-      wsUrl += `&token=${encodeURIComponent(token)}`;
-    }
+    // No token in the URL: the browser sends the httpOnly cookies on the handshake.
+    const wsUrl = `${protocol}//${hostname}/ws?meeting_id=${encodeURIComponent(meetingId)}`;
 
     const socket = new WebSocket(wsUrl);
 
@@ -298,7 +296,7 @@ export function MeetingProvider({ children }) {
         }
         reconnectTimerRef.current = setTimeout(() => {
           if (shouldReconnectRef.current) {
-            connectWebSocketRef.current(token, meetingId);
+            connectWebSocketRef.current(meetingId);
           }
         }, 5000);
       }
@@ -308,7 +306,7 @@ export function MeetingProvider({ children }) {
     return socket;
   }, []);
 
-  const connectWebSocket = useCallback((token, meetingId) => {
+  const connectWebSocket = useCallback((meetingId) => {
     if (!meetingId || meetingId === 'undefined' || meetingId === 'null') {
       console.error('Cannot connect WebSocket without valid meeting ID');
       return null;
@@ -318,7 +316,7 @@ export function MeetingProvider({ children }) {
 
     verifyMeetingAccess()
       .then((ok) => {
-        if (ok) openSocket(token, meetingId);
+        if (ok) openSocket(meetingId);
       })
       .finally(() => {
         connectingRef.current = false;

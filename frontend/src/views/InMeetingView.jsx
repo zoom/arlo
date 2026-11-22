@@ -75,7 +75,7 @@ export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
   const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsPhase, meetingId, connectWebSocket, viewers, meetingAccess, setWs } = useMeeting();
-  const { isAuthenticated, wsToken } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
   const { hasFeature, verticalId, getTerm } = useVertical();
@@ -188,13 +188,11 @@ export default function InMeetingView({ isGuestMode = false }) {
     if (ws) return; // Already connected
     if (!effectiveMeetingId) return; // No meeting ID yet
 
-    if (isGuestMode) {
-      // Guests connect without token
-      connectWebSocket(null, effectiveMeetingId);
-    } else if (isAuthenticated) {
-      connectWebSocket(wsToken, effectiveMeetingId);
+    // Guests connect too: their access is the verified meeting, not a sign-in
+    if (isGuestMode || isAuthenticated) {
+      connectWebSocket(effectiveMeetingId);
     }
-  }, [isGuestMode, isAuthenticated, ws, effectiveMeetingId, wsToken, connectWebSocket]);
+  }, [isGuestMode, isAuthenticated, ws, effectiveMeetingId, connectWebSocket]);
 
   // Keep the newest line in view while following live
   useEffect(() => {
@@ -611,7 +609,7 @@ export default function InMeetingView({ isGuestMode = false }) {
             isGuestMode={isGuestMode}
             onRetry={() => {
               setWs(null);
-              connectWebSocket(isGuestMode ? null : wsToken, effectiveMeetingId);
+              connectWebSocket(effectiveMeetingId);
             }}
           />
           {!showTranscript && (

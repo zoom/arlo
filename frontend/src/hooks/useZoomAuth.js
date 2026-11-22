@@ -64,7 +64,7 @@ export default function useZoomAuth() {
         }
 
         const data = await callbackResponse.json();
-        login(data.user, data.wsToken);
+        login(data.user);
         return data;
       };
 

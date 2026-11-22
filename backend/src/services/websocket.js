@@ -62,7 +62,8 @@ function initWebSocketServer(server) {
     }
 
     // Resolve the signed-in user from the session, if any (for per-user routing).
-    const sessionToken = getCookie(req, 'sessionToken') || queryParams.token;
+    // Cookie only: a token in the URL would end up in proxy and access logs.
+    const sessionToken = getCookie(req, 'sessionToken');
     if (sessionToken) {
       try {
         userId = verifySessionToken(sessionToken).userId;
