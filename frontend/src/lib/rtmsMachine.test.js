@@ -189,7 +189,8 @@ describe('status mapping', () => {
     expect(statusFromWs('rtms_paused')).toBe('paused');
     expect(statusFromWs('rtms_resumed')).toBe('resumed');
     expect(statusFromWs('rtms_interrupted')).toBe('interrupted');
-    expect(statusFromWs('media_interrupted')).toBeNull();
+    // media-only drop: the rtms service keeps its session and reconnects
+    expect(statusFromWs('media_interrupted')).toBe('interrupted');
     expect(statusFromWs(undefined)).toBeNull();
   });
 
@@ -425,5 +426,21 @@ describe('Arlo could not connect to the stream Zoom started', () => {
     expect(state.error.message).toMatch(/could not connect/i);
     expect(isRtmsActive(state)).toBe(false);
     expect(canStartRtms(state)).toBe(true);
+  });
+});
+
+describe('a stream that drops and comes back', () => {
+  const active = run([status('started', 'server')]);
+
+  test('a media interruption shows as reconnecting and the next transcript line clears it', () => {
+    const interrupted = rtmsReducer(active, status(statusFromWs('media_interrupted'), 'server'));
+    expect(interrupted.phase).toBe('interrupted');
+    expect(isRtmsActive(interrupted)).toBe(true);
+    expect(rtmsReducer(interrupted, { type: 'TRANSCRIPT' }).phase).toBe('active');
+  });
+
+  test('an interruption that ends in a stop is stopped', () => {
+    const interrupted = rtmsReducer(active, status('interrupted', 'server'));
+    expect(rtmsReducer(interrupted, status('stopped', 'server')).phase).toBe('stopped');
   });
 });

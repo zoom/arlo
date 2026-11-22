@@ -185,6 +185,7 @@ const WS_STATUS = {
   rtms_paused: 'paused',
   rtms_resumed: 'resumed',
   rtms_interrupted: 'interrupted',
+  media_interrupted: 'interrupted', // media-only drop; the rtms service reconnects
   rtms_failed: 'failed',
 };
 

@@ -158,6 +158,23 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     return sendResponse(res, 200, 'OK');
   }
 
+  // Zoom lost the signaling connection for this stream. Tell the meeting so the
+  // panel shows "Reconnecting…" instead of a silent stall. The rtms service is
+  // deliberately NOT told to drop its session here: whether the app or the
+  // @zoom/rtms SDK must reconnect, and how failover is signalled for meetings,
+  // is not settled by Zoom's docs. A later rtms_started, rtms_stopped or
+  // transcript line moves the state on.
+  if (event === 'meeting.rtms_interrupted') {
+    const meetingUuid = payload?.meeting_uuid;
+    if (typeof meetingUuid === 'string' && meetingUuid.length > 0 && meetingUuid.length <= 256) {
+      const sentCount = broadcastMeetingStatus(meetingUuid, 'rtms_interrupted');
+      console.log(`meeting.rtms_interrupted: delivered to ${sentCount} client(s)`);
+    } else {
+      logger.warn('meeting.rtms_interrupted ignored: unexpected payload');
+    }
+    return sendResponse(res, 200, 'OK');
+  }
+
   // Forward webhook to RTMS service (internal network only)
   if (event === 'meeting.rtms_started' || event === 'meeting.rtms_stopped') {
     try {
