@@ -111,3 +111,19 @@ describe('transcript', () => {
     expect(screen.getByText('Said while away.')).toBeInTheDocument();
   });
 });
+
+describe('auto-start', () => {
+  const startCalls = (sdk) => sdk.callZoomApi.mock.calls.filter(([name]) => name === 'startRTMS');
+
+  test('with auto-start on, opening the panel requests transcription once', async () => {
+    const { sdk } = await openMeeting({ autoStart: true });
+    await waitFor(() => expect(startCalls(sdk)).toHaveLength(1));
+  });
+
+  test('with auto-start off, nothing is requested until the user clicks Start', async () => {
+    const { sdk } = await openMeeting({ autoStart: false });
+    await new Promise((resolve) => setTimeout(resolve, 900)); // past the 500ms auto-start delay
+    expect(startCalls(sdk)).toHaveLength(0);
+    expect(await startButton()).toBeEnabled();
+  });
+});
