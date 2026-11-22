@@ -227,8 +227,14 @@ async function handleWebSocketMessage(ws, data) {
         // Broadcast updated presence to all viewers in this meeting
         broadcastPresence(meetingId);
 
-        // Demo mode: No database lookup - meeting status comes from RTMS events
-        console.log(`📡 WS subscribe: demo mode - waiting for RTMS events for meetingId="${meetingId}"`);
+        // Tell the new subscriber whether a stream is already running
+        const streamStatus = currentStreamStatus(meetingId);
+        if (streamStatus) {
+          ws.send(JSON.stringify({
+            type: 'meeting.status',
+            data: { meetingId, status: streamStatus, timestamp: new Date().toISOString() },
+          }));
+        }
       }
       break;
 
@@ -403,6 +409,7 @@ function broadcastAiSuggestion(meetingId, suggestion) {
  * Broadcast meeting status change
  */
 function broadcastMeetingStatus(meetingId, status) {
+  rememberStreamStatus(meetingId, status);
   return broadcastToMeeting(meetingId, {
     type: 'meeting.status',
     data: {
@@ -411,6 +418,44 @@ function broadcastMeetingStatus(meetingId, status) {
       timestamp: new Date().toISOString(),
     },
   });
+}
+
+/**
+ * Which meetings have a live stream right now (in memory only, a status string
+ * per meeting, no meeting content). Lets a panel that opens or reconnects
+ * mid-meeting learn the real stream state from the server that receives it.
+ */
+const STREAM_STATUS_TTL_MS = 12 * 60 * 60 * 1000;
+const STREAM_STATUS_MAX = 5000;
+const streamStatuses = new Map(); // meetingId -> { status, at }
+
+function rememberStreamStatus(meetingId, status) {
+  const known = streamStatuses.has(meetingId);
+  if (status === 'rtms_started') {
+    if (!known && streamStatuses.size >= STREAM_STATUS_MAX) {
+      // Drop the oldest entry (Map keeps insertion order) rather than grow without bound
+      streamStatuses.delete(streamStatuses.keys().next().value);
+    }
+    streamStatuses.delete(meetingId);
+    streamStatuses.set(meetingId, { status: 'rtms_started', at: Date.now() });
+  } else if (status === 'rtms_stopped') {
+    streamStatuses.delete(meetingId);
+  } else if (known && (status === 'rtms_paused' || status === 'rtms_interrupted')) {
+    // Pause/interrupt only change a stream that exists; they cannot create one
+    streamStatuses.get(meetingId).status = status;
+  } else if (known && status === 'rtms_resumed') {
+    streamStatuses.get(meetingId).status = 'rtms_started';
+  }
+}
+
+function currentStreamStatus(meetingId) {
+  const entry = streamStatuses.get(meetingId);
+  if (!entry) return null;
+  if (Date.now() - entry.at > STREAM_STATUS_TTL_MS) {
+    streamStatuses.delete(meetingId);
+    return null;
+  }
+  return entry.status;
 }
 
 /**

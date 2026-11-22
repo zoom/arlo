@@ -668,6 +668,8 @@ export default function InMeetingView({ isGuestMode = false }) {
   // Determine transcript state (initial_roster events don't count as displayable content)
   const hasContent = segments.length > 0 || participantEvents.some(e => e.eventType !== 'initial_roster');
   // 'requesting' = asked Zoom, not confirmed yet (host may still have to approve)
+  // 'starting'   = Zoom's client says started, the stream has not reached the server yet
+  // 'waiting'    = the server has the stream, no one has spoken yet
   const transcriptState = rtmsPaused
     ? 'paused'
     : rtmsActive && hasContent
@@ -676,13 +678,18 @@ export default function InMeetingView({ isGuestMode = false }) {
         ? 'waiting'
         : rtmsPhase === 'requested'
           ? 'requesting'
-          : 'not-started';
+          : rtmsPhase === 'starting'
+            ? 'starting'
+            : 'not-started';
   const requestSecondsLeft = useSecondsLeft(rtmsRequestExpiresAt);
   const requestingLabel = rtmsWaitingLong
     ? `Waiting for host approval…${requestSecondsLeft !== null ? ` ${requestSecondsLeft}s` : ''}`
     : 'Requesting transcription…';
   // Denied or unanswered: ask the host again. Failed: something is broken, so "Try again".
-  const startAgainLabel = rtmsPhase === 'failed' ? 'Try again' : 'Request again';
+  // Stalled: the host already allows it, so it is a plain start, not a new request.
+  const startAgainLabel = rtmsPhase === 'failed'
+    ? 'Try again'
+    : rtmsPhase === 'stalled' ? 'Start Transcription' : 'Request again';
   const liveLabel = rtmsPhase === 'interrupted' ? 'Reconnecting…' : 'Transcribing';
   // Start was denied or failed: say why and offer Retry (the stream is not running)
   const startError = !rtmsActive && rtmsError?.action === 'start' ? rtmsError.message : null;
@@ -1001,6 +1008,15 @@ export default function InMeetingView({ isGuestMode = false }) {
             </Card>
           )}
 
+          {transcriptState === 'starting' && (
+            <Card className="transcript-state-card">
+              <div className="transcript-state-inner" role="status" aria-live="polite">
+                <LoadingSpinner size={32} />
+                <p className="text-serif text-muted">Starting transcription…</p>
+              </div>
+            </Card>
+          )}
+
           {transcriptState === 'waiting' && (
             <Card className="transcript-state-card">
               <div className="transcript-state-inner">
@@ -1228,6 +1244,13 @@ export default function InMeetingView({ isGuestMode = false }) {
                   <div className="assist-status-live" role="status" aria-live="polite">
                     <LoadingSpinner size={14} />
                     <span className="text-sans text-sm text-muted">{requestingLabel}</span>
+                  </div>
+                </>
+              ) : transcriptState === 'starting' ? (
+                <>
+                  <div className="assist-status-live" role="status" aria-live="polite">
+                    <LoadingSpinner size={14} />
+                    <span className="text-sans text-sm text-muted">Starting transcription…</span>
                   </div>
                 </>
               ) : transcriptState === 'waiting' ? (

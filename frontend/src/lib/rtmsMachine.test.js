@@ -13,7 +13,8 @@ const run = (events, from = initialRtmsState) => events.reduce(rtmsReducer, from
 const request = (action) => ({ type: 'REQUEST', action });
 const accepted = (action, confirmsState = false) => ({ type: 'REQUEST_ACCEPTED', action, confirmsState });
 const failed = (action, code, message) => ({ type: 'REQUEST_FAILED', action, code, message });
-const status = (value, source = 'sdk') => ({ type: 'STATUS', status: value, source });
+// 'server' = the backend that receives the stream; 'sdk' = the Zoom client's own status
+const status = (value, source = 'server') => ({ type: 'STATUS', status: value, source });
 
 describe('starting', () => {
   test('a start request is not an active transcription', () => {
@@ -23,7 +24,7 @@ describe('starting', () => {
     expect(isRtmsBusy(state)).toBe(true);
   });
 
-  test('becomes active only when Zoom confirms the stream started', () => {
+  test('becomes active only when the server confirms the stream started', () => {
     const state = run([request('start'), accepted('start'), status('started')]);
     expect(state.phase).toBe('active');
     expect(isRtmsActive(state)).toBe(true);
@@ -50,7 +51,7 @@ describe('starting', () => {
   });
 
   test('Zoom reporting "stopped" while a start is pending means it was denied', () => {
-    const state = run([request('start'), accepted('start'), status('stopped')]);
+    const state = run([request('start'), accepted('start'), status('stopped', 'sdk')]);
     expect(state.phase).toBe('denied');
     expect(state.error.message).toMatch(/host/i);
     expect(isRtmsActive(state)).toBe(false);
@@ -69,13 +70,13 @@ describe('starting', () => {
     expect(isRtmsBusy(state)).toBe(false);
   });
 
-  test('error 10308 (already running) counts as active', () => {
-    expect(run([request('start'), failed('start', '10308', 'already started')]).phase).toBe('active');
-    expect(run([request('start'), failed('start', 10308, 'already started')]).phase).toBe('active');
+  test('error 10308 (Zoom says already running) waits for the server like any client claim', () => {
+    expect(run([request('start'), failed('start', '10308', 'already started')]).phase).toBe('starting');
+    expect(run([request('start'), failed('start', 10308, 'already started')]).phase).toBe('starting');
   });
 
   test('retry after a denied or failed start clears the error', () => {
-    const denied = run([request('start'), status('stopped')]);
+    const denied = run([request('start'), status('stopped', 'sdk')]);
     const retried = rtmsReducer(denied, request('start'));
     expect(retried.phase).toBe('requested');
     expect(retried.error).toBeNull();
@@ -265,5 +266,64 @@ describe('requests the host never answers, or denies', () => {
   test('a server failure (6) ends a running stream as failed', () => {
     const active = run([status('started')], requested);
     expect(rtmsReducer(active, requestStatus(6)).phase).toBe('failed');
+  });
+});
+
+describe('the Zoom client says "started" but no stream has reached the server', () => {
+  // Seen in a meeting: host denies, later allows the app. The client status flips,
+  // but nothing streams until someone actually starts it.
+  const sdkStarted = status('started', 'sdk');
+
+  test('a client-only "started" is starting, not active', () => {
+    const state = run([sdkStarted]);
+    expect(state.phase).toBe('starting');
+    expect(isRtmsActive(state)).toBe(false);
+    expect(isRtmsBusy(state)).toBe(true);
+  });
+
+  test('the same holds after a request, a denial or an expiry', () => {
+    expect(run([request('start'), accepted('start'), sdkStarted]).phase).toBe('starting');
+    expect(run([request('start'), { type: 'EXPIRE' }, sdkStarted]).phase).toBe('starting');
+    expect(run([request('start'), { type: 'REQUEST_STATUS', status: 3 }, sdkStarted]).phase).toBe('starting');
+  });
+
+  test('the server status or a transcript line makes it active', () => {
+    expect(run([sdkStarted, status('started', 'server')]).phase).toBe('active');
+    expect(run([sdkStarted, { type: 'TRANSCRIPT' }]).phase).toBe('active');
+  });
+
+  test('if the stream never arrives, the Start button comes back with an explanation', () => {
+    const stalled = run([sdkStarted, { type: 'STALL' }]);
+    expect(stalled.phase).toBe('stalled');
+    expect(isRtmsActive(stalled)).toBe(false);
+    expect(isRtmsBusy(stalled)).toBe(false);
+    expect(stalled.error.action).toBe('start');
+    expect(stalled.error.message).toMatch(/has not started/i);
+
+    expect(rtmsReducer(stalled, request('start')).phase).toBe('requested');
+    expect(rtmsReducer(stalled, status('started', 'server')).phase).toBe('active');
+  });
+
+  test('STALL only applies while starting', () => {
+    const active = run([status('started', 'server')]);
+    expect(rtmsReducer(active, { type: 'STALL' })).toBe(active);
+    expect(rtmsReducer(initialRtmsState, { type: 'STALL' })).toBe(initialRtmsState);
+  });
+
+  test('a client "started" does not downgrade a stream the server confirmed', () => {
+    const active = run([status('started', 'server')]);
+    expect(rtmsReducer(active, sdkStarted)).toBe(active);
+  });
+
+  test('a client "resumed" returns a paused stream to active (it was confirmed before)', () => {
+    const paused = run([status('started', 'server'), status('paused', 'sdk')]);
+    expect(rtmsReducer(paused, status('resumed', 'sdk')).phase).toBe('active');
+  });
+
+  test('a client "stopped" while starting or stalled returns to not started, without an error', () => {
+    const fromStarting = run([sdkStarted, status('stopped', 'sdk')]);
+    expect(fromStarting.phase).toBe('stopped');
+    expect(fromStarting.error).toBeNull();
+    expect(run([sdkStarted, { type: 'STALL' }, status('stopped', 'sdk')]).phase).toBe('stopped');
   });
 });

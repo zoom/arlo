@@ -19,6 +19,9 @@ const MeetingContext = createContext();
 // the client is not told, so the request expires here on the same clock.
 const START_CONFIRM_TIMEOUT_MS = 5000;
 const START_REQUEST_EXPIRY_MS = 60000;
+// Zoom's client says "started" but the server has seen no stream: how long to
+// show "Starting transcription…" before giving the Start button back.
+const STREAM_ARRIVAL_TIMEOUT_MS = 15000;
 const ACTION_CONFIRM_TIMEOUT_MS = 10000;
 
 const DEFAULT_CHAT_NOTICES = {
@@ -359,6 +362,16 @@ export function MeetingProvider({ children }) {
     }
   }, []);
 
+  // "Started" according to the Zoom client only. If the stream never reaches
+  // the server, stop pretending and let the user start it.
+  // Only judged while the WebSocket is up: the server reports a running
+  // stream on subscribe, so without a socket there is nothing to compare with.
+  useEffect(() => {
+    if (rtms.phase !== 'starting' || !ws) return undefined;
+    const timer = setTimeout(() => dispatchRtms({ type: 'STALL' }), STREAM_ARRIVAL_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [rtms.phase, ws]);
+
   // Timeline event for the other participants' panels (backend broadcasts it).
   const postTimelineStatus = useCallback((status) => {
     fetch('/api/rtms/status', {
@@ -379,7 +392,7 @@ export function MeetingProvider({ children }) {
     const local = localActionRef.current;
 
     if (next === 'active') {
-      if (prev === 'requested' && !alreadyRunningRef.current) {
+      if ((prev === 'requested' || prev === 'starting') && !alreadyRunningRef.current) {
         notify('info', 'Transcription started');
       }
       if (prev === 'paused' && local === 'resume') {
@@ -406,6 +419,8 @@ export function MeetingProvider({ children }) {
       localActionRef.current = null;
       startedHereRef.current = false;
     }
+    // 'starting' and 'stalled' keep startedHereRef: the stream may still arrive
+    // (e.g. the user clicks Zoom's own Start button) and the chat notice is ours.
   }, [rtms.phase, notify, postTimelineStatus]);
 
   // Denied / failed / unconfirmed requests are shown, not swallowed.

@@ -4,12 +4,19 @@
  * Rule: a request is not a state. `callZoomApi('startRTMS')` resolving only
  * means Zoom accepted the request; the host can still decline it. The phase
  * changes only on a confirmed signal:
- *   - Zoom client `onRTMSStatusChange` / `getRTMSStatus`  (source 'sdk')
  *   - backend WebSocket `meeting.status` from the webhook  (source 'server')
  *   - a transcript line arriving
+ *   - Zoom client `onRTMSStatusChange` / `getRTMSStatus`  (source 'sdk')
+ *
+ * Only the server (it receives the stream) or a transcript line proves the
+ * stream is running. The Zoom client reports "started" as soon as the host
+ * allows the app, before anything streams, so a client "started" is only
+ * `starting`; if the stream does not follow, it becomes `stalled` and the
+ * Start button returns.
  *
  * Phases:
- *   idle → requested → active | denied | failed | expired
+ *   idle → requested → starting → active
+ *   requested → denied | failed | expired,  starting → stalled
  *   active ⇄ paused, active → interrupted → active, active|paused → stopped
  *
  * `pending` is the request this client is waiting on ('start' | 'stop' |
@@ -24,7 +31,7 @@ export const initialRtmsState = Object.freeze({
 });
 
 const ALREADY_RUNNING = '10308';
-const NOT_RUNNING_PHASES = new Set(['idle', 'stopped', 'denied', 'failed', 'expired']);
+const NOT_RUNNING_PHASES = new Set(['idle', 'stopped', 'denied', 'failed', 'expired', 'stalled']);
 const RUNNING_PHASES = new Set(['active', 'paused', 'interrupted']);
 
 // What an accepted request implies on clients that get no status events.
@@ -45,10 +52,13 @@ const REQUEST_STATUS_OUTCOME = {
   6: { phase: 'failed', message: 'Zoom\'s transcription server failed. Request again.' },
 };
 const SERVER_FAILED = 6;
+const STALLED_MESSAGE = 'Zoom allows transcription, but the stream has not started. Start it here, or use the Start button Zoom shows for Arlo.';
 
 export const isRtmsActive = (state) => RUNNING_PHASES.has(state.phase);
 export const isRtmsPaused = (state) => state.phase === 'paused';
-export const isRtmsBusy = (state) => state.pending !== null || state.phase === 'requested';
+export const isRtmsBusy = (state) => (
+  state.pending !== null || state.phase === 'requested' || state.phase === 'starting'
+);
 
 const settled = (phase, error = null) => ({ phase, pending: null, error, waitingLong: false });
 
@@ -59,10 +69,15 @@ function onStatus(state, status, source) {
         ? { ...settled('requested'), pending: state.pending }
         : state;
     case 'started':
-    case 'resumed':
+    case 'resumed': {
+      // From the client this is a claim, not proof, unless the stream was
+      // already confirmed (running, or paused and now resumed).
+      const proven = source !== 'sdk' || RUNNING_PHASES.has(state.phase);
+      if (!proven) return state.phase === 'starting' ? state : settled('starting');
       return state.phase === 'active' && state.pending === null && !state.error
         ? state
         : settled('active');
+    }
     case 'paused':
       return settled('paused');
     case 'stopped':
@@ -73,7 +88,9 @@ function onStatus(state, status, source) {
           ? settled('denied', { action: 'start', code: null, message: DENIED_MESSAGE })
           : state;
       }
-      return RUNNING_PHASES.has(state.phase) ? settled('stopped') : state;
+      return RUNNING_PHASES.has(state.phase) || state.phase === 'starting' || state.phase === 'stalled'
+        ? settled('stopped')
+        : state;
     case 'interrupted':
       return RUNNING_PHASES.has(state.phase) ? { ...state, phase: 'interrupted' } : state;
     default:
@@ -97,7 +114,8 @@ export function rtmsReducer(state, event) {
 
     case 'REQUEST_FAILED': {
       if (event.action === 'start' && String(event.code) === ALREADY_RUNNING) {
-        return settled('active');
+        // Zoom says a stream exists; the server confirms whether it reaches us
+        return settled('starting');
       }
       const error = {
         action: event.action,
@@ -126,6 +144,11 @@ export function rtmsReducer(state, event) {
         };
       }
       return state;
+
+    case 'STALL':
+      return state.phase === 'starting'
+        ? settled('stalled', { action: 'start', code: 'stalled', message: STALLED_MESSAGE })
+        : state;
 
     case 'EXPIRE':
       return state.phase === 'requested'

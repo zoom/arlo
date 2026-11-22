@@ -79,3 +79,48 @@ test('unknown or malformed statuses are acknowledged but not delivered', async (
 
   assert.equal(received(ws).length, 0);
 });
+
+// A panel opened (or reconnected) mid-meeting must learn from the server whether
+// the stream is really running; the Zoom client's own status is not proof.
+const setStatus = (meetingId, status) => h.postJson(
+  `${srv.base}/api/rtms/status`,
+  { meetingId, status },
+  { 'x-arlo-internal-key': h.internalKey() },
+);
+const statuses = (ws) => ws.messages.filter((m) => m.type === 'meeting.status').map((m) => m.data.status);
+
+test('a client that joins after the stream started is told it is running', async () => {
+  await setStatus(MEETING, 'rtms_started');
+  const ws = await joinMeeting();
+  ws.socket.close();
+  assert.deepEqual(statuses(ws), ['rtms_started']);
+});
+
+test('a client that joins while paused is told it is paused', async () => {
+  await setStatus(MEETING, 'rtms_started');
+  await setStatus(MEETING, 'rtms_paused');
+  const ws = await joinMeeting();
+  ws.socket.close();
+  assert.deepEqual(statuses(ws), ['rtms_paused']);
+});
+
+test('after the stream stopped, a joining client is told nothing', async () => {
+  await setStatus(MEETING, 'rtms_started');
+  await setStatus(MEETING, 'rtms_stopped');
+  const ws = await joinMeeting();
+  ws.socket.close();
+  assert.deepEqual(statuses(ws), []);
+});
+
+test('pause/resume reports cannot invent a stream that never started', async () => {
+  await setStatus('MEETING-NEVER-STARTED', 'rtms_resumed');
+  const { cookie } = await h.postJson(
+    `${srv.base}/api/auth/meeting-access`,
+    { appContext: h.makeAppContext(h.meetingPayload({ mid: 'MEETING-NEVER-STARTED' })) },
+  );
+  const ws = await h.openWs(`${srv.wsBase}?meeting_id=x`, { cookie });
+  ws.socket.send(JSON.stringify({ type: 'subscribe', payload: {} }));
+  await h.wait(150);
+  ws.socket.close();
+  assert.deepEqual(statuses(ws), []);
+});
