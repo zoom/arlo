@@ -121,7 +121,19 @@ function wsRejection(url, headers = {}, timeoutMs = 1500) {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * POST a webhook the way Zoom does: signed with the webhook secret token.
+ * Pass { sign: false } to send it without a signature.
+ */
+async function postWebhook(base, body, { sign = true } = {}) {
+  const raw = JSON.stringify(body);
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = `v0=${crypto.createHmac('sha256', TEST_WEBHOOK_TOKEN).update(`v0:${timestamp}:${raw}`).digest('hex')}`;
+  const headers = sign ? { 'x-zm-signature': signature, 'x-zm-request-timestamp': timestamp } : {};
+  return postJson(`${base}/api/rtms/webhook`, body, headers);
+}
+
 module.exports = {
   setTestEnv, startServer, internalKey, makeAppContext, meetingPayload,
-  postJson, openWs, wsRejection, wait, TEST_CLIENT_SECRET,
+  postJson, postWebhook, openWs, wsRejection, wait, TEST_CLIENT_SECRET,
 };

@@ -9,7 +9,7 @@
  *   - a transcript line arriving
  *
  * Phases:
- *   idle → requested → active | denied | failed
+ *   idle → requested → active | denied | failed | expired
  *   active ⇄ paused, active → interrupted → active, active|paused → stopped
  *
  * `pending` is the request this client is waiting on ('start' | 'stop' |
@@ -24,7 +24,7 @@ export const initialRtmsState = Object.freeze({
 });
 
 const ALREADY_RUNNING = '10308';
-const NOT_RUNNING_PHASES = new Set(['idle', 'stopped', 'denied', 'failed']);
+const NOT_RUNNING_PHASES = new Set(['idle', 'stopped', 'denied', 'failed', 'expired']);
 const RUNNING_PHASES = new Set(['active', 'paused', 'interrupted']);
 
 // What an accepted request implies on clients that get no status events.
@@ -32,6 +32,19 @@ const ASSUMED_PHASE = { stop: 'stopped', pause: 'paused', resume: 'active' };
 
 const DENIED_MESSAGE = 'Transcription did not start. The host may have declined the request.';
 const UNCONFIRMED_MESSAGE = 'Zoom did not confirm the request. Try again.';
+const EXPIRED_MESSAGE = 'No answer from the host. Zoom cancels a request after 60 seconds.';
+
+// Zoom `rtms.request_status` webhook codes that end a request. 7 and 8 are
+// server maintenance notices, not outcomes, so they are not listed.
+const REQUEST_STATUS_OUTCOME = {
+  1: { phase: 'denied', message: 'Zoom denied the transcription request.' },
+  2: { phase: 'failed', message: 'Transcription can\'t start because the app owner is not in the meeting.' },
+  3: { phase: 'denied', message: 'The host declined the transcription request.' },
+  4: { phase: 'failed', message: 'Transcription is not enabled for this app\'s account (license expired or feature turned off).' },
+  5: { phase: 'failed', message: 'No RTMS concurrency limit is set for this app\'s account.' },
+  6: { phase: 'failed', message: 'Zoom\'s transcription server failed. Request again.' },
+};
+const SERVER_FAILED = 6;
 
 export const isRtmsActive = (state) => RUNNING_PHASES.has(state.phase);
 export const isRtmsPaused = (state) => state.phase === 'paused';
@@ -113,6 +126,23 @@ export function rtmsReducer(state, event) {
         };
       }
       return state;
+
+    case 'EXPIRE':
+      return state.phase === 'requested'
+        ? settled('expired', { action: 'start', code: 'timeout', message: EXPIRED_MESSAGE })
+        : state;
+
+    case 'REQUEST_STATUS': {
+      const outcome = REQUEST_STATUS_OUTCOME[event.status];
+      if (!outcome) return state;
+      // The webhook goes to everyone in the meeting: it only ends a request this
+      // client is showing (or just gave up on), or a stream whose server died.
+      const endsRequest = state.phase === 'requested' || state.phase === 'expired';
+      const endsStream = event.status === SERVER_FAILED && RUNNING_PHASES.has(state.phase);
+      return endsRequest || endsStream
+        ? settled(outcome.phase, { action: 'start', code: event.status, message: outcome.message })
+        : state;
+    }
 
     case 'RESET':
       return initialRtmsState;

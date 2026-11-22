@@ -13,6 +13,7 @@ import useZoomAuth from '../hooks/useZoomAuth';
 import { useDemoData } from '../hooks/useDemoData';
 import { useFeatureLayout } from '../hooks/useFeatureLayout';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
+import useSecondsLeft from '../hooks/useSecondsLeft';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import ArloResponsePanel from '../components/ArloResponsePanel';
 import ComplianceAdvisor from '../components/ComplianceAdvisor';
@@ -100,7 +101,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
-  const { ws, rtmsActive, rtmsPaused, rtmsLoading, rtmsPhase, rtmsError, rtmsWaitingLong, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
+  const { ws, rtmsActive, rtmsPaused, rtmsLoading, rtmsPhase, rtmsError, rtmsWaitingLong, rtmsRequestExpiresAt, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -676,7 +677,12 @@ export default function InMeetingView({ isGuestMode = false }) {
         : rtmsPhase === 'requested'
           ? 'requesting'
           : 'not-started';
-  const requestingLabel = rtmsWaitingLong ? 'Waiting for host approval…' : 'Requesting transcription…';
+  const requestSecondsLeft = useSecondsLeft(rtmsRequestExpiresAt);
+  const requestingLabel = rtmsWaitingLong
+    ? `Waiting for host approval…${requestSecondsLeft !== null ? ` ${requestSecondsLeft}s` : ''}`
+    : 'Requesting transcription…';
+  // Denied or unanswered: ask the host again. Failed: something is broken, so "Try again".
+  const startAgainLabel = rtmsPhase === 'failed' ? 'Try again' : 'Request again';
   const liveLabel = rtmsPhase === 'interrupted' ? 'Reconnecting…' : 'Transcribing';
   // Start was denied or failed: say why and offer Retry (the stream is not running)
   const startError = !rtmsActive && rtmsError?.action === 'start' ? rtmsError.message : null;
@@ -979,7 +985,7 @@ export default function InMeetingView({ isGuestMode = false }) {
                 )}
                 {!isGuestMode && (
                   <Button onClick={() => startRTMS(false)} disabled={rtmsLoading}>
-                    {startError ? 'Retry' : 'Start Transcription'}
+                    {startError ? startAgainLabel : 'Start Transcription'}
                   </Button>
                 )}
               </div>
@@ -1213,7 +1219,7 @@ export default function InMeetingView({ isGuestMode = false }) {
                   {!isGuestMode && (
                     <Button size="sm" onClick={() => startRTMS(false)} disabled={rtmsLoading}>
                       <Mic size={14} />
-                      {startError ? 'Retry' : 'Start'}
+                      {startError ? startAgainLabel : 'Start'}
                     </Button>
                   )}
                 </>

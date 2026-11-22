@@ -414,6 +414,21 @@ function broadcastMeetingStatus(meetingId, status) {
 }
 
 /**
+ * Tell a meeting why a stream request did not start (Zoom `rtms.request_status`).
+ * Only the numeric status is sent; the operator id stays on the server.
+ */
+function broadcastRtmsRequestStatus(meetingId, status) {
+  return broadcastToMeeting(meetingId, {
+    type: 'rtms.request_status',
+    data: {
+      meetingId,
+      status,
+      timestamp: new Date().toISOString(),
+    },
+  });
+}
+
+/**
  * Cross-register a user's existing WS connections under an RTMS meeting UUID.
  * Called when a new RTMS session starts — the user's WS is subscribed under the
  * SDK UUID, but transcripts are broadcast under the RTMS UUID.
@@ -469,6 +484,7 @@ module.exports = {
   broadcastParticipantEvent,
   broadcastAiSuggestion,
   broadcastMeetingStatus,
+  broadcastRtmsRequestStatus,
   crossRegisterUser,
   getStats,
 };

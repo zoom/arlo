@@ -14,8 +14,11 @@ import {
 
 const MeetingContext = createContext();
 
-// How long to wait for Zoom to confirm a request before saying so in the UI.
-const START_CONFIRM_TIMEOUT_MS = 30000;
+// A start that isn't confirmed quickly is waiting on the host: say so after
+// START_CONFIRM_TIMEOUT_MS. Zoom cancels an unanswered request after 60 seconds;
+// the client is not told, so the request expires here on the same clock.
+const START_CONFIRM_TIMEOUT_MS = 5000;
+const START_REQUEST_EXPIRY_MS = 60000;
 const ACTION_CONFIRM_TIMEOUT_MS = 10000;
 
 const DEFAULT_CHAT_NOTICES = {
@@ -58,6 +61,8 @@ export function MeetingProvider({ children }) {
   zoomSdkRef.current = zoomSdk;
   const rtmsRef = useRef(rtms);
   rtmsRef.current = rtms;
+  // When the pending start request expires (ms epoch), for the countdown in the UI
+  const [rtmsRequestExpiresAt, setRtmsRequestExpiresAt] = useState(null);
   // The request this client made and is waiting on. Chat notices and timeline
   // events fire when Zoom confirms it, and only on the client that asked.
   const localActionRef = useRef(null);
@@ -223,6 +228,11 @@ export function MeetingProvider({ children }) {
           if (status) dispatchRtms({ type: 'STATUS', status, source: 'server' });
           break;
         }
+        case 'rtms.request_status':
+          // Zoom's webhook says why a request did not start (3 = host denied)
+          console.log('RTMS request status from Zoom:', message.data?.status);
+          dispatchRtms({ type: 'REQUEST_STATUS', status: message.data?.status });
+          break;
         case 'meeting.presence':
           setViewers(message.data);
           break;
@@ -290,6 +300,8 @@ export function MeetingProvider({ children }) {
     if (!zoomSdk || !rtmsStatusSupported || !meetingId) return undefined;
     let cancelled = false;
     const handler = (event) => {
+      // Status only (no ids): shows in DevTools which events this client receives
+      console.log('onRTMSStatusChange:', event?.status);
       dispatchRtms({ type: 'STATUS', status: event?.status, source: 'sdk' });
     };
     try {
@@ -304,6 +316,7 @@ export function MeetingProvider({ children }) {
       .then((response) => {
         if (cancelled) return;
         const status = statusFromRtmsStatusList(response?.rtmsStatus);
+        console.log('getRTMSStatus:', status || 'no running session');
         if (status) dispatchRtms({ type: 'STATUS', status, source: 'sdk' });
       })
       .catch((error) => console.warn('getRTMSStatus failed:', error?.message));
@@ -325,6 +338,17 @@ export function MeetingProvider({ children }) {
     const timer = setTimeout(() => dispatchRtms({ type: 'TIMEOUT' }), delay);
     return () => clearTimeout(timer);
   }, [rtms.phase, rtms.pending, rtms.waitingLong]);
+
+  // A start request lives 60 seconds. After that the user can request again.
+  useEffect(() => {
+    if (rtms.phase !== 'requested') {
+      setRtmsRequestExpiresAt(null);
+      return undefined;
+    }
+    setRtmsRequestExpiresAt(Date.now() + START_REQUEST_EXPIRY_MS);
+    const timer = setTimeout(() => dispatchRtms({ type: 'EXPIRE' }), START_REQUEST_EXPIRY_MS);
+    return () => clearTimeout(timer);
+  }, [rtms.phase]);
 
   const notify = useCallback((type, message) => {
     try {
@@ -378,7 +402,7 @@ export function MeetingProvider({ children }) {
       localActionRef.current = null;
       startedHereRef.current = false;
       startNoticeSentRef.current = false;
-    } else if (next === 'denied' || next === 'failed') {
+    } else if (next === 'denied' || next === 'failed' || next === 'expired') {
       localActionRef.current = null;
       startedHereRef.current = false;
     }
@@ -596,6 +620,7 @@ export function MeetingProvider({ children }) {
     rtmsPhase: rtms.phase,
     rtmsError: rtms.error,
     rtmsWaitingLong: rtms.waitingLong,
+    rtmsRequestExpiresAt,
     ws,
     meetingId,
     meetingStartTime: meetingStartTimeRef.current,
@@ -614,7 +639,7 @@ export function MeetingProvider({ children }) {
     connectWebSocket,
     setWs,
     setTitleUserRenamed,
-  }), [rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, ws, meetingId, viewers, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, viewers, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

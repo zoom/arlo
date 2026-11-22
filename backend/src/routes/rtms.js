@@ -22,6 +22,7 @@ const {
   broadcastTranscriptSegment,
   broadcastParticipantEvent,
   broadcastMeetingStatus,
+  broadcastRtmsRequestStatus,
   crossRegisterUser,
   getStats,
 } = require('../services/websocket');
@@ -136,6 +137,26 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   }
 
   console.log(`RTMS Webhook: ${event} (signature verified)`);
+
+  // Why a stream request did not start (1-8, e.g. 3 = host denied). Zoom's docs
+  // do not say whether this fires for in-client startRTMS or only REST requests,
+  // so log the status code (never the ids) to find out.
+  if (event === 'rtms.request_status') {
+    const meetingUuid = payload?.id_field?.meeting_uuid ?? payload?.meeting_uuid;
+    const status = payload?.status;
+    const valid = typeof meetingUuid === 'string'
+      && meetingUuid.length > 0 && meetingUuid.length <= 256
+      && Number.isInteger(status) && status >= 1 && status <= 8;
+    if (valid) {
+      const sentCount = broadcastRtmsRequestStatus(meetingUuid, status);
+      console.log(`rtms.request_status: status=${status}, delivered to ${sentCount} client(s)`);
+    } else {
+      // Field names only, so the real payload shape can be confirmed without logging values
+      const fields = payload && typeof payload === 'object' ? Object.keys(payload).slice(0, 20).join(',') : 'none';
+      logger.warn(`rtms.request_status ignored: unexpected payload (fields: ${fields})`);
+    }
+    return sendResponse(res, 200, 'OK');
+  }
 
   // Forward webhook to RTMS service (internal network only)
   if (event === 'meeting.rtms_started' || event === 'meeting.rtms_stopped') {

@@ -199,3 +199,71 @@ describe('status mapping', () => {
     expect(statusFromRtmsStatusList(undefined)).toBeNull();
   });
 });
+
+describe('requests the host never answers, or denies', () => {
+  const requested = run([request('start'), accepted('start')]);
+  const requestStatus = (code) => ({ type: 'REQUEST_STATUS', status: code });
+
+  test('a request expires instead of spinning forever, and can be requested again', () => {
+    const expired = run([{ type: 'TIMEOUT' }, { type: 'EXPIRE' }], requested);
+    expect(expired.phase).toBe('expired');
+    expect(isRtmsBusy(expired)).toBe(false);
+    expect(isRtmsActive(expired)).toBe(false);
+    expect(expired.error.action).toBe('start');
+    expect(expired.error.message).toMatch(/60 seconds/);
+
+    const again = rtmsReducer(expired, request('start'));
+    expect(again.phase).toBe('requested');
+    expect(again.error).toBeNull();
+  });
+
+  test('expiry only applies to a pending request', () => {
+    const active = run([status('started')], requested);
+    expect(rtmsReducer(active, { type: 'EXPIRE' })).toBe(active);
+    expect(rtmsReducer(initialRtmsState, { type: 'EXPIRE' })).toBe(initialRtmsState);
+  });
+
+  test('a start confirmed after the request expired still becomes active', () => {
+    expect(run([{ type: 'EXPIRE' }, status('started', 'server')], requested).phase).toBe('active');
+  });
+
+  test('Zoom reporting "host denied" (request status 3) shows as denied by the host', () => {
+    const state = rtmsReducer(requested, requestStatus(3));
+    expect(state.phase).toBe('denied');
+    expect(state.error.message).toMatch(/host declined/i);
+    expect(state.error.code).toBe(3);
+    expect(isRtmsBusy(state)).toBe(false);
+  });
+
+  test('a denial that arrives after the local expiry replaces the generic message', () => {
+    const state = run([{ type: 'EXPIRE' }, requestStatus(3)], requested);
+    expect(state.phase).toBe('denied');
+    expect(state.error.message).toMatch(/host declined/i);
+  });
+
+  test.each([[1, 'denied'], [2, 'failed'], [4, 'failed'], [5, 'failed'], [6, 'failed']])(
+    'request status %i ends the request as %s with a reason',
+    (code, phase) => {
+      const state = rtmsReducer(requested, requestStatus(code));
+      expect(state.phase).toBe(phase);
+      expect(state.error.message.length).toBeGreaterThan(10);
+    },
+  );
+
+  test('server maintenance notices (7, 8) and unknown codes do not change state', () => {
+    expect(rtmsReducer(requested, requestStatus(7))).toBe(requested);
+    expect(rtmsReducer(requested, requestStatus(8))).toBe(requested);
+    expect(rtmsReducer(requested, requestStatus(42))).toBe(requested);
+  });
+
+  test('a denial for someone else\'s request does not stop a running stream', () => {
+    const active = run([status('started')], requested);
+    expect(rtmsReducer(active, requestStatus(3))).toBe(active);
+    expect(rtmsReducer(initialRtmsState, requestStatus(3))).toBe(initialRtmsState);
+  });
+
+  test('a server failure (6) ends a running stream as failed', () => {
+    const active = run([status('started')], requested);
+    expect(rtmsReducer(active, requestStatus(6)).phase).toBe('failed');
+  });
+});
