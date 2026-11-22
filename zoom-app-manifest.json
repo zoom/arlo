@@ -1,7 +1,7 @@
 {
     "display_information": {
         "description": "AI meeting assistant with live transcription",
-        "display_name": "Arlo - Meeting Assistant Demo",
+        "display_name": "Arlo Meeting Assistant",
         "long_description": "Arlo is an intelligent meeting companion that lives inside Zoom. It captures real-time transcripts using RTMS (Realtime Media Streams) without requiring a meeting bot, and provides AI-powered summaries, action items, transcript search, and meeting highlights."
     },
     "oauth_information": {
@@ -23,15 +23,27 @@
                 "optional": false
             },
             {
+                "scope": "meeting:read:meeting_transcript",
+                "optional": false
+            },
+            {
+                "scope": "meeting:read:list_meetings",
+                "optional": false
+            },
+            {
                 "scope": "meeting:write:open_app",
                 "optional": true
             },
             {
-                "scope": "user:read",
+                "scope": "meeting:delete:open_app",
+                "optional": true
+            },
+            {
+                "scope": "user:read:user",
                 "optional": true
             }
         ],
-        "scope_description": "Arlo needs meeting access for live transcription via RTMS, meeting list access for the upcoming meetings feature, and optional auto-open registration for hands-free meeting start."
+        "scope_description": "Arlo runs inside your meetings and receives the live transcript via RTMS. It reads meeting details and your upcoming meetings list, and can optionally register itself to auto-open in a meeting (and remove that registration). It optionally reads your profile to show your name."
     },
     "features": {
         "products": [
@@ -53,6 +65,7 @@
             "zoom_app_api": {
                 "enable": true,
                 "zoom_app_apis": [
+                    "getAppContext",
                     "getMeetingContext",
                     "getMeetingUUID",
                     "getRunningContext",
@@ -61,8 +74,10 @@
                     "authorize",
                     "onAuthorized",
                     "promptAuthorize",
-                    "onMessage",
-                    "postMessage",
+                    "startRTMS",
+                    "stopRTMS",
+                    "pauseRTMS",
+                    "resumeRTMS",
                     "showNotification",
                     "sendMessageToChat",
                     "openUrl",
@@ -74,6 +89,11 @@
                     "onSendAppInvitation",
                     "startCollaborate",
                     "endCollaborate",
+                    "joinCollaborate",
+                    "leaveCollaborate",
+                    "onCollaborateChange",
+                    "onMessage",
+                    "postMessage",
                     "runRenderingContext"
                 ]
             },
@@ -130,7 +150,9 @@
                     "subscription_name": "Arlo RTMS Events",
                     "event_types": [
                         "meeting.rtms_started",
-                        "meeting.rtms_stopped"
+                        "meeting.rtms_stopped",
+                        "meeting.rtms_interrupted",
+                        "rtms.request_status"
                     ],
                     "development_webhook_url": "https://your-ngrok-url.ngrok-free.app/api/rtms/webhook",
                     "production_webhook_url": "https://your-ngrok-url.ngrok-free.app/api/rtms/webhook",

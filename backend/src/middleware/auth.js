@@ -1,4 +1,4 @@
-const { verifyToken } = require('../services/auth');
+const { verifySessionToken } = require('../services/auth');
 const config = require('../config');
 
 /**
@@ -23,7 +23,7 @@ function requireAuth(req, res, next) {
     }
 
     // Verify token
-    const payload = verifyToken(token);
+    const payload = verifySessionToken(token);
 
     // Attach user info to request
     req.user = {
@@ -51,7 +51,7 @@ function optionalAuth(req, res, next) {
     const token = req.cookies?.sessionToken;
 
     if (token) {
-      const payload = verifyToken(token);
+      const payload = verifySessionToken(token);
       req.user = {
         id: payload.userId,
         zoomUserId: payload.zoomUserId,
@@ -70,8 +70,10 @@ function optionalAuth(req, res, next) {
  * Allows query param userId in dev mode for testing
  */
 function devAuthBypass(req, res, next) {
-  // Only in development and test modes
-  if (config.nodeEnv !== 'development' && config.nodeEnv !== 'test') {
+  // Explicit opt-in only, and never in production. docker-compose runs with
+  // NODE_ENV=development behind a public ngrok URL, so NODE_ENV alone must not
+  // enable impersonation via ?userId=.
+  if (process.env.ALLOW_DEV_AUTH_BYPASS !== 'true' || config.nodeEnv === 'production') {
     return next();
   }
 

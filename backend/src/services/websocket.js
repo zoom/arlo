@@ -1,6 +1,25 @@
 const WebSocket = require('ws');
 const url = require('url');
-const { verifyToken } = require('./auth');
+const { verifySessionToken } = require('./auth');
+const { verifyMeetingAccessToken } = require('./zoomAppContext');
+
+/** Read a cookie from the upgrade request, if present. */
+function getCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(idx + 1).trim());
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
 
 // Demo mode: No database - meeting data is not persisted
 
@@ -19,32 +38,58 @@ function initWebSocketServer(server) {
 
   wss.on('connection', async (ws, req) => {
     const queryParams = url.parse(req.url, true).query;
-    const { meeting_id, token } = queryParams;
 
-    console.log('📡 New WebSocket connection attempt at', req.url);
-
-    // Authenticate if token provided, otherwise allow as guest
+    // Never log req.url: it may carry a token query parameter.
+    //
+    // Access model: every connection must present a meeting-access token
+    // (httpOnly `meetingAccess` cookie, issued by POST /api/auth/meeting-access
+    // after verifying the Zoom App Context). The token names exactly one
+    // meeting, and the socket can only ever receive that meeting's data —
+    // whatever meeting ID the client asks for. Guests get the same access as
+    // signed-in users because the Zoom App Context proves they're in the meeting.
+    let meetingId = null;
     let userId = null;
-    let isGuest = true;
 
-    if (token) {
+    const accessToken = getCookie(req, 'meetingAccess');
+    if (accessToken) {
       try {
-        const payload = verifyToken(token);
-        userId = payload.userId;
-        isGuest = false;
-        console.log(`✅ WebSocket authenticated: User ${userId}`);
+        const access = verifyMeetingAccessToken(accessToken);
+        meetingId = access.meetingId;
+        userId = access.userId || null;
       } catch (error) {
-        console.error('❌ WebSocket token verification failed:', error.message);
-        ws.close(1008, 'Invalid authentication token');
-        return;
+        console.warn('WebSocket meeting access rejected:', error.message);
       }
-    } else {
-      console.log('📡 WebSocket guest connection (no token)');
     }
+
+    // Resolve the signed-in user from the session, if any (for per-user routing).
+    const sessionToken = getCookie(req, 'sessionToken') || queryParams.token;
+    if (sessionToken) {
+      try {
+        userId = verifySessionToken(sessionToken).userId;
+      } catch {
+        // Not signed in (or expired) — fine for guests.
+      }
+    }
+
+    // Local development outside Zoom has no app context. Allow an explicitly
+    // opted-in, signed-in developer to name a meeting directly.
+    if (!meetingId && userId && process.env.ALLOW_DEV_AUTH_BYPASS === 'true'
+        && process.env.NODE_ENV !== 'production' && typeof queryParams.meeting_id === 'string') {
+      meetingId = queryParams.meeting_id;
+      console.warn('⚠️  Dev mode: WebSocket bound to unverified meeting ID');
+    }
+
+    if (!meetingId) {
+      ws.close(1008, 'Meeting access required');
+      return;
+    }
+
+    const isGuest = !userId;
 
     // Store connection
     ws.userId = userId;
-    ws.meetingId = meeting_id;
+    ws.meetingId = meetingId;
+    ws.allowedMeetingId = meetingId;
     ws.isAlive = true;
     ws.isGuest = isGuest;
 
@@ -56,14 +101,10 @@ function initWebSocketServer(server) {
       userConnections.get(userId).add(ws);
     }
 
-    // Add to meeting connections if meeting_id provided
-    if (meeting_id) {
-      if (!connections.has(meeting_id)) {
-        connections.set(meeting_id, new Set());
-      }
-      connections.get(meeting_id).add(ws);
-      console.log(`📡 Subscribed to meeting: ${meeting_id}`);
+    if (!connections.has(meetingId)) {
+      connections.set(meetingId, new Set());
     }
+    connections.get(meetingId).add(ws);
 
     // Heartbeat
     ws.on('pong', () => {
@@ -97,7 +138,7 @@ function initWebSocketServer(server) {
       }
 
       // Remove from meeting connections and broadcast updated presence
-      const disconnectedMeetingId = ws.meetingId || meeting_id;
+      const disconnectedMeetingId = ws.meetingId;
       if (disconnectedMeetingId && connections.has(disconnectedMeetingId)) {
         connections.get(disconnectedMeetingId).delete(ws);
         if (connections.get(disconnectedMeetingId).size === 0) {
@@ -121,7 +162,7 @@ function initWebSocketServer(server) {
       type: 'connected',
       data: {
         userId,
-        meetingId: meeting_id,
+        meetingId,
         isGuest,
         timestamp: new Date().toISOString(),
       },
@@ -155,12 +196,15 @@ function initWebSocketServer(server) {
 async function handleWebSocketMessage(ws, data) {
   const { type, payload } = data;
 
-  console.log(`📨 WebSocket message: ${type}`, payload);
+  console.log(`📨 WebSocket message: ${type}`);
 
   switch (type) {
     case 'subscribe':
       // Subscribe to a meeting
-      const { meetingId, participantName, isGuest } = payload || {};
+      const { participantName } = payload || {};
+      // The client's requested meeting ID is ignored: a socket may only
+      // subscribe to the meeting its verified access token names.
+      const meetingId = ws.allowedMeetingId;
       if (meetingId) {
         // Remove from previous meeting if subscribed
         if (ws.meetingId && ws.meetingId !== meetingId && connections.has(ws.meetingId)) {
@@ -170,8 +214,7 @@ async function handleWebSocketMessage(ws, data) {
           }
         }
         ws.meetingId = meetingId;
-        ws.participantName = participantName || null;
-        ws.isGuest = !!isGuest;
+        ws.participantName = typeof participantName === 'string' ? participantName.slice(0, 100) : null;
         if (!connections.has(meetingId)) {
           connections.set(meetingId, new Set());
         }

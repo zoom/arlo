@@ -16,6 +16,7 @@ import { useVoiceCommands } from '../hooks/useVoiceCommands';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import ArloResponsePanel from '../components/ArloResponsePanel';
 import ComplianceAdvisor from '../components/ComplianceAdvisor';
+import MeetingAccessNotice from '../components/MeetingAccessNotice';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
@@ -99,7 +100,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
-  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed } = useMeeting();
+  const { ws, rtmsActive, rtmsPaused, rtmsLoading, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -948,6 +949,14 @@ export default function InMeetingView({ isGuestMode = false }) {
         </Tabs.List>
 
         <Tabs.Panel value="transcript" className="in-meeting-tab-panel">
+          <MeetingAccessNotice
+            access={meetingAccess}
+            isGuestMode={isGuestMode}
+            onRetry={() => {
+              setWs(null);
+              connectWebSocket(isGuestMode ? null : wsToken, effectiveMeetingId);
+            }}
+          />
           {transcriptState === 'not-started' && (
             <Card className="transcript-state-card">
               <div className="transcript-state-inner">

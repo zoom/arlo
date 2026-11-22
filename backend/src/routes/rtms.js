@@ -26,6 +26,7 @@ const {
   getStats,
 } = require('../services/websocket');
 const { requireAuth } = require('../middleware/auth');
+const { requireInternal, isInternalRequest, INTERNAL_KEY_HEADER, getInternalKey } = require('../lib/internalAuth');
 
 // Demo mode - no persistence
 console.log('Demo Mode: Transcripts are broadcast in real-time but never stored');
@@ -109,7 +110,10 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
   // Handle Zoom webhook validation (endpoint URL validation)
   if (event === 'endpoint.url_validation') {
-    const { plainToken } = payload;
+    const plainToken = payload?.plainToken;
+    if (typeof plainToken !== 'string' || plainToken.length === 0 || plainToken.length > 256) {
+      return sendResponse(res, 400, { error: 'Invalid plainToken' });
+    }
     logger.info('Webhook validation request received');
 
     const hash = crypto
@@ -140,7 +144,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       await axios.post(`${rtmsServiceUrl}/webhook`, body, {
         timeout: 5000,
         headers: {
-          'x-arlo-internal': 'true',
+          [INTERNAL_KEY_HEADER]: getInternalKey(),
           'x-zm-signature': signature,
           'x-zm-request-timestamp': timestamp,
         },
@@ -158,18 +162,45 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
  * POST /api/rtms/status
  * Receive RTMS status updates from RTMS service
  */
-router.post('/status', async (req, res) => {
-  const { meetingId, status, meetingTopic, operatorId } = req.body;
+const BROWSER_STATUSES = new Set(['rtms_paused', 'rtms_resumed']);
+const INTERNAL_STATUSES = new Set([
+  'rtms_started', 'rtms_stopped', 'rtms_paused', 'rtms_resumed',
+  'rtms_interrupted', 'media_interrupted',
+]);
 
-  console.log(`RTMS Status Update: ${status} for meeting ${meetingId}`);
+/**
+ * Internal callers (rtms service) may post any lifecycle status. Browser callers
+ * must be signed in and may only report pause/resume (the SDK pause/resume calls
+ * happen client-side, so the backend learns about them from the browser).
+ */
+function authorizeStatusUpdate(req, res, next) {
+  if (isInternalRequest(req)) {
+    req.isInternal = true;
+    return next();
+  }
+  return requireAuth(req, res, next);
+}
 
-  // Cross-register user for WebSocket if we have an operator ID
-  if (status === 'rtms_started' && operatorId) {
+router.post('/status', authorizeStatusUpdate, async (req, res) => {
+  const { meetingId, status, operatorId } = req.body || {};
+
+  if (typeof meetingId !== 'string' || meetingId.length === 0 || meetingId.length > 200) {
+    return res.status(400).json({ error: 'Invalid meetingId' });
+  }
+  const allowed = req.isInternal ? INTERNAL_STATUSES : BROWSER_STATUSES;
+  if (!allowed.has(status)) {
+    return res.status(req.isInternal ? 400 : 403).json({ error: 'Status not allowed' });
+  }
+
+  console.log(`RTMS Status Update: ${status}`);
+
+  // Cross-register user for WebSocket if we have an operator ID (internal only)
+  if (req.isInternal && status === 'rtms_started' && operatorId) {
     // Find user by Zoom ID in memory store
     const user = userStore.findByZoomId(operatorId);
     if (user) {
       crossRegisterUser(user.id, meetingId);
-      console.log(`Cross-registered user ${user.displayName} for meeting ${meetingId}`);
+      console.log('Cross-registered operator for RTMS meeting');
     }
   }
 
@@ -202,8 +233,11 @@ router.post('/status', async (req, res) => {
  * Receive transcript segments from RTMS service to broadcast to clients
  * No data is stored - broadcast only
  */
-router.post('/broadcast', async (req, res) => {
-  const { meetingId, segment } = req.body;
+router.post('/broadcast', requireInternal, async (req, res) => {
+  const { meetingId, segment } = req.body || {};
+  if (typeof meetingId !== 'string' || !segment || typeof segment !== 'object') {
+    return res.status(400).json({ error: 'Invalid broadcast payload' });
+  }
 
   if (logger.isDebug) {
     console.log(`Transcript segment for meeting ${meetingId}:`, segment?.text?.substring(0, 50));
@@ -211,7 +245,7 @@ router.post('/broadcast', async (req, res) => {
 
   // Broadcast transcript segment to all WebSocket clients
   const sentCount = broadcastTranscriptSegment(meetingId, segment);
-  console.log(`Broadcast transcript to ${sentCount} clients (demo mode - not stored)`);
+  logger.debug(`Broadcast transcript to ${sentCount} clients (demo mode - not stored)`);
 
   res.status(200).json({ received: true, broadcast: sentCount });
 });
@@ -221,10 +255,13 @@ router.post('/broadcast', async (req, res) => {
  * Receive participant join/leave events from RTMS service
  * No data is stored - broadcast only
  */
-router.post('/participant-event', async (req, res) => {
-  const { meetingId, events } = req.body;
+router.post('/participant-event', requireInternal, async (req, res) => {
+  const { meetingId, events } = req.body || {};
+  if (typeof meetingId !== 'string' || !Array.isArray(events)) {
+    return res.status(400).json({ error: 'Invalid participant-event payload' });
+  }
 
-  console.log(`Participant event for meeting ${meetingId}:`, events);
+  logger.debug(`Participant events received: ${events.length}`);
 
   // Broadcast each event to WebSocket clients
   let sentCount = 0;
@@ -235,8 +272,9 @@ router.post('/participant-event', async (req, res) => {
   res.status(200).json({ received: true, broadcast: sentCount });
 });
 
-// Debug endpoints — only available in non-production environments
-if (process.env.NODE_ENV !== 'production') {
+// Debug endpoints — explicit opt-in only (ENABLE_DEBUG_ROUTES=true). They list
+// active meeting IDs, so they must never be reachable on a public URL by default.
+if (process.env.ENABLE_DEBUG_ROUTES === 'true') {
   router.get('/debug', (req, res) => {
     const stats = getStats();
     console.log('WebSocket Debug Stats:', stats);

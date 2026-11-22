@@ -1,7 +1,13 @@
 const express = require('express');
 const axios = require('axios');
 const { userStore, tokenStore } = require('../lib/memoryStore');
-const { generatePKCE, generateState, encryptToken, decryptToken, generateToken } = require('../services/auth');
+const { generatePKCE, generateState, encryptToken, decryptToken, generateToken, verifySessionToken } = require('../services/auth');
+const {
+  AppContextError,
+  verifyMeetingAppContext,
+  issueMeetingAccessToken,
+  ACCESS_TOKEN_TTL_MS,
+} = require('../services/zoomAppContext');
 const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
 
@@ -140,7 +146,7 @@ router.get('/callback', async (req, res) => {
       zoomUser = userResponse.data;
     } catch (apiError) {
       const tokenPayload = JSON.parse(Buffer.from(access_token.split('.')[1], 'base64').toString());
-      console.log('Falling back to JWT token payload for user info:', tokenPayload);
+      console.log('Falling back to JWT token payload for user info');
       zoomUser = {
         id: tokenPayload.uid,
         email: tokenPayload.email || `${tokenPayload.uid}@zoom.user`,
@@ -179,7 +185,7 @@ router.get('/callback', async (req, res) => {
     // Set session cookie (sameSite: lax required for cross-origin OAuth redirect)
     res.cookie('sessionToken', sessionToken, {
       httpOnly: true,
-      secure: config.nodeEnv === 'production',
+      secure: config.secureCookies,
       sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000,
     });
@@ -223,7 +229,7 @@ router.get('/poll-code', (req, res) => {
   }
 
   // Code is ready - return it for the frontend to exchange
-  console.log('Poll-code: returning code for state', state);
+  console.log('Poll-code: returning code for pending OAuth state');
   return res.json({ ready: true, code: pkceData.code });
 });
 
@@ -309,7 +315,7 @@ router.post('/callback', async (req, res) => {
     } catch (apiError) {
       // Decode the JWT access token to extract user ID when user:read scope is missing
       const tokenPayload = JSON.parse(Buffer.from(access_token.split('.')[1], 'base64').toString());
-      console.log('Falling back to JWT token payload for user info:', tokenPayload);
+      console.log('Falling back to JWT token payload for user info');
       zoomUser = {
         id: tokenPayload.uid,
         email: tokenPayload.email || `${tokenPayload.uid}@zoom.user`,
@@ -348,7 +354,7 @@ router.post('/callback', async (req, res) => {
     // Set httpOnly cookie for session management
     res.cookie('sessionToken', sessionToken, {
       httpOnly: true,
-      secure: config.nodeEnv === 'production', // HTTPS only in production
+      secure: config.secureCookies,
       sameSite: 'lax',
       maxAge: 24 * 60 * 60 * 1000, // 24 hours
     });
@@ -528,7 +534,7 @@ router.post('/logout', async (req, res) => {
     // Clear session cookie
     res.clearCookie('sessionToken', {
       httpOnly: true,
-      secure: config.nodeEnv === 'production',
+      secure: config.secureCookies,
       sameSite: 'lax',
     });
 
@@ -540,6 +546,59 @@ router.post('/logout', async (req, res) => {
     }
     res.status(500).json({ error: 'Failed to logout' });
   }
+});
+
+/**
+ * POST /api/auth/meeting-access
+ * Body: { appContext } — the token from zoomSdk.getAppContext().
+ *
+ * Proves the caller has Arlo open inside a specific meeting (works for guests,
+ * no OAuth needed) and sets an httpOnly `meetingAccess` cookie that the
+ * WebSocket server uses to scope the connection to that meeting only.
+ */
+router.post('/meeting-access', (req, res) => {
+  const appContext = req.body?.appContext;
+  let verified;
+  try {
+    verified = verifyMeetingAppContext(appContext);
+  } catch (error) {
+    if (error instanceof AppContextError) {
+      console.warn('Meeting access denied:', error.message);
+      return res.status(403).json({ error: 'Could not verify your meeting', reason: error.message });
+    }
+    console.error('Meeting access error:', error.message);
+    return res.status(500).json({ error: 'Could not verify your meeting' });
+  }
+
+  // Link the signed-in Arlo user, if any, so per-user features keep working.
+  let userId = null;
+  const sessionToken = req.cookies?.sessionToken;
+  if (sessionToken) {
+    try {
+      userId = verifySessionToken(sessionToken).userId;
+    } catch {
+      userId = null;
+    }
+  }
+
+  const token = issueMeetingAccessToken({
+    meetingId: verified.meetingId,
+    zoomUserId: verified.zoomUserId,
+    userId,
+  });
+  res.cookie('meetingAccess', token, {
+    httpOnly: true,
+    secure: config.secureCookies,
+    sameSite: 'lax',
+    maxAge: ACCESS_TOKEN_TTL_MS,
+  });
+
+  res.json({
+    verified: true,
+    meetingId: verified.meetingId,
+    isGuest: !userId,
+    expiresInMs: ACCESS_TOKEN_TTL_MS,
+  });
 });
 
 module.exports = router;

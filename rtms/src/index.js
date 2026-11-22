@@ -35,6 +35,30 @@ if (!WEBHOOK_SECRET) {
   process.exit(1);
 }
 
+// Internal service-to-service key (must match backend/src/lib/internalAuth.js).
+// INTERNAL_API_SECRET if set, otherwise derived from ZOOM_WEBHOOK_TOKEN.
+const INTERNAL_KEY_HEADER = 'x-arlo-internal-key';
+const INTERNAL_KEY = process.env.INTERNAL_API_SECRET
+  || crypto.createHmac('sha256', WEBHOOK_SECRET).update('arlo-internal-v1').digest('hex');
+
+function isInternalRequest(req) {
+  const provided = req.headers[INTERNAL_KEY_HEADER];
+  if (typeof provided !== 'string' || provided.length === 0) return false;
+  const a = crypto.createHash('sha256').update(provided).digest();
+  const b = crypto.createHash('sha256').update(INTERNAL_KEY).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+const internalHttp = axios.create({
+  timeout: 5000,
+  headers: { [INTERNAL_KEY_HEADER]: INTERNAL_KEY },
+});
+
+// Transcript text, names and raw payloads are only logged when LOG_LEVEL=debug.
+// ZM_RTMS_LOG_LEVEL controls the @zoom/rtms SDK's own logging and does NOT
+// enable PII logging here.
+const LOG_PII = process.env.LOG_LEVEL === 'debug';
+
 /**
  * Verify Zoom webhook HMAC signature
  * @param {object} req - Express request object
@@ -130,7 +154,7 @@ app.post('/webhook', async (req, res) => {
   // - Requests forwarded from the backend, already verified against Zoom's
   //   original body bytes. Axios re-serializes the parsed JSON so a second
   //   HMAC here would fail on the reserialized body.
-  const isInternal = req.headers['x-arlo-internal'] === 'true';
+  const isInternal = isInternalRequest(req);
   if (event !== 'endpoint.url_validation' && !isInternal) {
     const rawBody = req.rawBody || JSON.stringify(req.body);
     if (!verifyWebhookSignature(req, rawBody)) {
@@ -143,10 +167,8 @@ app.post('/webhook', async (req, res) => {
   console.log(`RTMS Webhook Received: ${event} (signature verified)`);
   console.log('='.repeat(60));
   // Only log payload details in debug mode to avoid PII exposure
-  if (process.env.LOG_LEVEL === 'debug' || process.env.ZM_RTMS_LOG_LEVEL === 'debug') {
+  if (LOG_PII) {
     console.log(JSON.stringify(payload, null, 2));
-  } else {
-    console.log(`Meeting UUID: ${payload?.meeting_uuid || 'N/A'}`);
   }
 
   // Acknowledge webhook immediately
@@ -190,10 +212,12 @@ async function handleRTMSStarted(payload) {
   } = payload;
 
   console.log('Starting RTMS session...');
-  console.log(`Meeting UUID: ${meeting_uuid}`);
-  console.log(`Stream ID: ${rtms_stream_id}`);
-  console.log(`Server URLs: ${server_urls}`);
-  console.log(`Operator ID: ${operator_id || 'not provided'}`);
+  if (LOG_PII) {
+    console.log(`Meeting UUID: ${meeting_uuid}`);
+    console.log(`Stream ID: ${rtms_stream_id}`);
+    console.log(`Server URLs: ${server_urls}`);
+    console.log(`Operator ID: ${operator_id || 'not provided'}`);
+  }
 
   // Check if already connected to this stream (true duplicate)
   // Note: We key by rtms_stream_id, not meeting_uuid, so failovers with new stream_ids work
@@ -227,8 +251,7 @@ async function handleRTMSStarted(payload) {
       try {
         const text = data.toString('utf-8');
         // Only log PII (transcript text, user info) in debug mode
-        const isDebug = process.env.LOG_LEVEL === 'debug' || process.env.ZM_RTMS_LOG_LEVEL === 'debug';
-        if (isDebug) {
+        if (LOG_PII) {
           console.log('Raw transcript event:');
           console.log(`  Text: ${text}`);
           console.log(`  Size: ${size}`);
@@ -276,7 +299,8 @@ async function handleRTMSStarted(payload) {
 
     // Set up session update handler — v1.0 receives (event, session) object
     client.onSessionUpdate((event, session) => {
-      console.log('Session update:', event, session);
+      console.log('Session update:', event);
+      if (LOG_PII) console.log('Session detail:', session);
     });
 
     // Handle media connection interruption (signaling survives, media only drops)
@@ -292,7 +316,8 @@ async function handleRTMSStarted(payload) {
 
     // Set up participant event handler — renamed from onUserUpdate in v1.0
     client.onParticipantEvent((event, timestamp, participants) => {
-      console.log('Participant event:', event, timestamp, participants);
+      console.log('Participant event:', event, `(${Array.isArray(participants) ? participants.length : 0} participants)`);
+      if (LOG_PII) console.log('Participant detail:', timestamp, participants);
 
       const session = activeSessions.get(rtms_stream_id);
 
@@ -490,8 +515,7 @@ async function handleTranscript(meetingId, transcript) {
 
   await broadcastSegment(meetingId, segment);
   // Only log transcript content in debug mode to avoid PII exposure
-  const isDebug = process.env.LOG_LEVEL === 'debug' || process.env.ZM_RTMS_LOG_LEVEL === 'debug';
-  if (isDebug) {
+  if (LOG_PII) {
     console.log(`Broadcast segment: "${(text || '').substring(0, 50)}..."`);
   }
 }
@@ -503,11 +527,10 @@ async function broadcastSegment(meetingId, segment) {
   try {
     // Use Docker service name for inter-container communication
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
-    await axios.post(`${backendUrl}/api/rtms/broadcast`, {
+    await internalHttp.post(`${backendUrl}/api/rtms/broadcast`, {
       meetingId,
       segment,
     });
-    console.log('Sent to backend for broadcast');
   } catch (error) {
     // Non-critical, just log
     console.warn('Failed to broadcast segment:', error.message);
@@ -520,7 +543,7 @@ async function broadcastSegment(meetingId, segment) {
 async function broadcastParticipantEvents(meetingId, events) {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
-    await axios.post(`${backendUrl}/api/rtms/participant-event`, {
+    await internalHttp.post(`${backendUrl}/api/rtms/participant-event`, {
       meetingId,
       events,
     });
@@ -536,7 +559,7 @@ async function broadcastParticipantEvents(meetingId, events) {
 async function notifyBackend(meetingId, status, operatorId) {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
-    await axios.post(`${backendUrl}/api/rtms/status`, {
+    await internalHttp.post(`${backendUrl}/api/rtms/status`, {
       meetingId,
       status,
       ...(operatorId && { operatorId }),

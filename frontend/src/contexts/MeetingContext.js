@@ -25,6 +25,9 @@ export function MeetingProvider({ children }) {
   const [rtmsLoading, setRtmsLoading] = useState(false);
   const [ws, setWs] = useState(null);
   const [viewers, setViewers] = useState(null);
+  // Server-verified meeting access (Zoom App Context). status:
+  // 'idle' | 'verifying' | 'verified' | 'denied' | 'unavailable'
+  const [meetingAccess, setMeetingAccess] = useState({ status: 'idle', isGuest: null, reason: null });
 
   const meetingStartTimeRef = useRef(null);
   const autoStartAttemptedRef = useRef(false);
@@ -35,6 +38,9 @@ export function MeetingProvider({ children }) {
   const shouldReconnectRef = useRef(true);
   const startNoticeSentRef = useRef(false);
   const reconnectTimerRef = useRef(null);
+  const connectingRef = useRef(false);
+  const zoomSdkRef = useRef(zoomSdk);
+  zoomSdkRef.current = zoomSdk;
   const rtmsActiveRef = useRef(rtmsActive);
   const isGuestRef = useRef(isGuest);
   const userContextRef = useRef(userContext);
@@ -102,15 +108,50 @@ export function MeetingProvider({ children }) {
   const sendChatNoticeRef = useRef(sendChatNotice);
   useEffect(() => { sendChatNoticeRef.current = sendChatNotice; }, [sendChatNotice]);
 
-  const connectWebSocket = useCallback((token, meetingId) => {
-    if (!meetingId || meetingId === 'undefined' || meetingId === 'null') {
-      console.error('Cannot connect WebSocket without valid meeting ID');
-      return null;
+  /**
+   * Prove to the backend that this user has Arlo open in this meeting.
+   * Sends the signed Zoom App Context; on success the backend sets an httpOnly
+   * `meetingAccess` cookie that the WebSocket server requires. Works for
+   * guests (no OAuth needed). Called before every (re)connect so the access
+   * token never goes stale.
+   */
+  const verifyMeetingAccess = useCallback(async () => {
+    const sdk = zoomSdkRef.current;
+    if (!sdk || typeof sdk.getAppContext !== 'function') {
+      setMeetingAccess({ status: 'unavailable', isGuest: null, reason: 'Open Arlo inside a Zoom meeting to see the live transcript.' });
+      return false;
     }
+    setMeetingAccess((prev) => ({ ...prev, status: 'verifying', reason: null }));
+    try {
+      const { context } = await sdk.getAppContext();
+      const res = await fetch('/api/auth/meeting-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ appContext: context }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMeetingAccess({ status: 'denied', isGuest: null, reason: data.error || 'Could not verify your meeting.' });
+        return false;
+      }
+      setMeetingAccess({ status: 'verified', isGuest: !!data.isGuest, reason: null });
+      return true;
+    } catch (error) {
+      console.error('Meeting access verification failed:', error);
+      setMeetingAccess({ status: 'denied', isGuest: null, reason: 'Could not read your Zoom meeting context.' });
+      return false;
+    }
+  }, []);
+
+  const openSocket = useCallback((token, meetingId) => {
 
     // Close existing socket before creating new one
     setWs(prev => {
       if (prev && prev.readyState !== WebSocket.CLOSED) {
+        // Deliberate replacement: detach so the old socket's onclose doesn't
+        // schedule a reconnect that would in turn close this new socket.
+        prev.onclose = null;
         prev.close();
       }
       return prev;
@@ -175,8 +216,15 @@ export function MeetingProvider({ children }) {
       console.error('WebSocket error:', error);
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       console.log('WebSocket disconnected');
+      // 1008 = policy violation: the server rejected our credentials. Retrying
+      // with the same token can't succeed, so stop instead of looping.
+      if (event?.code === 1008) {
+        console.warn('WebSocket rejected: meeting access required');
+        setMeetingAccess({ status: 'denied', isGuest: null, reason: 'The server could not confirm you are in this meeting.' });
+        return;
+      }
       if (shouldReconnectRef.current) {
         // Clear any existing reconnect timer
         if (reconnectTimerRef.current) {
@@ -184,8 +232,7 @@ export function MeetingProvider({ children }) {
         }
         reconnectTimerRef.current = setTimeout(() => {
           if (shouldReconnectRef.current) {
-            const reconnected = connectWebSocket(token, meetingId);
-            if (reconnected) setWs(reconnected);
+            connectWebSocketRef.current(token, meetingId);
           }
         }, 5000);
       }
@@ -195,6 +242,28 @@ export function MeetingProvider({ children }) {
     return socket;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const connectWebSocket = useCallback((token, meetingId) => {
+    if (!meetingId || meetingId === 'undefined' || meetingId === 'null') {
+      console.error('Cannot connect WebSocket without valid meeting ID');
+      return null;
+    }
+    if (connectingRef.current) return null; // a verify+connect is already in flight
+    connectingRef.current = true;
+
+    verifyMeetingAccess()
+      .then((ok) => {
+        if (ok) openSocket(token, meetingId);
+      })
+      .finally(() => {
+        connectingRef.current = false;
+      });
+    return null;
+  }, [verifyMeetingAccess, openSocket]);
+
+  // Reconnect timers call through a ref so they always use the latest callback.
+  const connectWebSocketRef = useRef(connectWebSocket);
+  connectWebSocketRef.current = connectWebSocket;
 
   const startRTMS = useCallback(async (isAutoStart = false) => {
     if (rtmsLoading || !zoomSdk) return;
@@ -455,6 +524,8 @@ export function MeetingProvider({ children }) {
     meetingStartTime: meetingStartTimeRef.current,
     autoStartAttemptedRef,
     viewers,
+    meetingAccess,
+    verifyMeetingAccess,
     startRTMS,
     stopRTMS,
     pauseRTMS,
@@ -466,7 +537,7 @@ export function MeetingProvider({ children }) {
     connectWebSocket,
     setWs,
     setTitleUserRenamed,
-  }), [rtmsActive, rtmsPaused, rtmsLoading, ws, meetingId, viewers, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [rtmsActive, rtmsPaused, rtmsLoading, ws, meetingId, viewers, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

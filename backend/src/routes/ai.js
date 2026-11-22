@@ -20,6 +20,16 @@
  */
 const express = require('express');
 const router = express.Router();
+
+// Cap AI request size. Transcript context sent by the client is untrusted and
+// is interpolated into LLM prompts; 200 KB is far above any real request.
+const MAX_AI_BODY_CHARS = 200_000;
+router.use((req, res, next) => {
+  if (req.method === 'POST' && req.body && JSON.stringify(req.body).length > MAX_AI_BODY_CHARS) {
+    return res.status(413).json({ error: 'Request too large' });
+  }
+  next();
+});
 const config = require('../config');
 const { requireAuth, optionalAuth, devAuthBypass } = require('../middleware/auth');
 const {
@@ -62,7 +72,7 @@ router.post('/action-items', requireAuth, async (req, res) => {
  * POST /api/ai/extract-soap
  * Extract SOAP notes from healthcare transcript - AVAILABLE in demo mode
  */
-router.post('/extract-soap', optionalAuth, async (req, res) => {
+router.post('/extract-soap', requireAuth, async (req, res) => {
   const { transcript, currentSoap } = req.body;
 
   if (!config.aiEnabled) {
@@ -114,7 +124,7 @@ const suggestRateLimit = new Map();
  * POST /api/ai/suggest
  * Get real-time AI suggestions - AVAILABLE in demo mode
  */
-router.post('/suggest', optionalAuth, async (req, res) => {
+router.post('/suggest', requireAuth, async (req, res) => {
   const { meetingId, recentTranscript } = req.body;
 
   if (!config.aiEnabled) {
@@ -163,7 +173,7 @@ router.get('/status', (req, res) => {
  * POST /api/ai/sentiment
  * Analyze sentiment - AVAILABLE in demo mode
  */
-router.post('/sentiment', optionalAuth, async (req, res) => {
+router.post('/sentiment', requireAuth, async (req, res) => {
   const { text } = req.body;
 
   if (!config.aiEnabled) {
@@ -187,7 +197,7 @@ router.post('/sentiment', optionalAuth, async (req, res) => {
  * POST /api/ai/summary-live
  * Generate summary from provided transcript - AVAILABLE in demo mode
  */
-router.post('/summary-live', optionalAuth, async (req, res) => {
+router.post('/summary-live', requireAuth, async (req, res) => {
   const { transcript, title } = req.body;
 
   if (!config.aiEnabled) {
@@ -216,7 +226,7 @@ router.post('/summary-live', optionalAuth, async (req, res) => {
  * POST /api/ai/key-moment
  * Detect key moments - AVAILABLE in demo mode
  */
-router.post('/key-moment', optionalAuth, async (req, res) => {
+router.post('/key-moment', requireAuth, async (req, res) => {
   const { text } = req.body;
 
   if (!config.aiEnabled) {

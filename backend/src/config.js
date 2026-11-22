@@ -191,6 +191,9 @@ module.exports = {
   zoomWebhookToken: process.env.ZOOM_WEBHOOK_TOKEN,
   zoomAppId: process.env.ZOOM_APP_ID || null,
   publicUrl: resolvedPublicUrl,
+  // Secure cookies whenever the app is served over HTTPS (ngrok, Render, etc.),
+  // not only when NODE_ENV=production.
+  secureCookies: String(resolvedPublicUrl || '').startsWith('https://'),
   redirectUri: process.env.ZOOM_APP_REDIRECT_URI || `${resolvedPublicUrl}/api/auth/callback`,
 
   // Zoom for Government support

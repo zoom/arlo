@@ -1,0 +1,34 @@
+.meeting-access-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.meeting-access-notice > span {
+  flex: 1 1 160px;
+}
+
+.meeting-access-notice--ok svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.meeting-access-notice--error {
+  border-color: var(--destructive);
+  color: var(--foreground);
+}
+
+.meeting-access-notice--error svg {
+  color: var(--destructive);
+  flex-shrink: 0;
+}

@@ -156,7 +156,20 @@ function verifyToken(token) {
   }
 }
 
+/**
+ * Verify a *session* token. Rejects other token kinds signed with the same key
+ * (e.g. meeting-access tokens) so they can't be replayed as a login session.
+ */
+function verifySessionToken(token) {
+  const payload = verifyToken(token);
+  if (payload.kind || !payload.userId) {
+    throw new Error('Invalid token');
+  }
+  return payload;
+}
+
 module.exports = {
+  verifySessionToken,
   generatePKCE,
   generateState,
   encryptToken,

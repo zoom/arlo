@@ -4,6 +4,7 @@ const ZoomSdkContext = createContext();
 
 // Capabilities required for auth, RTMS, and in-meeting flows.
 const CORE_CAPABILITIES = [
+  'getAppContext', // signed context the backend verifies to grant meeting-scoped transcript access
   'getMeetingContext',
   'getMeetingUUID',
   'getRunningContext',
@@ -197,7 +198,7 @@ export function ZoomSdkProvider({ children }) {
             try {
               await zoomSdk.config({
                 capabilities: [
-                  'getMeetingContext', 'getMeetingUUID', 'getRunningContext',
+                  'getAppContext', 'getMeetingContext', 'getMeetingUUID', 'getRunningContext',
                   'getUserContext', 'getMeetingParticipants', 'authorize',
                   'onAuthorized', 'promptAuthorize', 'callZoomApi',
                   'onMessage', 'postMessage', 'showNotification',

@@ -10,6 +10,7 @@ const path = require('path');
 const { initWebSocketServer } = require('./services/websocket');
 const config = require('./config');
 const logger = require('./lib/logger');
+const { isInternalRequest } = require('./lib/internalAuth');
 const { version } = require('../package.json');
 const rateLimit = require('express-rate-limit');
 
@@ -81,7 +82,12 @@ if (logger.isDebug) {
 // HTTP request logging (morgan)
 if (config.nodeEnv !== 'test') {
   // Use 'dev' format in debug mode for more readable output, 'combined' otherwise
-  app.use(morgan(logger.isDebug ? 'dev' : 'combined'));
+  // Log paths without query strings: OAuth codes, state and tokens travel in
+  // query parameters and must not reach logs.
+  morgan.token('path-only', (req) => (req.originalUrl || req.url || '').split('?')[0]);
+  app.use(morgan(logger.isDebug
+    ? ':method :path-only :status :response-time ms - :res[content-length]'
+    : ':remote-addr - :remote-user [:date[clf]] ":method :path-only HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'));
 }
 
 // =============================================================================
@@ -95,6 +101,9 @@ const globalLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later' },
+  // The rtms service posts every transcript segment from one container IP;
+  // counting those against a per-IP limit silently drops transcript under load.
+  skip: (req) => isInternalRequest(req),
 });
 app.use('/api/', globalLimiter);
 
