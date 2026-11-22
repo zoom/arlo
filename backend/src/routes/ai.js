@@ -122,6 +122,7 @@ router.post('/generate-title', requireAuth, async (req, res) => {
 // can stub the LLM call.
 const openrouterService = require('../services/openrouter');
 const MAX_QUESTION_CHARS = 1000;
+const RATE_LIMITED_MESSAGE = 'The free AI models are rate limited right now. Try again in a minute.';
 const MAX_TITLE_CHARS = 200;
 const isText = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 
@@ -145,6 +146,7 @@ router.post('/ask-live', requireAuth, async (req, res) => {
     return res.json({ answer: answer.trim() });
   } catch (error) {
     console.error('ask-live failed:', error.message);
+    if (error.code === 'rate_limited') return res.status(429).json({ error: RATE_LIMITED_MESSAGE });
     return res.status(502).json({ error: 'The AI service could not answer right now.' });
   }
 });
@@ -171,6 +173,7 @@ router.post('/title-live', requireAuth, async (req, res) => {
     return res.json({ title: title.trim() });
   } catch (error) {
     console.error('title-live failed:', error.message);
+    if (error.code === 'rate_limited') return res.status(429).json({ error: RATE_LIMITED_MESSAGE });
     return res.status(502).json({ error: 'The AI service could not suggest a title right now.' });
   }
 });

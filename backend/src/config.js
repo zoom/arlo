@@ -115,13 +115,15 @@ if (!encryptionKeyRaw) {
 
 const encryptionKey = resolveEncryptionKey(encryptionKeyRaw);
 
+// Free model IDs are retired often. These four were checked against
+// https://openrouter.ai/api/v1/models on 2026-11-22; the first answered a live
+// probe, the Gemma models were rate limited by their provider at the time.
+// Order = fallback order.
 const defaultOpenRouterModels = Object.freeze([
-  'nex-agi/nex-n2.5-mini:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
   'nvidia/nemotron-3.5-lightning:free',
   'google/gemma-4-31b-it:free',
-  'thinkingmachines/inkling:free',
-  'poolside/laguna-s-2.1:free',
-  'liquid/lfm-2.5-2.6b:free',
+  'google/gemma-4-26b-a4b-it:free',
 ]);
 
 function parseCsv(value) {

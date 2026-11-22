@@ -1,9 +1,12 @@
 export const AI_MODEL_STORAGE_KEY = 'arlo-ai-model';
 
+// Keep in step with defaultOpenRouterModels in backend/src/config.js. The server
+// ignores any model it does not allow and uses its own default.
 export const DEFAULT_FREE_OPENROUTER_MODELS = [
-  'z-ai/glm-5.2:free',
-  'google/gemma-4-31b-it:free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
+  'nvidia/nemotron-3.5-lightning:free',
+  'google/gemma-4-31b-it:free',
+  'google/gemma-4-26b-a4b-it:free',
 ];
 
 export function formatModelLabel(model) {

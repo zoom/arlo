@@ -14,8 +14,22 @@ const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
  * @param {object} options - Additional options (model, maxTokens, etc.)
  * @returns {Promise<string>} The AI response text
  */
+// Models OpenRouter said do not exist (404). Free model IDs are retired often;
+// a dead one is skipped for the rest of the process instead of costing a round
+// trip on every request.
+const deadModels = new Set();
+
+function fail(message, code) {
+  return Object.assign(new Error(message), { code });
+}
+
 async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
-  const models = buildModelChain(options.model);
+  let models = buildModelChain(options.model).filter((model) => !deadModels.has(model));
+  if (models.length === 0) {
+    // Everything was marked gone: try them all again rather than failing forever.
+    deadModels.clear();
+    models = buildModelChain(options.model);
+  }
   const maxTokens = options.maxTokens || 2048;
   const timeoutMs = options.timeoutMs || 20000;
 
@@ -37,6 +51,8 @@ async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
   messages.push({ role: 'user', content: prompt });
 
   let lastError;
+  let rateLimited = 0;
+  let gone = 0;
   for (const model of models) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -50,19 +66,33 @@ async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
           messages,
           max_tokens: maxTokens,
           temperature: 0.7,
+          // Reasoning models otherwise spend max_tokens on thinking and return
+          // no text at all for short answers (titles, sentiment, key moments).
+          reasoning: { enabled: false },
         }),
       });
 
       if (!response.ok) {
-        lastError = new Error(`OpenRouter API error: ${response.status}`);
-        console.error(`❌ OpenRouter API error for ${model}:`, response.status);
+        lastError = fail(`OpenRouter API error: ${response.status}`, 'upstream_error');
+        if (response.status === 404) {
+          gone += 1;
+          deadModels.add(model);
+          console.error(`❌ OpenRouter model "${model}" no longer exists (404). Remove it from OPENROUTER_MODELS; skipping it until restart.`);
+        } else if (response.status === 429) {
+          rateLimited += 1;
+          console.warn(`OpenRouter model "${model}" is rate limited (429)`);
+        } else {
+          console.error(`❌ OpenRouter API error for ${model}:`, response.status);
+        }
         continue;
       }
 
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || '';
       if (content.trim()) return content;
-      lastError = new Error(`OpenRouter returned an empty response for ${model}`);
+      const finish = data.choices?.[0]?.finish_reason || 'unknown';
+      lastError = fail(`OpenRouter returned an empty response for ${model}`, 'empty_response');
+      console.error(`❌ OpenRouter model "${model}" returned no text (finish_reason: ${finish})`);
     } catch (error) {
       lastError = error;
       console.error(`❌ OpenRouter call failed for ${model}:`, error.message);
@@ -71,6 +101,12 @@ async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
     }
   }
 
+  if (rateLimited > 0 && rateLimited + gone === models.length) {
+    throw fail('All available AI models are rate limited', 'rate_limited');
+  }
+  if (gone === models.length) {
+    throw fail('None of the configured AI models exist any more', 'no_models');
+  }
   throw lastError || new Error('OpenRouter call failed across all configured models');
 }
 
@@ -445,6 +481,8 @@ Output ONLY valid JSON, no markdown.`;
 }
 
 module.exports = {
+  // Test hook: forget which models were marked gone
+  _resetForTests: () => deadModels.clear(),
   callOpenRouter,
   generateSummary,
   generateTitle,

@@ -68,3 +68,13 @@ test('title-live requires a session and a transcript, and never returns an empty
     assert.equal((await post('/api/ai/title-live', { transcript })).status, 502);
   } finally { restore(); }
 });
+
+test('a rate limit is reported as such, so the panel can say "try again in a minute"', async () => {
+  const limited = async () => { throw Object.assign(new Error('rate limited'), { code: 'rate_limited' }); };
+  const restoreChat = stub('chatWithTranscript', limited);
+  const restoreTitle = stub('generateTitle', limited);
+  try {
+    assert.equal((await post('/api/ai/ask-live', { question: 'When?', transcript })).status, 429);
+    assert.equal((await post('/api/ai/title-live', { transcript })).status, 429);
+  } finally { restoreChat(); restoreTitle(); }
+});
