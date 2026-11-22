@@ -18,11 +18,13 @@ const router = express.Router();
 const config = require('../config');
 const logger = require('../lib/logger');
 const { userStore } = require('../lib/memoryStore');
+const deauthorized = require('../lib/deauthorized');
 const {
   broadcastTranscriptSegment,
   broadcastParticipantEvent,
   broadcastMeetingStatus,
   broadcastRtmsRequestStatus,
+  disconnectUser,
   crossRegisterUser,
   getStats,
 } = require('../services/websocket');
@@ -140,6 +142,26 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   }
 
   console.log(`RTMS Webhook: ${event} (signature verified)`);
+
+  // The user removed the app from their Zoom account. Delete what the server
+  // holds for them and end their session. (Set the Marketplace
+  // "Deauthorization Notification Endpoint URL" to this webhook URL.)
+  if (event === 'app_deauthorized') {
+    const zoomUserId = payload?.user_id;
+    const forThisApp = payload?.client_id === config.zoomClientId;
+    if (forThisApp && typeof zoomUserId === 'string' && zoomUserId.length > 0 && zoomUserId.length <= 200) {
+      deauthorized.mark(zoomUserId);
+      const user = userStore.findByZoomId(zoomUserId);
+      if (user) {
+        disconnectUser(user.id);
+        userStore.delete(user.id); // also deletes their OAuth tokens
+      }
+      console.log(`app_deauthorized: user data removed (${user ? 'user was in memory' : 'no data held'})`);
+    } else {
+      logger.warn('app_deauthorized ignored: not for this app or unexpected payload');
+    }
+    return sendResponse(res, 200, 'OK');
+  }
 
   // Why a stream request did not start (1-8, e.g. 3 = host denied). Zoom's docs
   // do not say whether this fires for in-client startRTMS or only REST requests,

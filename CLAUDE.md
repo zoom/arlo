@@ -238,7 +238,8 @@ DEMO_MODE=true                  # Always true in this version
 3. **RTMS Scopes** — Enable Transcripts (requires RTMS access approval from Zoom)
 4. **SDK Capabilities** — See `.claude/skills/zoom-apps/02-sdk-setup.md`
 5. **Home URL** — Your ngrok/production URL
-6. **Event Subscriptions** — `meeting.rtms_started`, `meeting.rtms_stopped`
+6. **Event Subscriptions** — `meeting.rtms_started`, `meeting.rtms_stopped`, `meeting.rtms_interrupted`; optional `rtms.request_status` (shows why a stream request failed). Endpoint: `https://{your-domain}/api/rtms/webhook`
+7. **Deauthorization Notification Endpoint URL** — the same `https://{your-domain}/api/rtms/webhook`. On `app_deauthorized` the server deletes the user's record and tokens and ends their session.
 
 ## Security (Demo Mode)
 

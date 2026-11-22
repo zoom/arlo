@@ -1,5 +1,6 @@
 const crypto = require('crypto');
 const config = require('../config');
+const deauthorized = require('../lib/deauthorized');
 
 /**
  * Generate PKCE code verifier and challenge
@@ -163,6 +164,10 @@ function verifyToken(token) {
 function verifySessionToken(token) {
   const payload = verifyToken(token);
   if (payload.kind || !payload.userId) {
+    throw new Error('Invalid token');
+  }
+  // The user removed the app: their session ends now, not when the token expires
+  if (payload.zoomUserId && deauthorized.isDeauthorized(payload.zoomUserId)) {
     throw new Error('Invalid token');
   }
   return payload;

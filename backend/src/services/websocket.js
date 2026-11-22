@@ -475,6 +475,25 @@ function broadcastRtmsRequestStatus(meetingId, status) {
 }
 
 /**
+ * Close every socket a user has open (they removed the app). The panel
+ * reconnects by itself as a plain meeting participant if it is still open.
+ */
+function disconnectUser(userId) {
+  const clients = userConnections.get(userId);
+  if (!clients) return 0;
+  let closed = 0;
+  for (const client of [...clients]) {
+    try {
+      client.close(4001, 'App deauthorized');
+      closed += 1;
+    } catch {
+      // already closing
+    }
+  }
+  return closed;
+}
+
+/**
  * Cross-register a user's existing WS connections under an RTMS meeting UUID.
  * Called when a new RTMS session starts — the user's WS is subscribed under the
  * SDK UUID, but transcripts are broadcast under the RTMS UUID.
@@ -531,6 +550,7 @@ module.exports = {
   broadcastAiSuggestion,
   broadcastMeetingStatus,
   broadcastRtmsRequestStatus,
+  disconnectUser,
   crossRegisterUser,
   getStats,
 };

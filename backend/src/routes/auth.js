@@ -10,6 +10,7 @@ const {
 } = require('../services/zoomAppContext');
 const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
+const deauthorized = require('../lib/deauthorized');
 const { setRestoreCookie, clearRestoreCookie } = require('../services/sessionRestore');
 
 const router = express.Router();
@@ -161,6 +162,8 @@ router.get('/callback', async (req, res) => {
     const isFirstInstall = !userStore.exists(zoomUser.id);
 
     // Create or update user (in-memory only - no persistent storage)
+    // A fresh authorization lifts a lock left by an earlier deauthorization
+    deauthorized.clear(zoomUser.id);
     const user = userStore.upsert(zoomUser.id, {
       email: zoomUser.email,
       displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
@@ -329,6 +332,8 @@ router.post('/callback', async (req, res) => {
     }
 
     // Create or update user (in-memory only - no persistent storage)
+    // A fresh authorization lifts a lock left by an earlier deauthorization
+    deauthorized.clear(zoomUser.id);
     const user = userStore.upsert(zoomUser.id, {
       email: zoomUser.email,
       displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
