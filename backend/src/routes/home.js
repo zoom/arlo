@@ -5,11 +5,12 @@
  * are not available in demo mode.
  */
 const express = require('express');
-const { optionalAuth } = require('../middleware/auth');
+const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.use(optionalAuth);
+// Per-user data: signed-in users only, also while the routes are demo stubs
+router.use(requireAuth);
 
 /**
  * GET /api/home/highlights

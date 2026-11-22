@@ -27,7 +27,7 @@ function demoModeResponse(res, feature) {
  * GET /api/meetings
  * List meetings - Returns empty in demo mode
  */
-router.get('/', optionalAuth, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   // In demo mode, return empty list with explanation
   return res.json({
     meetings: [],
@@ -94,7 +94,7 @@ router.get('/by-zoom-id/:zoomMeetingId/participant-events', optionalAuth, async 
  * GET /api/meetings/:id
  * Get meeting by ID - Not available in demo mode
  */
-router.get('/:id', optionalAuth, async (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
   return demoModeResponse(res, 'Meeting details');
 });
 
@@ -102,7 +102,7 @@ router.get('/:id', optionalAuth, async (req, res) => {
  * GET /api/meetings/:id/transcript
  * Get transcript - Not available in demo mode
  */
-router.get('/:id/transcript', optionalAuth, async (req, res) => {
+router.get('/:id/transcript', requireAuth, async (req, res) => {
   return res.json({
     segments: [],
     cursor: null,
@@ -115,7 +115,7 @@ router.get('/:id/transcript', optionalAuth, async (req, res) => {
  * GET /api/meetings/:id/participant-events
  * Get participant events - Not available in demo mode
  */
-router.get('/:id/participant-events', optionalAuth, async (req, res) => {
+router.get('/:id/participant-events', requireAuth, async (req, res) => {
   return res.json({
     events: [],
     demoMode: true,

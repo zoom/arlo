@@ -183,10 +183,10 @@ async function runTests() {
     assertEqual(res.status, 401, `Expected 401, got ${res.status}`);
   });
 
-  await test('GET /api/home/highlights uses optionalAuth (returns data or empty)', async () => {
+  await test('GET /api/home/highlights returns 401 when not authenticated', async () => {
     const res = await request(`${BASE_URL}/api/home/highlights`);
-    // This endpoint uses optionalAuth, so should return 200 even without auth
-    assertEqual(res.status, 200, `Expected 200, got ${res.status}`);
+    // Per-user data: signed-in users only, also while the route is a demo stub
+    assertEqual(res.status, 401, `Expected 401, got ${res.status}`);
   });
 
   // -------------------------------------------------------------------------

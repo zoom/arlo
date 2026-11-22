@@ -101,3 +101,17 @@ test('WebSocket ignores a session token passed in the URL', async () => {
   viaCookie.socket.close();
   assert.equal(viaCookie.messages.find((m) => m.type === 'connected')?.data?.isGuest, false);
 });
+
+// Per-user data routes are stubs in demo mode, but they must already refuse
+// anonymous callers, so that turning storage on later cannot expose data.
+test('per-user data routes require a session', async () => {
+  const paths = [
+    '/api/meetings', '/api/meetings/some-id', '/api/meetings/some-id/transcript',
+    '/api/meetings/some-id/participant-events', '/api/highlights',
+    '/api/home/highlights', '/api/home/reminders', '/api/search?q=x',
+  ];
+  for (const path of paths) {
+    assert.equal((await fetch(url(path))).status, 401, `${path} without a session`);
+    assert.equal((await fetch(url(path), { headers: sessionCookie() })).status, 200, `${path} with a session`);
+  }
+});

@@ -14,7 +14,7 @@ router.use(devAuthBypass);
  * GET /api/highlights
  * Get highlights - Returns empty in demo mode
  */
-router.get('/', optionalAuth, async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   return res.json({
     highlights: [],
     demoMode: true,
