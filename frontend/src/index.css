@@ -29,6 +29,51 @@
   --input-background: #ffffff;
   --ring: #2563eb;
 
+  /* Semantic tokens. Components reference these names; ~60 of them were used
+     across the app without ever being defined, so the declarations were dropped
+     by the browser (missing borders, hover states and status colours).
+     Aliases follow the palette above, so they switch with the theme. */
+  --color-text: var(--foreground);
+  --color-text-primary: var(--foreground);
+  --color-text-secondary: var(--muted-foreground);
+  --color-text-muted: var(--muted-foreground);
+  --color-text-disabled: #a3a3a3;
+  --color-border: var(--border);
+  --color-border-input: var(--input);
+  --color-border-subtle: #f0f0f0;
+  --color-surface: var(--card);
+  --color-surface-elevated: var(--card);
+  --color-surface-raised: var(--card);
+  --color-surface-hover: var(--muted);
+  --color-bg-white: var(--card);
+  --color-bg-light: var(--muted);
+  --color-bg-subtle: var(--muted);
+  --color-bg-hover: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-hover: #262626;
+  --color-accent: var(--accent);
+  --color-accent-hover: #1d4ed8;
+  --color-accent-muted: rgba(37, 99, 235, 0.12);
+  --color-accent-bg: rgba(37, 99, 235, 0.08);
+  --color-accent-disabled: #93c5fd;
+  --color-success: #16a34a;
+  --color-success-hover: #15803d;
+  --color-success-dark: #166534;
+  --color-success-bg: #f0fdf4;
+  --color-warning: #d97706;
+  --color-warning-dark: #92400e;
+  --color-warning-bg: #fffbeb;
+  --color-warning-subtle: #fffbeb;
+  --color-error: var(--destructive);
+  --color-error-dark: #991b1b;
+  --color-error-bg: #fef2f2;
+  --color-error-border: #fecaca;
+  --color-danger: var(--destructive);
+  --color-danger-subtle: #fef2f2;
+  --warning: var(--color-warning);
+  --danger: var(--destructive);
+  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.12), 0 4px 10px rgba(0, 0, 0, 0.06);
+
   /* Radii */
   --radius: 0.375rem;
   --radius-sm: calc(var(--radius) - 2px);
@@ -57,6 +102,28 @@
   --input: #3f3f46;
   --input-background: #18181b;
   --ring: #60a5fa;
+
+  /* Semantic tokens that are not plain aliases need dark values */
+  --color-text-disabled: #71717a;
+  --color-border-subtle: #27272a;
+  --color-primary-hover: #e4e4e7;
+  --color-accent-hover: #93c5fd;
+  --color-accent-muted: rgba(96, 165, 250, 0.18);
+  --color-accent-bg: rgba(96, 165, 250, 0.12);
+  --color-accent-disabled: #1e3a8a;
+  --color-success: #4ade80;
+  --color-success-hover: #86efac;
+  --color-success-dark: #bbf7d0;
+  --color-success-bg: rgba(74, 222, 128, 0.12);
+  --color-warning: #fbbf24;
+  --color-warning-dark: #fde68a;
+  --color-warning-bg: rgba(251, 191, 36, 0.12);
+  --color-warning-subtle: rgba(251, 191, 36, 0.12);
+  --color-error-dark: #fecaca;
+  --color-error-bg: rgba(248, 113, 113, 0.12);
+  --color-error-border: rgba(248, 113, 113, 0.4);
+  --color-danger-subtle: rgba(248, 113, 113, 0.12);
+  --shadow-lg: 0 10px 25px rgba(0, 0, 0, 0.5), 0 4px 10px rgba(0, 0, 0, 0.3);
 }
 
 /* =============================================================================
@@ -262,4 +329,21 @@ select option {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+/* Keyboard focus is always visible */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -6,7 +6,7 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -23,6 +23,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* Long meeting topics take two lines at most in a narrow side panel */
+.in-meeting-header .meeting-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 /* Title editing (scoped to in-meeting-header) */
@@ -378,7 +388,7 @@
   flex: 1;
   min-height: 200px;
   overflow-y: auto;
-  padding: 20px;
+  padding: 14px;
 }
 
 .transcript-entry {
@@ -392,8 +402,14 @@
 .transcript-entry-header {
   display: flex;
   align-items: baseline;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 2px;
+}
+
+/* Speaker first, time on the right: the text gets the full panel width */
+.transcript-entry-header .transcript-timestamp {
+  order: 2;
 }
 
 .transcript-timestamp {
@@ -401,7 +417,6 @@
 }
 
 .transcript-text {
-  padding-left: 48px;
   line-height: 1.6;
   word-wrap: break-word;
   overflow-wrap: break-word;

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import { Tabs, ScrollArea } from '@base-ui/react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { ArrowDown, X, Sparkles, Pause, Play, Square, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw, MonitorPlay, Volume2 } from 'lucide-react';
+import { ArrowDown, X, Sparkles, Pause, Play, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw, MonitorPlay, Volume2 } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { getPreferredAiModel } from '../utils/aiModel';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,7 +13,8 @@ import useZoomAuth from '../hooks/useZoomAuth';
 import { useDemoData } from '../hooks/useDemoData';
 import { useFeatureLayout } from '../hooks/useFeatureLayout';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
-import useSecondsLeft from '../hooks/useSecondsLeft';
+import TransportBar from '../components/TransportBar';
+import { getTransportView } from '../lib/transportView';
 import { transcriptToText } from '../lib/transcript';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import ArloResponsePanel from '../components/ArloResponsePanel';
@@ -23,7 +24,6 @@ import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
 import Input from '../components/ui/Input';
-import LoadingSpinner from '../components/ui/LoadingSpinner';
 // Healthcare vertical features
 import {
   SOAPNotesPanel,
@@ -102,7 +102,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
-  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsLoading, rtmsPhase, rtmsError, rtmsWaitingLong, rtmsRequestExpiresAt, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
+  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsPhase, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -576,48 +576,12 @@ export default function InMeetingView({ isGuestMode = false }) {
     zoomSdk.onSendAppInvitation(handler);
   }, [zoomSdk]);
 
-  const handlePause = () => {
-    pauseRTMS();
-  };
-
-  const handleResume = () => {
-    resumeRTMS();
-  };
-
-  const handleStop = () => {
-    stopRTMS();
-  };
-
   // Determine transcript state (initial_roster events don't count as displayable content)
   const hasContent = segments.length > 0 || participantEvents.some(e => e.eventType !== 'initial_roster');
-  // 'requesting' = asked Zoom, not confirmed yet (host may still have to approve)
-  // 'starting'   = Zoom's client says started, the stream has not reached the server yet
-  // 'waiting'    = the server has the stream, no one has spoken yet
-  const transcriptState = rtmsPaused
-    ? 'paused'
-    : rtmsActive && hasContent
-      ? 'live'
-      : rtmsActive
-        ? 'waiting'
-        : rtmsPhase === 'requested'
-          ? 'requesting'
-          : rtmsPhase === 'starting'
-            ? 'starting'
-            : 'not-started';
-  const requestSecondsLeft = useSecondsLeft(rtmsRequestExpiresAt);
-  const requestingLabel = rtmsWaitingLong
-    ? `Waiting for host approval…${requestSecondsLeft !== null ? ` ${requestSecondsLeft}s` : ''}`
-    : 'Requesting transcription…';
-  // Denied or unanswered: ask the host again. Failed: something is broken, so "Try again".
-  // After a denial, an expiry or a stall the client can't tell whether the host has
-  // allowed Arlo since, so the button is a plain Start: it starts at once if allowed
-  // and asks the host again if not.
-  const startAgainLabel = rtmsPhase === 'failed' ? 'Try again' : 'Start Transcription';
-  const liveLabel = rtmsPhase === 'interrupted' ? 'Reconnecting…' : 'Transcribing';
-  // Start was denied or failed: say why and offer Retry (the stream is not running)
-  const startError = !rtmsActive && rtmsError?.action === 'start' ? rtmsError.message : null;
-  // A pause/resume/stop that Zoom rejected or never confirmed
-  const controlError = rtmsActive && rtmsError ? rtmsError.message : null;
+  const transcriptState = getTransportView({
+    phase: rtmsPhase, active: rtmsActive, paused: rtmsPaused, hasContent,
+  }).state;
+  const showTranscript = transcriptState === 'live' || transcriptState === 'paused';
 
   // Merge transcript segments and participant events into a chronological timeline
   // Filter out initial_roster events — they're not real joins, just the SDK reporting existing participants
@@ -801,10 +765,6 @@ export default function InMeetingView({ isGuestMode = false }) {
       {/* Meeting header */}
       <div className="in-meeting-header">
         <div className="live-indicator-row">
-          <div className="live-dot-container">
-            <div className="live-dot" />
-            <div className="live-dot-ping" />
-          </div>
           {isAuthenticated && isEditingTitle ? (
             <div className="title-edit-row">
               <input
@@ -828,7 +788,7 @@ export default function InMeetingView({ isGuestMode = false }) {
             </div>
           ) : isAuthenticated ? (
             <div className="title-display" onClick={handleEditTitle}>
-              <h1 className="text-serif text-2xl">{title}</h1>
+              <h1 className="text-serif text-lg meeting-title">{title}</h1>
               <Pencil size={16} className="title-action text-muted" />
               <button
                 className="title-action-btn"
@@ -843,7 +803,7 @@ export default function InMeetingView({ isGuestMode = false }) {
               </button>
             </div>
           ) : (
-            <h1 className="text-serif text-2xl">{title}</h1>
+            <h1 className="text-serif text-lg meeting-title">{title}</h1>
           )}
         </div>
         {participants.length > 0 && (
@@ -888,6 +848,50 @@ export default function InMeetingView({ isGuestMode = false }) {
         />
       )}
 
+      {/* Transcription status and controls: one bar for both tabs */}
+      <TransportBar
+        guest={isGuestMode}
+        hasContent={hasContent}
+        extra={rtmsActive && (
+          <div className="invite-dropdown-container" ref={inviteDropdownRef}>
+            <Button
+              variant="outline"
+              size="sm"
+              className={inviteSent ? 'invite-sent' : ''}
+              onClick={() => setInviteMenuOpen(prev => !prev)}
+              aria-label="Share Arlo with participants"
+              aria-haspopup="menu"
+              aria-expanded={inviteMenuOpen}
+            >
+              {inviteSent ? <Check size={14} aria-hidden="true" /> : <Share2 size={14} aria-hidden="true" />}
+            </Button>
+            {inviteMenuOpen && (
+              <div className="invite-dropdown" role="menu">
+                <button className="invite-dropdown-item" role="menuitem" onClick={handleInviteAll}>
+                  <Users size={14} />
+                  Invite all participants
+                </button>
+                <button className="invite-dropdown-item" role="menuitem" onClick={handleInviteChoose}>
+                  <Share2 size={14} />
+                  Choose participants...
+                </button>
+                {!isTestMode && !isGuestMode && (
+                  <button
+                    className="invite-dropdown-item"
+                    role="menuitem"
+                    onClick={handleCollaborate}
+                    disabled={collaborateLoading}
+                  >
+                    {collaborateLoading ? <Loader2 size={14} className="animate-spin" /> : <MonitorPlay size={14} />}
+                    {isCollaborating ? 'End collaborate mode' : 'Start collaborate mode'}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      />
+
       {/* Tabs: Transcript (default) | Arlo Assist */}
       <Tabs.Root
         value={activeTab}
@@ -908,165 +912,22 @@ export default function InMeetingView({ isGuestMode = false }) {
               connectWebSocket(isGuestMode ? null : wsToken, effectiveMeetingId);
             }}
           />
-          {transcriptState === 'not-started' && (
+          {!showTranscript && (
             <Card className="transcript-state-card">
               <div className="transcript-state-inner">
                 <p className="text-serif text-muted">
-                  {isGuestMode ? 'Waiting for host to start transcription...' : 'Transcription not started'}
+                  {transcriptState === 'waiting'
+                    ? 'Listening. The transcript appears here when someone speaks.'
+                    : 'The transcript appears here once transcription starts.'}
                 </p>
-                {!isGuestMode && startError && (
-                  <p className="text-sans text-sm" role="alert" style={{ color: 'var(--color-danger, #ef4444)' }}>
-                    {startError}
-                  </p>
-                )}
-                {!isGuestMode && (
-                  <Button onClick={() => startRTMS(false)} disabled={rtmsLoading}>
-                    {startError ? startAgainLabel : 'Start Transcription'}
-                  </Button>
-                )}
               </div>
             </Card>
           )}
 
-          {transcriptState === 'requesting' && (
-            <Card className="transcript-state-card">
-              <div className="transcript-state-inner" role="status" aria-live="polite">
-                <LoadingSpinner size={32} />
-                <p className="text-serif text-muted">{requestingLabel}</p>
-                {/* Zoom does not tell the app when the host allows it, so the user can */}
-                {!isGuestMode && rtmsWaitingLong && (
-                  <>
-                    <p className="text-sans text-sm text-muted">Has the host allowed Arlo?</p>
-                    <Button variant="outline" onClick={() => startRTMS(false)}>
-                      Start Transcription
-                    </Button>
-                  </>
-                )}
-              </div>
-            </Card>
-          )}
-
-          {transcriptState === 'starting' && (
-            <Card className="transcript-state-card">
-              <div className="transcript-state-inner" role="status" aria-live="polite">
-                <LoadingSpinner size={32} />
-                <p className="text-serif text-muted">Starting transcription…</p>
-              </div>
-            </Card>
-          )}
-
-          {transcriptState === 'waiting' && (
-            <Card className="transcript-state-card">
-              <div className="transcript-state-inner">
-                <LoadingSpinner size={32} />
-                <p className="text-serif text-muted">Waiting for transcript...</p>
-              </div>
-            </Card>
-          )}
-
-          {(transcriptState === 'live' || transcriptState === 'paused') && (
+          {showTranscript && (
             <div className="transcript-active-container">
-              {/* Transcription controls bar */}
-              <Card className="transcript-controls-card">
-                <div className="transcript-controls">
-                  <div className="transcript-status">
-                    {transcriptState === 'live' ? (
-                      <>
-                        <div className="live-dot-container">
-                          <div className="recording-dot" />
-                          <div className="recording-dot-ping" />
-                        </div>
-                        <span className="text-sans text-sm text-muted">{liveLabel}</span>
-                      </>
-                    ) : (
-                      <span className="paused-badge text-sans">Paused</span>
-                    )}
-                    {controlError && (
-                      <span className="text-sans text-xs" role="alert" style={{ color: 'var(--color-danger, #ef4444)' }}>
-                        {controlError}
-                      </span>
-                    )}
-                  </div>
-                  <div className="transcript-controls-buttons">
-                    {/* RTMS controls - only for authenticated users (host/co-host) */}
-                    {!isGuestMode && (
-                      <>
-                        {transcriptState === 'live' ? (
-                          <>
-                            <Button variant="outline" size="sm" onClick={handlePause} disabled={rtmsLoading}>
-                              <Pause size={12} />
-                              Pause
-                            </Button>
-                            <Button variant="outline" size="sm" className="btn-destructive-outline" onClick={handleStop} disabled={rtmsLoading}>
-                              <Square size={12} />
-                              Stop
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button size="sm" onClick={handleResume} disabled={rtmsLoading}>
-                              <Play size={12} />
-                              Resume
-                            </Button>
-                            <Button variant="outline" size="sm" className="btn-destructive-outline" onClick={handleStop} disabled={rtmsLoading}>
-                              <Square size={12} />
-                              Stop
-                            </Button>
-                          </>
-                        )}
-                      </>
-                    )}
-                    {/* Collaborate mode */}
-                    {!isTestMode && (
-                      <Button
-                        variant={isCollaborating ? 'primary' : 'outline'}
-                        size="sm"
-                        onClick={handleCollaborate}
-                        disabled={collaborateLoading}
-                        title={isCollaborating ? 'End collaborate mode' : 'Start collaborate mode - share Arlo with all participants'}
-                      >
-                        {collaborateLoading ? <Loader2 size={12} className="animate-spin" /> : <MonitorPlay size={12} />}
-                        {isCollaborating ? 'End Collab' : 'Collaborate'}
-                      </Button>
-                    )}
-                    {/* Invite participants */}
-                    {(
-                    <div className="invite-dropdown-container" ref={inviteDropdownRef}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className={inviteSent ? 'invite-sent' : ''}
-                        onClick={() => setInviteMenuOpen(prev => !prev)}
-                      >
-                        {inviteSent ? <Check size={12} /> : <Share2 size={12} />}
-                        {inviteSent ? 'Sent' : 'Invite'}
-                      </Button>
-                      {inviteMenuOpen && (
-                        <div className="invite-dropdown">
-                          <button className="invite-dropdown-item" onClick={handleInviteAll}>
-                            <Users size={14} />
-                            Invite all participants
-                          </button>
-                          <button className="invite-dropdown-item" onClick={handleInviteChoose}>
-                            <Share2 size={14} />
-                            Choose participants...
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    )}
-                  </div>
-                </div>
-              </Card>
-
               {/* Transcript card */}
               <Card className="transcript-live-card">
-                {transcriptState === 'paused' && (
-                  <div className="transcript-paused-pill">
-                    <span className="text-sans text-xs text-muted">Transcript paused</span>
-                  </div>
-                )}
-
                 {/* Healthcare: Show detected symptoms/medications */}
                 {isHealthcare && hasFeature('symptoms') && (
                   <HealthcareTagsSummary
@@ -1160,100 +1021,6 @@ export default function InMeetingView({ isGuestMode = false }) {
         </Tabs.Panel>
 
         <Tabs.Panel value="assist" className="in-meeting-tab-panel">
-          {/* Compact transcription status bar on Arlo Assist tab */}
-          <Card className="assist-transcript-status">
-            <div className="assist-transcript-status-inner">
-              {transcriptState === 'not-started' ? (
-                <>
-                  <span className="text-sans text-sm text-muted">
-                    {isGuestMode
-                      ? 'Waiting for host to start transcription...'
-                      : (startError || 'Transcription not started')}
-                  </span>
-                  {!isGuestMode && (
-                    <Button size="sm" onClick={() => startRTMS(false)} disabled={rtmsLoading}>
-                      <Mic size={14} />
-                      {startError ? startAgainLabel : 'Start'}
-                    </Button>
-                  )}
-                </>
-              ) : transcriptState === 'requesting' ? (
-                <>
-                  <div className="assist-status-live" role="status" aria-live="polite">
-                    <LoadingSpinner size={14} />
-                    <span className="text-sans text-sm text-muted">{requestingLabel}</span>
-                  </div>
-                  {!isGuestMode && rtmsWaitingLong && (
-                    <Button variant="outline" size="sm" onClick={() => startRTMS(false)}>
-                      <Mic size={14} />
-                      Start
-                    </Button>
-                  )}
-                </>
-              ) : transcriptState === 'starting' ? (
-                <>
-                  <div className="assist-status-live" role="status" aria-live="polite">
-                    <LoadingSpinner size={14} />
-                    <span className="text-sans text-sm text-muted">Starting transcription…</span>
-                  </div>
-                </>
-              ) : transcriptState === 'waiting' ? (
-                <>
-                  <div className="assist-status-live">
-                    <LoadingSpinner size={14} />
-                    <span className="text-sans text-sm text-muted">Waiting for transcript...</span>
-                  </div>
-                </>
-              ) : transcriptState === 'paused' ? (
-                <>
-                  <span className="paused-badge-sm text-sans text-sm">Paused</span>
-                  <div className="assist-transcript-controls">
-                    {!isGuestMode && (
-                      <Button size="sm" onClick={handleResume} disabled={rtmsLoading}>
-                        <Play size={14} />
-                        Resume
-                      </Button>
-                    )}
-                    <Button variant="outline" size="sm" onClick={() => setActiveTab('transcript')}>
-                      View Transcript
-                    </Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="assist-status-live">
-                    <div className="live-dot-container small">
-                      <div className="recording-dot" />
-                      <div className="recording-dot-ping" />
-                    </div>
-                    <span className="text-sans text-sm text-muted">{liveLabel}</span>
-                    <span className="text-sans text-xs text-muted">({segments.length})</span>
-                    {/* Voice commands indicator - inline */}
-                    <button
-                      className={`voice-commands-btn ${voiceCommandsEnabled ? 'active' : ''}`}
-                      onClick={() => setVoiceCommandsEnabled(prev => !prev)}
-                      title='Say "Hey Arlo, summarize" or other commands'
-                    >
-                      <Volume2 size={14} />
-                      <span className="text-sans text-xs">Voice {voiceCommandsEnabled ? 'On' : 'Off'}</span>
-                    </button>
-                  </div>
-                  <div className="assist-transcript-controls">
-                    {!isGuestMode && (
-                      <Button variant="outline" size="sm" onClick={handlePause} disabled={rtmsLoading}>
-                        <Pause size={14} />
-                        Pause
-                      </Button>
-                    )}
-                    <Button variant="outline" size="sm" onClick={() => setActiveTab('transcript')}>
-                      View Transcript
-                    </Button>
-                  </div>
-                </>
-              )}
-            </div>
-          </Card>
-
           {/* Feature reorder toolbar */}
           {hasCustomOrder(effectiveVerticalId) && (
             <div className="feature-reorder-toolbar">

@@ -1,0 +1,96 @@
+/* Transcription bar: one row at any panel width from 280px up. */
+.transport-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.transport-bar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.transport-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted-foreground);
+}
+
+.transport-label {
+  overflow-wrap: break-word;
+}
+
+/* Waiting on the host: the countdown gets its own line, Start sits below it */
+.transport-bar[data-state='requesting'] .transport-bar-row {
+  flex-wrap: wrap;
+}
+
+.transport-bar[data-state='requesting'] .transport-status {
+  flex: 1 1 100%;
+}
+
+.transport-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--destructive);
+}
+
+.transport-dot[data-paused='true'] {
+  background: var(--muted-foreground);
+}
+
+.transport-dot[data-pulse='true'] {
+  animation: transport-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes transport-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.transport-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.transport-hint {
+  color: var(--muted-foreground);
+}
+
+.transport-message {
+  color: var(--destructive);
+}
+
+/* Side-panel widths: icon-only Pause / Resume / Stop (they keep their aria-labels) */
+@media (max-width: 440px) {
+  .transport-action-text {
+    display: none;
+  }
+
+  .transport-actions {
+    gap: 4px;
+  }
+
+  .transport-actions .btn {
+    padding: 0 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .transport-dot[data-pulse='true'] {
+    animation: none;
+  }
+}

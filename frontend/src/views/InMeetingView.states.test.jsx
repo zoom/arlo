@@ -127,3 +127,59 @@ describe('auto-start', () => {
     expect(await startButton()).toBeEnabled();
   });
 });
+
+describe('transport bar', () => {
+  async function goLive() {
+    const result = await openMeeting();
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(1, 'Hello.'));
+    await screen.findByText('Transcribing');
+    return result;
+  }
+
+  test('there is one set of controls, shared by both tabs', async () => {
+    await goLive();
+    expect(screen.getAllByRole('button', { name: 'Pause transcription' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Stop transcription' })).toHaveLength(1);
+
+    await userEvent.click(screen.getByRole('tab', { name: 'Arlo Assist' }));
+    expect(screen.getAllByRole('button', { name: 'Pause transcription' })).toHaveLength(1);
+    expect(screen.getByText('Transcribing')).toBeInTheDocument();
+  });
+
+  test('pause is requested, then shown as paused only when confirmed', async () => {
+    const { sdk } = await goLive();
+    await userEvent.click(screen.getByRole('button', { name: 'Pause transcription' }));
+    expect(sdk.pauseRTMS).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Paused')).not.toBeInTheDocument();
+
+    await send(serverMessage.status('rtms_paused'));
+    expect(await screen.findByText('Paused')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume transcription' })).toBeEnabled();
+    expect(screen.getByText('Hello.')).toBeInTheDocument();
+  });
+
+  test('stop returns to "not started" once the server confirms, keeping what was said', async () => {
+    const { sdk } = await goLive();
+    await userEvent.click(screen.getByRole('button', { name: 'Stop transcription' }));
+    expect(sdk.stopRTMS).toHaveBeenCalledTimes(1);
+
+    await send(serverMessage.status('rtms_stopped'));
+    expect(await screen.findByText('Transcription not started')).toBeInTheDocument();
+    expect(await startButton()).toBeEnabled();
+  });
+
+  test('a guest sees the state but no controls', async () => {
+    mockFetch({}, { signedIn: false });
+    renderInMeeting({ sdk: createZoomSdk({ status: 'authenticated', role: 'attendee' }), guest: true });
+    expect(await screen.findByText('Waiting for host to start transcription...')).toBeInTheDocument();
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    expect(screen.queryByRole('button', { name: 'Start Transcription' })).not.toBeInTheDocument();
+
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(1, 'Guests can read this.'));
+    expect(await screen.findByText('Guests can read this.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause transcription' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop transcription' })).not.toBeInTheDocument();
+  });
+});
