@@ -136,18 +136,20 @@ export function useVoiceCommands({
 
         case 'HIGHLIGHT':
           addToast('⭐ Creating highlight...', 'info', 2000);
-          if (callbacks.onHighlight) {
-            await callbacks.onHighlight();
+          {
+            // Only claim a highlight that was really saved
+            const saved = callbacks.onHighlight ? await callbacks.onHighlight() : false;
             setResponses(prev => [...prev, {
               type: 'assistant',
               action: 'Highlight',
-              text: 'Highlight created at current timestamp!',
+              text: saved ? 'Highlight created at current timestamp!' : 'Highlights are not saved in demo mode.',
               timestamp: Date.now(),
             }]);
+            if (!saved) break;
           }
           if (zoomSdk) {
             zoomSdk.showNotification({
-              type: 'success',
+              type: 'info',
               title: 'Arlo',
               message: 'Highlight created!',
             }).catch(() => {});
