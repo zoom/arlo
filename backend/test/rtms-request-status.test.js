@@ -124,3 +124,29 @@ test('pause/resume reports cannot invent a stream that never started', async () 
   ws.socket.close();
   assert.deepEqual(statuses(ws), []);
 });
+
+// The rtms service joined Zoom's stream and was refused (e.g. status 16).
+test('a failed stream connection is delivered and is not remembered as running', async () => {
+  await setStatus(MEETING, 'rtms_started');
+  const ws = await joinMeeting();
+  const res = await setStatus(MEETING, 'rtms_failed');
+  await h.wait(200);
+  ws.socket.close();
+  assert.equal(res.status, 200);
+  assert.deepEqual(statuses(ws), ['rtms_started', 'rtms_failed']);
+
+  const later = await joinMeeting();
+  later.socket.close();
+  assert.deepEqual(statuses(later), []);
+});
+
+test('a browser cannot report a stream failure', async () => {
+  const { generateToken } = require('../src/services/auth');
+  const session = generateToken({ userId: 'u1', zoomUserId: 'z1' });
+  const res = await h.postJson(
+    `${srv.base}/api/rtms/status`,
+    { meetingId: MEETING, status: 'rtms_failed' },
+    { cookie: `sessionToken=${session}` },
+  );
+  assert.equal(res.status, 403);
+});

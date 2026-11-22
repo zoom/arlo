@@ -187,6 +187,7 @@ const BROWSER_STATUSES = new Set(['rtms_paused', 'rtms_resumed']);
 const INTERNAL_STATUSES = new Set([
   'rtms_started', 'rtms_stopped', 'rtms_paused', 'rtms_resumed',
   'rtms_interrupted', 'media_interrupted',
+  'rtms_failed', // the rtms service could not join the stream Zoom started
 ]);
 
 /**

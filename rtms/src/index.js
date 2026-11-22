@@ -286,9 +286,32 @@ async function handleRTMSStarted(payload) {
       }
     });
 
-    // Set up join confirmation handler
+    // Join confirmation: 0 = joined. Anything else is an RTMS_STATUS_CODE and
+    // means no media will flow (e.g. 16 = STATUS_DUPLICATE_MEDIA_DATA_CONNECTION).
+    // The backend is told "started" only here, once the join really succeeded.
     client.onJoinConfirm((reason) => {
-      console.log('Joined RTMS session, reason:', reason);
+      if (reason === 0) {
+        console.log('Joined RTMS session');
+        notifyBackend(meeting_uuid, 'rtms_started', operator_id).catch(err => {
+          console.warn('Failed to notify backend of start:', err.message);
+        });
+        return;
+      }
+      console.error(`RTMS join refused by Zoom, status code ${reason}. See RTMS_STATUS_CODE in the Zoom RTMS docs.`);
+      notifyBackend(meeting_uuid, 'rtms_failed').catch(err => {
+        console.warn('Failed to notify backend of join failure:', err.message);
+      });
+      // Release the refused client outside this callback so a new start is clean
+      setImmediate(() => {
+        const session = activeSessions.get(rtms_stream_id);
+        if (!session || session.client !== client) return;
+        activeSessions.delete(rtms_stream_id);
+        try {
+          client.leave();
+        } catch (err) {
+          console.warn('Error leaving refused RTMS session:', err.message);
+        }
+      });
     });
 
     // Set up leave handler — v1.0 now receives a reason parameter
@@ -391,9 +414,8 @@ async function handleRTMSStarted(payload) {
     });
 
     console.log('Join result:', result);
-
-    // Notify backend that RTMS is active
-    await notifyBackend(meeting_uuid, 'rtms_started', operator_id);
+    // "Started" is reported from onJoinConfirm, not here: join() returning
+    // true only means the attempt began.
 
   } catch (error) {
     console.error('Failed to start RTMS:', error);

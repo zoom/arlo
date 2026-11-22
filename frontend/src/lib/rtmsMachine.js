@@ -52,6 +52,7 @@ const REQUEST_STATUS_OUTCOME = {
   6: { phase: 'failed', message: 'Zoom\'s transcription server failed. Request again.' },
 };
 const SERVER_FAILED = 6;
+const CONNECT_FAILED_MESSAGE = 'Arlo could not connect to the transcription stream. Start again.';
 const STALLED_MESSAGE = 'Zoom allows transcription, but the stream has not started. Start it here, or use the Start button Zoom shows for Arlo.';
 
 export const isRtmsActive = (state) => RUNNING_PHASES.has(state.phase);
@@ -93,6 +94,9 @@ function onStatus(state, status, source) {
         : state;
     case 'interrupted':
       return RUNNING_PHASES.has(state.phase) ? { ...state, phase: 'interrupted' } : state;
+    case 'failed':
+      // Zoom started a stream but Arlo's server could not join it
+      return settled('failed', { action: 'start', code: 'stream_connect', message: CONNECT_FAILED_MESSAGE });
     default:
       return state;
   }
@@ -181,6 +185,7 @@ const WS_STATUS = {
   rtms_paused: 'paused',
   rtms_resumed: 'resumed',
   rtms_interrupted: 'interrupted',
+  rtms_failed: 'failed',
 };
 
 /** Backend `meeting.status` value → machine status (null = not a stream state). */

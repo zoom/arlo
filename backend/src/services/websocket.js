@@ -438,7 +438,7 @@ function rememberStreamStatus(meetingId, status) {
     }
     streamStatuses.delete(meetingId);
     streamStatuses.set(meetingId, { status: 'rtms_started', at: Date.now() });
-  } else if (status === 'rtms_stopped') {
+  } else if (status === 'rtms_stopped' || status === 'rtms_failed') {
     streamStatuses.delete(meetingId);
   } else if (known && (status === 'rtms_paused' || status === 'rtms_interrupted')) {
     // Pause/interrupt only change a stream that exists; they cannot create one

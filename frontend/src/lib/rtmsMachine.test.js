@@ -408,3 +408,22 @@ describe('Start stays available while waiting on the host', () => {
     expect(canStartRtms({ ...initialRtmsState, phase: 'stopped', pending: 'stop' })).toBe(false);
   });
 });
+
+describe('Arlo could not connect to the stream Zoom started', () => {
+  // Seen in the logs: rtms_started webhook, then the join was refused (status 16)
+  // and Zoom stopped the stream a minute later.
+  const failedStatus = status(statusFromWs('rtms_failed'), 'server');
+
+  test('maps the backend status', () => {
+    expect(statusFromWs('rtms_failed')).toBe('failed');
+  });
+
+  test.each(['requested', 'starting', 'active', 'expired'])('from %s it ends as failed with a reason and Start available', (phase) => {
+    const state = rtmsReducer({ ...initialRtmsState, phase, pending: phase === 'requested' ? 'start' : null }, failedStatus);
+    expect(state.phase).toBe('failed');
+    expect(state.error.action).toBe('start');
+    expect(state.error.message).toMatch(/could not connect/i);
+    expect(isRtmsActive(state)).toBe(false);
+    expect(canStartRtms(state)).toBe(true);
+  });
+});
