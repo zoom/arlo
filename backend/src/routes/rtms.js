@@ -100,8 +100,9 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       return sendResponse(res, 400, { error: 'Invalid JSON' });
     }
   } else if (req.body && typeof req.body === 'object') {
+    // Already parsed by the global JSON parser, which kept the original bytes
     body = req.body;
-    rawBodyStr = JSON.stringify(body);
+    rawBodyStr = Buffer.isBuffer(req.rawBody) ? req.rawBody.toString('utf8') : null;
   } else {
     logger.error('Empty or invalid webhook request body');
     return sendResponse(res, 400, { error: 'Invalid request body' });
@@ -130,8 +131,10 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
   const signature = req.headers['x-zm-signature'];
   const timestamp = req.headers['x-zm-request-timestamp'];
 
-  const rawBodyBuffer = Buffer.isBuffer(req.body) ? req.body : Buffer.from(rawBodyStr, 'utf8');
-  if (!verifyWebhookSignature(rawBodyBuffer, timestamp, signature)) {
+  // Verify against the bytes Zoom sent, never a re-serialized copy. Without
+  // those bytes the signature cannot be checked, so the request is refused.
+  const rawBodyBuffer = Buffer.isBuffer(req.body) ? req.body : req.rawBody;
+  if (!Buffer.isBuffer(rawBodyBuffer) || !verifyWebhookSignature(rawBodyBuffer, timestamp, signature)) {
     logger.error('Webhook signature verification failed');
     return sendResponse(res, 401, { error: 'Unauthorized' });
   }

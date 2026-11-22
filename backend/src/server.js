@@ -66,7 +66,16 @@ app.use(cors(corsOptions));
 app.use(cookieParser());
 
 // Body parsing
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({
+  limit: '10mb',
+  // Zoom signs the exact bytes of a webhook. Keep them for signature checks:
+  // the parsed-then-reserialized body is not byte-identical.
+  verify: (req, res, buf) => {
+    if (req.originalUrl && req.originalUrl.startsWith('/api/rtms/webhook')) {
+      req.rawBody = Buffer.from(buf);
+    }
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Debug mode: Log all POST/PUT/PATCH request bodies

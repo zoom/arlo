@@ -62,3 +62,23 @@ test('WebSocket rejects missing or bogus tokens with 1008', async () => {
     assert.deepEqual(ws.messages, []);
   }
 });
+
+// Zoom signs the exact bytes it sends. Verifying a re-serialized copy of the
+// parsed JSON rejects any payload whose bytes differ from JSON.stringify's
+// output: escaped unicode (a meeting topic with an accent), spacing, key order.
+test('webhook signatures are checked against the bytes Zoom sent', async () => {
+  const crypto = require('node:crypto');
+  const raw = '{"event":"rtms.request_status", "payload":{"id_field":{"meeting_uuid":"MEETING-RAW=="},"status":3,"note":"caf\\u00e9 \\/ r\\u00e9union"}}';
+  assert.notEqual(JSON.stringify(JSON.parse(raw)), raw); // the case that used to fail
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const sign = (body) => `v0=${crypto.createHmac('sha256', process.env.ZOOM_WEBHOOK_TOKEN).update(`v0:${timestamp}:${body}`).digest('hex')}`;
+  const send = (body, signature) => fetch(url('/api/rtms/webhook'), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-zm-signature': signature, 'x-zm-request-timestamp': timestamp },
+    body,
+  });
+
+  assert.equal((await send(raw, sign(raw))).status, 200);
+  // A signature over the re-serialized form is not a signature over what was sent
+  assert.equal((await send(raw, sign(JSON.stringify(JSON.parse(raw))))).status, 401);
+});
