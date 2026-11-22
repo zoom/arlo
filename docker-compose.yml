@@ -64,7 +64,7 @@ services:
       # ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET, and ZOOM_WEBHOOK_TOKEN come from env_file (.env)
       # RTMS SDK v1.0 logging (replaces configureLogger())
       ZM_RTMS_LOG_LEVEL: info
-      # Log level for PII gating
+      # Log verbosity. No level logs transcript text, names, ids or tokens.
       LOG_LEVEL: ${LOG_LEVEL:-info}
     # Note: Port 3002 is NOT exposed to host — RTMS service is only accessible
     # from the Docker internal network via http://rtms:3002 (from backend)

@@ -192,10 +192,10 @@ Zoom RTMS WebSocket → RTMS Service → Backend API → PostgreSQL
 | Level | Content |
 |-------|---------|
 | `info` (default) | API requests, errors, system events |
-| `debug` | Transcript content, PII (development only) |
+| `debug` | Request and response shapes: field names, types and sizes (development only) |
 
 ### PII in Logs
-- Transcript content only logged at `debug` level
+- Transcript content, names, ids and tokens are not logged at any level
 - Production deployments should use `LOG_LEVEL=info`
 - No tokens or secrets logged at any level
 

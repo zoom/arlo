@@ -7,7 +7,8 @@
  * the Zoom RTMS SDK: the client is injected, so the rules can be tested with a
  * fake client (the real one is a native module that only runs in the container).
  *
- * Nothing here is stored beyond the life of a stream.
+ * Nothing here is stored beyond the life of a stream, and nothing a person
+ * said, their name, or a meeting or stream id is ever written to the logs.
  */
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -18,7 +19,6 @@ const isId = (value) => typeof value === 'string' && value.length > 0 && value.l
 function createSessionManager({
   createClient,
   backend,
-  logPii = false,
   log = console,
   now = Date.now,
   defer = setImmediate,
@@ -50,8 +50,6 @@ function createSessionManager({
 
   function onTranscript(session, data, timestamp, metadata) {
     const text = data.toString('utf-8');
-    if (logPii) log.log('Raw transcript event:', { text, timestamp, metadata });
-
     // First transcript marks the boundary between the initial roster and real joins
     session.firstTranscriptReceived = true;
     const userId = metadata?.userId;

@@ -36,7 +36,7 @@ console.log('Demo Mode: Transcripts are broadcast in real-time but never stored'
  * Send a response and log it in debug mode
  */
 function sendResponse(res, statusCode, body) {
-  logger.debug('Response:', JSON.stringify({ status: statusCode, body }));
+  logger.debug('Response status:', statusCode);
   if (typeof body === 'string') {
     return res.status(statusCode).send(body);
   }
@@ -279,10 +279,6 @@ router.post('/broadcast', requireInternal, async (req, res) => {
   const { meetingId, segment } = req.body || {};
   if (typeof meetingId !== 'string' || !segment || typeof segment !== 'object') {
     return res.status(400).json({ error: 'Invalid broadcast payload' });
-  }
-
-  if (logger.isDebug) {
-    console.log(`Transcript segment for meeting ${meetingId}:`, segment?.text?.substring(0, 50));
   }
 
   // Broadcast transcript segment to all WebSocket clients

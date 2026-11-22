@@ -5,13 +5,14 @@
  *   - error: Always shown, critical errors
  *   - warn:  Warnings and potential issues
  *   - info:  General operational info (default)
- *   - debug: Verbose debugging, including request bodies
+ *   - debug: Verbose debugging: request and response shapes (field names and
+ *            types), never their content
  *
  * Usage:
  *   const logger = require('./lib/logger');
  *   logger.info('Server started');
  *   logger.debug('Request body:', body);
- *   logger.logRequest(req);  // Logs full request details in debug mode
+ *   logger.logRequest(req);  // Logs the request's shape in debug mode
  */
 
 const config = require('../config');
@@ -35,23 +36,26 @@ function formatMessage(level, args) {
 }
 
 /**
- * Sanitize sensitive fields from objects before logging
+ * Describe a value without revealing it: field names and types, never content.
+ * Request bodies carry transcripts, names, ids and tokens, and no log level may
+ * record those. `{ meetingId: 'string(18)', segment: { text: 'string(41)' } }`
+ * is enough to debug a wrong payload shape.
  */
-function sanitize(obj, sensitiveFields = ['password', 'token', 'secret', 'authorization', 'cookie', 'access_token', 'refresh_token']) {
-  if (!obj || typeof obj !== 'object') return obj;
-
-  const sanitized = Array.isArray(obj) ? [...obj] : { ...obj };
-
-  for (const key of Object.keys(sanitized)) {
-    const lowerKey = key.toLowerCase();
-    if (sensitiveFields.some(field => lowerKey.includes(field))) {
-      sanitized[key] = '[REDACTED]';
-    } else if (typeof sanitized[key] === 'object' && sanitized[key] !== null) {
-      sanitized[key] = sanitize(sanitized[key], sensitiveFields);
-    }
+function describeShape(value, depth = 0) {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) {
+    return value.length === 0 ? 'array(0)' : `array(${value.length}) of ${JSON.stringify(describeShape(value[0], depth + 1))}`;
   }
-
-  return sanitized;
+  if (typeof value === 'object') {
+    if (depth >= 3) return 'object';
+    const shape = {};
+    for (const key of Object.keys(value).slice(0, 30)) {
+      shape[key] = describeShape(value[key], depth + 1);
+    }
+    return shape;
+  }
+  if (typeof value === 'string') return `string(${value.length})`;
+  return typeof value;
 }
 
 const logger = {
@@ -110,19 +114,20 @@ const logger = {
   logRequest(req, { includeBody = true, includeHeaders = true } = {}) {
     if (currentLevel < LOG_LEVELS.debug) return;
 
+    // Shape only. Never values: no query string (OAuth codes travel there), no
+    // header values (cookies, keys, signatures), no body content (transcripts).
     const info = {
       method: req.method,
-      path: req.path,
-      url: req.originalUrl,
-      query: Object.keys(req.query).length > 0 ? req.query : undefined,
+      path: req.path || String(req.originalUrl || '').split('?')[0],
+      queryFields: req.query && Object.keys(req.query).length > 0 ? Object.keys(req.query) : undefined,
     };
 
-    if (includeHeaders) {
-      info.headers = sanitize(req.headers);
+    if (includeHeaders && req.headers) {
+      info.headerNames = Object.keys(req.headers);
     }
 
-    if (includeBody && req.body && Object.keys(req.body).length > 0) {
-      info.body = sanitize(req.body);
+    if (includeBody && req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+      info.body = describeShape(req.body);
     }
 
     console.log(...formatMessage('debug', ['📥 Request:', JSON.stringify(info, null, 2)]));
@@ -138,7 +143,7 @@ const logger = {
       method: req.method,
       path: req.path,
       statusCode: res.statusCode,
-      body: body ? sanitize(body) : undefined,
+      body: body ? describeShape(body) : undefined,
     };
 
     console.log(...formatMessage('debug', ['📤 Response:', JSON.stringify(info, null, 2)]));
@@ -149,7 +154,7 @@ const logger = {
    */
   logBody(label, body) {
     if (currentLevel < LOG_LEVELS.debug) return;
-    console.log(...formatMessage('debug', [`📦 ${label}:`, JSON.stringify(sanitize(body), null, 2)]));
+    console.log(...formatMessage('debug', [`📦 ${label}:`, JSON.stringify(describeShape(body), null, 2)]));
   },
 
   /**

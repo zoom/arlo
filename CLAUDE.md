@@ -216,7 +216,7 @@ OPENROUTER_API_KEY=...          # Optional — free models work without it
 OPENROUTER_MODELS=nvidia/nemotron-3-ultra-550b-a55b:free,nvidia/nemotron-3.5-lightning:free,google/gemma-4-31b-it:free
 DEFAULT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 FALLBACK_MODEL=nvidia/nemotron-3.5-lightning:free
-LOG_LEVEL=info                  # Set to 'debug' to enable transcript/PII logging
+LOG_LEVEL=info                  # 'debug' adds request shapes (field names, sizes). No level logs transcript text, names, ids or tokens
 DEMO_MODE=true                  # Always true in this version
 ```
 

@@ -405,7 +405,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Demo Mode: ENABLED (no data persistence)`);
   console.log(`AI Enabled: ${config.aiEnabled}`);
   console.log(`Default Model: ${config.defaultModel}`);
-  console.log(`Log Level: ${logger.level}${logger.isDebug ? ' (request bodies will be logged)' : ''}`);
+  console.log(`Log Level: ${logger.level}${logger.isDebug ? ' (request shapes are logged, never their content)' : ''}`);
   console.log('='.repeat(60));
   console.log(`Health check: http://localhost:${PORT}/health`);
   console.log(`WebSocket: ws://localhost:${PORT}`);

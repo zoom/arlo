@@ -55,10 +55,9 @@ const internalHttp = axios.create({
   headers: { [INTERNAL_KEY_HEADER]: INTERNAL_KEY },
 });
 
-// Transcript text, names and raw payloads are only logged when LOG_LEVEL=debug.
-// ZM_RTMS_LOG_LEVEL controls the @zoom/rtms SDK's own logging and does NOT
-// enable PII logging here.
-const LOG_PII = process.env.LOG_LEVEL === 'debug';
+// This service never logs transcript text, names or webhook payloads, at any
+// log level. ZM_RTMS_LOG_LEVEL controls the @zoom/rtms SDK's own logging; keep
+// it at info, since the SDK's debug output is outside this service's control.
 
 /**
  * Verify Zoom webhook HMAC signature
@@ -120,7 +119,6 @@ const sessions = createSessionManager({
     segment: broadcastSegment,
     participantEvents: broadcastParticipantEvents,
   },
-  logPii: LOG_PII,
 });
 
 // Remove sessions older than 24 hours (prevents unbounded growth)
@@ -160,11 +158,6 @@ app.post('/webhook', async (req, res) => {
   console.log('='.repeat(60));
   console.log(`RTMS Webhook Received: ${event} (${isInternal ? 'forwarded by the backend' : 'signature verified'})`);
   console.log('='.repeat(60));
-  // Only log payload details in debug mode to avoid PII exposure
-  if (LOG_PII) {
-    console.log(JSON.stringify(payload, null, 2));
-  }
-
   // Acknowledge webhook immediately
   res.status(200).send('OK');
 

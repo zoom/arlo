@@ -231,3 +231,27 @@ test('a backend that cannot be reached does not break the stream', async () => {
   await tick();
   assert.equal(manager.size(), 1);
 });
+
+test('what people say and who they are never reaches the logs, at any log level', async () => {
+  const lines = [];
+  const record = (...args) => lines.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+  const clients = [];
+  const manager = createSessionManager({
+    createClient: () => { const c = new FakeClient(); clients.push(c); return c; },
+    backend: { status: async () => {}, segment: async () => {}, participantEvents: async () => {} },
+    defer: (fn) => fn(),
+    log: { log: record, warn: record, error: record },
+    logPii: true, // an old option must not bring transcript logging back
+  });
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  clients[0].handlers.participant('join', 1, [{ participantId: 11, userName: 'Ana Ruiz' }]);
+  clients[0].handlers.transcript(Buffer.from('My diagnosis is confidential'), 28, 1_700_000_000_000_000, { userId: 11, userName: 'Ana Ruiz' });
+  await manager.stopped({ meeting_uuid: 'MEETING-1==' });
+  await tick();
+
+  const output = lines.join('\n');
+  for (const secret of ['My diagnosis', 'confidential', 'Ana Ruiz', 'MEETING-1==', 'stream-1', 'op-1']) {
+    assert.equal(output.includes(secret), false, `logged "${secret}"`);
+  }
+});
