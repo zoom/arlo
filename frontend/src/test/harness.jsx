@@ -42,6 +42,10 @@ export function createZoomSdk({
     authorize: vi.fn(async () => ({ message: 'Success' })),
     showNotification: vi.fn(async () => ({})),
     sendMessageToChat: vi.fn(async () => ({})),
+    sendAppInvitationToAllParticipants: vi.fn(async () => ({})),
+    showAppInvitationDialog: vi.fn(async () => ({})),
+    startCollaborate: vi.fn(async () => ({})),
+    endCollaborate: vi.fn(async () => ({})),
     // RTMS controls: the app calls start through callZoomApi (it passes media
     // options) and the others through the documented methods.
     startRTMS: vi.fn(startRTMS),

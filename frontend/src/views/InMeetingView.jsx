@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Tabs, ScrollArea } from '@base-ui/react';
+import { Tabs } from '@base-ui/react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { ArrowDown, X, Sparkles, Pause, Play, LogIn, LogOut, Mic, MicOff, Share2, Check, Users, Pencil, Loader2, GripVertical, RotateCcw, MonitorPlay, Volume2 } from 'lucide-react';
+import { ArrowDown, X, Sparkles, Users, GripVertical, RotateCcw, Volume2 } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
 import { getPreferredAiModel } from '../utils/aiModel';
 import { useAuth } from '../contexts/AuthContext';
@@ -14,6 +14,9 @@ import { useDemoData } from '../hooks/useDemoData';
 import { useFeatureLayout } from '../hooks/useFeatureLayout';
 import { useVoiceCommands } from '../hooks/useVoiceCommands';
 import TransportBar from '../components/TransportBar';
+import MeetingTitle from '../components/meeting/MeetingTitle';
+import ShareMenu from '../components/meeting/ShareMenu';
+import TranscriptTimeline from '../components/meeting/TranscriptTimeline';
 import { getTransportView } from '../lib/transportView';
 import { transcriptToText } from '../lib/transcript';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
@@ -68,41 +71,10 @@ import {
 } from '../features/general';
 import './InMeetingView.css';
 
-function formatTimestamp(ms) {
-  const date = new Date(ms);
-  if (isNaN(date.getTime()) || ms === 0) return '--:--';
-  return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-}
-
-function InlineEventIcon({ eventType }) {
-  const cls = "transcript-event-icon";
-  switch (eventType) {
-    case 'joined': return <LogIn size={14} className={cls} />;
-    case 'left': return <LogOut size={14} className={cls} />;
-    case 'transcription_started': return <Mic size={14} className={cls} />;
-    case 'transcription_stopped': return <MicOff size={14} className={cls} />;
-    case 'transcription_paused': return <Pause size={14} className={cls} />;
-    case 'transcription_resumed': return <Play size={14} className={cls} />;
-    default: return <Mic size={14} className={cls} />;
-  }
-}
-
-function InlineEventLabel({ eventType, name }) {
-  switch (eventType) {
-    case 'joined': return `${name} joined the meeting`;
-    case 'left': return `${name} left the meeting`;
-    case 'transcription_started': return 'Transcription started';
-    case 'transcription_stopped': return 'Transcription stopped';
-    case 'transcription_paused': return 'Transcription paused';
-    case 'transcription_resumed': return 'Transcription resumed';
-    default: return `${name} — ${eventType}`;
-  }
-}
-
 export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
-  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsPhase, meetingId, connectWebSocket, viewers, setTitleUserRenamed, meetingAccess, setWs } = useMeeting();
+  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsPhase, meetingId, connectWebSocket, viewers, meetingAccess, setWs } = useMeeting();
   const { isAuthenticated, wsToken } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -165,15 +137,6 @@ export default function InMeetingView({ isGuestMode = false }) {
   const [notes, setNotes] = useState('');
   const [tasks, setTasks] = useState([]);
   const [newTask, setNewTask] = useState('');
-  const [inviteMenuOpen, setInviteMenuOpen] = useState(false);
-  const [inviteSent, setInviteSent] = useState(false);
-  const [isCollaborating, setIsCollaborating] = useState(false);
-  const [collaborateLoading, setCollaborateLoading] = useState(false);
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editedTitle, setEditedTitle] = useState('');
-  const [isSavingTitle, setIsSavingTitle] = useState(false);
-  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
-  const [displayTitle, setDisplayTitle] = useState(null);
   // Default to transcript tab - the live transcript is the "wow moment"
   const [activeTab, setActiveTab] = useState('transcript');
   const [voiceCommandsEnabled, setVoiceCommandsEnabled] = useState(true);
@@ -187,7 +150,6 @@ export default function InMeetingView({ isGuestMode = false }) {
     }
   });
   const transcriptRef = useRef(null);
-  const inviteDropdownRef = useRef(null);
   // eslint-disable-next-line no-unused-vars
   const meetingSummaryRef = useRef(null);
   // eslint-disable-next-line no-unused-vars
@@ -483,121 +445,12 @@ export default function InMeetingView({ isGuestMode = false }) {
     enabled: voiceCommandsEnabled && rtmsActive,
   });
 
-  // Invite handlers
-  const handleInviteAll = useCallback(async () => {
-    if (!zoomSdk?.sendAppInvitationToAllParticipants) return;
-    try {
-      await zoomSdk.sendAppInvitationToAllParticipants();
-      setInviteSent(true);
-      setInviteMenuOpen(false);
-      addToast('Invitation sent to all participants', 'success');
-      setTimeout(() => setInviteSent(false), 3000);
-    } catch (err) {
-      console.error('sendAppInvitationToAllParticipants failed:', err);
-      addToast('Failed to send invitation', 'error');
-    }
-  }, [zoomSdk, addToast]);
-
-  const handleInviteChoose = useCallback(() => {
-    if (!zoomSdk?.showAppInvitationDialog) return;
-    zoomSdk.showAppInvitationDialog().catch((err) => {
-      console.error('showAppInvitationDialog failed:', err);
-    });
-    setInviteMenuOpen(false);
-  }, [zoomSdk]);
-
-  // Collaborate mode handler
-  const handleCollaborate = useCallback(async () => {
-    if (!zoomSdk) return;
-    setCollaborateLoading(true);
-    try {
-      if (isCollaborating) {
-        // End collaborate mode
-        await zoomSdk.endCollaborate();
-        setIsCollaborating(false);
-        addToast('Collaborate mode ended', 'info');
-      } else {
-        // Start collaborate mode
-        await zoomSdk.startCollaborate({
-          shareScreen: false, // Don't share screen, just open app for all
-        });
-        setIsCollaborating(true);
-        addToast('Collaborate mode started - all participants can now see Arlo', 'success');
-      }
-    } catch (err) {
-      console.error('Collaborate mode error:', err);
-      // Handle "app_not_support" error gracefully - this happens when:
-      // - Meeting type doesn't support collaborate (e.g., webinars, certain room types)
-      // - User doesn't have host/co-host permissions
-      // Don't show error toast for these known limitations
-      const errMsg = err.message || '';
-      if (errMsg.includes('app_not_support') || errMsg.includes('80004')) {
-        console.log('Collaborate mode not available for this meeting type or user role');
-        addToast('Collaborate mode is not available for this meeting', 'info');
-      } else if (errMsg.includes('not a function') || errMsg.includes('undefined')) {
-        // Try alternative method if startCollaborate doesn't exist
-        try {
-          await zoomSdk.runRenderingContext({
-            view: 'immersive',
-          });
-          setIsCollaborating(true);
-          addToast('Collaborate mode started', 'success');
-        } catch (fallbackErr) {
-          console.error('Fallback collaborate error:', fallbackErr);
-          addToast('Collaborate mode not available', 'info');
-        }
-      } else {
-        addToast('Collaborate mode not available', 'info');
-      }
-    } finally {
-      setCollaborateLoading(false);
-    }
-  }, [zoomSdk, isCollaborating, addToast]);
-
-  // Close invite dropdown on click outside
-  useEffect(() => {
-    if (!inviteMenuOpen) return;
-    const handleClickOutside = (e) => {
-      if (inviteDropdownRef.current && !inviteDropdownRef.current.contains(e.target)) {
-        setInviteMenuOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [inviteMenuOpen]);
-
-  // Register onSendAppInvitation listener for confirmation
-  useEffect(() => {
-    if (!zoomSdk?.onSendAppInvitation) return;
-    const handler = () => {
-      setInviteSent(true);
-      setTimeout(() => setInviteSent(false), 3000);
-    };
-    zoomSdk.onSendAppInvitation(handler);
-  }, [zoomSdk]);
-
   // Determine transcript state (initial_roster events don't count as displayable content)
   const hasContent = segments.length > 0 || participantEvents.some(e => e.eventType !== 'initial_roster');
   const transcriptState = getTransportView({
     phase: rtmsPhase, active: rtmsActive, paused: rtmsPaused, hasContent,
   }).state;
   const showTranscript = transcriptState === 'live' || transcriptState === 'paused';
-
-  // Merge transcript segments and participant events into a chronological timeline
-  // Filter out initial_roster events — they're not real joins, just the SDK reporting existing participants
-  const timelineItems = useMemo(() => {
-    const items = [];
-    segments.forEach((seg, i) => {
-      items.push({ type: 'transcript', ...seg, _ts: seg.tStartMs, _key: `seg-${i}` });
-    });
-    participantEvents
-      .filter(evt => evt.eventType !== 'initial_roster')
-      .forEach((evt, i) => {
-        items.push({ type: 'participant-event', ...evt, _ts: evt.timestamp, _key: `evt-${i}` });
-      });
-    items.sort((a, b) => a._ts - b._ts);
-    return items;
-  }, [segments, participantEvents]);
 
   // Feature renderers for each vertical - maps feature ID to render function
   const featureRenderers = useMemo(() => ({
@@ -688,127 +541,13 @@ export default function InMeetingView({ isGuestMode = false }) {
     return null;
   }
 
-  // Title editing handlers
-  const handleEditTitle = () => {
-    setIsEditingTitle(true);
-    setEditedTitle(displayTitle || meetingContext?.meetingTopic || 'Live Meeting');
-  };
-
-  const handleSaveTitle = async () => {
-    if (!editedTitle.trim() || editedTitle === (displayTitle || meetingContext?.meetingTopic || 'Live Meeting')) {
-      setIsEditingTitle(false);
-      return;
-    }
-    setIsSavingTitle(true);
-    try {
-      const res = await fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/topic`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ title: editedTitle, force: true }),
-      });
-      if (res.ok) {
-        setDisplayTitle(editedTitle);
-        setTitleUserRenamed();
-        addToast('Meeting renamed', 'success');
-      } else {
-        addToast('Failed to rename meeting', 'error');
-      }
-    } catch {
-      addToast('Failed to rename meeting', 'error');
-    } finally {
-      setIsSavingTitle(false);
-      setIsEditingTitle(false);
-    }
-  };
-
-  const handleCancelEditTitle = () => {
-    setIsEditingTitle(false);
-  };
-
-  const handleGenerateTitle = async (e) => {
-    e.stopPropagation();
-    setIsGeneratingTitle(true);
-    try {
-      const transcriptText = transcriptToText(segments);
-      if (transcriptText.trim().length < 50) {
-        addToast('Not enough conversation yet to suggest a title', 'info');
-        return;
-      }
-      const res = await fetch('/api/ai/title-live', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ transcript: transcriptText, currentTitle: title, model: getPreferredAiModel() }),
-      });
-      const data = res.ok ? await res.json() : null;
-      // Only open the editor with a real title: an empty one used to crash on save
-      if (typeof data?.title === 'string' && data.title.trim()) {
-        setEditedTitle(data.title.trim());
-        setIsEditingTitle(true);
-      } else {
-        addToast('Failed to generate title', 'error');
-      }
-    } catch {
-      addToast('Failed to generate title', 'error');
-    } finally {
-      setIsGeneratingTitle(false);
-    }
-  };
-
-  // Get meeting title (user rename > Zoom topic > fallback)
-  const title = displayTitle || meetingContext?.meetingTopic || 'Live Meeting';
-  const participants = []; // TODO: from Zoom SDK getMeetingParticipants
-
   return (
     <div className="in-meeting-view">
       {/* Meeting header */}
       <div className="in-meeting-header">
         <div className="live-indicator-row">
-          {isAuthenticated && isEditingTitle ? (
-            <div className="title-edit-row">
-              <input
-                type="text"
-                className="input title-edit-input text-serif text-2xl"
-                value={editedTitle}
-                onChange={(e) => setEditedTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSaveTitle();
-                  if (e.key === 'Escape') handleCancelEditTitle();
-                }}
-                autoFocus
-                onFocus={(e) => e.target.select()}
-              />
-              <Button variant="ghost" size="icon" onClick={handleSaveTitle} disabled={isSavingTitle}>
-                {isSavingTitle ? <Loader2 size={16} className="spin" /> : <Check size={16} />}
-              </Button>
-              <Button variant="ghost" size="icon" onClick={handleCancelEditTitle} disabled={isSavingTitle}>
-                <X size={16} />
-              </Button>
-            </div>
-          ) : isAuthenticated ? (
-            <div className="title-display" onClick={handleEditTitle}>
-              <h1 className="text-serif text-lg meeting-title">{title}</h1>
-              <Pencil size={16} className="title-action text-muted" />
-              <button
-                className="title-action-btn"
-                onClick={handleGenerateTitle}
-                disabled={isGeneratingTitle}
-                title="Generate title with AI"
-              >
-                {isGeneratingTitle
-                  ? <Loader2 size={16} className="spin text-muted" />
-                  : <Sparkles size={16} className="title-action text-muted" />
-                }
-              </button>
-            </div>
-          ) : (
-            <h1 className="text-serif text-lg meeting-title">{title}</h1>
-          )}
+          <MeetingTitle canEdit={isAuthenticated} />
         </div>
-        {participants.length > 0 && (
-          <p className="text-sans text-sm text-muted">{participants.join(', ')}</p>
-        )}
         {viewers && viewers.guestCount > 0 && (
           <span className="viewer-count text-sans text-xs text-muted">
             <Users size={12} />
@@ -852,44 +591,7 @@ export default function InMeetingView({ isGuestMode = false }) {
       <TransportBar
         guest={isGuestMode}
         hasContent={hasContent}
-        extra={rtmsActive && (
-          <div className="invite-dropdown-container" ref={inviteDropdownRef}>
-            <Button
-              variant="outline"
-              size="sm"
-              className={inviteSent ? 'invite-sent' : ''}
-              onClick={() => setInviteMenuOpen(prev => !prev)}
-              aria-label="Share Arlo with participants"
-              aria-haspopup="menu"
-              aria-expanded={inviteMenuOpen}
-            >
-              {inviteSent ? <Check size={14} aria-hidden="true" /> : <Share2 size={14} aria-hidden="true" />}
-            </Button>
-            {inviteMenuOpen && (
-              <div className="invite-dropdown" role="menu">
-                <button className="invite-dropdown-item" role="menuitem" onClick={handleInviteAll}>
-                  <Users size={14} />
-                  Invite all participants
-                </button>
-                <button className="invite-dropdown-item" role="menuitem" onClick={handleInviteChoose}>
-                  <Share2 size={14} />
-                  Choose participants...
-                </button>
-                {!isTestMode && !isGuestMode && (
-                  <button
-                    className="invite-dropdown-item"
-                    role="menuitem"
-                    onClick={handleCollaborate}
-                    disabled={collaborateLoading}
-                  >
-                    {collaborateLoading ? <Loader2 size={14} className="animate-spin" /> : <MonitorPlay size={14} />}
-                    {isCollaborating ? 'End collaborate mode' : 'Start collaborate mode'}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        extra={rtmsActive && <ShareMenu canCollaborate={!isTestMode && !isGuestMode} />}
       />
 
       {/* Tabs: Transcript (default) | Arlo Assist */}
@@ -946,48 +648,13 @@ export default function InMeetingView({ isGuestMode = false }) {
                   />
                 )}
 
-                <ScrollArea.Root className="transcript-scroll-root">
-                  <ScrollArea.Viewport
-                    ref={transcriptRef}
-                    className="transcript-viewport"
-                    onScroll={handleScroll}
-                  >
-                    {timelineItems.map((item) => {
-                      if (item.type === 'participant-event') {
-                        return (
-                          <div key={item._key} className="transcript-participant-event timeline-event-animate">
-                            <InlineEventIcon eventType={item.eventType} />
-                            <span className="transcript-event-text text-sans text-sm">
-                              <InlineEventLabel eventType={item.eventType} name={item.participantName} />
-                            </span>
-                            <span className="transcript-event-time text-mono text-xs">
-                              {formatTimestamp(item.timestamp)}
-                            </span>
-                          </div>
-                        );
-                      }
-
-                      return (
-                        <div key={item._key} className="transcript-entry" data-seq={item.seqNo}>
-                          <div className="transcript-entry-header">
-                            <span className="transcript-timestamp text-mono text-xs text-muted">
-                              {formatTimestamp(item.tStartMs)}
-                            </span>
-                            <span className="transcript-speaker text-sans text-sm font-medium">
-                              {item.speakerLabel}
-                            </span>
-                          </div>
-                          <p className="transcript-text text-serif text-sm">
-                            {isHealthcare ? highlightMedicalTerms(item.text) : item.text}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </ScrollArea.Viewport>
-                  <ScrollArea.Scrollbar orientation="vertical" className="scroll-area-scrollbar">
-                    <ScrollArea.Thumb className="scroll-area-scrollbar-thumb" />
-                  </ScrollArea.Scrollbar>
-                </ScrollArea.Root>
+                <TranscriptTimeline
+                  segments={segments}
+                  participantEvents={participantEvents}
+                  viewportRef={transcriptRef}
+                  onScroll={handleScroll}
+                  renderText={isHealthcare ? highlightMedicalTerms : undefined}
+                />
 
                 {/* Suggestion bubbles */}
                 {suggestions.length > 0 && (
