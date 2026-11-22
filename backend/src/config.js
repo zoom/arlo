@@ -1,4 +1,8 @@
-require('dotenv').config({ path: '../.env' });
+// Tests supply their own throwaway configuration and must never read the
+// developer's real .env (its secrets, or settings that would change results).
+if (process.env.NODE_ENV !== 'test') {
+  require('dotenv').config({ path: '../.env' });
+}
 
 /**
  * Configuration validation and exports

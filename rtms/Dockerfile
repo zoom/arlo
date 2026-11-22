@@ -1,9 +1,10 @@
-FROM node:20-slim
+# @zoom/rtms 1.1 requires Node 22
+FROM node:22-slim
 
 WORKDIR /app
 
 # Install CA certificates for RTMS TLS
-# Install libstdc++6 from Debian Trixie for GLIBCXX_3.4.32 (required by @zoom/rtms v1.0 native binding)
+# Install libstdc++6 from Debian Trixie for GLIBCXX_3.4.32 (required by the @zoom/rtms native binding)
 RUN echo "deb http://deb.debian.org/debian trixie main" > /etc/apt/sources.list.d/trixie.list && \
     apt-get update && \
     apt-get install -y openssl ca-certificates && \

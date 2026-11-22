@@ -11,8 +11,15 @@
 // Use `npm run dev` instead for the hot-reloading dev server in a normal browser.
 import { build, preview } from 'vite';
 
+// Own output folder, inside node_modules: in Docker that is a container-only
+// volume, so a `npm run build` (or cleaning `build/`) on the host cannot delete
+// the bundle this server is serving.
+const outDir = 'node_modules/.arlo-serve';
+
 const watcher = await build({
   build: {
+    outDir,
+    emptyOutDir: true,
     watch: {},
     sourcemap: true, // readable stack traces in the panel's DevTools
   },
@@ -28,6 +35,7 @@ watcher.on('event', async (event) => {
   console.log(`[arlo] build ready ${new Date().toISOString()}. Reload the Zoom panel to see changes.`);
   if (serving) return;
   serving = true;
-  const server = await preview(); // host, port and allowed hosts come from vite.config.js
+  // host, port and allowed hosts come from vite.config.js
+  const server = await preview({ build: { outDir } });
   server.printUrls();
 });

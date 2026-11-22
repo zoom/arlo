@@ -3,7 +3,7 @@
   "version": "1.0.0-demo",
   "description": "Backend API server for Arlo Meeting Assistant (Demo Mode - No Database)",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "main": "src/server.js",
   "scripts": {
