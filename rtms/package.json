@@ -8,7 +8,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "test": "node --test test/sessions.test.js"
   },
   "dependencies": {
     "@zoom/rtms": "^1.0.2",

@@ -56,6 +56,10 @@ jobs:
       - name: Run backend tests
         run: npm test --workspace=backend
 
+      # Session lifecycle with a fake Zoom RTMS client (the real one is native, Linux only)
+      - name: Run RTMS service tests
+        run: npm test --workspace=rtms
+
   docker-build:
     runs-on: ubuntu-latest
 
