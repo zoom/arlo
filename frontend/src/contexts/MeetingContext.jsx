@@ -658,8 +658,10 @@ export function MeetingProvider({ children }) {
   // Check via REST API whether RTMS is already active.
   // Runs immediately (no delay) with retries to handle the race where the meeting
   // record hasn't been created yet (e.g. RTMS auto-started before app opened).
+  const accessVerified = meetingAccess.status === 'verified';
   useEffect(() => {
-    if (statusCheckRef.current || !isAuthenticated || !meetingId || rtmsActive) return;
+    // The server only answers meeting-scoped routes after access is verified
+    if (statusCheckRef.current || !isAuthenticated || !meetingId || rtmsActive || !accessVerified) return;
     statusCheckRef.current = true;
 
     let cancelled = false;
@@ -690,12 +692,12 @@ export function MeetingProvider({ children }) {
 
     checkStatus();
     return () => { cancelled = true; };
-  }, [isAuthenticated, meetingId, rtmsActive]);
+  }, [isAuthenticated, meetingId, rtmsActive, accessVerified]);
 
   // Stored transcript and timeline for this meeting, when the server keeps one
   // (database mode). In demo mode these return nothing.
   useEffect(() => {
-    if (!meetingId) return undefined;
+    if (!meetingId || !accessVerified) return undefined;
     let cancelled = false;
     const load = (path) => fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/${path}`, {
       credentials: 'include',
@@ -713,7 +715,7 @@ export function MeetingProvider({ children }) {
       });
     });
     return () => { cancelled = true; };
-  }, [meetingId]);
+  }, [meetingId, accessVerified]);
 
   // Send Zoom meeting topic to backend to replace generic "Meeting M/D/YYYY" title
   // Wait for rtmsActive so the meeting record exists in the DB before patching

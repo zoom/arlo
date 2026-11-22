@@ -6,7 +6,7 @@
  * are available in the full version.
  */
 const express = require('express');
-const { requireAuth, optionalAuth, devAuthBypass } = require('../middleware/auth');
+const { requireAuth, requireMeetingAccess, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
 
 const router = express.Router();
@@ -42,7 +42,7 @@ router.get('/', requireAuth, async (req, res) => {
  * PATCH /api/meetings/by-zoom-id/:zoomMeetingId/topic
  * Update meeting title - Accepts but doesn't persist in demo mode
  */
-router.patch('/by-zoom-id/:zoomMeetingId/topic', optionalAuth, async (req, res) => {
+router.patch('/by-zoom-id/:zoomMeetingId/topic', requireAuth, requireMeetingAccess, async (req, res) => {
   // Accept the request but explain it won't be persisted
   return res.json({
     updated: false,
@@ -55,7 +55,7 @@ router.patch('/by-zoom-id/:zoomMeetingId/topic', optionalAuth, async (req, res) 
  * GET /api/meetings/by-zoom-id/:zoomMeetingId
  * Get meeting details by Zoom ID - Demo mode response
  */
-router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
+router.get('/by-zoom-id/:zoomMeetingId', requireMeetingAccess, async (req, res) => {
   return res.json({
     meeting: null,
     demoMode: true,
@@ -69,7 +69,7 @@ router.get('/by-zoom-id/:zoomMeetingId', optionalAuth, async (req, res) => {
  * Get transcript by Zoom ID - Returns empty in demo mode
  * Note: Live transcripts come via WebSocket, not this endpoint
  */
-router.get('/by-zoom-id/:zoomMeetingId/transcript', optionalAuth, async (req, res) => {
+router.get('/by-zoom-id/:zoomMeetingId/transcript', requireMeetingAccess, async (req, res) => {
   return res.json({
     segments: [],
     meetingDbId: null,
@@ -82,7 +82,7 @@ router.get('/by-zoom-id/:zoomMeetingId/transcript', optionalAuth, async (req, re
  * GET /api/meetings/by-zoom-id/:zoomMeetingId/participant-events
  * Get participant events - Returns empty in demo mode
  */
-router.get('/by-zoom-id/:zoomMeetingId/participant-events', optionalAuth, async (req, res) => {
+router.get('/by-zoom-id/:zoomMeetingId/participant-events', requireMeetingAccess, async (req, res) => {
   return res.json({
     events: [],
     demoMode: true,

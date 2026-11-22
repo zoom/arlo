@@ -44,7 +44,7 @@ function InlineEventLabel({ eventType, name }) {
 export default function GuestInMeetingView() {
   const { id } = useParams();
   const { zoomSdk, meetingContext, userContextStatus, isTestMode } = useZoomSdk();
-  const { ws, connectWebSocket, rtmsActive, viewers, segments, participantEvents } = useMeeting();
+  const { ws, connectWebSocket, rtmsActive, viewers, segments, participantEvents, meetingAccess } = useMeeting();
 
   // Meeting ID: prefer SDK context, fall back to URL param
   const meetingId = meetingContext?.meetingUUID || id;
@@ -57,9 +57,11 @@ export default function GuestInMeetingView() {
   const transcriptRef = useRef(null);
 
   // Fetch meeting details (title, summary) from backend
+  const accessVerified = meetingAccess?.status === 'verified';
   useEffect(() => {
-    if (!meetingId) return;
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}`)
+    // The server only answers once this guest is verified to be in the meeting
+    if (!meetingId || !accessVerified) return;
+    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}`, { credentials: 'include' })
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data?.meeting) {
@@ -71,7 +73,12 @@ export default function GuestInMeetingView() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [meetingId]);
+  }, [meetingId, accessVerified]);
+
+  // No details to wait for when this guest could not be verified
+  useEffect(() => {
+    if (meetingAccess?.status === 'denied' || meetingAccess?.status === 'unavailable') setLoading(false);
+  }, [meetingAccess?.status]);
 
   // Connect WebSocket for live transcript (anonymous — null token)
   useEffect(() => {

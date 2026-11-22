@@ -1,6 +1,7 @@
 const { verifySessionToken } = require('../services/auth');
 const config = require('../config');
 const { restoreIfMissing } = require('../services/sessionRestore');
+const { verifyMeetingAccessToken } = require('../services/zoomAppContext');
 
 /**
  * Authentication middleware
@@ -72,6 +73,31 @@ function optionalAuth(req, res, next) {
 }
 
 /**
+ * Meeting-scoped routes (`/…/by-zoom-id/:zoomMeetingId/…`).
+ * The caller must hold a verified meeting-access cookie for exactly that
+ * meeting: the same proof that opens the WebSocket. It is issued by
+ * POST /api/auth/meeting-access from the Zoom App Context, so it works for
+ * guests, and being signed in does not replace it.
+ */
+function requireMeetingAccess(req, res, next) {
+  const token = req.cookies?.meetingAccess;
+  if (!token) {
+    return res.status(401).json({ error: 'Unauthorized', message: 'Meeting access required' });
+  }
+  let access;
+  try {
+    access = verifyMeetingAccessToken(token);
+  } catch {
+    return res.status(401).json({ error: 'Unauthorized', message: 'Invalid or expired meeting access' });
+  }
+  if (access.meetingId !== req.params.zoomMeetingId) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Not a participant of this meeting' });
+  }
+  req.meetingAccess = access;
+  return next();
+}
+
+/**
  * Development mode bypass
  * Allows query param userId in dev mode for testing
  */
@@ -99,5 +125,6 @@ function devAuthBypass(req, res, next) {
 module.exports = {
   requireAuth,
   optionalAuth,
+  requireMeetingAccess,
   devAuthBypass,
 };

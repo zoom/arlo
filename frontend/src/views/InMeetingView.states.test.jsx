@@ -191,3 +191,33 @@ describe('WebSocket connection', () => {
     expect(server().url).not.toMatch(/token=/);
   });
 });
+
+describe('stored transcript (database mode)', () => {
+  test('is requested only after meeting access is verified, and merged with live lines', async () => {
+    const { json } = await import('../test/harness');
+    const calls = [];
+    const fetchMock = mockFetch({
+      '/api/meetings/by-zoom-id/': ({ url }) => {
+        calls.push(url);
+        return url.endsWith('/transcript')
+          ? json({ segments: [{ seqNo: 1, text: 'Stored earlier.', speakerId: '1', speakerLabel: 'Ana', tStartMs: 500, tEndMs: 500 }] })
+          : json({});
+      },
+    });
+    renderInMeeting();
+    await screen.findByText('Transcription not started');
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    await waitFor(() => expect(calls.some((url) => url.endsWith('/transcript'))).toBe(true));
+
+    const order = fetchMock.mock.calls.map(([url]) => String(url));
+    const verified = order.findIndex((url) => url.includes('/api/auth/meeting-access'));
+    const firstScoped = order.findIndex((url) => url.includes('/api/meetings/by-zoom-id/'));
+    expect(verified).toBeGreaterThanOrEqual(0);
+    expect(firstScoped).toBeGreaterThan(verified);
+
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(2, 'Said live.'));
+    expect(await screen.findByText('Stored earlier.')).toBeInTheDocument();
+    expect(screen.getByText('Said live.')).toBeInTheDocument();
+  });
+});

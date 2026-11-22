@@ -102,3 +102,42 @@ test('a meeting-access token cannot be replayed as a session', async () => {
   const ai = await h.postJson(`${srv.base}/api/ai/suggest`, {}, { cookie: `sessionToken=${accessToken}` });
   assert.equal(ai.status, 401);
 });
+
+// Meeting-scoped REST routes: the same proof that opens the WebSocket (a
+// verified meeting-access cookie) is what lets a caller read a meeting by its
+// Zoom id. Demo mode returns nothing from these, but the rule has to hold
+// before storage is ever turned on.
+test('meeting-by-Zoom-id routes only answer someone verified to be in that meeting', async () => {
+  const { cookie } = await access(h.makeAppContext(h.meetingPayload({ mid: 'MEETING-A==' })));
+  const get = (meetingId, suffix, headers = {}) => fetch(
+    `${srv.base}/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}${suffix}`, { headers },
+  );
+
+  for (const suffix of ['', '/transcript', '/participant-events']) {
+    assert.equal((await get('MEETING-A==', suffix, { cookie })).status, 200, `own meeting ${suffix}`);
+    assert.equal((await get('MEETING-B', suffix, { cookie })).status, 403, `other meeting ${suffix}`);
+    assert.equal((await get('MEETING-A==', suffix)).status, 401, `no cookie ${suffix}`);
+    assert.equal((await get('MEETING-A==', suffix, { cookie: 'meetingAccess=garbage' })).status, 401, `bad cookie ${suffix}`);
+  }
+});
+
+test('a signed-in user who is not in the meeting cannot read it by Zoom id', async () => {
+  const session = generateToken({ userId: 'u1', zoomUserId: 'z1' });
+  const res = await fetch(`${srv.base}/api/meetings/by-zoom-id/MEETING-A%3D%3D/transcript`, {
+    headers: { cookie: `sessionToken=${session}` },
+  });
+  assert.equal(res.status, 401);
+});
+
+test('renaming a meeting needs a session and proof of being in that meeting', async () => {
+  const { cookie } = await access(h.makeAppContext(h.meetingPayload({ mid: 'MEETING-A==' })));
+  const session = `sessionToken=${generateToken({ userId: 'u1', zoomUserId: 'z1' })}`;
+  const rename = (meetingId, headers) => fetch(
+    `${srv.base}/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/topic`,
+    { method: 'PATCH', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify({ title: 'New' }) },
+  );
+  assert.equal((await rename('MEETING-A==', { cookie: `${cookie}; ${session}` })).status, 200);
+  assert.equal((await rename('MEETING-A==', { cookie })).status, 401);            // guest: in the meeting, not signed in
+  assert.equal((await rename('MEETING-A==', { cookie: session })).status, 401);   // signed in, not in the meeting
+  assert.equal((await rename('MEETING-B', { cookie: `${cookie}; ${session}` })).status, 403);
+});
