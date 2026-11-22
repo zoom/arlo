@@ -231,6 +231,21 @@ ngrok http 3000
 1. Go to **[Zoom Marketplace](https://marketplace.zoom.us/)** → Develop → Build App
 2. Select **General App** → name it (e.g., "Arlo Meeting Assistant")
 3. Copy your **Client ID** and **Client Secret**
+4. *(Optional)* Set the app icon: click the icon next to the app name and upload the 160×160 PNGs in [`docs/assets/marketplace/`](./docs/assets/marketplace/). Use `arlo-icon-160.png` for light mode and `arlo-icon-160-dark.png` for dark mode. You have to upload the icon yourself because the manifest has no icon field.
+
+#### Optional: configure the app from the manifest
+
+[`zoom-app-manifest.json`](./zoom-app-manifest.json) contains every setting from [Step 4](#4-configure-zoom-app-settings): scopes, Zoom Apps SDK APIs, OAuth, domain allow list, and event subscriptions. If your account can upload app manifests (a Marketplace beta), you can upload it instead of configuring each setting by hand.
+
+> **Before uploading, replace the ngrok URL everywhere it appears in the manifest.** The placeholder `your-ngrok-url.ngrok-free.app` appears 8 times: OAuth redirect URIs, OAuth allow list, home URLs, domain allow list, and webhook URLs. If you miss one, OAuth, the app panel, or RTMS webhooks will fail. Replace only the hostname; the manifest already includes `https://` and the paths.
+>
+> ```bash
+> # Writes a filled-in copy and leaves the template unchanged. Use your full ngrok hostname (it may end in .ngrok-free.dev).
+> sed 's/your-ngrok-url\.ngrok-free\.app/YOUR-NAME.ngrok-free.app/g' zoom-app-manifest.json > my-zoom-app-manifest.json
+> grep -c 'your-ngrok-url' my-zoom-app-manifest.json   # should print 0
+> ```
+>
+> Upload the filled-in copy, not the template, and don't commit it. If your ngrok URL changes later, update the same 8 fields in the Marketplace.
 
 ---
 
@@ -246,6 +261,7 @@ Edit `.env` with your values:
 # From Zoom Marketplace (Step 2)
 ZOOM_CLIENT_ID=your_client_id
 ZOOM_CLIENT_SECRET=your_client_secret
+ZOOM_WEBHOOK_TOKEN=your_secret_token   # Features → Access → Secret Token (required for RTMS webhooks)
 
 # Your ngrok URL (Step 1)
 PUBLIC_URL=https://your-name.ngrok-free.app
@@ -274,17 +290,20 @@ In [Zoom Marketplace](https://marketplace.zoom.us/) → Your App:
 <details>
 <summary><strong>Scopes</strong></summary>
 
-Add these OAuth scopes:
-- `meeting:read` — Read meeting details
-- `user:read` — Read user profile
-
+Add these OAuth scopes (granular):
+- `zoomapp:inmeeting` — Run the app inside meetings
+- `meeting:read:meeting` — Read meeting details
+- `meeting:read:meeting_transcript` — Receive live transcripts via RTMS (search "RTMS"; requires RTMS access)
+- `meeting:read:list_meetings` — List upcoming meetings
+- `meeting:write:open_app` / `meeting:delete:open_app` — Register/unregister auto-open in a meeting (optional)
+- `user:read:user` — Read user profile (optional)
 </details>
 
 <details>
 <summary><strong>Features → Zoom App SDK</strong></summary>
 
-- Click **Add APIs** and enable required capabilities
-- **Enable RTMS → Transcripts** (requires RTMS approval)
+- Click **Add APIs** and enable required capabilities, including `startRTMS`, `stopRTMS`, `pauseRTMS`, `resumeRTMS`, and `getAppContext`
+- Enable **In-client OAuth** and **Guest mode**
 
 </details>
 
@@ -304,7 +323,7 @@ Add these OAuth scopes:
 | Setting | Value |
 |---------|-------|
 | Event notification endpoint | `https://YOUR-NGROK-URL/api/rtms/webhook` |
-| Events to subscribe | `meeting.rtms_started`, `meeting.rtms_stopped` |
+| Events to subscribe | `meeting.rtms_started`, `meeting.rtms_stopped`, `meeting.rtms_interrupted` |
 
 </details>
 
