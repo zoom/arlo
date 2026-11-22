@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:22-slim
 
 WORKDIR /app
 
@@ -14,5 +14,5 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
-# Start development server
+# Start the Vite development server (host/port set in vite.config.js)
 CMD ["npm", "start"]

@@ -31,10 +31,8 @@ services:
       dockerfile: Dockerfile
     container_name: arlo-meeting-assistant-frontend
     restart: unless-stopped
-    environment:
-      REACT_APP_API_URL: http://localhost:3000
-      REACT_APP_WS_URL: ws://localhost:3000
-      DANGEROUSLY_DISABLE_HOST_CHECK: "true"
+    # Vite dev server. The app calls the API on its own origin (through the
+    # backend proxy), so it needs no API/WS URL variables.
     ports:
       - "3001:3000"
     volumes:

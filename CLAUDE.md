@@ -43,7 +43,7 @@ docker-compose down && docker-compose up --build  # Clean restart
 ```bash
 npm run dev              # Start all services concurrently (backend + frontend + rtms)
 npm run dev:backend      # Backend only (nodemon for auto-restart)
-npm run dev:frontend     # Frontend only (CRA dev server)
+npm run dev:frontend     # Frontend only (Vite dev server)
 npm run dev:rtms         # RTMS service only
 npm run setup            # Install all workspace dependencies
 ```
@@ -51,8 +51,12 @@ npm run setup            # Install all workspace dependencies
 ### Frontend Build
 
 ```bash
-cd frontend && npx react-scripts build
+npm run build -w frontend    # Vite production build → frontend/build
+npm test -w frontend         # Vitest unit + UI state tests (jsdom, Testing Library)
+npm run lint -w frontend     # ESLint
 ```
+
+Files that contain JSX use the `.jsx` extension (Vite requires it). Hot reload is off by default because the backend proxy does not forward WebSockets; reload the Zoom panel after a change, or set `VITE_HMR=true` when using the dev server directly on port 3001.
 
 ### ngrok (Required for Zoom App Testing)
 
@@ -92,7 +96,7 @@ Zoom RTMS WebSocket → RTMS Service → Backend (broadcast only, NO storage)
 
 ### Authentication Flow (Zoom OAuth PKCE)
 
-Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — single source of truth for auth.
+Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.jsx`) — single source of truth for auth.
 
 ```
 1. Frontend: GET /api/auth/authorize → { codeChallenge, state }
@@ -117,12 +121,12 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `middleware/auth.js` — `requireAuth` and `optionalAuth` session middleware
 
 ### Frontend (`frontend/src/`)
-- `App.js` — HashRouter, route definitions, provider hierarchy: Theme → ZoomSdk → Auth → Meeting → Toast
+- `App.jsx` — HashRouter, route definitions, provider hierarchy: Theme → ZoomSdk → Auth → Meeting → Toast
 - `index.css` — Design tokens, typography (Source Serif 4 + Inter), light/dark theme variables
 - `views/` — 14 views (Auth, Home, MeetingsList, MeetingDetail, InMeeting, SearchResults, Settings, etc.)
 - `contexts/` — AuthContext (session), ZoomSdkContext (SDK init), MeetingContext (active meeting + WS), ServerSettingsContext (demo mode flags)
-- `hooks/useZoomAuth.js` — In-client OAuth PKCE flow hook
-- `components/AppShell.js` — Persistent header + `<Outlet />`
+- `hooks/useZoomAuth.jsx` — In-client OAuth PKCE flow hook
+- `components/AppShell.jsx` — Persistent header + `<Outlet />`
 
 ### Monorepo (npm workspaces)
 
@@ -138,15 +142,15 @@ npm install <package> -w rtms         # Add to rtms
 
 The frontend uses `@base-ui/react` for accessible, unstyled components, styled with plain CSS and CSS custom properties.
 
-### Critical: CRA Import Pattern
+### Import Pattern
 
-CRA 5 does NOT support package.json `exports` subpath patterns. Always import from the main entry:
+Import Base UI from the main entry (project convention, kept from the CRA days when subpath imports failed):
 
 ```javascript
 // CORRECT
 import { Tabs, Collapsible, Tooltip } from '@base-ui/react';
 
-// WRONG — fails at runtime in CRA
+// AVOID — subpath imports
 import { Tabs } from '@base-ui/react/tabs';
 ```
 
@@ -264,6 +268,6 @@ This demo mode version prioritizes security by never storing customer data:
 
 ## Known Issues
 
-- Frontend uses CRA (react-scripts), NOT Next.js — migration to Vite planned
+- Frontend uses Vite + Vitest (migrated from CRA in Nov 2026), NOT Next.js
 - Users must re-authenticate after server restart (tokens in memory only)
 - Features requiring stored data show "not available in demo mode" messaging

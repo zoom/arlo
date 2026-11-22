@@ -528,7 +528,7 @@ See the full [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for additional i
 ```
 arlo/
 ├── backend/           # Express API server
-├── frontend/          # React Zoom App (CRA)
+├── frontend/          # React Zoom App (Vite)
 ├── rtms/              # RTMS transcript ingestion service
 ├── terraform/         # AWS deployment configuration
 ├── docs/              # Documentation
