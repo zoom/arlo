@@ -30,6 +30,26 @@ jobs:
         run: npm audit --audit-level=critical
         continue-on-error: true
 
+  backend-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Security + guest-access tests. Uses random throwaway secrets; needs no .env.
+      - name: Run backend tests
+        run: npm test --workspace=backend
+
   docker-build:
     runs-on: ubuntu-latest
 

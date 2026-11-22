@@ -8,7 +8,8 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test": "node --test --test-force-exit test/zoom-app-context.test.js test/guest-access.test.js test/security.test.js"
   },
   "dependencies": {
     "axios": "^1.6.5",
