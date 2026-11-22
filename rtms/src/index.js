@@ -123,7 +123,7 @@ setInterval(() => {
   let swept = 0;
   for (const [streamId, session] of activeSessions) {
     if (now - session.startTime.getTime() > SESSION_TTL_MS) {
-      console.log(`Sweeping stale session: ${streamId} (age > 24h)`);
+      console.log('Sweeping a stale session (age > 24h)');
       try {
         session.client.leave();
       } catch (e) {
@@ -230,7 +230,7 @@ async function handleRTMSStarted(payload) {
   // Clean up the old session before starting the new one
   for (const [existingStreamId, session] of activeSessions) {
     if (session.meetingUuid === meeting_uuid && existingStreamId !== rtms_stream_id) {
-      console.log(`Failover detected: cleaning up old stream ${existingStreamId} for meeting ${meeting_uuid}`);
+      console.log('Failover detected: cleaning up the old stream for this meeting');
       try {
         session.client.leave();
       } catch (e) {
@@ -329,7 +329,7 @@ async function handleRTMSStarted(payload) {
     // Handle media connection interruption (signaling survives, media only drops)
     // Note: This is different from meeting.rtms_interrupted webhook which is full signaling loss
     client.onMediaConnectionInterrupted((ts) => {
-      console.warn(`Media connection interrupted at ${ts} for meeting ${meeting_uuid}`);
+      console.warn(`Media connection interrupted at ${ts}`);
       // Notify backend so UI can show reconnecting state
       notifyBackend(meeting_uuid, 'media_interrupted').catch(err => {
         console.warn('Failed to notify backend of media interruption:', err.message);
@@ -442,7 +442,7 @@ function findSessionByMeetingUuid(meeting_uuid) {
 async function handleRTMSStopped(payload) {
   const { meeting_uuid, rtms_stream_id } = payload;
 
-  console.log(`Stopping RTMS for meeting: ${meeting_uuid}`);
+  console.log('Stopping RTMS for a meeting');
 
   // Try to find by rtms_stream_id first (if provided), then by meeting_uuid
   let session = rtms_stream_id ? activeSessions.get(rtms_stream_id) : null;
@@ -479,7 +479,7 @@ async function handleRTMSStopped(payload) {
 async function handleRTMSInterrupted(payload) {
   const { meeting_uuid, rtms_stream_id } = payload;
 
-  console.log(`RTMS interrupted for meeting: ${meeting_uuid}, stream: ${rtms_stream_id}`);
+  console.log('RTMS interrupted for a meeting');
 
   // Find and clean up the session
   let session = rtms_stream_id ? activeSessions.get(rtms_stream_id) : null;
@@ -632,9 +632,9 @@ function shutdown(signal) {
     try {
       session.stopping = true;
       session.client.leave();
-      console.log(`Closed RTMS session for meeting: ${meetingId}`);
+      console.log('Closed an RTMS session');
     } catch (err) {
-      console.error(`Error closing session ${meetingId}:`, err.message);
+      console.error('Error closing a session:', err.message);
     }
   }
   activeSessions.clear();

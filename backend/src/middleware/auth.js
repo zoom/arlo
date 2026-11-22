@@ -90,7 +90,7 @@ function devAuthBypass(req, res, next) {
       id: userId,
       zoomUserId: `dev-user-${userId}`,
     };
-    console.warn(`⚠️  Dev mode: Using userId from query param: ${userId}`);
+    console.warn('⚠️  Dev mode: using the userId query parameter as the signed-in user');
   }
 
   next();

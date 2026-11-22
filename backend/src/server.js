@@ -328,7 +328,6 @@ if (hasProductionBuild) {
     // Log Zoom Marketplace webhook validation attempts
     if (req.headers['user-agent']?.includes('Zoom Marketplace')) {
       console.log('⚠️ Zoom Marketplace POST to:', req.path);
-      console.log('Body:', JSON.stringify(req.body, null, 2));
       console.log('💡 This should be going to /api/rtms/webhook instead');
     }
 

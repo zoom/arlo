@@ -127,7 +127,7 @@ function initWebSocketServer(server) {
 
     // Handle disconnect
     ws.on('close', () => {
-      console.log(`📡 WebSocket disconnected: ${userId ? `User ${userId}` : 'Guest'}`);
+      console.log(`📡 WebSocket disconnected (${userId ? 'signed-in user' : 'guest'})`);
 
       // Remove from user connections (only for authenticated users)
       if (userId && userConnections.has(userId)) {
@@ -316,7 +316,7 @@ function broadcastPresence(meetingId) {
  */
 function broadcastToMeeting(meetingId, message) {
   if (!connections.has(meetingId)) {
-    console.log(`📡 No active connections for meeting ${meetingId}`);
+    console.log('📡 No active connections for this meeting');
     return 0;
   }
 
@@ -335,7 +335,7 @@ function broadcastToMeeting(meetingId, message) {
     }
   });
 
-  console.log(`📡 Broadcast to ${sentCount} clients in meeting ${meetingId}`);
+  console.log(`📡 Broadcast to ${sentCount} client(s)`);
   return sentCount;
 }
 
@@ -344,7 +344,7 @@ function broadcastToMeeting(meetingId, message) {
  */
 function broadcastToUser(userId, message) {
   if (!userConnections.has(userId)) {
-    console.log(`📡 No active connections for user ${userId}`);
+    console.log('📡 No active connections for this user');
     return 0;
   }
 
@@ -359,7 +359,7 @@ function broadcastToUser(userId, message) {
     }
   });
 
-  console.log(`📡 Broadcast to ${sentCount} clients for user ${userId}`);
+  console.log(`📡 Broadcast to ${sentCount} of the user's client(s)`);
   return sentCount;
 }
 
@@ -503,7 +503,7 @@ function crossRegisterUser(userId, rtmsMeetingId) {
   });
 
   if (count > 0) {
-    console.log(`📡 Cross-registered ${count} WS connection(s) for user ${userId} under RTMS UUID "${rtmsMeetingId}"`);
+    console.log(`📡 Cross-registered ${count} WS connection(s) for the stream operator`);
   }
   return count;
 }
