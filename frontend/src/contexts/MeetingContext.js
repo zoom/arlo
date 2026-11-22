@@ -10,6 +10,7 @@ import {
   isRtmsBusy,
   statusFromWs,
   statusFromRtmsStatusList,
+  statusFromPoll,
 } from '../lib/rtmsMachine';
 
 const MeetingContext = createContext();
@@ -22,6 +23,14 @@ const START_REQUEST_EXPIRY_MS = 60000;
 // Zoom's client says "started" but the server has seen no stream: how long to
 // show "Starting transcription…" before giving the Start button back.
 const STREAM_ARRIVAL_TIMEOUT_MS = 15000;
+// The client sends no event when the host denies a request or allows the app
+// later, so while a start is unresolved Arlo asks the client itself.
+const STATUS_POLL_INTERVAL_MS = 5000;
+const STATUS_POLL_PHASES = new Set(['requested', 'expired', 'denied', 'failed', 'stalled']);
+
+const readRtmsStatus = (sdk) => (typeof sdk.getRTMSStatus === 'function'
+  ? sdk.getRTMSStatus()
+  : sdk.callZoomApi('getRTMSStatus'));
 const ACTION_CONFIRM_TIMEOUT_MS = 10000;
 
 const DEFAULT_CHAT_NOTICES = {
@@ -313,9 +322,7 @@ export function MeetingProvider({ children }) {
       console.warn('onRTMSStatusChange not available:', error?.message);
     }
     Promise.resolve()
-      .then(() => (typeof zoomSdk.getRTMSStatus === 'function'
-        ? zoomSdk.getRTMSStatus()
-        : zoomSdk.callZoomApi('getRTMSStatus')))
+      .then(() => readRtmsStatus(zoomSdk))
       .then((response) => {
         if (cancelled) return;
         const status = statusFromRtmsStatusList(response?.rtmsStatus);
@@ -332,6 +339,32 @@ export function MeetingProvider({ children }) {
       }
     };
   }, [zoomSdk, rtmsStatusSupported, meetingId]);
+
+  // Poll getRTMSStatus while a start is unresolved (see STATUS_POLL_PHASES).
+  const lastPolledStatusRef = useRef(null);
+  useEffect(() => {
+    if (!zoomSdk || !rtmsStatusSupported || !meetingId) return undefined;
+    if (!STATUS_POLL_PHASES.has(rtms.phase)) return undefined;
+    let cancelled = false;
+    const poll = () => {
+      Promise.resolve()
+        .then(() => readRtmsStatus(zoomSdk))
+        .then((response) => {
+          if (cancelled) return;
+          const polled = statusFromPoll(response?.rtmsStatus);
+          if (polled === lastPolledStatusRef.current) return;
+          lastPolledStatusRef.current = polled;
+          console.log('getRTMSStatus poll:', polled || 'no running session');
+          if (polled) dispatchRtms({ type: 'STATUS', status: polled, source: 'sdk' });
+        })
+        .catch(() => {});
+    };
+    const interval = setInterval(poll, STATUS_POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [zoomSdk, rtmsStatusSupported, meetingId, rtms.phase]);
 
   // A request that Zoom never confirms must not hang silently.
   useEffect(() => {
@@ -434,7 +467,11 @@ export function MeetingProvider({ children }) {
     try {
       const apiName = `${action}RTMS`;
       if (options) {
+        // The documented startRTMS() takes no options, so the media options
+        // still go through callZoomApi.
         await zoomSdk.callZoomApi(apiName, options);
+      } else if (rtmsStatusSupported && typeof zoomSdk[apiName] === 'function') {
+        await zoomSdk[apiName]();
       } else {
         await zoomSdk.callZoomApi(apiName);
       }

@@ -6,6 +6,7 @@ import {
   isRtmsBusy,
   statusFromWs,
   statusFromRtmsStatusList,
+  statusFromPoll,
 } from './rtmsMachine';
 
 const run = (events, from = initialRtmsState) => events.reduce(rtmsReducer, from);
@@ -325,5 +326,27 @@ describe('the Zoom client says "started" but no stream has reached the server', 
     expect(fromStarting.phase).toBe('stopped');
     expect(fromStarting.error).toBeNull();
     expect(run([sdkStarted, { type: 'STALL' }, status('stopped', 'sdk')]).phase).toBe('stopped');
+  });
+});
+
+describe('polling getRTMSStatus (the client sends no event when the host denies or later allows)', () => {
+  const session = (s) => ({ rtmsSessionId: 'x', displayName: 'Arlo', status: s, timestamp: 1 });
+
+  test('reports a session that is started or paused', () => {
+    expect(statusFromPoll([session('stopped'), session('started')])).toBe('started');
+    expect(statusFromPoll([session('paused')])).toBe('paused');
+  });
+
+  test('ignores connecting and stopped: a stale session must not restart or deny a request', () => {
+    expect(statusFromPoll([session('connecting')])).toBeNull();
+    expect(statusFromPoll([session('stopped')])).toBeNull();
+    expect(statusFromPoll([])).toBeNull();
+    expect(statusFromPoll(undefined)).toBeNull();
+  });
+
+  test('a polled "started" after an expired request brings the app out of the dead end', () => {
+    const expired = run([request('start'), { type: 'EXPIRE' }]);
+    const next = rtmsReducer(expired, status(statusFromPoll([session('started')]), 'sdk'));
+    expect(next.phase).toBe('starting');
   });
 });

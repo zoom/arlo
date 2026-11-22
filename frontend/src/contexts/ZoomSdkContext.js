@@ -37,9 +37,15 @@ const OPTIONAL_CAPABILITIES = [
   'runRenderingContext',
 ];
 
-// Confirmed RTMS state (connecting/started/paused/stopped). Requested on their own so an
-// app whose Marketplace config doesn't list them yet keeps the optional APIs above.
+// The documented RTMS APIs: controls plus session status (connecting/started/paused/stopped).
+// Requested on their own so an app whose Marketplace config doesn't list them yet, or an
+// older client, keeps the optional APIs above. Desktop only: start/stop need client 6.4.10,
+// pause/resume/getRTMSStatus 6.5.5, onRTMSStatusChange 6.5.10. None support guest mode.
 const RTMS_STATUS_CAPABILITIES = [
+  'startRTMS',
+  'stopRTMS',
+  'pauseRTMS',
+  'resumeRTMS',
   'getRTMSStatus',
   'onRTMSStatusChange',
 ];
@@ -115,7 +121,10 @@ export function ZoomSdkProvider({ children }) {
         }
 
         console.log('SDK Configured:', configResponse);
-        setRtmsStatusSupported(acceptedCapabilities.includes('onRTMSStatusChange'));
+        const rtmsApisAccepted = acceptedCapabilities.includes('onRTMSStatusChange');
+        // If this prints false, the client sends Arlo no RTMS status at all
+        console.log('RTMS SDK APIs (start/stop/pause/resume/status) accepted by this client:', rtmsApisAccepted);
+        setRtmsStatusSupported(rtmsApisAccepted);
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured
 

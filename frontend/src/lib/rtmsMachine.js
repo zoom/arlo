@@ -39,7 +39,7 @@ const ASSUMED_PHASE = { stop: 'stopped', pause: 'paused', resume: 'active' };
 
 const DENIED_MESSAGE = 'Transcription did not start. The host may have declined the request.';
 const UNCONFIRMED_MESSAGE = 'Zoom did not confirm the request. Try again.';
-const EXPIRED_MESSAGE = 'No answer from the host. Zoom cancels a request after 60 seconds.';
+const EXPIRED_MESSAGE = 'No answer from the host (Zoom cancels a request after 60 seconds). If the host has allowed Arlo since, start transcription here.';
 
 // Zoom `rtms.request_status` webhook codes that end a request. 7 and 8 are
 // server maintenance notices, not outcomes, so they are not listed.
@@ -191,4 +191,14 @@ export function statusFromRtmsStatusList(list) {
   if (!Array.isArray(list)) return null;
   const statuses = new Set(list.map((session) => session?.status));
   return ['started', 'paused', 'connecting'].find((s) => statuses.has(s)) || null;
+}
+
+/**
+ * `getRTMSStatus().rtmsStatus` from a repeated poll → a status worth acting on.
+ * Only a session that is up counts. "connecting" and "stopped" may be left over
+ * from an earlier request and must not restart a countdown or look like a denial.
+ */
+export function statusFromPoll(list) {
+  const status = statusFromRtmsStatusList(list);
+  return status === 'started' || status === 'paused' ? status : null;
 }

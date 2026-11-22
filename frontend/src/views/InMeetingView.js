@@ -686,10 +686,10 @@ export default function InMeetingView({ isGuestMode = false }) {
     ? `Waiting for host approval…${requestSecondsLeft !== null ? ` ${requestSecondsLeft}s` : ''}`
     : 'Requesting transcription…';
   // Denied or unanswered: ask the host again. Failed: something is broken, so "Try again".
-  // Stalled: the host already allows it, so it is a plain start, not a new request.
-  const startAgainLabel = rtmsPhase === 'failed'
-    ? 'Try again'
-    : rtmsPhase === 'stalled' ? 'Start Transcription' : 'Request again';
+  // After a denial, an expiry or a stall the client can't tell whether the host has
+  // allowed Arlo since, so the button is a plain Start: it starts at once if allowed
+  // and asks the host again if not.
+  const startAgainLabel = rtmsPhase === 'failed' ? 'Try again' : 'Start Transcription';
   const liveLabel = rtmsPhase === 'interrupted' ? 'Reconnecting…' : 'Transcribing';
   // Start was denied or failed: say why and offer Retry (the stream is not running)
   const startError = !rtmsActive && rtmsError?.action === 'start' ? rtmsError.message : null;
