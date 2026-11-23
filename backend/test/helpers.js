@@ -43,6 +43,7 @@ function setTestEnv(extra = {}) {
     NODE_ENV: 'test',
     LOG_LEVEL: 'error',
     AI_ENABLED: 'true',
+    DEMO_MODE: 'true',
     ...extra,
   });
   delete process.env.INTERNAL_API_SECRET;
