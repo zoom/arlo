@@ -1,6 +1,7 @@
 /**
- * What the server holds for a meeting while it runs: transcript segments and
- * timeline events, in memory only. Nothing here touches disk. A meeting's data
+ * What the server holds for a meeting while it runs: transcript segments,
+ * timeline events, the notes written from them and a few facts about the
+ * meeting (who brought Arlo in, who may ask), in memory only. Nothing here touches disk. A meeting's data
  * is removed by deleteMeeting() (see services/meetingLifecycle.js) or by
  * sweep() once it is older than the age limit.
  *
@@ -20,6 +21,11 @@ const MAX_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 4000;
 const MAX_NAME_CHARS = 200;
 const MAX_EVENT_TYPE_CHARS = 50;
+const MAX_SUMMARY_CHARS = 1500;
+const MAX_NOTE_LINE_CHARS = 300;
+const MAX_DECISIONS = 20;
+const MAX_ACTION_ITEMS = 30;
+const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 
 const MAX_SEQ_NO = 2 ** 31;
 
@@ -33,6 +39,16 @@ const bounded = (value, max) => (value.length > max ? Buffer.from(value.slice(0,
 const clip = (value, max) => (typeof value === 'string' ? bounded(value, max) : null);
 const isTime = (value) => Number.isFinite(value) && value >= 0;
 const isSeqNo = (value) => Number.isSafeInteger(value) && value >= 0 && value < MAX_SEQ_NO;
+const isText = (value) => typeof value === 'string' && value.length > 0;
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+const defaultMeta = () => ({ ownerUserId: null, ownerName: null, whoCanAsk: 'owner' });
+const copyNotes = (notes) => ({
+  ...notes,
+  decisions: [...notes.decisions],
+  actionItems: notes.actionItems.map((item) => ({ ...item })),
+});
 
 function createMemoryMeetingStore(options = {}) {
   const { now = Date.now } = options;
@@ -40,7 +56,7 @@ function createMemoryMeetingStore(options = {}) {
   for (const key of Object.keys(DEFAULTS)) {
     if (Number.isInteger(options[key]) && options[key] > 0) limits[key] = options[key];
   }
-  const meetings = new Map(); // meetingId -> { createdAt, segments, events, nextSeqNo }
+  const meetings = new Map(); // meetingId -> { createdAt, segments, events, nextSeqNo, notes, meta }
 
   function entryFor(meetingId) {
     let entry = meetings.get(meetingId);
@@ -51,7 +67,7 @@ function createMemoryMeetingStore(options = {}) {
       if (meetings.size >= limits.maxMeetings) {
         meetings.delete(meetings.keys().next().value);
       }
-      entry = { createdAt: now(), segments: [], events: [], nextSeqNo: 1 };
+      entry = { createdAt: now(), segments: [], events: [], nextSeqNo: 1, notes: null, meta: defaultMeta() };
     }
     meetings.set(meetingId, entry);
     return entry;
@@ -101,6 +117,70 @@ function createMemoryMeetingStore(options = {}) {
     return { ...event };
   }
 
+  /**
+   * Replace the meeting's notes. Returns the stored copy, or null if refused.
+   * Only for a meeting already held (a segment or event was stored): notes that
+   * arrive late, after the flush, must not bring the meeting back. Looked up
+   * without entryFor(), so writing notes neither creates a meeting nor counts
+   * as it being in use.
+   */
+  function setNotes(meetingId, raw) {
+    const entry = meetings.get(meetingId);
+    if (!entry || !isPlainObject(raw) || typeof raw.summary !== 'string' || !isSeqNo(raw.throughSeqNo)) {
+      return null;
+    }
+    const decisions = (Array.isArray(raw.decisions) ? raw.decisions : [])
+      .filter(isText)
+      .slice(0, MAX_DECISIONS)
+      .map((line) => bounded(line, MAX_NOTE_LINE_CHARS));
+    const actionItems = (Array.isArray(raw.actionItems) ? raw.actionItems : [])
+      .filter((item) => isPlainObject(item) && isText(item.text))
+      .slice(0, MAX_ACTION_ITEMS)
+      .map((item) => ({
+        text: bounded(item.text, MAX_NOTE_LINE_CHARS),
+        owner: isText(item.owner) ? bounded(item.owner, MAX_NAME_CHARS) : null,
+      }));
+    entry.notes = {
+      summary: bounded(raw.summary, MAX_SUMMARY_CHARS),
+      decisions,
+      actionItems,
+      updatedAt: now(),
+      throughSeqNo: raw.throughSeqNo,
+    };
+    return copyNotes(entry.notes);
+  }
+
+  const getNotes = (meetingId) => {
+    const notes = meetings.get(meetingId)?.notes;
+    return notes ? copyNotes(notes) : null;
+  };
+
+  /**
+   * Change facts about the meeting. Only the known keys are read; a key with a
+   * value that is not allowed is left as it was. Returns the stored meta, or
+   * null for a meeting not held (same reason as setNotes).
+   */
+  function setMeta(meetingId, patch) {
+    const entry = meetings.get(meetingId);
+    if (!entry) return null;
+    if (isPlainObject(patch)) {
+      const { meta } = entry;
+      // An id that is too long is not cut: a cut id would name someone else
+      if (hasOwn(patch, 'ownerUserId') && (patch.ownerUserId === null || isMeetingId(patch.ownerUserId))) {
+        meta.ownerUserId = patch.ownerUserId;
+      }
+      if (hasOwn(patch, 'ownerName') && (patch.ownerName === null || isText(patch.ownerName))) {
+        meta.ownerName = clip(patch.ownerName, MAX_NAME_CHARS);
+      }
+      if (hasOwn(patch, 'whoCanAsk') && WHO_CAN_ASK.has(patch.whoCanAsk)) {
+        meta.whoCanAsk = patch.whoCanAsk;
+      }
+    }
+    return { ...entry.meta };
+  }
+
+  const getMeta = (meetingId) => ({ ...(meetings.get(meetingId)?.meta || defaultMeta()) });
+
   const listSegments = (meetingId) => (meetings.get(meetingId)?.segments || []).map((s) => ({ ...s }));
   const listEvents = (meetingId) => (meetings.get(meetingId)?.events || []).map((e) => ({ ...e }));
   const has = (meetingId) => meetings.has(meetingId);
@@ -124,7 +204,11 @@ function createMemoryMeetingStore(options = {}) {
     return deleted;
   }
 
-  return { appendSegment, appendEvent, listSegments, listEvents, has, deleteMeeting, sweep, size };
+  return {
+    appendSegment, appendEvent, listSegments, listEvents,
+    setNotes, getNotes, setMeta, getMeta,
+    has, deleteMeeting, sweep, size,
+  };
 }
 
 module.exports = { createMemoryMeetingStore };

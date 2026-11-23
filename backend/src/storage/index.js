@@ -6,10 +6,18 @@
  *   appendEvent(meetingId, event)     -> stored event with id | null
  *   listSegments(meetingId)           -> segment[]
  *   listEvents(meetingId)             -> event[]
+ *   setNotes(meetingId, notes)        -> stored copy | null
+ *   getNotes(meetingId)               -> { summary, decisions, actionItems, updatedAt, throughSeqNo } | null
+ *   setMeta(meetingId, patch)         -> stored meta | null
+ *   getMeta(meetingId)                -> { ownerUserId, ownerName, whoCanAsk } (defaults: null, null, 'owner')
  *   has(meetingId)                    -> boolean
  *   deleteMeeting(meetingId)          -> boolean
  *   sweep()                           -> number of meetings deleted
  *   size()                            -> number of meetings held
+ *
+ * setNotes and setMeta only work for a meeting already held (a segment or event
+ * was stored) and return null otherwise, so a late write cannot bring back a
+ * meeting that was flushed. deleteMeeting and sweep remove notes and meta too.
  *
  * Today there is one implementation: memory. In demo mode that is the design:
  * a meeting's data is held only while the meeting runs and is flushed when it
