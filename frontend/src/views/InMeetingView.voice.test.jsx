@@ -1,6 +1,6 @@
 import { screen, waitFor, act } from '@testing-library/react';
 import {
-  FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage,
+  FakeWebSocket, json, mockFetch, renderClassic as renderInMeeting, resetHarness, serverMessage,
 } from '../test/harness';
 
 // Voice commands: someone says "Hey Arlo, ..." and the transcript line triggers it.

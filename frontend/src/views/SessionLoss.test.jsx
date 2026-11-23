@@ -1,7 +1,7 @@
 import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage,
+  FakeWebSocket, json, mockFetch, renderClassic as renderInMeeting, resetHarness, serverMessage,
 } from '../test/harness';
 
 // The session ends while the panel is open in a meeting. The next API call is

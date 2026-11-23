@@ -66,7 +66,7 @@ function RootView() {
     console.log('RootView routing:', { isGuest, runningContext, hasMeetingContext: !!meetingContext });
 
     if (isGuest) {
-      // Guest user — route to full meeting view (same as authenticated users)
+      // Guest user — route to the meeting view (the same screens as signed-in users)
       const inMeeting = runningContext === 'inMeeting';
       const meetingUUID = meetingContext?.meetingUUID;
       const meetingID = meetingContext?.meetingID;
@@ -84,8 +84,8 @@ function RootView() {
       const routeId = meetingUUID || meetingID;
 
       if (inMeeting && routeId) {
-        // Send guests to full InMeetingView with all features
-        console.log('Guest routing to full meeting view');
+        // Guests get the Arlo screens too: the participant view
+        console.log('Guest routing to the meeting view');
         navigate(`/guest-meeting/${encodeURIComponent(routeId)}`, { replace: true });
       } else {
         console.log('Guest has no meeting ID, routing to /guest');
@@ -168,11 +168,11 @@ function App() {
                       {/* Guest routes */}
                       <Route path="/guest" element={<GuestNoMeetingView />} />
                       <Route path="/guest/:id" element={<GuestInMeetingView />} />
-                      {/* Guest full meeting view - same features as authenticated, but read-only */}
-                      <Route path="/guest-meeting/:id" element={<InMeetingView isGuestMode={true} />} />
+                      {/* A guest in a meeting: the single-action Arlo screens and the meeting record */}
+                      <Route path="/guest-meeting/:id" element={<ArloMeetingView isGuestMode />} />
                       <Route path="/guest-meeting/:id/record" element={<MeetingRecordView isGuestMode />} />
-                      {/* The single-action Arlo screens, for a guest */}
-                      <Route path="/guest-arlo/:id" element={<ArloMeetingView isGuestMode />} />
+                      {/* The earlier dashboard for a guest. Nothing links here; kept so its tests keep running */}
+                      <Route path="/guest-meeting/:id/classic" element={<InMeetingView isGuestMode={true} />} />
 
                       {/* Authenticated routes (inside AppShell) */}
                       <Route element={
@@ -183,10 +183,11 @@ function App() {
                         <Route path="/home" element={<HomeView />} />
                         <Route path="/meetings" element={<MeetingsListView />} />
                         <Route path="/meetings/:id" element={<MeetingDetailView />} />
-                        <Route path="/meeting/:id" element={<InMeetingView />} />
+                        {/* In a meeting: the single-action Arlo screens and the meeting record */}
+                        <Route path="/meeting/:id" element={<ArloMeetingView />} />
                         <Route path="/meeting/:id/record" element={<MeetingRecordView />} />
-                        {/* The single-action Arlo screens */}
-                        <Route path="/arlo/:id" element={<ArloMeetingView />} />
+                        {/* The earlier dashboard, linked from Settings only */}
+                        <Route path="/meeting/:id/classic" element={<InMeetingView />} />
                         <Route path="/search" element={<SearchResultsView />} />
                         <Route path="/settings" element={<SettingsView />} />
                         <Route path="/upcoming" element={<UpcomingMeetingsView />} />

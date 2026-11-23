@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Search, Settings } from 'lucide-react';
+import { useServerSettings } from '../contexts/ServerSettingsContext';
 import ArloLogo from './ArloLogo';
 import Button from './ui/Button';
 import LiveMeetingBanner from './LiveMeetingBanner';
@@ -9,6 +10,7 @@ import './AppShell.css';
 export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { showSearch } = useServerSettings();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -68,6 +70,12 @@ export default function AppShell() {
   }, [searchQuery]);
 
   const handleBack = useCallback(() => {
+    // From the meeting record or the classic dashboard, back is the meeting screen
+    const subPage = location.pathname.match(/^(\/meeting\/[^/]+)\/(record|classic)$/);
+    if (subPage) {
+      navigate(subPage[1]);
+      return;
+    }
     // From the meeting view, back goes home (history may be empty inside Zoom)
     if (location.pathname === '/meeting' || location.pathname.startsWith('/meeting/')) {
       navigate('/home');
@@ -108,7 +116,7 @@ export default function AppShell() {
         </div>
 
         <div className="header-right" ref={searchRef}>
-          {searchOpen && (
+          {showSearch && searchOpen && (
             <div className="search-container">
               <input
                 type="text"
@@ -149,11 +157,14 @@ export default function AppShell() {
             </div>
           )}
 
-          <Button variant="ghost" size="icon" onClick={() => setSearchOpen(!searchOpen)}>
-            <Search size={16} />
-          </Button>
+          {/* Search needs stored meetings: without them it only leads to an empty page */}
+          {showSearch && (
+            <Button variant="ghost" size="icon" aria-label="Search" onClick={() => setSearchOpen(!searchOpen)}>
+              <Search size={16} />
+            </Button>
+          )}
 
-          <Button variant="ghost" size="icon" onClick={() => navigate('/settings')}>
+          <Button variant="ghost" size="icon" aria-label="Settings" onClick={() => navigate('/settings')}>
             <Settings size={16} />
           </Button>
         </div>

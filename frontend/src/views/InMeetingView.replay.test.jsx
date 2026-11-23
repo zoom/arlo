@@ -1,6 +1,6 @@
 import { screen, waitFor, act } from '@testing-library/react';
 import {
-  FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage, MEETING,
+  FakeWebSocket, json, mockFetch, renderClassic as renderInMeeting, resetHarness, serverMessage, MEETING,
 } from '../test/harness';
 
 // A panel that opens late, or loses its connection, catches up from the server.

@@ -1,7 +1,7 @@
 import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  FakeWebSocket, mockFetch, renderInMeeting, resetHarness, serverMessage,
+  FakeWebSocket, mockFetch, renderClassic as renderInMeeting, resetHarness, serverMessage,
 } from '../test/harness';
 
 // UI state tests for a stream that drops: reconnecting, back again, or ended

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Mic,
   Calendar,
@@ -22,6 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useVertical } from '../contexts/VerticalContext';
 import { useServerSettings } from '../contexts/ServerSettingsContext';
+import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import { useDemoData } from '../hooks/useDemoData';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -135,6 +136,37 @@ const mockSupportData = {
 // MAIN COMPONENT
 // =============================================================================
 export default function HomeView() {
+  const { demoMode } = useServerSettings();
+  // Demo mode stores nothing, so there is nothing to list
+  return demoMode ? <DemoHome /> : <StoredHome />;
+}
+
+/**
+ * Home in demo mode: what Arlo is here, and the one way to use it. No list,
+ * no search, no ask input. Inside a meeting, one link back to the Arlo screen.
+ */
+function DemoHome() {
+  const { meetingId } = useMeeting();
+  const { runningContext } = useZoomSdk();
+  const inMeeting = runningContext === 'inMeeting' && Boolean(meetingId);
+
+  return (
+    <div className="home-view home-demo">
+      <h1 className="text-serif text-2xl">Arlo</h1>
+      <p className="text-sans text-sm text-muted">Demo mode: meetings and notes are not stored.</p>
+      {inMeeting ? (
+        <Link className="home-demo-link text-sans text-sm" to={`/meeting/${encodeURIComponent(meetingId)}`}>
+          Back to the meeting
+        </Link>
+      ) : (
+        <p className="text-sans text-sm">Open Arlo from a Zoom meeting to bring it in.</p>
+      )}
+    </div>
+  );
+}
+
+/** Home when meetings are stored: the existing dashboard. */
+function StoredHome() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { meetingId, rtmsActive } = useMeeting();

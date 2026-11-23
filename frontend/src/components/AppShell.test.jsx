@@ -11,7 +11,7 @@ test('the header back arrow in a meeting goes home and keeps the saved vertical'
   mockFetch();
   renderInMeeting();
   localStorage.setItem('arlo-vertical', 'notes');
-  await screen.findByText('Transcription not started');
+  await screen.findByRole('heading', { name: 'Bring Arlo into this meeting' });
   await waitFor(() => expect(FakeWebSocket.last?.readyState).toBe(FakeWebSocket.OPEN));
 
   await userEvent.click(screen.getByRole('button', { name: /back/i }));

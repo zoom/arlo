@@ -1,5 +1,5 @@
 import React, { useEffect, useCallback, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import useZoomAuth from '../hooks/useZoomAuth';
@@ -17,6 +17,8 @@ let lastSilentReauthAt = -Infinity;
 
 export default function AuthView() {
   const navigate = useNavigate();
+  // Where the session ended, when ProtectedRoute sent the user here
+  const cameFrom = useLocation().state?.from;
   const { isAuthenticated, isLoading, login } = useAuth();
   const {
     isTestMode: isBrowser,
@@ -45,10 +47,14 @@ export default function AuthView() {
 
   const getPostAuthDestination = useCallback(() => {
     if (runningContext === 'inMeeting' && meetingContext?.meetingUUID) {
-      return `/meeting/${encodeURIComponent(meetingContext.meetingUUID)}`;
+      const meetingPath = `/meeting/${encodeURIComponent(meetingContext.meetingUUID)}`;
+      // A session renewed on the meeting record or the classic dashboard returns
+      // there. Only these two pages, and always for the meeting Zoom reports.
+      const page = typeof cameFrom === 'string' ? cameFrom.match(/^\/meeting\/[^/]+\/(record|classic)$/) : null;
+      return page ? `${meetingPath}/${page[1]}` : meetingPath;
     }
     return '/home';
-  }, [runningContext, meetingContext]);
+  }, [runningContext, meetingContext, cameFrom]);
 
   // Redirect if already authenticated and SDK context is ready
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage,
+  createZoomSdk, FakeWebSocket, json, mockFetch, renderClassic as renderInMeeting, resetHarness, serverMessage,
 } from '../test/harness';
 
 // UI state tests: the real app inside a fake Zoom meeting. They stand in for
@@ -106,7 +106,7 @@ describe('transcript', () => {
     await waitFor(() => expect(screen.queryByText('Said before navigating.')).not.toBeInTheDocument());
     await send(serverMessage.segment(2, 'Said while away.'));
 
-    await act(async () => { window.location.hash = `#/meeting/${encodeURIComponent('MEETING-1==')}`; });
+    await act(async () => { window.location.hash = `#/meeting/${encodeURIComponent('MEETING-1==')}/classic`; });
     expect(await screen.findByText('Said before navigating.')).toBeInTheDocument();
     expect(screen.getByText('Said while away.')).toBeInTheDocument();
   });

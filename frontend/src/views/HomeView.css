@@ -608,3 +608,20 @@
     font-size: 1.125rem;
   }
 }
+
+/* Home in demo mode: three lines, nothing else */
+.home-demo {
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.home-demo-link {
+  align-self: flex-start;
+  color: var(--accent);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.home-demo-link:hover {
+  text-decoration: underline;
+}

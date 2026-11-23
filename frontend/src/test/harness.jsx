@@ -191,23 +191,26 @@ export const serverMessage = {
 };
 
 /**
- * Render the real app inside a (fake) Zoom meeting, on the in-meeting route
- * (`arlo: true` for the Arlo screens; `page: 'record'` for the meeting record).
+ * Render the real app inside a (fake) Zoom meeting, on the in-meeting route:
+ * the single-action Arlo screens. `page: 'record'` opens the meeting record,
+ * `page: 'classic'` the earlier dashboard.
  * Auto-start is off unless asked for, so each test decides when a start happens.
  */
 export function renderInMeeting({
-  sdk = createZoomSdk(), autoStart = false, guest = false, arlo = false, page = null,
+  sdk = createZoomSdk(), autoStart = false, guest = false, page = null,
 } = {}) {
   window.zoomSdk = sdk;
   FakeWebSocket.instances = [];
   vi.stubGlobal('WebSocket', FakeWebSocket);
   localStorage.setItem('arlo-vertical', 'notes');
   localStorage.setItem('arlo-auto-start', autoStart ? 'true' : 'false');
-  // `arlo: true` opens the single-action Arlo screens instead of the dashboard
-  const route = arlo ? (guest ? 'guest-arlo' : 'arlo') : (guest ? 'guest-meeting' : 'meeting');
+  const route = guest ? 'guest-meeting' : 'meeting';
   window.location.hash = `#/${route}/${encodeURIComponent(MEETING)}${page ? `/${page}` : ''}`;
   return { sdk, ...render(<App />) };
 }
+
+/** The earlier dashboard (InMeetingView), kept at the classic route. */
+export const renderClassic = (options = {}) => renderInMeeting({ ...options, page: 'classic' });
 
 /** Undo what renderInMeeting and mockFetch installed. */
 export function resetHarness() {

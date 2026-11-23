@@ -1,7 +1,7 @@
 import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  createZoomSdk, FakeWebSocket, mockFetch, renderInMeeting, resetHarness, serverMessage,
+  createZoomSdk, FakeWebSocket, mockFetch, renderClassic as renderInMeeting, resetHarness, serverMessage,
 } from '../test/harness';
 
 // Zoom's Dynamic Indicator: Arlo's status in Zoom's own meeting window.

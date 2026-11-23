@@ -1,5 +1,5 @@
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import LoadingSpinner from './ui/LoadingSpinner';
@@ -9,6 +9,7 @@ const isDevMode = window.location.search.includes('test=true');
 
 export default function ProtectedRoute({ children }) {
   const { isAuthenticated, isLoading } = useAuth();
+  const location = useLocation();
   const { isTestMode: isBrowser, runningContext, isGuest, meetingContext } = useZoomSdk();
 
   // Dev mode: bypass auth for local development with ?test=true
@@ -45,7 +46,8 @@ export default function ProtectedRoute({ children }) {
       }
       return <Navigate to="/guest" replace />;
     }
-    return <Navigate to="/auth" replace />;
+    // AuthView returns the user to this page of the meeting after signing in again
+    return <Navigate to="/auth" replace state={{ from: location.pathname }} />;
   }
 
   return children;

@@ -33,7 +33,7 @@ async function openArlo({ sdk, guest = false, routes = {}, state } = {}) {
     ...(state && { [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...state }) }),
     ...routes,
   }, { signedIn: !guest });
-  const result = renderInMeeting({ sdk, guest, arlo: true });
+  const result = renderInMeeting({ sdk, guest });
   await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
   return { ...result, fetchMock };
 }
@@ -491,7 +491,7 @@ describe('after the meeting', () => {
 describe('meeting access', () => {
   test('a panel the server could not place in the meeting shows the reason, not a screen', async () => {
     await mockFetch({ '/api/auth/meeting-access': () => json({ error: 'This app context has expired.' }, 403) });
-    renderInMeeting({ arlo: true });
+    renderInMeeting();
     expect(await screen.findByRole('alert')).toHaveTextContent('This app context has expired.');
     expect(screen.queryByRole('button', { name: 'Bring Arlo into this meeting' })).not.toBeInTheDocument();
   });

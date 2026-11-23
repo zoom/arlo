@@ -452,3 +452,14 @@
   color: var(--destructive);
 }
 
+
+/* The row that opens the classic dashboard */
+.settings-classic-link {
+  color: var(--foreground);
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.settings-classic-link:hover {
+  text-decoration: underline;
+}

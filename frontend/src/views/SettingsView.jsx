@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   CheckCircle2,
   XCircle,
@@ -24,6 +24,7 @@ import { useDemoData } from '../hooks/useDemoData';
 import { useServerSettings } from '../contexts/ServerSettingsContext';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import { useMeeting } from '../contexts/MeetingContext';
+import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
@@ -60,6 +61,8 @@ export default function SettingsView() {
   const { autoStartAvailable } = useServerSettings();
   const { complianceEnabled, setComplianceEnabled } = useComplianceSettings();
   const { meetingId, rtmsActive, rtmsLoading, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
+  const { runningContext } = useZoomSdk();
+  const inMeeting = runningContext === 'inMeeting' && Boolean(meetingId);
   const [apiStartSuccess, setApiStartSuccess] = useState(false);
   const [autoOpen, setAutoOpen] = useState(true);
   const [autoStart, setAutoStart] = useState(true);
@@ -916,6 +919,30 @@ export default function SettingsView() {
           </div>
         </Card>
       </section>
+
+      {/* The earlier in-meeting dashboard: only reachable from here, and only in a meeting */}
+      {inMeeting && (
+        <section className="settings-section">
+          <Card>
+            <div className="settings-card-inner">
+              <div className="settings-toggle-row">
+                <div className="settings-toggle-text">
+                  <Link
+                    className="text-sans font-medium settings-classic-link"
+                    to={`/meeting/${encodeURIComponent(meetingId)}/classic`}
+                  >
+                    Classic dashboard
+                  </Link>
+                  <p className="text-sans text-sm text-muted">
+                    The earlier dashboard, kept while the new screens are tried.
+                  </p>
+                </div>
+                <ChevronRight size={16} aria-hidden="true" />
+              </div>
+            </div>
+          </Card>
+        </section>
+      )}
     </div>
   );
 }
