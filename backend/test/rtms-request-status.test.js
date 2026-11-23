@@ -2,7 +2,7 @@
 // start, e.g. status 3 = host denied) reaches the people in that meeting.
 const h = require('./helpers');
 
-h.setTestEnv();
+h.setTestEnv({ RTMS_SERVICE_URL: 'http://127.0.0.1:9' }); // nothing listens: forwarding fails fast
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -151,7 +151,8 @@ test('a browser cannot report a stream failure', async () => {
   assert.equal(res.status, 403);
 });
 
-// Zoom reports a dropped signaling connection with meeting.rtms_interrupted.
+// Zoom reports a dropped signaling connection with meeting.rtms_interrupted. The
+// rtms service normally reports it; here it is unreachable, so the backend does.
 test('an interrupted stream is shown to the meeting as interrupted, not as stopped', async () => {
   await setStatus(MEETING, 'rtms_started');
   const ws = await joinMeeting();

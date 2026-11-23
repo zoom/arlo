@@ -409,13 +409,15 @@ function broadcastAiSuggestion(meetingId, suggestion) {
 /**
  * Broadcast meeting status change
  */
-function broadcastMeetingStatus(meetingId, status) {
+function broadcastMeetingStatus(meetingId, status, { fault = false } = {}) {
   rememberStreamStatus(meetingId, status);
   return broadcastToMeeting(meetingId, {
     type: 'meeting.status',
     data: {
       meetingId,
       status,
+      // The stream ended because of a connection problem, not because someone stopped it
+      ...(fault === true && { fault: true }),
       timestamp: new Date().toISOString(),
     },
   });

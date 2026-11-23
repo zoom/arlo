@@ -8,6 +8,8 @@ import {
   statusFromRtmsStatusList,
   statusFromPoll,
   shouldAutoRestart,
+  shouldRestartAfterFault,
+  FAULT_RESTART_LIMIT,
   canStartRtms,
 } from './rtmsMachine';
 
@@ -442,5 +444,65 @@ describe('a stream that drops and comes back', () => {
   test('an interruption that ends in a stop is stopped', () => {
     const interrupted = rtmsReducer(active, status('interrupted', 'server'));
     expect(rtmsReducer(interrupted, status('stopped', 'server')).phase).toBe('stopped');
+  });
+});
+
+describe('a stream Zoom ended because of a connection problem', () => {
+  const active = run([status('started', 'server')]);
+  const faultStop = { type: 'STATUS', status: 'stopped', source: 'server', fault: true };
+
+  test('is stopped, says why, and can be started again', () => {
+    const state = rtmsReducer(active, faultStop);
+    expect(state.phase).toBe('stopped');
+    expect(state.error).toEqual({
+      action: 'start', code: 'stream_fault', message: 'Transcription stopped because of a connection problem.',
+    });
+    expect(isRtmsActive(state)).toBe(false);
+    expect(canStartRtms(state)).toBe(true);
+  });
+
+  test('also while the stream was shown as reconnecting', () => {
+    const interrupted = rtmsReducer(active, status('interrupted', 'server'));
+    expect(rtmsReducer(interrupted, faultStop).error.code).toBe('stream_fault');
+  });
+
+  test('an ordinary stop carries no error', () => {
+    expect(rtmsReducer(active, status('stopped', 'server')).error).toBeNull();
+    expect(rtmsReducer(active, { ...faultStop, fault: false }).error).toBeNull();
+  });
+
+  test('the reason is kept when the Zoom client reports the stop before the server does', () => {
+    const stoppedByClient = rtmsReducer(active, status('stopped', 'sdk'));
+    expect(stoppedByClient.error).toBeNull();
+    expect(rtmsReducer(stoppedByClient, faultStop).error.code).toBe('stream_fault');
+    // and the client's report after the server's does not erase it
+    expect(run([faultStop, status('stopped', 'sdk')], active).error.code).toBe('stream_fault');
+  });
+
+  test('only the server can say a stop was a fault', () => {
+    expect(rtmsReducer(active, { ...faultStop, source: 'sdk' }).error).toBeNull();
+  });
+
+  test('a late fault stop does not end a new request or touch an idle panel', () => {
+    const requested = run([request('start')]);
+    expect(rtmsReducer(requested, faultStop)).toBe(requested);
+    expect(rtmsReducer(initialRtmsState, faultStop)).toBe(initialRtmsState);
+  });
+
+  test('starting again clears the message', () => {
+    const state = run([faultStop, request('start')], active);
+    expect(state.phase).toBe('requested');
+    expect(state.error).toBeNull();
+  });
+
+  test('is restarted without a click only by the client that started it, a few times per meeting', () => {
+    const fault = { phase: 'stopped', errorCode: 'stream_fault', startedHere: true, restarts: 0, guest: false };
+    expect(shouldRestartAfterFault(fault)).toBe(true);
+    expect(shouldRestartAfterFault({ ...fault, startedHere: false })).toBe(false);
+    expect(shouldRestartAfterFault({ ...fault, guest: true })).toBe(false);
+    expect(shouldRestartAfterFault({ ...fault, errorCode: null })).toBe(false);
+    expect(shouldRestartAfterFault({ ...fault, phase: 'requested' })).toBe(false);
+    expect(shouldRestartAfterFault({ ...fault, restarts: FAULT_RESTART_LIMIT - 1 })).toBe(true);
+    expect(shouldRestartAfterFault({ ...fault, restarts: FAULT_RESTART_LIMIT })).toBe(false);
   });
 });

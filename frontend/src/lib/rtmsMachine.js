@@ -19,6 +19,10 @@
  *   requested → denied | failed | expired,  starting → stalled
  *   active ⇄ paused, active → interrupted → active, active|paused → stopped
  *
+ * A stream Zoom ended because of a connection problem is `stopped` with the
+ * error code 'stream_fault': the panel says so and offers a restart, and the
+ * client that started the stream asks Zoom for a new one by itself.
+ *
  * `pending` is the request this client is waiting on ('start' | 'stop' |
  * 'pause' | 'resume'), `error` is { action, code, message } for the UI.
  */
@@ -53,6 +57,10 @@ const REQUEST_STATUS_OUTCOME = {
 };
 const SERVER_FAILED = 6;
 const CONNECT_FAILED_MESSAGE = 'Arlo could not connect to the transcription stream. Start again.';
+const FAULT_MESSAGE = 'Transcription stopped because of a connection problem.';
+export const STREAM_FAULT = 'stream_fault';
+// Automatic restarts after a fault, per meeting. After that the user decides.
+export const FAULT_RESTART_LIMIT = 3;
 const STALLED_MESSAGE = 'Zoom allows transcription, but the stream has not started. Start it here, or use the Start button Zoom shows for Arlo.';
 
 export const isRtmsActive = (state) => RUNNING_PHASES.has(state.phase);
@@ -63,7 +71,7 @@ export const isRtmsBusy = (state) => (
 
 const settled = (phase, error = null) => ({ phase, pending: null, error, waitingLong: false });
 
-function onStatus(state, status, source) {
+function onStatus(state, status, source, fault) {
   switch (status) {
     case 'connecting':
       return NOT_RUNNING_PHASES.has(state.phase)
@@ -81,7 +89,7 @@ function onStatus(state, status, source) {
     }
     case 'paused':
       return settled('paused');
-    case 'stopped':
+    case 'stopped': {
       if (state.phase === 'requested') {
         // Only the Zoom client knows the request died. A webhook "stopped"
         // here is the previous stream ending late, not a denial.
@@ -89,9 +97,18 @@ function onStatus(state, status, source) {
           ? settled('denied', { action: 'start', code: null, message: DENIED_MESSAGE })
           : state;
       }
+      // Only the server knows why a stream ended
+      const faultError = fault === true && source === 'server'
+        ? { action: 'start', code: STREAM_FAULT, message: FAULT_MESSAGE }
+        : null;
+      if (state.phase === 'stopped') {
+        // The Zoom client may report the stop first; the server's reason follows
+        return faultError && !state.error ? settled('stopped', faultError) : state;
+      }
       return RUNNING_PHASES.has(state.phase) || state.phase === 'starting' || state.phase === 'stalled'
-        ? settled('stopped')
+        ? settled('stopped', faultError)
         : state;
+    }
     case 'interrupted':
       return RUNNING_PHASES.has(state.phase) ? { ...state, phase: 'interrupted' } : state;
     case 'failed':
@@ -132,7 +149,7 @@ export function rtmsReducer(state, event) {
     }
 
     case 'STATUS':
-      return onStatus(state, event.status, event.source);
+      return onStatus(state, event.status, event.source, event.fault);
 
     case 'TRANSCRIPT':
       // Text is flowing, so the stream is up. Late lines after a pause don't count.
@@ -185,7 +202,7 @@ const WS_STATUS = {
   rtms_paused: 'paused',
   rtms_resumed: 'resumed',
   rtms_interrupted: 'interrupted',
-  media_interrupted: 'interrupted', // media-only drop; the rtms service reconnects
+  media_interrupted: 'interrupted', // media drop; the rtms service rejoins the stream
   rtms_failed: 'failed',
 };
 
@@ -217,6 +234,16 @@ export function statusFromPoll(list) {
  */
 export function shouldAutoRestart({ phase, wantsTranscription, alreadyRetried }) {
   return phase === 'starting' && wantsTranscription === true && !alreadyRetried;
+}
+
+/**
+ * A stream that ended by a fault is restarted without a click, but only by the
+ * client that started it (one request, not one per open panel), never after the
+ * user stopped it, and only a few times per meeting.
+ */
+export function shouldRestartAfterFault({ phase, errorCode, startedHere, restarts, guest }) {
+  return phase === 'stopped' && errorCode === STREAM_FAULT
+    && startedHere === true && guest !== true && restarts < FAULT_RESTART_LIMIT;
 }
 
 /**

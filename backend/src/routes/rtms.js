@@ -194,25 +194,12 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     return sendResponse(res, 200, 'OK');
   }
 
-  // Zoom lost the signaling connection for this stream. Tell the meeting so the
-  // panel shows "Reconnecting…" instead of a silent stall. The rtms service is
-  // deliberately NOT told to drop its session here: whether the app or the
-  // @zoom/rtms SDK must reconnect, and how failover is signalled for meetings,
-  // is not settled by Zoom's docs. A later rtms_started, rtms_stopped or
-  // transcript line moves the state on.
-  if (event === 'meeting.rtms_interrupted') {
-    const meetingUuid = payload?.meeting_uuid;
-    if (typeof meetingUuid === 'string' && meetingUuid.length > 0 && meetingUuid.length <= 256) {
-      const sentCount = broadcastMeetingStatus(meetingUuid, 'rtms_interrupted');
-      console.log(`meeting.rtms_interrupted: delivered to ${sentCount} client(s)`);
-    } else {
-      logger.warn('meeting.rtms_interrupted ignored: unexpected payload');
-    }
-    return sendResponse(res, 200, 'OK');
-  }
-
-  // Forward webhook to RTMS service (internal network only)
-  if (event === 'meeting.rtms_started' || event === 'meeting.rtms_stopped') {
+  // Forward the stream lifecycle to the RTMS service (internal network only).
+  // It owns the connection: it joins on started, leaves on stopped, and on
+  // interrupted (Zoom lost the signaling connection) it rejoins within Zoom's
+  // ~60s window and reports "interrupted" / "reconnected" itself.
+  const FORWARDED = ['meeting.rtms_started', 'meeting.rtms_stopped', 'meeting.rtms_interrupted'];
+  if (FORWARDED.includes(event)) {
     try {
       const rtmsServiceUrl = process.env.RTMS_SERVICE_URL || 'http://rtms:3002';
       await axios.post(`${rtmsServiceUrl}/webhook`, body, {
@@ -226,6 +213,14 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       console.log(`Forwarded ${event} to RTMS service`);
     } catch (error) {
       console.error(`Failed to forward webhook to RTMS service:`, error.message);
+      // Nobody is left to report the interruption, so tell the meeting from here:
+      // the panel shows "Reconnecting…" instead of a silent stall.
+      if (event === 'meeting.rtms_interrupted') {
+        const meetingUuid = payload?.meeting_uuid;
+        if (typeof meetingUuid === 'string' && meetingUuid.length > 0 && meetingUuid.length <= 256) {
+          broadcastMeetingStatus(meetingUuid, 'rtms_interrupted');
+        }
+      }
     }
   }
 
@@ -240,6 +235,7 @@ const BROWSER_STATUSES = new Set(['rtms_paused', 'rtms_resumed']);
 const INTERNAL_STATUSES = new Set([
   'rtms_started', 'rtms_stopped', 'rtms_paused', 'rtms_resumed',
   'rtms_interrupted', 'media_interrupted',
+  'rtms_reconnected', // the rtms service rejoined the stream after an interruption
   'rtms_failed', // the rtms service could not join the stream Zoom started
 ]);
 
@@ -257,7 +253,7 @@ function authorizeStatusUpdate(req, res, next) {
 }
 
 router.post('/status', authorizeStatusUpdate, async (req, res) => {
-  const { meetingId, status, operatorId } = req.body || {};
+  const { meetingId, status, operatorId, fault } = req.body || {};
 
   if (typeof meetingId !== 'string' || meetingId.length === 0 || meetingId.length > 200) {
     return res.status(400).json({ error: 'Invalid meetingId' });
@@ -280,13 +276,22 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   }
 
   // Timeline: what Arlo's own connection to the stream did
-  const ARLO_EVENTS = { rtms_started: 'arlo.stream_joined', rtms_failed: 'arlo.join_failed', media_interrupted: 'arlo.media_interrupted' };
+  const ARLO_EVENTS = {
+    rtms_started: 'arlo.stream_joined',
+    rtms_reconnected: 'arlo.stream_rejoined',
+    rtms_failed: 'arlo.join_failed',
+    media_interrupted: 'arlo.media_interrupted',
+  };
   if (req.isInternal && ARLO_EVENTS[status]) {
     rtmsEvents.record({ event: ARLO_EVENTS[status], meetingUuid: meetingId });
   }
 
-  // Broadcast status change to WebSocket clients
-  const sentCount = broadcastMeetingStatus(meetingId, status);
+  // Broadcast status change to WebSocket clients. A rejoined stream is a running
+  // stream to them. `fault` (from the rtms service only) marks a stream Zoom
+  // ended because of a connection problem, so the panel can offer a restart.
+  const clientStatus = status === 'rtms_reconnected' ? 'rtms_started' : status;
+  const endedByFault = req.isInternal && status === 'rtms_stopped' && fault === true;
+  const sentCount = broadcastMeetingStatus(meetingId, clientStatus, { fault: endedByFault });
   console.log(`Broadcast status to ${sentCount} clients`);
 
   // Broadcast transcription lifecycle event for timeline

@@ -57,6 +57,8 @@ export function getTransportView({
       // After a denial, an expiry or a stall the app can't tell whether the host has
       // allowed Arlo since, so it is a plain Start. A failure is "Try again".
       if (phase === 'failed') view.startLabel = 'Try again';
+      // The stream ended because of a connection problem, not because someone stopped it
+      if (phase === 'stopped' && error?.code === 'stream_fault') view.startLabel = 'Restart Transcription';
   }
 
   if (guest) {

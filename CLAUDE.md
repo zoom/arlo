@@ -96,6 +96,21 @@ Zoom RTMS WebSocket → RTMS Service → Backend (broadcast only, NO storage)
 
 **SECURITY:** Data flows through memory only and is never persisted. When the meeting ends or server restarts, all meeting data is gone.
 
+### Stream failover and reconnection
+
+Rules live in `rtms/src/sessions.js` (tested with a fake client in `rtms/test/sessions.test.js`) and follow Zoom's [failover guide](https://developers.zoom.us/docs/rtms/meetings/failover-reconnection/). The backend forwards `meeting.rtms_started`, `rtms_stopped` and `rtms_interrupted` to the rtms service, which owns the connection and reports what happened.
+
+| Signal from Zoom | What Arlo does | Panel shows |
+|---|---|---|
+| `meeting.rtms_started` again for a stream it holds (server failover) | Rejoins at once with the new `server_urls` | Reconnecting… |
+| `meeting.rtms_interrupted` (signaling dropped, ~60s window) | Rejoins after a backoff: 3s, 6s, 12s, 24s, 30s; gives up after 5 attempts | Reconnecting… |
+| Media connection interrupted (~30s window) | Same rejoin: the `@zoom/rtms` SDK has only `join()`/`leave()`, so there is no media-only reconnect | Reconnecting… |
+| `meeting.rtms_stopped` with stop reason 10–19 or 24 | Reports the stop as a fault | "Transcription stopped because of a connection problem" + Restart |
+
+After a fault stop, the panel that started the stream calls `startRTMS` again by itself (at most 3 times per meeting); other panels show the Restart button. A connection that closes on its own is never rejoined before Zoom says what happened.
+
+To watch this in a real meeting, set `CHAOS_DROP_STREAM_AFTER_SEC=15` in `.env` and `docker-compose up -d rtms`: the rtms service drops its connection 15 seconds after every join. Remove it afterwards.
+
 ### Authentication Flow (Zoom OAuth PKCE)
 
 Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — single source of truth for auth.

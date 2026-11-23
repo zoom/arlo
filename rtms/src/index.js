@@ -112,8 +112,20 @@ app.use(express.json({
 
 // Session lifecycle lives in ./sessions.js (tested with a fake client). This
 // file only wires it to the real Zoom SDK client, the backend and the webhook.
+// CHAOS_DROP_STREAM_AFTER_SEC (testing only, off by default): drop the stream
+// connection that many seconds after each join, to watch the reconnection flow
+// in a real meeting. Modelled on Zoom's reconnection_and_chaos_mode_js sample.
+const chaosSeconds = Number.parseInt(process.env.CHAOS_DROP_STREAM_AFTER_SEC || '0', 10);
+const CHAOS_DROP_AFTER_MS = Number.isInteger(chaosSeconds) && chaosSeconds > 0 && chaosSeconds <= 3600
+  ? chaosSeconds * 1000
+  : 0;
+if (CHAOS_DROP_AFTER_MS > 0) {
+  console.warn(`CHAOS MODE: every stream connection is dropped ${chaosSeconds}s after it joins`);
+}
+
 const sessions = createSessionManager({
   createClient: () => new rtms.Client(),
+  chaosDropAfterMs: CHAOS_DROP_AFTER_MS,
   backend: {
     status: notifyBackend,
     segment: broadcastSegment,
@@ -139,7 +151,7 @@ setInterval(() => {
  * Receive RTMS webhooks from Zoom (or forwarded from backend)
  */
 app.post('/webhook', async (req, res) => {
-  const { event, payload } = req.body;
+  const { event, payload, event_ts: eventTs } = req.body;
 
   // Skip HMAC verification for:
   // - endpoint.url_validation (uses its own CRC mechanism)
@@ -172,11 +184,8 @@ app.post('/webhook', async (req, res) => {
         break;
 
       case 'meeting.rtms_interrupted':
-        // Signaling dropped. The session is kept: whether the app or the SDK
-        // must reconnect is not settled for meetings (see the backend's handler).
-        if (typeof payload?.meeting_uuid === 'string') {
-          await notifyBackend(payload.meeting_uuid, 'rtms_interrupted');
-        }
+        // Signaling dropped: rejoin within Zoom's ~60s window
+        await sessions.interrupted(payload, eventTs);
         break;
 
       default:
@@ -223,13 +232,14 @@ async function broadcastParticipantEvents(meetingId, events) {
 /**
  * Notify backend of RTMS status change
  */
-async function notifyBackend(meetingId, status, operatorId) {
+async function notifyBackend(meetingId, status, { operatorId, fault } = {}) {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await internalHttp.post(`${backendUrl}/api/rtms/status`, {
       meetingId,
       status,
       ...(operatorId && { operatorId }),
+      ...(fault === true && { fault: true }),
     });
     console.log(`Notified backend: ${status}`);
   } catch (error) {

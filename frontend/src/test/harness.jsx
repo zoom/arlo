@@ -154,7 +154,7 @@ export { json };
 
 /** Messages the server sends, in the shapes the backend uses. */
 export const serverMessage = {
-  status: (status) => ({ type: 'meeting.status', data: { meetingId: MEETING, status } }),
+  status: (status, extra = {}) => ({ type: 'meeting.status', data: { meetingId: MEETING, status, ...extra } }),
   requestStatus: (status) => ({ type: 'rtms.request_status', data: { meetingId: MEETING, status } }),
   segment: (seqNo, text, extra = {}) => ({
     type: 'transcript.segment',

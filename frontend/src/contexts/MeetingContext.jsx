@@ -12,6 +12,8 @@ import {
   statusFromRtmsStatusList,
   statusFromPoll,
   shouldAutoRestart,
+  shouldRestartAfterFault,
+  STREAM_FAULT,
   canStartRtms,
 } from '../lib/rtmsMachine';
 import { addSegment, mergeHistory } from '../lib/transcript';
@@ -28,6 +30,8 @@ const START_REQUEST_EXPIRY_MS = 60000;
 const STREAM_ARRIVAL_TIMEOUT_MS = 15000;
 // ...and how long before Arlo asks Zoom to start again by itself (once).
 const AUTO_RESTART_DELAY_MS = 6000;
+// After a stream fault: a short pause before asking Zoom for a new stream
+const FAULT_RESTART_DELAY_MS = 2000;
 const START_OPTIONS = {
   audioOptions: { rawAudio: false },
   transcriptOptions: { caption: true },
@@ -96,6 +100,10 @@ export function MeetingProvider({ children }) {
   const startedHereRef = useRef(false);
   const alreadyRunningRef = useRef(false);
   const autoRestartedRef = useRef(false);
+  // Stream faults: whether the stream that just stopped was started here (and
+  // not stopped here), and how many automatic restarts this meeting has had.
+  const stoppedStreamWasOursRef = useRef(false);
+  const faultRestartsRef = useRef(0);
   const isGuestRef = useRef(isGuest);
   const userContextRef = useRef(userContext);
   isGuestRef.current = isGuest;
@@ -126,6 +134,8 @@ export function MeetingProvider({ children }) {
       startedHereRef.current = false;
       alreadyRunningRef.current = false;
       autoRestartedRef.current = false;
+      stoppedStreamWasOursRef.current = false;
+      faultRestartsRef.current = 0;
     } else {
       // Meeting ended — stop reconnecting, close WS, reset state
       shouldReconnectRef.current = false;
@@ -255,7 +265,9 @@ export function MeetingProvider({ children }) {
         case 'meeting.status': {
           // Confirmed by Zoom's webhook: covers REST-started streams and other clients.
           const status = statusFromWs(message.data?.status);
-          if (status) dispatchRtms({ type: 'STATUS', status, source: 'server' });
+          if (status) {
+            dispatchRtms({ type: 'STATUS', status, source: 'server', fault: message.data?.fault === true });
+          }
           break;
         }
         case 'participant.event':
@@ -481,6 +493,8 @@ export function MeetingProvider({ children }) {
         sendChatNoticeRef.current('stop');
         notify('info', 'Transcription stopped');
       }
+      // Remembered for a restart after a fault; the server's reason may come later
+      stoppedStreamWasOursRef.current = startedHereRef.current && local !== 'stop';
       localActionRef.current = null;
       startedHereRef.current = false;
       startNoticeSentRef.current = false;
@@ -567,6 +581,32 @@ export function MeetingProvider({ children }) {
     }, AUTO_RESTART_DELAY_MS);
     return () => clearTimeout(timer);
   }, [rtms.phase, zoomSdk, ws, requestRtms]);
+
+  // Zoom ended the stream because of a connection problem. The client that
+  // started it asks for a new stream once; if that fails, the Restart button
+  // and the message stay (see shouldRestartAfterFault).
+  const faultCode = rtms.phase === 'stopped' ? rtms.error?.code : null;
+  useEffect(() => {
+    if (faultCode !== STREAM_FAULT || !zoomSdk) return undefined;
+    const mayRestart = () => shouldRestartAfterFault({
+      phase: rtmsRef.current.phase,
+      errorCode: rtmsRef.current.error?.code,
+      startedHere: stoppedStreamWasOursRef.current,
+      restarts: faultRestartsRef.current,
+      guest: isGuestRef.current,
+    });
+    if (!mayRestart()) return undefined;
+    const timer = setTimeout(() => {
+      if (!mayRestart()) return;
+      stoppedStreamWasOursRef.current = false;
+      faultRestartsRef.current += 1;
+      startedHereRef.current = true;
+      setStartAttempt((n) => n + 1);
+      console.log('RTMS stream ended by a fault: asking Zoom for a new stream');
+      requestRtms('start', START_OPTIONS);
+    }, FAULT_RESTART_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [faultCode, zoomSdk, requestRtms]);
 
   const stopRTMS = useCallback(async () => {
     const current = rtmsRef.current;

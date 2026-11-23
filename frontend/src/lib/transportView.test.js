@@ -53,6 +53,17 @@ describe('getTransportView', () => {
     expect(v.actions).toEqual(['pause', 'stop']);
   });
 
+  test('a stream that ended by a fault: the reason and a Restart button', () => {
+    const error = { action: 'start', code: 'stream_fault', message: 'Transcription stopped because of a connection problem.' };
+    const v = view({ phase: 'stopped', error });
+    expect(v.state).toBe('not-started');
+    expect(v.message).toBe('Transcription stopped because of a connection problem.');
+    expect(v.actions).toEqual(['start']);
+    expect(v.startLabel).toBe('Restart Transcription');
+    expect(view({ phase: 'stopped' }).startLabel).toBe('Start Transcription');
+    expect(view({ phase: 'stopped', error, guest: true }).actions).toEqual([]);
+  });
+
   test('interrupted stream shows as reconnecting', () => {
     expect(view({ phase: 'interrupted', active: true, hasContent: true }).label).toBe('Reconnecting…');
   });
