@@ -8,6 +8,7 @@
 const express = require('express');
 const { requireAuth, requireMeetingAccess, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
+const { getMeetingStore } = require('../storage');
 
 const router = express.Router();
 
@@ -66,27 +67,26 @@ router.get('/by-zoom-id/:zoomMeetingId', requireMeetingAccess, async (req, res) 
 
 /**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId/transcript
- * Get transcript by Zoom ID - Returns empty in demo mode
- * Note: Live transcripts come via WebSocket, not this endpoint
+ * What has been said in this meeting so far, for a panel that opened late or
+ * reconnected. Only for someone verified to be in that meeting. Empty once the
+ * meeting's data has been flushed.
  */
 router.get('/by-zoom-id/:zoomMeetingId/transcript', requireMeetingAccess, async (req, res) => {
   return res.json({
-    segments: [],
+    segments: getMeetingStore().listSegments(req.params.zoomMeetingId),
     meetingDbId: null,
-    demoMode: true,
-    message: 'Transcript history is not stored in demo mode. Live transcripts are streamed via WebSocket during the meeting.',
+    demoMode: config.demoMode,
   });
 });
 
 /**
  * GET /api/meetings/by-zoom-id/:zoomMeetingId/participant-events
- * Get participant events - Returns empty in demo mode
+ * This meeting's timeline so far (joins, leaves, transcription started/stopped).
  */
 router.get('/by-zoom-id/:zoomMeetingId/participant-events', requireMeetingAccess, async (req, res) => {
   return res.json({
-    events: [],
-    demoMode: true,
-    message: 'Participant events are not stored in demo mode.',
+    events: getMeetingStore().listEvents(req.params.zoomMeetingId),
+    demoMode: config.demoMode,
   });
 });
 

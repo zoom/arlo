@@ -1,15 +1,15 @@
 /**
- * RTMS Routes - Demo Mode
+ * RTMS Routes
  *
- * SECURITY: Live transcription works via WebSocket broadcast.
- * No meeting data is ever persisted to a database.
- * All data exists only in memory during the active meeting.
+ * SECURITY: a meeting's transcript and timeline are held in memory while the
+ * meeting runs (storage/) and deleted when it ends (services/meetingLifecycle.js).
+ * Nothing is written to disk or a database, and nothing is logged.
  *
  * This module handles:
  * - Webhook verification from Zoom
  * - Forwarding webhooks to RTMS service
- * - Broadcasting transcript segments to WebSocket clients
- * - Broadcasting participant events to WebSocket clients
+ * - Storing and broadcasting transcript segments
+ * - Storing and broadcasting participant events
  */
 const express = require('express');
 const crypto = require('crypto');
@@ -34,9 +34,13 @@ const {
 } = require('../services/websocket');
 const { requireAuth } = require('../middleware/auth');
 const { requireInternal, isInternalRequest, INTERNAL_KEY_HEADER, getInternalKey } = require('../lib/internalAuth');
+const { getMeetingStore } = require('../storage');
 
-// Demo mode - no persistence
-console.log('Demo Mode: Transcripts are broadcast in real-time but never stored');
+/** Keep a timeline event for the meeting, then send the stored copy (it has the id). */
+function recordParticipantEvent(meetingId, event) {
+  const stored = getMeetingStore().appendEvent(meetingId, event);
+  return stored ? broadcastParticipantEvent(meetingId, stored) : 0;
+}
 
 /**
  * Send a response and log it in debug mode
@@ -303,12 +307,11 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   };
   const eventType = lifecycleMap[status];
   if (eventType) {
-    broadcastParticipantEvent(meetingId, {
-      eventType,
-      participantName: 'Arlo',
-      participantId: null,
-      timestamp: Date.now(),
-    });
+    const event = { eventType, participantName: 'Arlo', participantId: null, timestamp: Date.now() };
+    // Only the rtms service's reports are kept. A browser names its own
+    // meetingId here, so its pause/resume report is passed on but not stored.
+    if (req.isInternal) recordParticipantEvent(meetingId, event);
+    else broadcastParticipantEvent(meetingId, event);
   }
 
   res.status(200).json({ received: true, broadcast: sentCount });
@@ -316,8 +319,8 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
 
 /**
  * POST /api/rtms/broadcast
- * Receive transcript segments from RTMS service to broadcast to clients
- * No data is stored - broadcast only
+ * A transcript segment from the RTMS service: kept for the meeting (in memory,
+ * until the meeting ends) and sent to the panels connected to it.
  */
 router.post('/broadcast', requireInternal, async (req, res) => {
   const { meetingId, segment } = req.body || {};
@@ -325,9 +328,12 @@ router.post('/broadcast', requireInternal, async (req, res) => {
     return res.status(400).json({ error: 'Invalid broadcast payload' });
   }
 
-  // Broadcast transcript segment to all WebSocket clients
-  const sentCount = broadcastTranscriptSegment(meetingId, segment);
-  logger.debug(`Broadcast transcript to ${sentCount} clients (demo mode - not stored)`);
+  const stored = getMeetingStore().appendSegment(meetingId, segment);
+  if (!stored) {
+    return res.status(400).json({ error: 'Invalid segment' });
+  }
+  const sentCount = broadcastTranscriptSegment(meetingId, stored);
+  logger.debug(`Transcript segment kept and sent to ${sentCount} client(s)`);
 
   res.status(200).json({ received: true, broadcast: sentCount });
 });
@@ -335,7 +341,7 @@ router.post('/broadcast', requireInternal, async (req, res) => {
 /**
  * POST /api/rtms/participant-event
  * Receive participant join/leave events from RTMS service
- * No data is stored - broadcast only
+ * Kept for the meeting (in memory) and sent to its panels
  */
 router.post('/participant-event', requireInternal, async (req, res) => {
   const { meetingId, events } = req.body || {};
@@ -347,8 +353,8 @@ router.post('/participant-event', requireInternal, async (req, res) => {
 
   // Broadcast each event to WebSocket clients
   let sentCount = 0;
-  for (const event of events) {
-    sentCount += broadcastParticipantEvent(meetingId, event);
+  for (const event of events.slice(0, 200)) {
+    sentCount += recordParticipantEvent(meetingId, event);
   }
 
   res.status(200).json({ received: true, broadcast: sentCount });
