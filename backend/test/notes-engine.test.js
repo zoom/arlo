@@ -448,3 +448,19 @@ test('a disabled engine does nothing', async () => {
   assert.equal(calls.length, 0);
   assert.equal(engine.size(), 0);
 });
+
+// --- the transcript as lines of model input -----------------------------------
+
+const { newestLines } = require('../src/lib/transcriptLines');
+
+test('newestLines: one line per segment, newest kept within the limit, and where they end', () => {
+  const segments = [1, 2, 3, 4].map((seqNo) => ({ seqNo, speakerLabel: 'Ana', text: `${seqNo} ${'x'.repeat(20)}` }));
+  assert.deepEqual(newestLines(segments, 1000).lines.length, 4);
+  const cut = newestLines(segments, 60);
+  assert.equal(cut.lines.length, 2);
+  assert.ok(cut.lines[0].startsWith('Ana: 3 '));
+  assert.ok(cut.lines.join('\n').length <= 60);
+  assert.deepEqual(newestLines([], 100), { lines: [] });
+  assert.deepEqual(newestLines([{ seqNo: 1, speakerLabel: 'A\nB', text: 'x\r\ny' }], 100).lines, ['A B: x y']);
+  assert.deepEqual(newestLines([{ seqNo: 1, speakerLabel: 'Ana', text: 'z'.repeat(500) }], 50).lines[0].length, 50);
+});

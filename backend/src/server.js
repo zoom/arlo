@@ -138,14 +138,8 @@ const authPollLimiter = rateLimit({
 });
 app.use('/api/auth/poll-code', authPollLimiter);
 
-// Stricter rate limit for AI endpoints
-const aiLimiter = rateLimit({
-  windowMs: 1 * 60 * 1000, // 1 minute
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many AI requests, please try again later' },
-});
+// Stricter rate limit for AI endpoints (also applied to Arlo's ask route, in routes/arlo.js)
+const { aiLimiter } = require('./middleware/aiLimiter');
 app.use('/api/ai/', aiLimiter);
 
 // =============================================================================
@@ -164,6 +158,8 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/auth', require('./routes/auth'));
+// Before the generic meetings router, whose /:id routes would otherwise answer
+app.use('/api/meetings/by-zoom-id/:zoomMeetingId/arlo', require('./routes/arlo'));
 app.use('/api/meetings', require('./routes/meetings'));
 app.use('/api/search', require('./routes/search'));
 app.use('/api/ai', require('./routes/ai'));

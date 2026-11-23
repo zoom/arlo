@@ -23,6 +23,8 @@
  * the meeting. Never log transcript text, notes or names from here: log lines
  * carry an error code at most.
  */
+const { newestLines } = require('../lib/transcriptLines');
+
 const MAX_ID_CHARS = 256;
 const RATE_LIMIT_WAIT_MS = 2 * 60 * 1000;
 // More than the store keeps (20 decisions, 30 action items); the store cuts the rest
@@ -38,8 +40,6 @@ const textOf = (object, key) => {
   const trimmed = object[key].trim();
   return trimmed.length > 0 ? trimmed : null;
 };
-const oneLine = (value) => String(value).replace(/\s+/g, ' ').trim();
-
 const defaultSchedule = (fn, ms) => {
   const timer = setTimeout(fn, ms);
   if (typeof timer.unref === 'function') timer.unref();
@@ -121,18 +121,7 @@ function createNotesEngine({
   /** The lines after `throughSeqNo` as "<speaker>: <text>", newest kept within the size limit. */
   function inputFor(meetingId, throughSeqNo) {
     const segments = store.listSegments(meetingId).filter((segment) => segment.seqNo > throughSeqNo);
-    const lines = [];
-    let used = 0;
-    for (let i = segments.length - 1; i >= 0; i -= 1) {
-      const room = maxInputChars - used - (lines.length > 0 ? 1 : 0); // 1 = the line break
-      let line = `${oneLine(segments[i].speakerLabel)}: ${oneLine(segments[i].text)}`;
-      if (line.length > room) {
-        if (lines.length > 0) break;
-        line = line.slice(0, Math.max(room, 0)); // one line over the limit: cut, not skipped
-      }
-      lines.unshift(line);
-      used += line.length + (lines.length > 1 ? 1 : 0);
-    }
+    const { lines } = newestLines(segments, maxInputChars);
     return { lines, through: segments.length > 0 ? segments[segments.length - 1].seqNo : throughSeqNo };
   }
 
