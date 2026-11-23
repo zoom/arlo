@@ -1,16 +1,17 @@
-import React from 'react';
+import React, { forwardRef } from 'react';
 import './Button.css';
 
-export default function Button({
+const Button = forwardRef(function Button({
   children,
   variant = 'default',
   size = 'default',
   className = '',
   disabled,
   ...props
-}) {
+}, ref) {
   return (
     <button
+      ref={ref}
       className={`btn btn-${variant} btn-size-${size} ${className}`}
       disabled={disabled}
       {...props}
@@ -18,4 +19,6 @@ export default function Button({
       {children}
     </button>
   );
-}
+});
+
+export default Button;

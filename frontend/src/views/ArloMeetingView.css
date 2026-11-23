@@ -222,6 +222,51 @@
   color: var(--muted-foreground);
 }
 
+/* Under the notes: the record link, and "Post notes to chat" as a quiet second action */
+.arlo-notes-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  min-height: 32px;
+}
+
+.arlo-notes-actions .arlo-link {
+  align-self: center;
+}
+
+.arlo-post {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.arlo-post-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.arlo-post-question,
+.arlo-post-status {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.arlo-post-question {
+  color: var(--foreground);
+}
+
+/* Takes the focus when the buttons it replaces are gone: no ring for a focus
+   the user did not move there */
+.arlo-post-status:focus {
+  outline: none;
+}
+
 /* Participant view */
 .arlo-participant {
   display: flex;

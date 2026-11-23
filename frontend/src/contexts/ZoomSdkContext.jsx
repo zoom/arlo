@@ -83,6 +83,8 @@ export function ZoomSdkProvider({ children }) {
   const [rtmsStatusSupported, setRtmsStatusSupported] = useState(false);
   // true once zoomSdk.config() accepted setDynamicIndicator + removeDynamicIndicator
   const [dynamicIndicatorSupported, setDynamicIndicatorSupported] = useState(false);
+  // true once zoomSdk.config() accepted sendMessageToChat and the client has the method
+  const [chatSupported, setChatSupported] = useState(false);
   // null = SDK not loaded yet, true = guest, false = authorized user
   const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
 
@@ -148,6 +150,8 @@ export function ZoomSdkProvider({ children }) {
           removeMethod: typeof zoomSdk.removeDynamicIndicator,
         });
         setDynamicIndicatorSupported(indicatorAccepted);
+        setChatSupported(acceptedCapabilities.includes('sendMessageToChat')
+          && typeof zoomSdk.sendMessageToChat === 'function');
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
@@ -285,8 +289,9 @@ export function ZoomSdkProvider({ children }) {
     isGuest,
     rtmsStatusSupported,
     dynamicIndicatorSupported,
+    chatSupported,
     isTestMode: isTestModeState,
-  }), [zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, isTestModeState]);
+  }), [zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
 
   return (
     <ZoomSdkContext.Provider value={contextValue}>
