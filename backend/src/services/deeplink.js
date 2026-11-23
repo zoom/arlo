@@ -2,10 +2,12 @@
  * "Open Arlo in Zoom": a link that opens the Zoom client straight into the app.
  *
  * First choice is Zoom's deeplink API (POST /v2/zoomapp/deeplink), called with
- * the user's own token. It works for unpublished apps too, but needs the
- * app:deeplink:write scope. If that call is refused or the user has no usable
- * token, the fallback is Zoom's documented Marketplace launch URL, which needs
- * no token but only works for a published app the user has added.
+ * the user's own token. It works for unpublished apps too. Zoom's API reference
+ * lists the app:deeplink:write scope for it, but that scope cannot be added to
+ * a Zoom App in the Marketplace UI and, per the app owner, does not need to be
+ * registered. If the call is refused or the user has no usable token, the
+ * fallback is Zoom's documented Marketplace launch URL, which needs no token
+ * but only works for a published app the user has added.
  *
  * A deeplink is per user and short-lived: it is generated on demand, never
  * cached and never logged.
