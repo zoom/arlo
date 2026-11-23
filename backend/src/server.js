@@ -172,6 +172,7 @@ app.use('/api/highlights', require('./routes/highlights'));
 app.use('/api/home', require('./routes/home'));
 app.use('/api/preferences', require('./routes/preferences'));
 app.use('/api/zoom-meetings', require('./routes/zoom-meetings'));
+app.use('/api/tokens', require('./routes/tokens'));
 
 // =============================================================================
 // FRONTEND PROXY (with friendly startup page)

@@ -19,6 +19,8 @@ const config = require('../config');
 const logger = require('../lib/logger');
 const { userStore } = require('../lib/memoryStore');
 const deauthorized = require('../lib/deauthorized');
+const apiTokens = require('../lib/apiTokens');
+const { sessionOrToken } = require('../middleware/apiToken');
 const {
   broadcastTranscriptSegment,
   broadcastParticipantEvent,
@@ -154,6 +156,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       const user = userStore.findByZoomId(zoomUserId);
       if (user) {
         disconnectUser(user.id);
+        apiTokens.revokeAllFor(user.id);
         userStore.delete(user.id); // also deletes their OAuth tokens
       }
       console.log(`app_deauthorized: user data removed (${user ? 'user was in memory' : 'no data held'})`);
@@ -353,7 +356,7 @@ if (process.env.ENABLE_DEBUG_ROUTES === 'true') {
  * Start or stop RTMS via Zoom REST API
  * Note: This still works in demo mode as it calls Zoom's API directly
  */
-router.post('/start', requireAuth, async (req, res) => {
+router.post('/start', sessionOrToken('rtms:control'), async (req, res) => {
   const { meetingId, meetingNumber, action = 'start' } = req.body;
 
   // In demo mode, we can't make Zoom API calls because we don't have stored tokens
@@ -362,6 +365,15 @@ router.post('/start', requireAuth, async (req, res) => {
     message: 'RTMS control via REST API is not available in demo mode. Use the Zoom SDK start/stop methods in the client instead.',
     available: false,
   });
+});
+
+/**
+ * GET /api/rtms/events
+ * Timeline of RTMS events for the caller's own meetings (filled in below).
+ */
+router.get('/events', sessionOrToken('rtms:read'), (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ events: [] });
 });
 
 module.exports = router;

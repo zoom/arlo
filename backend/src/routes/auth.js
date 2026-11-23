@@ -13,6 +13,7 @@ const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
 const deauthorized = require('../lib/deauthorized');
 const oauthState = require('../services/oauthState');
+const apiTokens = require('../lib/apiTokens');
 const { createDeeplink } = require('../services/deeplink');
 const { setRestoreCookie, clearRestoreCookie } = require('../services/sessionRestore');
 
@@ -547,8 +548,9 @@ router.post('/logout', async (req, res) => {
       });
     });
 
-    // Delete user tokens from memory
+    // Delete user tokens from memory, and revoke their API tokens
     tokenStore.delete(req.user.id);
+    apiTokens.revokeAllFor(req.user.id);
 
     // Clear session cookie
     res.clearCookie('sessionToken', {
