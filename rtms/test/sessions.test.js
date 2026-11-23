@@ -809,3 +809,67 @@ test('what people say and who they are never reaches the logs, at any log level'
     assert.equal(output.includes(secret), false, `logged "${secret}"`);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Pause and resume made with Zoom's own controls: the SDK's session update
+// says so (SESSION_EVENT_PAUSE = 3, SESSION_EVENT_RESUME = 4).
+// ---------------------------------------------------------------------------
+
+test('a pause and a resume reported by the RTMS session are passed on for that stream', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  await manager.started(second());
+  clients[0].handlers.joinConfirm(0);
+  clients[1].handlers.joinConfirm(0);
+  await tick();
+  sent.status.length = 0;
+
+  clients[1].handlers.sessionUpdate(3, { sessionId: 'x' });
+  await tick();
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_paused', streamId: 'stream-2' }]);
+
+  clients[1].handlers.sessionUpdate(4, { sessionId: 'x' });
+  await tick();
+  assert.deepEqual(statuses(sent), ['rtms_paused', 'rtms_resumed']);
+  assert.equal(sent.status[1].streamId, 'stream-2');
+});
+
+test('other session updates, and updates in any other form, report nothing', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  await tick();
+  sent.status.length = 0;
+  for (const op of [0, 1, 2, 5, '3', '4', null, undefined, {}, 3.5]) clients[0].handlers.sessionUpdate(op);
+  await tick();
+  assert.deepEqual(sent.status, []);
+});
+
+test('a session update is only taken from the current client of a stream that is streaming', async () => {
+  const { manager, clients, sent, fire } = setup();
+  await manager.started(started());
+  // not joined yet
+  clients[0].handlers.sessionUpdate(3);
+  clients[0].handlers.joinConfirm(0);
+  await tick();
+  // reconnecting: the old client is replaced, the new one not confirmed
+  await manager.interrupted({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-1' });
+  clients[0].handlers.sessionUpdate(3);
+  fire(3000);
+  clients[0].handlers.sessionUpdate(3);
+  clients[1].handlers.sessionUpdate(3);
+  await tick();
+  assert.deepEqual(statuses(sent), ['rtms_started', 'rtms_interrupted']);
+
+  clients[1].handlers.joinConfirm(0);
+  clients[1].handlers.sessionUpdate(3);
+  await tick();
+  assert.deepEqual(statuses(sent), ['rtms_started', 'rtms_interrupted', 'rtms_reconnected', 'rtms_paused']);
+
+  // a stream that ended reports nothing more
+  await manager.stopped({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-1', stop_reason: 2 });
+  clients[1].handlers.sessionUpdate(4);
+  await tick();
+  assert.equal(statuses(sent).at(-1), 'rtms_stopped');
+  assert.equal(statuses(sent).filter((s) => s === 'rtms_resumed').length, 0);
+});

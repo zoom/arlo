@@ -531,3 +531,156 @@ test('a browser\'s pause or resume report never reaches the meeting lifecycle; t
   await h.wait(450);
   assert.deepEqual(await texts(meeting), ['kept through the pause']);
 });
+
+// --- a pause made with Zoom's own controls, reported by the rtms service --------
+
+const count = (ws, type) => ofType(ws, type).length;
+
+test('a native pause of the only stream pauses the meeting, lines do not clear it, the service\'s resume does', async () => {
+  const meeting = 'NATIVE-1==';
+  const owner = await openPanel(meeting, ana());
+  const guest = await openPanel(meeting, null);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await h.wait(100);
+  assert.deepEqual(told(guest), ['rtms_started', 'rtms_paused']);
+  assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [true, true]);
+  assert.equal(state(guest).paused, true);
+
+  // Zoom said it is paused: a line arriving later does not say otherwise
+  await later(4000, () => say(meeting, 's1', 'still on its way'));
+  await later(60_000, () => say(meeting, 's1', 'and another'));
+  await h.wait(100);
+  assert.deepEqual(told(guest), ['rtms_started', 'rtms_paused']);
+  assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [true, true]);
+
+  await status(meeting, { status: 'rtms_resumed', streamId: 's1' });
+  await h.wait(100);
+  for (const ws of [owner, guest]) ws.socket.close();
+  assert.deepEqual(told(guest), ['rtms_started', 'rtms_paused', 'rtms_resumed']);
+  assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [false, false]);
+  assert.deepEqual(await timeline(meeting), ['transcription_started', 'transcription_paused', 'transcription_resumed']);
+  assert.deepEqual(await texts(meeting), ['still on its way', 'and another']);
+});
+
+test('two streams, one paused natively: the meeting is not paused, only that owner\'s stream is', async () => {
+  const meeting = 'NATIVE-2==';
+  const anaPanel = await openPanel(meeting, ana());
+  const benPanel = await openPanel(meeting, ben());
+  const guest = await openPanel(meeting, null);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: ben().zoomUserId });
+
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await h.wait(100);
+  for (const ws of [anaPanel, benPanel, guest]) ws.socket.close();
+  assert.deepEqual(told(guest), ['rtms_started']);
+  assert.deepEqual([state(anaPanel).paused, state(anaPanel).myStreamPaused], [false, true]);
+  assert.deepEqual([state(benPanel).paused, state(benPanel).myStreamPaused], [false, false]);
+  assert.deepEqual(await timeline(meeting), ['transcription_started']);
+});
+
+test('a natively paused stream that stops is stopped, and a new start is running', async () => {
+  const meeting = 'NATIVE-3==';
+  const owner = await openPanel(meeting, ana());
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await status(meeting, { status: 'rtms_stopped', streamId: 's1' });
+  await h.wait(100);
+  assert.deepEqual(told(owner), ['rtms_started', 'rtms_paused', 'rtms_stopped']);
+  assert.deepEqual([state(owner).present, state(owner).paused, state(owner).myStreamPaused], [false, false, false]);
+  // a resume for the stream that is gone changes nothing
+  await status(meeting, { status: 'rtms_resumed', streamId: 's1' });
+
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: ana().zoomUserId });
+  await h.wait(100);
+  owner.socket.close();
+  assert.deepEqual(told(owner), ['rtms_started', 'rtms_paused', 'rtms_stopped', 'rtms_started']);
+  assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [false, false]);
+});
+
+test('the same native pause or resume reported twice is told once', async () => {
+  const meeting = 'NATIVE-4==';
+  const owner = await openPanel(meeting, ana());
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await h.wait(100);
+  const afterPause = [count(owner, 'meeting.status'), count(owner, 'arlo.state'), count(owner, 'participant.event')];
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await h.wait(100);
+  assert.deepEqual([count(owner, 'meeting.status'), count(owner, 'arlo.state'), count(owner, 'participant.event')], afterPause);
+
+  await status(meeting, { status: 'rtms_resumed', streamId: 's1' });
+  await h.wait(100);
+  const afterResume = [count(owner, 'meeting.status'), count(owner, 'arlo.state'), count(owner, 'participant.event')];
+  await status(meeting, { status: 'rtms_resumed', streamId: 's1' });
+  await h.wait(100);
+  owner.socket.close();
+  assert.deepEqual([count(owner, 'meeting.status'), count(owner, 'arlo.state'), count(owner, 'participant.event')], afterResume);
+  assert.deepEqual(told(owner), ['rtms_started', 'rtms_paused', 'rtms_resumed']);
+  assert.deepEqual(await timeline(meeting), ['transcription_started', 'transcription_paused', 'transcription_resumed']);
+});
+
+test('the panel\'s report and the service\'s report of one pause are one change, in either order', async () => {
+  const meeting = 'NATIVE-5==';
+  const owner = await openPanel(meeting, ana());
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+  const counts = () => [count(owner, 'meeting.status'), count(owner, 'arlo.state'), count(owner, 'participant.event')];
+
+  // the panel first, then the service
+  await report(meeting, ana(), 'rtms_paused');
+  await h.wait(100);
+  const afterPause = counts();
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await h.wait(100);
+  assert.deepEqual(counts(), afterPause);
+  // Zoom confirmed it: the line rule of an unconfirmed pause no longer applies
+  await later(4000, () => say(meeting, 's1', 'on its way'));
+  await h.wait(100);
+  assert.deepEqual(told(owner), ['rtms_started', 'rtms_paused']);
+  // the pause the panel reported was shown but not kept; the service's confirmation keeps it, once
+  assert.deepEqual(await timeline(meeting), ['transcription_started', 'transcription_paused']);
+
+  // the service first, then the panel
+  await status(meeting, { status: 'rtms_resumed', streamId: 's1' });
+  await h.wait(100);
+  const afterResume = counts();
+  await report(meeting, ana(), 'rtms_resumed');
+  await h.wait(100);
+  assert.deepEqual(counts(), afterResume);
+  assert.deepEqual(told(owner), ['rtms_started', 'rtms_paused', 'rtms_resumed']);
+
+  // service pause, then the panel's report of the same pause: still confirmed
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await report(meeting, ana(), 'rtms_paused');
+  await later(4000, () => say(meeting, 's1', 'later'));
+  // panel resume first, then the service's
+  await report(meeting, ana(), 'rtms_resumed');
+  await status(meeting, { status: 'rtms_resumed', streamId: 's1' });
+  await h.wait(100);
+  owner.socket.close();
+  assert.deepEqual(told(owner), ['rtms_started', 'rtms_paused', 'rtms_resumed', 'rtms_paused', 'rtms_resumed']);
+  assert.deepEqual(await timeline(meeting), [
+    'transcription_started', 'transcription_paused', 'transcription_resumed', 'transcription_paused', 'transcription_resumed',
+  ]);
+});
+
+test('after a rejoin a native pause stands, but a line then shows the stream is running (a resume may have been missed)', async () => {
+  const meeting = 'NATIVE-6==';
+  const owner = await openPanel(meeting, ana());
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await status(meeting, { status: 'rtms_interrupted', streamId: 's1' });
+  await status(meeting, { status: 'rtms_reconnected', streamId: 's1', operatorId: ana().zoomUserId });
+  await h.wait(100);
+  assert.equal(told(owner).at(-1), 'rtms_paused');
+  assert.equal(state(owner).myStreamPaused, true);
+
+  await later(4000, () => say(meeting, 's1', 'running after all'));
+  await h.wait(100);
+  owner.socket.close();
+  assert.equal(told(owner).at(-1), 'rtms_resumed');
+  assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [false, false]);
+});

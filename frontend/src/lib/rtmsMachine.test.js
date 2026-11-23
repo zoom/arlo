@@ -506,3 +506,64 @@ describe('a stream Zoom ended because of a connection problem', () => {
     expect(shouldRestartAfterFault({ ...fault, restarts: FAULT_RESTART_LIMIT })).toBe(false);
   });
 });
+
+describe('a pause or resume Zoom does not confirm, when the server already says what was asked for', () => {
+  const live = rtmsReducer(initialRtmsState, { type: 'STATUS', status: 'started', source: 'server' });
+  const paused = rtmsReducer(live, { type: 'STATUS', status: 'paused', source: 'server' });
+  const ask = (from, action) => rtmsReducer(from, { type: 'REQUEST', action });
+
+  test('an unconfirmed pause of a stream the server says is paused is paused, without an error', () => {
+    const state = rtmsReducer(ask(live, 'pause'), { type: 'TIMEOUT', serverPaused: true });
+    expect(state).toEqual({ phase: 'paused', pending: null, error: null, waitingLong: false });
+  });
+
+  test('an unconfirmed resume of a stream the server says is running is running, without an error', () => {
+    const state = rtmsReducer(ask(paused, 'resume'), { type: 'TIMEOUT', serverPaused: false });
+    expect(state).toEqual({ phase: 'active', pending: null, error: null, waitingLong: false });
+  });
+
+  test('a pause or resume Zoom refuses is treated the same way', () => {
+    const refused = (action) => ({ type: 'REQUEST_FAILED', action, code: '10000', message: 'Already in that state' });
+    expect(rtmsReducer(ask(live, 'pause'), { ...refused('pause'), serverPaused: true }))
+      .toEqual({ phase: 'paused', pending: null, error: null, waitingLong: false });
+    expect(rtmsReducer(ask(paused, 'resume'), { ...refused('resume'), serverPaused: false }))
+      .toEqual({ phase: 'active', pending: null, error: null, waitingLong: false });
+  });
+
+  test('when the server does not agree, or has not said, the error is shown as before', () => {
+    for (const serverPaused of [false, null, undefined]) {
+      const state = rtmsReducer(ask(live, 'pause'), { type: 'TIMEOUT', serverPaused });
+      expect(state.phase).toBe('active');
+      expect(state.error.message).toBe('Zoom did not confirm the request. Try again.');
+    }
+    for (const serverPaused of [true, null, undefined]) {
+      const state = rtmsReducer(ask(paused, 'resume'), { type: 'REQUEST_FAILED', action: 'resume', message: 'No', serverPaused });
+      expect(state.phase).toBe('paused');
+      expect(state.error.message).toBe('No');
+    }
+    // a stop is never taken as done from the pause state
+    expect(rtmsReducer(ask(live, 'stop'), { type: 'TIMEOUT', serverPaused: true }).error.action).toBe('stop');
+  });
+
+  test('the server saying so after the error was shown takes the error away', () => {
+    const failedPause = rtmsReducer(ask(live, 'pause'), { type: 'TIMEOUT' });
+    expect(failedPause.error).not.toBeNull();
+    expect(rtmsReducer(failedPause, { type: 'SERVER_PAUSE', paused: false })).toBe(failedPause);
+    expect(rtmsReducer(failedPause, { type: 'SERVER_PAUSE', paused: true }))
+      .toEqual({ phase: 'paused', pending: null, error: null, waitingLong: false });
+
+    const failedResume = rtmsReducer(ask(paused, 'resume'), { type: 'TIMEOUT' });
+    expect(rtmsReducer(failedResume, { type: 'SERVER_PAUSE', paused: true })).toBe(failedResume);
+    expect(rtmsReducer(failedResume, { type: 'SERVER_PAUSE', paused: false }).phase).toBe('active');
+    expect(rtmsReducer(failedResume, { type: 'SERVER_PAUSE', paused: false }).error).toBeNull();
+  });
+
+  test('the server\'s word changes nothing without such an error: not a running stream, not a request in flight, not another error', () => {
+    for (const state of [live, paused, ask(live, 'pause'), ask(paused, 'resume'), initialRtmsState]) {
+      expect(rtmsReducer(state, { type: 'SERVER_PAUSE', paused: true })).toBe(state);
+      expect(rtmsReducer(state, { type: 'SERVER_PAUSE', paused: false })).toBe(state);
+    }
+    const failedStop = rtmsReducer(ask(live, 'stop'), { type: 'TIMEOUT' });
+    expect(rtmsReducer(failedStop, { type: 'SERVER_PAUSE', paused: true })).toBe(failedStop);
+  });
+});

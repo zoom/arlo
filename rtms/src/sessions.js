@@ -62,6 +62,12 @@ const isDeliberateStop = (reason) => Number.isInteger(reason)
 // RTMS stop reason 6: the stream ended because the meeting did
 const MEETING_ENDED = 6;
 
+// What the SDK's onSessionUpdate(op) reports: the values of @zoom/rtms's
+// SESSION_EVENT_PAUSE and SESSION_EVENT_RESUME (SESSION_EVENT_ADD is 1,
+// SESSION_EVENT_STOP 2). Defined here because this module never imports the SDK.
+const SESSION_EVENT_PAUSE = 3;
+const SESSION_EVENT_RESUME = 4;
+
 const defaultSchedule = (fn, ms) => {
   const timer = setTimeout(fn, ms);
   if (typeof timer.unref === 'function') timer.unref();
@@ -369,8 +375,14 @@ function createSessionManager({
       connectionLost(session, { alreadyClosed: true });
     });
 
-    client.onSessionUpdate((event) => {
-      log.log('Session update:', event);
+    // Someone paused or resumed this stream, with Arlo's button or with Zoom's
+    // own controls ("Apps that access meeting content"). Zoom sends no webhook
+    // for it: this is the only place it is heard of.
+    client.onSessionUpdate((op) => {
+      log.log('Session update:', typeof op === 'number' ? op : 'unexpected form');
+      if (!isCurrent() || session.state !== 'streaming') return;
+      if (op === SESSION_EVENT_PAUSE) reportFor(session, 'rtms_paused');
+      else if (op === SESSION_EVENT_RESUME) reportFor(session, 'rtms_resumed');
     });
 
     // Scenario 3: media dropped while signaling survives. Zoom allows ~30s.

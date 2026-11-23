@@ -82,10 +82,29 @@ function syncPause(meetingId, { stored = true } = {}) {
   if (paused === (told === 'rtms_paused')) return 0;
   const sentCount = broadcastMeetingStatus(meetingId, paused ? 'rtms_paused' : 'rtms_resumed');
   const event = arloEvent(paused ? 'transcription_paused' : 'transcription_resumed');
-  // eslint-disable-next-line no-use-before-define
-  if (stored) recordParticipantEvent(meetingId, event);
-  else broadcastParticipantEvent(meetingId, event);
+  if (stored) {
+    // eslint-disable-next-line no-use-before-define
+    recordParticipantEvent(meetingId, event);
+    streams.pauseKept(meetingId, paused);
+  } else {
+    broadcastParticipantEvent(meetingId, event);
+  }
   return sentCount;
+}
+
+/**
+ * The rtms service confirmed a pause or resume the panels were already told
+ * of (a panel reported it first, and a browser's word is shown, not kept):
+ * the timeline line is kept now, once, and not sent again.
+ */
+function keepConfirmedPause(meetingId) {
+  const streams = getMeetingStreams();
+  if (!streams.anyLive(meetingId)) return;
+  const paused = streams.pauseState(meetingId).meeting;
+  if (paused !== (currentStreamStatus(meetingId) === 'rtms_paused') || paused === streams.pauseKept(meetingId)) return;
+  if (!getMeetingLifecycle().dataReceived(meetingId)) return;
+  getMeetingStore().appendEvent(meetingId, arloEvent(paused ? 'transcription_paused' : 'transcription_resumed'));
+  streams.pauseKept(meetingId, paused);
 }
 
 /**
@@ -480,16 +499,20 @@ function inMeeting(req, meetingId) {
 
 /**
  * A pause or resume report. Pause is per stream: the rtms service names the
- * stream; a browser's report is about the caller's own running stream, found
- * from who they are (nothing the browser sends names it). The panels hear of
- * it only when the meeting as a whole changes (see syncPause); each owner's
- * `arlo.state` says whether their own stream is paused.
+ * stream, and its word is Zoom's own (the stream's session said so, also for
+ * a pause made with Zoom's controls): a line does not undo it. A browser's
+ * report is about the caller's own running stream, found from who they are
+ * (nothing the browser sends names it). The panels hear of it only when the
+ * meeting as a whole changes (see syncPause); each owner's `arlo.state` says
+ * whether their own stream is paused, and is sent when a report changed
+ * something: the same pause reported twice, or by both, is told once.
  */
 function pauseReported(req, res, { meetingId, status, streamId }) {
   const streams = getMeetingStreams();
   const paused = status === 'rtms_paused';
+  const before = JSON.stringify(streams.pauseState(meetingId));
   if (req.isInternal) {
-    streams.setPaused(meetingId, { streamId }, paused);
+    streams.setPaused(meetingId, { streamId }, paused, { confirmed: true });
   } else {
     const operatorId = getArloPresence().liveStreamOperator(meetingId, req.user.id);
     if (operatorId === null) {
@@ -502,7 +525,8 @@ function pauseReported(req, res, { meetingId, status, streamId }) {
   // nothing for it, and a browser cannot start a flush or hold data back
   if (req.isInternal) getMeetingLifecycle().streamStatus(meetingId, status);
   const sentCount = syncPause(meetingId, { stored: req.isInternal === true });
-  broadcastArloState(meetingId);
+  if (req.isInternal) keepConfirmedPause(meetingId);
+  if (sentCount > 0 || JSON.stringify(streams.pauseState(meetingId)) !== before) broadcastArloState(meetingId);
   return res.status(200).json({ received: true, broadcast: sentCount });
 }
 

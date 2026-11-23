@@ -161,6 +161,11 @@ export function MeetingProvider({ children }) {
   // request has not ended. Known before the stream is confirmed.
   const [startAskedHere, setStartAskedHere] = useState(false);
   const [voiceState, setVoiceState] = useState({ enabled: false, processing: false });
+  // What the server says about this person's own stream: paused (true), running
+  // (false), or nothing (null: not an owner, Arlo not here, or not told yet).
+  // From `arlo.state` on the socket. A pause made with Zoom's own controls is
+  // only known this way.
+  const ownPauseOnServerRef = useRef(null);
   const stoppedStreamWasOursRef = useRef(false);
   const faultRestartsRef = useRef(0);
   const isGuestRef = useRef(isGuest);
@@ -390,6 +395,8 @@ export function MeetingProvider({ children }) {
   // connectWebSocket, after verifyMeetingAccess succeeded: no socket exists
   // before access is verified, so no message is applied before then either.
   const openSocket = useCallback((meetingId) => {
+    // A new socket (another meeting, or a reconnect): the server says it again
+    ownPauseOnServerRef.current = null;
     // A retry still waiting would replace the socket about to be opened
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -466,6 +473,12 @@ export function MeetingProvider({ children }) {
         case 'arlo.state':
           // Arlo is in the meeting, so the meeting goes on: covers a missed "started"
           if (data.present === true) setMeetingEnded(false);
+          ownPauseOnServerRef.current = data.present === true && data.role === 'owner' && typeof data.myStreamPaused === 'boolean'
+            ? data.myStreamPaused
+            : null;
+          if (ownPauseOnServerRef.current !== null) {
+            dispatchRtms({ type: 'SERVER_PAUSE', paused: ownPauseOnServerRef.current });
+          }
           break;
         case 'participant.event': {
           const incoming = message.data?.event;
@@ -649,7 +662,7 @@ export function MeetingProvider({ children }) {
     const waiting = rtms.phase === 'requested' || rtms.pending !== null;
     if (!waiting || rtms.waitingLong) return undefined;
     const delay = rtms.phase === 'requested' ? START_CONFIRM_TIMEOUT_MS : ACTION_CONFIRM_TIMEOUT_MS;
-    const timer = setTimeout(() => dispatchRtms({ type: 'TIMEOUT' }), delay);
+    const timer = setTimeout(() => dispatchRtms({ type: 'TIMEOUT', serverPaused: ownPauseOnServerRef.current }), delay);
     return () => clearTimeout(timer);
   }, [rtms.phase, rtms.pending, rtms.waitingLong]);
 
@@ -797,7 +810,9 @@ export function MeetingProvider({ children }) {
       if (action === 'start' && String(error?.code) === '10308') {
         alreadyRunningRef.current = true; // already running: no "started" toast
       }
-      dispatchRtms({ type: 'REQUEST_FAILED', action, code: error?.code, message: error?.message });
+      dispatchRtms({
+        type: 'REQUEST_FAILED', action, code: error?.code, message: error?.message, serverPaused: ownPauseOnServerRef.current,
+      });
       return false;
     }
   }, [zoomSdk, rtmsStatusSupported]);

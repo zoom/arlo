@@ -41,9 +41,16 @@
  * name the panels show) and whose connection trouble is the meeting's.
  *
  * Pause is per stream too: each user pauses their own. A stream is marked
- * paused by a report, and the mark goes when a line arrives from it (it is
- * running after all) or when it stops. The meeting counts as paused only when
- * at least one stream runs and every running stream is paused.
+ * paused by a report, and the meeting counts as paused only when at least one
+ * stream runs and every running stream is paused. Two kinds of report:
+ *   - the rtms service's, which is Zoom's own word from the stream's session
+ *     (also for a pause made with Zoom's controls, not Arlo's). That mark is
+ *     confirmed: only a resume report or the stream stopping removes it, not
+ *     a line. After a rejoin it is no longer confirmed, because a resume
+ *     during the gap would not have been heard.
+ *   - a panel's, about its user's own stream. That mark also goes when a line
+ *     arrives from the stream (it is running after all).
+ * Both reports of one pause, in either order, are one mark.
  *
  * When the rtms service replaces a user's stream with their new one, and that
  * was the meeting's only stream, the stop is not the meeting's yet: the wait
@@ -163,15 +170,17 @@ function createMeetingStreams(options = {}) {
     arrivalMs: limits.sameEventArrivalMs,
   };
   // meetingId -> {
-  //   streams: Map(key -> { operatorId, originalHost, live, replaced, pausedAt, since, endedAt }),
+  //   streams: Map(key -> { operatorId, originalHost, live, replaced, pausedAt, pauseConfirmed, since, endedAt }),
   //   primaryKey: the primary stream, or the last one when none is live,
   //   lines, events: what was stored last, oldest first, each
   //     { who, hash, stamp, at, from: Set(stream keys that delivered it) },
   //   awaiting: { cancel } while a replacing stream's outcome is waited for,
+  //   pauseKept: whether the stored timeline's last word is "paused" (see pauseKept()),
   //   warned }
   // The streams Map keeps the order in which the streams started. `replaced`
   // marks a stream that ended because its user started a new one, `pausedAt`
-  // is when a running stream was reported paused (null: not paused), `since`
+  // is when a running stream was reported paused (null: not paused),
+  // `pauseConfirmed` whether Zoom itself said so (the rtms service), `since`
   // is when the stream was first seen or last started, `endedAt` when it
   // stopped (null while it runs).
   const meetings = new Map();
@@ -200,7 +209,7 @@ function createMeetingStreams(options = {}) {
       // A backstop only: a meeting normally leaves through forget()
       if (meetings.size >= limits.maxMeetings) drop(meetings.keys().next().value);
       state = {
-        streams: new Map(), primaryKey: null, lines: [], events: [], awaiting: null, warned: false,
+        streams: new Map(), primaryKey: null, lines: [], events: [], awaiting: null, pauseKept: false, warned: false,
       };
     }
     meetings.set(meetingId, state);
@@ -231,6 +240,11 @@ function createMeetingStreams(options = {}) {
     if (stream.live) stream.endedAt = now();
     stream.live = false;
     stream.pausedAt = null;
+    stream.pauseConfirmed = false;
+  };
+  /** With nothing running, nothing is paused: the next start is a running stream. */
+  const noteNothingRuns = (state) => {
+    if (liveKeys(state).length === 0) state.pauseKept = false;
   };
 
   /**
@@ -281,7 +295,14 @@ function createMeetingStreams(options = {}) {
       return null;
     }
     const stream = {
-      operatorId: null, originalHost: false, live: true, replaced: false, pausedAt: null, since: now(), endedAt: null,
+      operatorId: null,
+      originalHost: false,
+      live: true,
+      replaced: false,
+      pausedAt: null,
+      pauseConfirmed: false,
+      since: now(),
+      endedAt: null,
     };
     state.streams.set(key, stream);
     return stream;
@@ -323,8 +344,10 @@ function createMeetingStreams(options = {}) {
       stream.endedAt = null;
     }
     // A stream that reports itself running again after a rejoin keeps its
-    // pause mark: if it is in fact running, its next line says so
-    if (!stream) stream = addStream(state, key);
+    // pause mark, but no longer as Zoom's confirmed word (a resume during the
+    // gap was not heard): if it is in fact running, its next line says so
+    if (stream) stream.pauseConfirmed = false;
+    else stream = addStream(state, key);
     if (stream) {
       stream.live = true;
       stream.replaced = false;
@@ -348,6 +371,7 @@ function createMeetingStreams(options = {}) {
       end(state.streams.get(key));
     }
     choosePrimary(state);
+    noteNothingRuns(state);
     return { anyLive: liveKeys(state).length > 0 };
   }
 
@@ -359,6 +383,7 @@ function createMeetingStreams(options = {}) {
     const state = meetings.get(meetingId);
     if (!state) return;
     for (const stream of state.streams.values()) end(stream);
+    noteNothingRuns(state);
     endWait(state);
   }
 
@@ -429,9 +454,10 @@ function createMeetingStreams(options = {}) {
   function keepsLine(meetingId, streamId, details) {
     const heard = heardFrom(meetingId, streamId, details);
     if (heard === null) return false;
-    // A line, also a copy, shows that a stream marked paused is running
-    const pausedAt = heard.stream?.pausedAt ?? null;
-    if (pausedAt !== null && now() - pausedAt >= limits.pauseSettleMs) heard.stream.pausedAt = null;
+    // A line, also a copy, shows that a stream marked paused is running,
+    // unless Zoom itself said it is paused: then only a resume report counts
+    const { pausedAt = null, pauseConfirmed = false } = heard.stream ?? {};
+    if (pausedAt !== null && !pauseConfirmed && now() - pausedAt >= limits.pauseSettleMs) heard.stream.pausedAt = null;
     return firstDelivery(heard, 'lines', lineIdentity(details?.line), lineRules);
   }
 
@@ -447,9 +473,12 @@ function createMeetingStreams(options = {}) {
   /**
    * Mark a running stream paused or resumed. `who` names it: `{ operatorId }`
    * is the running stream of that user, `{ streamId }` that stream (without an
-   * id: the meeting's one unnamed stream). Returns whether a stream was marked.
+   * id: the meeting's one unnamed stream). `confirmed: true` for Zoom's own
+   * word (the rtms service's report), which a line does not undo; a pause
+   * already confirmed stays so when a panel reports it too.
+   * Returns whether a stream was marked.
    */
-  function setPaused(meetingId, who, paused) {
+  function setPaused(meetingId, who, paused, { confirmed = false } = {}) {
     const state = meetings.get(meetingId);
     if (!state || who === null || typeof who !== 'object') return false;
     let marked = [];
@@ -460,7 +489,16 @@ function createMeetingStreams(options = {}) {
       if (stream) marked = [stream];
     }
     marked = marked.filter((stream) => stream.live);
-    for (const stream of marked) stream.pausedAt = paused === true ? now() : null;
+    for (const stream of marked) {
+      if (paused !== true) {
+        stream.pausedAt = null;
+        stream.pauseConfirmed = false;
+      } else if (stream.pausedAt === null || !stream.pauseConfirmed) {
+        // A second report of a pause Zoom confirmed changes nothing about it
+        stream.pausedAt = now();
+        stream.pauseConfirmed = confirmed === true;
+      }
+    }
     return marked.length > 0;
   }
 
@@ -476,6 +514,20 @@ function createMeetingStreams(options = {}) {
       streams: paused.length,
       operators: [...new Set(paused.map((stream) => stream.operatorId).filter(Boolean))],
     };
+  }
+
+  /**
+   * Whether the meeting's stored timeline says "paused" last. A pause a panel
+   * reports is shown but not kept (a browser's word is not stored); when the
+   * rtms service then confirms it, the meeting does not change again, and
+   * this tells the caller that the line is still to be kept. Without an
+   * argument it is read; with one it is set. False again when nothing runs.
+   */
+  function pauseKept(meetingId, kept) {
+    const state = meetings.get(meetingId);
+    if (!state) return false;
+    if (typeof kept === 'boolean') state.pauseKept = kept;
+    return state.pauseKept;
   }
 
   /** Operator ids of the streams running now, each once. */
@@ -565,7 +617,7 @@ function createMeetingStreams(options = {}) {
 
   return {
     streamStarted, streamStopped, stopAll, keepsLine, keepsEvent,
-    setPaused, pauseState, awaitReplacement, settleReplacement, awaitingReplacement,
+    setPaused, pauseState, pauseKept, awaitReplacement, settleReplacement, awaitingReplacement,
     isPrimary, isLive, hasStopped, anyLive, operators, liveOperators, primaryOperator,
     remembered, forget, size: () => meetings.size,
   };

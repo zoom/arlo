@@ -23,6 +23,13 @@
  * error code 'stream_fault': the panel says so and offers a restart, and the
  * client that started the stream asks Zoom for a new one by itself.
  *
+ * A pause or resume Zoom refuses or never confirms is not an error when the
+ * server already says the user's own stream is in the state they asked for
+ * (it was paused with Zoom's own controls, say): the phase follows the server.
+ * `serverPaused` on TIMEOUT and REQUEST_FAILED, and the SERVER_PAUSE event,
+ * carry the server's word about this user's own stream (true, false, or
+ * null/absent when it has not said).
+ *
  * `pending` is the request this client is waiting on ('start' | 'stop' |
  * 'pause' | 'resume'), `error` is { action, code, message } for the UI.
  */
@@ -70,6 +77,18 @@ export const isRtmsBusy = (state) => (
 );
 
 const settled = (phase, error = null) => ({ phase, pending: null, error, waitingLong: false });
+
+/**
+ * The phase to settle in when the server already says what a pause or resume
+ * asked for, or null: for any other action, when the server has not said or
+ * says otherwise, or when no stream is known here.
+ */
+function agreedPhase(state, action, serverPaused) {
+  if (!RUNNING_PHASES.has(state.phase)) return null;
+  if (action === 'pause' && serverPaused === true) return 'paused';
+  if (action === 'resume' && serverPaused === false) return 'active';
+  return null;
+}
 
 function onStatus(state, status, source, fault) {
   switch (status) {
@@ -138,6 +157,8 @@ export function rtmsReducer(state, event) {
         // Zoom says a stream exists; the server confirms whether it reaches us
         return settled('starting');
       }
+      const agreed = agreedPhase(state, event.action, event.serverPaused);
+      if (agreed) return settled(agreed);
       const error = {
         action: event.action,
         code: event.code ?? null,
@@ -158,6 +179,8 @@ export function rtmsReducer(state, event) {
     case 'TIMEOUT':
       if (state.phase === 'requested') return { ...state, waitingLong: true };
       if (state.pending) {
+        const agreed = agreedPhase(state, state.pending, event.serverPaused);
+        if (agreed) return settled(agreed);
         return {
           ...state,
           pending: null,
@@ -165,6 +188,13 @@ export function rtmsReducer(state, event) {
         };
       }
       return state;
+
+    case 'SERVER_PAUSE': {
+      // Only takes away the error of a pause or resume that is now explained
+      if (!state.error || state.pending !== null) return state;
+      const agreed = agreedPhase(state, state.error.action, event.paused);
+      return agreed ? settled(agreed) : state;
+    }
 
     case 'STALL':
       return state.phase === 'starting'

@@ -750,6 +750,70 @@ describe('paused, according to the server or to this panel', () => {
   });
 });
 
+describe('a pause made with Zoom\'s own controls', () => {
+  const PAUSED = { ...OWNER, paused: true, myStreamPaused: true };
+
+  test('the server reports it: "Arlo is paused" with Resume, no Pause, no error; then the resume: running again', async () => {
+    const { sdk } = await openAsOwner();
+    await send(serverMessage.status('rtms_paused'));
+    await send(serverMessage.arloState(PAUSED));
+
+    expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText('Arlo is in the meeting')).not.toBeInTheDocument();
+
+    await send(serverMessage.status('rtms_resumed'));
+    await send(serverMessage.arloState(OWNER));
+    expect(await screen.findByText('Arlo is in the meeting')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // nobody clicked anything in the panel
+    expect(sdk.pauseRTMS).not.toHaveBeenCalled();
+    expect(sdk.resumeRTMS).not.toHaveBeenCalled();
+  });
+
+  test('Pause clicked while Zoom has it paused already: Zoom refuses, the server says paused, and no error is shown', async () => {
+    const sdk = createZoomSdk();
+    let refuse;
+    sdk.pauseRTMS.mockImplementation(() => new Promise((resolve, reject) => { refuse = reject; }));
+    await openAsOwner({ sdk });
+    await userEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    // one of several streams: the meeting is not paused, this owner's stream is
+    await send(serverMessage.arloState({ ...OWNER, paused: false, myStreamPaused: true }));
+    await act(async () => { refuse(Object.assign(new Error('The stream is already paused'), { code: '10000' })); });
+
+    expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeEnabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(sdk.showNotification).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
+  });
+
+  test('the refusal first and the server\'s word after it: the error goes away', async () => {
+    const sdk = createZoomSdk();
+    sdk.pauseRTMS.mockRejectedValue(Object.assign(new Error('The stream is already paused'), { code: '10000' }));
+    await openAsOwner({ sdk });
+    await userEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+
+    await send(serverMessage.arloState(PAUSED));
+    expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('a refusal the server does not explain is still shown', async () => {
+    const sdk = createZoomSdk();
+    sdk.pauseRTMS.mockRejectedValue(Object.assign(new Error('Not allowed'), { code: '10012' }));
+    await openAsOwner({ sdk });
+    await send(serverMessage.arloState(OWNER));
+    await userEvent.click(screen.getByRole('button', { name: 'Pause' }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByText('Arlo is in the meeting')).toBeInTheDocument();
+  });
+});
+
 describe('several people each run a stream: whose pause it is', () => {
   test('an owner whose own stream is paused sees "Arlo is paused" and Resume, though the meeting is not paused', async () => {
     const { sdk } = await openAsOwner();
