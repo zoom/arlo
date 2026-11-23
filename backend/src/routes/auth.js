@@ -529,8 +529,9 @@ router.get('/settings', (req, res) => {
       upcomingMeetings: false,      // Disabled - requires database
       autoOpen: false,              // Disabled - requires database
       aiChat: false,                // Disabled - requires database
+      autoStart: config.autoStartRtms, // AUTO_START_RTMS=true; off by default
     },
-    privacyNotice: 'Your meeting data is processed in real-time and never stored. All data exists only in memory during your active session and is automatically cleared when you leave.',
+    privacyNotice: 'Arlo keeps this meeting\'s transcript and notes in memory while the meeting is running, and they are deleted when the meeting ends. Nothing is written to disk or kept between meetings.',
   });
 });
 

@@ -1,7 +1,7 @@
 import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  createZoomSdk, FakeWebSocket, mockFetch, renderInMeeting, resetHarness, serverMessage,
+  createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage,
 } from '../test/harness';
 
 // UI state tests: the real app inside a fake Zoom meeting. They stand in for
@@ -123,6 +123,17 @@ describe('auto-start', () => {
   test('with auto-start off, nothing is requested until the user clicks Start', async () => {
     const { sdk } = await openMeeting({ autoStart: false });
     await new Promise((resolve) => setTimeout(resolve, 900)); // past the 500ms auto-start delay
+    expect(startCalls(sdk)).toHaveLength(0);
+    expect(await startButton()).toBeEnabled();
+  });
+
+  test('with the deployment flag off, nothing is requested even if the user turned auto-start on', async () => {
+    mockFetch({ '/api/auth/settings': () => json({ demoMode: true }) });
+    const { sdk } = renderInMeeting({ autoStart: true });
+    await screen.findByText('Transcription not started');
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    await new Promise((resolve) => setTimeout(resolve, 900)); // past the 500ms auto-start delay
+
     expect(startCalls(sdk)).toHaveLength(0);
     expect(await startButton()).toBeEnabled();
   });

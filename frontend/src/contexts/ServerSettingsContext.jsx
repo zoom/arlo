@@ -14,6 +14,7 @@ const defaultFeatures = {
   upcomingMeetings: false,
   autoOpen: false,
   aiChat: false,
+  autoStart: false,
 };
 
 export function ServerSettingsProvider({ children }) {
@@ -34,7 +35,7 @@ export function ServerSettingsProvider({ children }) {
           setSettings({
             demoMode: data.demoMode ?? true,
             meetingPersistenceEnabled: data.meetingPersistenceEnabled ?? false,
-            features: data.features ?? defaultFeatures,
+            features: { ...defaultFeatures, ...(data.features || {}) },
             privacyNotice: data.privacyNotice ?? '',
             loaded: true,
           });
@@ -55,6 +56,8 @@ export function ServerSettingsProvider({ children }) {
     showSearch: settings.features?.search ?? false,
     // Helper to check if upcoming meetings is available
     showUpcomingMeetings: settings.features?.upcomingMeetings ?? false,
+    // The deployment allows Arlo to request transcription when it is opened
+    autoStartAvailable: settings.features?.autoStart === true,
   }), [settings]);
 
   return (

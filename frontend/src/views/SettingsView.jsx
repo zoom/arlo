@@ -21,6 +21,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 import { useVertical } from '../contexts/VerticalContext';
 import { useDemoData } from '../hooks/useDemoData';
+import { useServerSettings } from '../contexts/ServerSettingsContext';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import { useMeeting } from '../contexts/MeetingContext';
 import Card from '../components/ui/Card';
@@ -56,6 +57,7 @@ export default function SettingsView() {
   const { theme, toggleTheme } = useTheme();
   const { vertical, clearVertical } = useVertical();
   const { showDemoData, setShowDemoData } = useDemoData();
+  const { autoStartAvailable, demoMode } = useServerSettings();
   const { complianceEnabled, setComplianceEnabled } = useComplianceSettings();
   const { meetingId, rtmsActive, rtmsLoading, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
   const [apiStartSuccess, setApiStartSuccess] = useState(false);
@@ -465,6 +467,7 @@ export default function SettingsView() {
               </div>
             )}
 
+            {autoStartAvailable && (<>
             <hr className="settings-separator" />
 
             <div className="settings-toggle-row">
@@ -491,6 +494,7 @@ export default function SettingsView() {
                 <span className="settings-toggle-thumb" />
               </label>
             </div>
+            </>)}
           </div>
         </Card>
       </section>

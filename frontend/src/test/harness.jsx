@@ -132,7 +132,9 @@ export function mockFetch(routes = {}, { signedIn = true } = {}) {
     '/api/auth/me': () => (signedIn
       ? json({ user: { id: 'user-1', displayName: 'Ana' } })
       : json({ error: 'Not authenticated' }, 401)),
-    '/api/auth/settings': () => json({ demoMode: true }),
+    // Tests run with the deployment's auto-start flag ON unless a test overrides
+    // this route, so `renderInMeeting({ autoStart })` alone decides the behaviour.
+    '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true } }),
     '/api/auth/meeting-access': () => json({ verified: true, isGuest: !signedIn, meetingId: MEETING }),
     ...routes,
   };

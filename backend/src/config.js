@@ -223,6 +223,10 @@ module.exports = {
     return Number.isInteger(value) && value >= 0 && value <= 60 * 60 * 1000 ? value : 2 * 60 * 1000;
   })(),
 
+  // Ask Zoom to start transcription as soon as someone opens Arlo in a meeting.
+  // Off by default: nothing is requested from the host until a person clicks.
+  autoStartRtms: process.env.AUTO_START_RTMS === 'true',
+
   // Security
   sessionSecret: process.env.SESSION_SECRET,
   encryptionKey: encryptionKey,

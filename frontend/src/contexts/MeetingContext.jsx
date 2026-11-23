@@ -62,7 +62,9 @@ const DEFAULT_CHAT_NOTICES = {
 
 export function MeetingProvider({ children }) {
   const { zoomSdk, meetingContext, isGuest, userContext, rtmsStatusSupported, dynamicIndicatorSupported } = useZoomSdk();
-  const { demoMode } = useServerSettings();
+  const { demoMode, autoStartAvailable } = useServerSettings();
+  const autoStartAvailableRef = useRef(autoStartAvailable);
+  autoStartAvailableRef.current = autoStartAvailable;
   // Transcription state changes only on confirmed signals (see lib/rtmsMachine.js).
   const [rtms, dispatchRtms] = useReducer(rtmsReducer, initialRtmsState);
   const rtmsActive = isRtmsActive(rtms);
@@ -602,7 +604,8 @@ export function MeetingProvider({ children }) {
     if (rtms.phase !== 'starting' || !zoomSdk || !ws) return undefined;
     const timer = setTimeout(() => {
       const wantsTranscription = !isGuestRef.current
-        && (startedHereRef.current || localStorage.getItem('arlo-auto-start') !== 'false');
+        && (startedHereRef.current
+          || (autoStartAvailableRef.current && localStorage.getItem('arlo-auto-start') !== 'false'));
       if (!shouldAutoRestart({
         phase: rtmsRef.current.phase,
         wantsTranscription,
@@ -724,11 +727,12 @@ export function MeetingProvider({ children }) {
   const { isAuthenticated } = useAuth();
   useEffect(() => {
     if (autoStartAttemptedRef.current || !isAuthenticated || !meetingId || rtmsActive || rtmsLoading) return;
-    if (localStorage.getItem('arlo-auto-start') === 'false') return;
+    // Off unless the deployment turns it on (AUTO_START_RTMS) and the user has not turned it off
+    if (!autoStartAvailable || localStorage.getItem('arlo-auto-start') === 'false') return;
     autoStartAttemptedRef.current = true;
     const timer = setTimeout(() => startRTMSRef.current(true), 500);
     return () => clearTimeout(timer);
-  }, [isAuthenticated, meetingId, rtmsActive, rtmsLoading]);
+  }, [isAuthenticated, meetingId, rtmsActive, rtmsLoading, autoStartAvailable]);
 
   // Check via REST API whether RTMS is already active.
   // Runs immediately (no delay) with retries to handle the race where the meeting
