@@ -2,6 +2,7 @@ const WebSocket = require('ws');
 const url = require('url');
 const { verifySessionToken } = require('./auth');
 const { verifyMeetingAccessToken } = require('./zoomAppContext');
+const { getMeetingLifecycle } = require('./meetingLifecycle');
 
 /** Read a cookie from the upgrade request, if present. */
 function getCookie(req, name) {
@@ -26,6 +27,19 @@ function getCookie(req, name) {
 // Store active connections
 const connections = new Map(); // meetingId -> Set of WebSocket connections
 const userConnections = new Map(); // userId -> Set of WebSocket connections
+
+/** Tell the lifecycle how many panels are connected for a meeting right now. */
+function reportPanels(meetingId) {
+  if (!meetingId) return;
+  let open = 0;
+  const clients = connections.get(meetingId);
+  if (clients) {
+    clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) open += 1;
+    });
+  }
+  getMeetingLifecycle().panelsChanged(meetingId, open);
+}
 
 /**
  * Initialize WebSocket server
@@ -106,6 +120,7 @@ function initWebSocketServer(server) {
       connections.set(meetingId, new Set());
     }
     connections.get(meetingId).add(ws);
+    reportPanels(meetingId);
 
     // Heartbeat
     ws.on('pong', () => {
@@ -156,6 +171,8 @@ function initWebSocketServer(server) {
           connections.delete(ws.rtmsMeetingId);
         }
       }
+      reportPanels(disconnectedMeetingId);
+      reportPanels(ws.rtmsMeetingId);
     });
 
     // Send welcome message
@@ -247,6 +264,7 @@ async function handleWebSocketMessage(ws, data) {
           type: 'unsubscribed',
           data: { meetingId: ws.meetingId },
         }));
+        reportPanels(ws.meetingId);
         ws.meetingId = null;
       }
       break;
@@ -526,6 +544,7 @@ function crossRegisterUser(userId, rtmsMeetingId) {
 
   if (count > 0) {
     console.log(`📡 Cross-registered ${count} WS connection(s) for the stream operator`);
+    reportPanels(rtmsMeetingId);
   }
   return count;
 }

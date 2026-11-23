@@ -135,3 +135,38 @@ test('lines for a meeting the server was never told about are kept, then flushed
   await h.wait(600);
   assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
 });
+
+test('a stop inside the meeting keeps the transcript while a panel is connected, and a restart continues it', async () => {
+  const meeting = 'REPLAY-K==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'Said before the stop.');
+
+  await status(meeting, { status: 'rtms_stopped' });
+  await h.wait(400); // longer than the 200ms grace period: a panel is still connected
+  assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'Said after the restart.');
+  assert.deepEqual(
+    (await history(meeting, 'transcript', cookie)).body.segments.map((s) => s.text),
+    ['Said before the stop.', 'Said after the restart.'],
+  );
+  ws.socket.close();
+});
+
+test('stream stopped, then the last panel closes: the transcript is deleted after the grace period', async () => {
+  const meeting = 'REPLAY-G==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'Nobody is left to read this.');
+  await status(meeting, { status: 'rtms_stopped' });
+  await h.wait(400);
+  assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+
+  ws.socket.close();
+  await h.wait(600);
+  assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
+});

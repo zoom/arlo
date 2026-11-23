@@ -232,7 +232,7 @@ async function broadcastParticipantEvents(meetingId, events) {
 /**
  * Notify backend of RTMS status change
  */
-async function notifyBackend(meetingId, status, { operatorId, fault } = {}) {
+async function notifyBackend(meetingId, status, { operatorId, fault, meetingEnded } = {}) {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await internalHttp.post(`${backendUrl}/api/rtms/status`, {
@@ -240,6 +240,7 @@ async function notifyBackend(meetingId, status, { operatorId, fault } = {}) {
       status,
       ...(operatorId && { operatorId }),
       ...(fault === true && { fault: true }),
+      ...(meetingEnded === true && { meetingEnded: true }),
     });
     console.log(`Notified backend: ${status}`);
   } catch (error) {

@@ -55,6 +55,9 @@ const isFaultStop = (reason) => Number.isInteger(reason)
 const isDeliberateStop = (reason) => Number.isInteger(reason)
   && ((reason >= 1 && reason <= 9) || (reason >= 20 && reason <= 23) || reason === 25 || reason === 26);
 
+// RTMS stop reason 6: the stream ended because the meeting did
+const MEETING_ENDED = 6;
+
 const defaultSchedule = (fn, ms) => {
   const timer = setTimeout(fn, ms);
   if (typeof timer.unref === 'function') timer.unref();
@@ -307,7 +310,11 @@ function createSessionManager({
         clearTimers(session);
         sessions.delete(streamId);
         // Tell the meeting now instead of waiting for the stopped webhook
-        send('status', backend.status(meetingUuid, 'rtms_stopped'));
+        send('status', backend.status(
+          meetingUuid,
+          'rtms_stopped',
+          reason === MEETING_ENDED ? { meetingEnded: true } : undefined,
+        ));
         return;
       }
       if (session.reconnecting) {
@@ -461,7 +468,13 @@ function createSessionManager({
       release(found.streamId, found.session);
       log.log(`RTMS session stopped${fault ? ' by a fault' : ''}`);
     }
-    await send('status', backend.status(meetingUuid, 'rtms_stopped', fault ? { fault: true } : undefined));
+    const meetingEnded = payload.stop_reason === MEETING_ENDED;
+    const extra = { ...(fault && { fault: true }), ...(meetingEnded && { meetingEnded: true }) };
+    await send('status', backend.status(
+      meetingUuid,
+      'rtms_stopped',
+      Object.keys(extra).length > 0 ? extra : undefined,
+    ));
   }
 
   /** Drop sessions older than 24 hours. Returns how many were dropped. */

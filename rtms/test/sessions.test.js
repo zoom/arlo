@@ -387,7 +387,7 @@ test('a media interruption before the join is confirmed is reported and the sess
 });
 
 test('scenario 4: a stop with a fault reason is reported as a fault', async () => {
-  for (const [reason, fault] of [[13, true], [19, true], [24, true], [6, false], [undefined, false]]) {
+  for (const [reason, fault] of [[13, true], [19, true], [24, true], [2, false], [undefined, false]]) {
     const { manager, sent } = await streaming();
     await manager.stopped({ meeting_uuid: MEETING, rtms_stream_id: 'stream-1', stop_reason: reason });
     assert.deepEqual(sent.status.at(-1), fault
@@ -395,6 +395,22 @@ test('scenario 4: a stop with a fault reason is reported as a fault', async () =
       : { meetingId: MEETING, status: 'rtms_stopped' }, `reason ${reason}`);
     assert.equal(manager.size(), 0);
   }
+});
+
+test('a stop because the meeting ended says so, from the webhook or from the closed connection', async () => {
+  const viaWebhook = await streaming();
+  await viaWebhook.manager.stopped({ meeting_uuid: MEETING, rtms_stream_id: 'stream-1', stop_reason: 6 });
+  assert.deepEqual(viaWebhook.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', meetingEnded: true });
+
+  const viaConnection = await streaming();
+  viaConnection.clients[0].handlers.leave(6);
+  await tick();
+  assert.deepEqual(viaConnection.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', meetingEnded: true });
+
+  const hostStopped = await streaming();
+  hostStopped.clients[0].handlers.leave(1);
+  await tick();
+  assert.deepEqual(hostStopped.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped' });
 });
 
 test('a stop that lands while the connection is being recovered is a fault, and cancels the reconnect', async () => {
