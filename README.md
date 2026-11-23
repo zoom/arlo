@@ -303,6 +303,7 @@ Add these OAuth scopes (granular):
 <summary><strong>Features → Zoom App SDK</strong></summary>
 
 - Click **Add APIs** and enable required capabilities, including `startRTMS`, `stopRTMS`, `pauseRTMS`, `resumeRTMS`, and `getAppContext`
+- Optional: `setDynamicIndicator` and `removeDynamicIndicator`, to show Arlo's status ("Arlo is transcribing") in Zoom's meeting window for everyone in the meeting
 - Enable **In-client OAuth** and **Guest mode**
 
 </details>

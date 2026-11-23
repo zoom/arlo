@@ -73,7 +73,7 @@ import './InMeetingView.css';
 export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
-  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsPhase, meetingId, connectWebSocket, viewers, meetingAccess, setWs } = useMeeting();
+  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsPhase, meetingId, connectWebSocket, viewers, meetingAccess, setWs, reportVoiceState } = useMeeting();
   const { isAuthenticated } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -255,6 +255,13 @@ export default function InMeetingView({ isGuestMode = false }) {
 
   // Determine transcript state (initial_roster events don't count as displayable content)
   const hasContent = segments.length > 0 || participantEvents.some(e => e.eventType !== 'initial_roster');
+  // Voice commands only run while this screen is open: tell the meeting
+  // context, which shows it in Zoom's Dynamic Indicator.
+  useEffect(() => {
+    reportVoiceState?.(voiceCommandsEnabled && rtmsActive, voiceProcessing);
+    return () => reportVoiceState?.(false, false);
+  }, [reportVoiceState, voiceCommandsEnabled, rtmsActive, voiceProcessing]);
+
   const transcriptState = getTransportView({
     phase: rtmsPhase, active: rtmsActive, paused: rtmsPaused, hasContent,
   }).state;

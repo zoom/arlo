@@ -143,6 +143,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `views/` — 14 views (Auth, Home, MeetingsList, MeetingDetail, InMeeting, SearchResults, Settings, etc.)
 - `contexts/` — AuthContext (session), ZoomSdkContext (SDK init), MeetingContext (active meeting + WS), ServerSettingsContext (demo mode flags)
 - `hooks/useZoomAuth.js` — In-client OAuth PKCE flow hook
+- `lib/dynamicIndicator.js` + `hooks/useDynamicIndicator.js` — Zoom's Dynamic Indicator (status text in Zoom's meeting window, seen by everyone). Basic version: text only, set by the panel that started the stream, only while transcription is confirmed (`rtmsPhase === 'active'`); "Arlo is thinking…" while a voice command runs. Silent when the client or the Marketplace config lacks `setDynamicIndicator` / `removeDynamicIndicator`
 - `components/AppShell.jsx` — Persistent header + `<Outlet />`
 
 ### Monorepo (npm workspaces)

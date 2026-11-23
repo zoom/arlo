@@ -84,6 +84,8 @@
                     "resumeRTMS",
                     "getRTMSStatus",
                     "onRTMSStatusChange",
+                    "setDynamicIndicator",
+                    "removeDynamicIndicator",
                     "showNotification",
                     "sendMessageToChat",
                     "openUrl",

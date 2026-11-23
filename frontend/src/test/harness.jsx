@@ -57,6 +57,9 @@ export function createZoomSdk({
     stopRTMS: vi.fn(async () => ({ message: 'Success' })),
     pauseRTMS: vi.fn(async () => ({ message: 'Success' })),
     resumeRTMS: vi.fn(async () => ({ message: 'Success' })),
+    // Dynamic Indicator: Arlo's status in Zoom's own meeting window
+    setDynamicIndicator: vi.fn(async () => ({ message: 'Success' })),
+    removeDynamicIndicator: vi.fn(async () => ({ message: 'Success' })),
     callZoomApi: vi.fn(async (name, options) => sdk[name](options)),
     emit(event, payload) {
       [...(listeners.get(event) || [])].forEach((handler) => handler(payload));

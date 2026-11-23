@@ -51,6 +51,13 @@ const RTMS_STATUS_CAPABILITIES = [
   'onRTMSStatusChange',
 ];
 
+// Dynamic Indicator: Arlo's status in Zoom's own meeting window, visible to all
+// participants. Requested on its own for the same reason. Desktop 5.17.5+.
+const DYNAMIC_INDICATOR_CAPABILITIES = [
+  'setDynamicIndicator',
+  'removeDynamicIndicator',
+];
+
 // Check if running outside Zoom - evaluated dynamically
 const checkIsTestMode = () => !window.zoomSdk || window.location.search.includes('test=true');
 
@@ -74,6 +81,8 @@ export function ZoomSdkProvider({ children }) {
   const [userContext, setUserContext] = useState(null);
   // true once zoomSdk.config() accepted getRTMSStatus + onRTMSStatusChange
   const [rtmsStatusSupported, setRtmsStatusSupported] = useState(false);
+  // true once zoomSdk.config() accepted setDynamicIndicator + removeDynamicIndicator
+  const [dynamicIndicatorSupported, setDynamicIndicatorSupported] = useState(false);
   // null = SDK not loaded yet, true = guest, false = authorized user
   const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
 
@@ -101,6 +110,7 @@ export function ZoomSdkProvider({ children }) {
         // Some Zoom clients reject config when unsupported capabilities are requested.
         // Try the largest set first, then fall back step by step to the core set.
         const capabilitySets = [
+          [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES, ...DYNAMIC_INDICATOR_CAPABILITIES],
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES],
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES],
           CORE_CAPABILITIES,
@@ -118,6 +128,9 @@ export function ZoomSdkProvider({ children }) {
           } catch (configError) {
             if (i === capabilitySets.length - 1) throw configError;
             console.warn('Capability set rejected, retrying with a smaller set:', configError);
+            if (capabilitySets[i].includes('setDynamicIndicator')) {
+              console.warn('[indicator] Zoom rejected the Dynamic Indicator APIs at config:', configError?.code, configError?.message);
+            }
           }
         }
 
@@ -126,6 +139,15 @@ export function ZoomSdkProvider({ children }) {
         // If this prints false, the client sends Arlo no RTMS status at all
         console.log('RTMS SDK APIs (start/stop/pause/resume/status) accepted by this client:', rtmsApisAccepted);
         setRtmsStatusSupported(rtmsApisAccepted);
+        const indicatorAccepted = acceptedCapabilities.includes('setDynamicIndicator')
+          && typeof zoomSdk.setDynamicIndicator === 'function'
+          && typeof zoomSdk.removeDynamicIndicator === 'function';
+        console.log('[indicator] APIs accepted by this client:', indicatorAccepted, {
+          requested: acceptedCapabilities.includes('setDynamicIndicator'),
+          setMethod: typeof zoomSdk.setDynamicIndicator,
+          removeMethod: typeof zoomSdk.removeDynamicIndicator,
+        });
+        setDynamicIndicatorSupported(indicatorAccepted);
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
@@ -262,8 +284,9 @@ export function ZoomSdkProvider({ children }) {
     userContextStatus: userContext?.status || null,
     isGuest,
     rtmsStatusSupported,
+    dynamicIndicatorSupported,
     isTestMode: isTestModeState,
-  }), [zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, isTestModeState]);
+  }), [zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, isTestModeState]);
 
   return (
     <ZoomSdkContext.Provider value={contextValue}>

@@ -17,6 +17,8 @@ import {
   canStartRtms,
 } from '../lib/rtmsMachine';
 import { addSegment, mergeHistory } from '../lib/transcript';
+import { indicatorText } from '../lib/dynamicIndicator';
+import { useDynamicIndicator } from '../hooks/useDynamicIndicator';
 
 const MeetingContext = createContext();
 
@@ -59,7 +61,7 @@ const DEFAULT_CHAT_NOTICES = {
 };
 
 export function MeetingProvider({ children }) {
-  const { zoomSdk, meetingContext, isGuest, userContext, rtmsStatusSupported } = useZoomSdk();
+  const { zoomSdk, meetingContext, isGuest, userContext, rtmsStatusSupported, dynamicIndicatorSupported } = useZoomSdk();
   const { demoMode } = useServerSettings();
   // Transcription state changes only on confirmed signals (see lib/rtmsMachine.js).
   const [rtms, dispatchRtms] = useReducer(rtmsReducer, initialRtmsState);
@@ -102,6 +104,10 @@ export function MeetingProvider({ children }) {
   const autoRestartedRef = useRef(false);
   // Stream faults: whether the stream that just stopped was started here (and
   // not stopped here), and how many automatic restarts this meeting has had.
+  // Dynamic Indicator inputs: is the confirmed stream one this client started,
+  // and what the meeting screen reports about voice commands.
+  const [streamStartedHere, setStreamStartedHere] = useState(false);
+  const [voiceState, setVoiceState] = useState({ enabled: false, processing: false });
   const stoppedStreamWasOursRef = useRef(false);
   const faultRestartsRef = useRef(0);
   const isGuestRef = useRef(isGuest);
@@ -482,6 +488,7 @@ export function MeetingProvider({ children }) {
       alreadyRunningRef.current = false;
       autoRestartedRef.current = false;
       localActionRef.current = null;
+      setStreamStartedHere(startedHereRef.current);
     } else if (next === 'paused') {
       if (local === 'pause') {
         sendChatNoticeRef.current('pause');
@@ -505,7 +512,34 @@ export function MeetingProvider({ children }) {
     }
     // 'starting' and 'stalled' keep startedHereRef: the stream may still arrive
     // (e.g. the user clicks Zoom's own Start button) and the chat notice is ours.
+    if (next === 'stopped' || next === 'idle' || next === 'denied' || next === 'failed' || next === 'expired') {
+      setStreamStartedHere(false);
+    }
   }, [rtms.phase, notify, postTimelineStatus]);
+
+  // Arlo's status in Zoom's own meeting window (see lib/dynamicIndicator.js)
+  useDynamicIndicator({
+    zoomSdk,
+    supported: dynamicIndicatorSupported,
+    text: indicatorText({
+      phase: rtms.phase,
+      startedHere: streamStartedHere,
+      guest: isGuest,
+      voiceEnabled: voiceState.enabled,
+      voiceProcessing: voiceState.processing,
+    }),
+  });
+  // Why the indicator is or is not shown, on every change (status only, no content)
+  useEffect(() => {
+    console.log('[indicator] state:', {
+      supported: dynamicIndicatorSupported, phase: rtms.phase, startedHere: streamStartedHere, guest: isGuest,
+    });
+  }, [dynamicIndicatorSupported, rtms.phase, streamStartedHere, isGuest]);
+  const reportVoiceState = useCallback((enabled, processing) => {
+    setVoiceState((prev) => (
+      prev.enabled === enabled && prev.processing === processing ? prev : { enabled, processing }
+    ));
+  }, []);
 
   // Denied / failed / unconfirmed requests are shown, not swallowed.
   useEffect(() => {
@@ -816,7 +850,8 @@ export function MeetingProvider({ children }) {
     connectWebSocket,
     setWs,
     setTitleUserRenamed,
-  }), [rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, viewers, segments, participantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
+    reportVoiceState,
+  }), [reportVoiceState, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, viewers, segments, participantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>
