@@ -41,13 +41,13 @@ const RUNNING_PHASES = new Set(['active', 'paused', 'interrupted']);
 // What an accepted request implies on clients that get no status events.
 const ASSUMED_PHASE = { stop: 'stopped', pause: 'paused', resume: 'active' };
 
-const DENIED_MESSAGE = 'Transcription did not start. The host may have declined the request.';
+export const DENIED_MESSAGE = 'Transcription did not start. The host may have declined the request.';
 const UNCONFIRMED_MESSAGE = 'Zoom did not confirm the request. Try again.';
-const EXPIRED_MESSAGE = 'No answer from the host (Zoom cancels a request after 60 seconds). If the host has allowed Arlo since, start transcription here.';
+export const EXPIRED_MESSAGE = 'No answer from the host (Zoom cancels a request after 60 seconds). If the host has allowed Arlo since, start transcription here.';
 
 // Zoom `rtms.request_status` webhook codes that end a request. 7 and 8 are
 // server maintenance notices, not outcomes, so they are not listed.
-const REQUEST_STATUS_OUTCOME = {
+export const REQUEST_STATUS_OUTCOME = {
   1: { phase: 'denied', message: 'Zoom denied the transcription request.' },
   2: { phase: 'failed', message: 'Transcription can\'t start because the app owner is not in the meeting.' },
   3: { phase: 'denied', message: 'The host declined the transcription request.' },
@@ -56,12 +56,12 @@ const REQUEST_STATUS_OUTCOME = {
   6: { phase: 'failed', message: 'Zoom\'s transcription server failed. Request again.' },
 };
 const SERVER_FAILED = 6;
-const CONNECT_FAILED_MESSAGE = 'Arlo could not connect to the transcription stream. Start again.';
-const FAULT_MESSAGE = 'Transcription stopped because of a connection problem.';
+export const CONNECT_FAILED_MESSAGE = 'Arlo could not connect to the transcription stream. Start again.';
+export const FAULT_MESSAGE = 'Transcription stopped because of a connection problem.';
 export const STREAM_FAULT = 'stream_fault';
 // Automatic restarts after a fault, per meeting. After that the user decides.
 export const FAULT_RESTART_LIMIT = 3;
-const STALLED_MESSAGE = 'Zoom allows transcription, but the stream has not started. Start it here, or use the Start button Zoom shows for Arlo.';
+export const STALLED_MESSAGE = 'Zoom allows transcription, but the stream has not started. Start it here, or use the Start button Zoom shows for Arlo.';
 
 export const isRtmsActive = (state) => RUNNING_PHASES.has(state.phase);
 export const isRtmsPaused = (state) => state.phase === 'paused';

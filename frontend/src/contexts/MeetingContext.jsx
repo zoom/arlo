@@ -378,6 +378,10 @@ export function MeetingProvider({ children }) {
           else if (status === 'started') setMeetingEnded(false);
           break;
         }
+        case 'arlo.state':
+          // Arlo is in the meeting, so the meeting goes on: covers a missed "started"
+          if (data.present === true) setMeetingEnded(false);
+          break;
         case 'participant.event': {
           const incoming = message.data?.event;
           if (incoming) {
@@ -783,9 +787,12 @@ export function MeetingProvider({ children }) {
     await requestRtms('pause');
   }, [zoomSdk, requestRtms]);
 
-  const resumeRTMS = useCallback(async () => {
+  // `pausedOnServer`: the server reports a pause this client was not told
+  // about; the stream is this user's, so Zoom is asked to resume it all the same.
+  const resumeRTMS = useCallback(async ({ pausedOnServer = false } = {}) => {
     const current = rtmsRef.current;
-    if (!zoomSdk || isRtmsBusy(current) || current.phase !== 'paused') return;
+    const paused = current.phase === 'paused' || (pausedOnServer === true && current.phase === 'active');
+    if (!zoomSdk || isRtmsBusy(current) || !paused) return;
     await requestRtms('resume');
   }, [zoomSdk, requestRtms]);
 

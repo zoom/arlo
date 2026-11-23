@@ -25,9 +25,11 @@ function arloStatus({ phase, present, paused, waitingOnHost }) {
   if (phase === 'requested') return waitingOnHost ? 'asking' : 'returning';
   if (phase === 'starting') return 'returning';
   if (phase === 'interrupted') return 'reconnecting';
-  if (phase === 'paused') return 'paused';
-  if (phase === 'active') return 'live';
-  if (present) return paused ? 'paused' : 'live';
+  // The server and this panel can disagree for a while (a pause this client
+  // was never told about, or one the server has not reported yet): paused
+  // when either says so, so Resume is always within reach.
+  if (phase === 'paused' || (paused && (present || phase === 'active'))) return 'paused';
+  if (phase === 'active' || present) return 'live';
   return 'left';
 }
 
@@ -49,9 +51,10 @@ export default function StatusLine({ present, paused, canControl }) {
   const waitingOnHost = userContext?.role !== 'host';
   const status = arloStatus({ phase: rtmsPhase, present, paused, waitingOnHost });
   const inMeeting = IN_MEETING.has(status);
-  // The existing wording for a failed control or a stream fault
+  // Why a control failed or the stream ended, in this screen's words
   const { message } = getTransportView({
     phase: rtmsPhase, active: rtmsActive, paused: rtmsPaused, hasContent: true, error: rtmsError, guest: !canControl,
+    wording: 'arlo',
   });
   // Zoom does not say when the host allows Arlo: after a while the owner may ask again
   const mayAskAgain = rtmsPhase === 'requested' && rtmsWaitingLong;
@@ -87,7 +90,7 @@ export default function StatusLine({ present, paused, canControl }) {
               <Button variant="ghost" size="sm" onClick={() => pauseRTMS()} disabled={rtmsLoading}>Pause</Button>
             )}
             {status === 'paused' && (
-              <Button variant="ghost" size="sm" onClick={() => resumeRTMS()} disabled={rtmsLoading}>Resume</Button>
+              <Button variant="ghost" size="sm" onClick={() => resumeRTMS({ pausedOnServer: paused })} disabled={rtmsLoading}>Resume</Button>
             )}
             {inMeeting && (
               <Button

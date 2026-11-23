@@ -44,11 +44,13 @@ export default function MeetingRecordView({ isGuestMode = false }) {
   const hasShown = useMemo(() => buildTimeline(shownSegments, shownEvents).length > 0, [shownSegments, shownEvents]);
 
   // Out of a meeting there is no record to read, except the one kept with the owner's notes
-  const outsideMeeting = !isGuestMode && !isTestMode && runningContext !== null && runningContext !== 'inMeeting';
+  const outsideMeeting = !isTestMode && runningContext !== null && runningContext !== 'inMeeting';
   const nothingToShow = outsideMeeting && !hasAnything && !afterMeeting;
+  // A guest goes to the guest screen for no meeting
+  const leaveTo = isAuthenticated ? '/home' : '/guest';
   useEffect(() => {
-    if (nothingToShow) navigate('/home', { replace: true });
-  }, [nothingToShow, navigate]);
+    if (nothingToShow) navigate(leaveTo, { replace: true });
+  }, [nothingToShow, leaveTo, navigate]);
 
   // The meeting socket, when the panel was opened (or reloaded) on this screen
   useEffect(() => {

@@ -178,6 +178,8 @@ export function ArloProvider({ children }) {
           }
           break;
         case 'arlo.state':
+          // Arlo is in the meeting, so it has not ended: covers a missed "started"
+          if (data.present === true) endedRef.current = false;
           setAwaitingState(false);
           applyState(data);
           break;

@@ -156,7 +156,7 @@ describe('ask the host (signed-in attendee)', () => {
     await screen.findByText(/Waiting for the host to allow Arlo…/);
     await send(serverMessage.requestStatus(3));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('The host declined the transcription request.');
+    expect(await screen.findByRole('alert')).toHaveTextContent('The host declined the request to bring Arlo in.');
     expect(screen.getByRole('button', { name: 'Ask the host to bring Arlo in' })).toBeEnabled();
   });
 
@@ -250,7 +250,7 @@ describe('live notes (owner)', () => {
     await send(serverMessage.status('rtms_stopped', { fault: true }));
     await send(serverMessage.arloState({ ...OWNER, present: false }));
     expect(await screen.findByText('Arlo has left')).toBeInTheDocument();
-    expect(screen.getByRole('alert')).toHaveTextContent('Transcription stopped because of a connection problem.');
+    expect(screen.getByRole('alert')).toHaveTextContent('Arlo left because of a connection problem.');
     expect(screen.getByRole('button', { name: 'Bring Arlo back' })).toBeInTheDocument();
   });
 });
@@ -726,5 +726,71 @@ describe('focus', () => {
     await screen.findByText('Arlo is in the meeting');
     expect(search).toHaveFocus();
     expect(search).toHaveValue('bud');
+  });
+});
+
+describe('paused, according to the server or to this panel', () => {
+  test('the server says paused while this panel still thinks Arlo is live: "Arlo is paused" and Resume', async () => {
+    const { sdk } = await openAsOwner();
+    await send(serverMessage.arloState({ ...OWNER, paused: true }));
+
+    expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(sdk.resumeRTMS).toHaveBeenCalledTimes(1);
+  });
+
+  test('this panel knows of the pause before the server says so: the same', async () => {
+    const { sdk } = await openAsOwner();
+    await send(serverMessage.status('rtms_paused'));
+
+    expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(sdk.resumeRTMS).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('an "ended" that turns out wrong', () => {
+  const endMeeting = () => act(async () => {
+    server().serverSend(serverMessage.status('rtms_stopped', { meetingEnded: true }));
+    server().serverSend(serverMessage.arloState({ present: false, role: 'participant', ownerName: null }));
+  });
+
+  test('Arlo reported present again clears it for a participant, without a new "started"', async () => {
+    await openArlo({ sdk: attendee(), state: ANA_BROUGHT_ARLO });
+    await send(serverMessage.status('rtms_started'));
+    await screen.findByRole('heading', { name: 'Ana brought Arlo into this meeting' });
+    await endMeeting();
+    await screen.findByText('Nothing is stored after the meeting ends.');
+
+    await send(serverMessage.arloState(ANA_BROUGHT_ARLO));
+    expect(await screen.findByRole('heading', { name: 'Ana brought Arlo into this meeting' })).toBeInTheDocument();
+    expect(screen.queryByText('Nothing is stored after the meeting ends.')).not.toBeInTheDocument();
+  });
+
+  test('and for the owner, who is back on the live notes', async () => {
+    await openAsOwner();
+    await send(serverMessage.notes(NOTES));
+    await endMeeting();
+    await screen.findByRole('button', { name: 'Copy notes' });
+
+    await send(serverMessage.arloState(OWNER));
+    expect(await screen.findByText('Arlo is in the meeting')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy notes' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Ask Arlo' })).toBeInTheDocument();
+  });
+});
+
+describe('a guest who leaves the meeting', () => {
+  test('goes to the guest screen for no meeting, and keeps nothing of the meeting on screen', async () => {
+    const sdk = createZoomSdk({ status: 'authenticated', role: 'attendee', screenName: 'Guest' });
+    await openArlo({ sdk, guest: true, state: ANA_BROUGHT_ARLO });
+    await screen.findByRole('heading', { name: 'Ana brought Arlo into this meeting' });
+
+    await act(async () => { sdk.emit('onRunningContextChange', { runningContext: 'inMainClient' }); });
+
+    await waitFor(() => expect(window.location.hash).toBe('#/guest'));
+    expect(await screen.findByRole('button', { name: 'Add Arlo to Your Account' })).toBeInTheDocument();
+    expect(screen.queryByText(/Ana brought Arlo/)).not.toBeInTheDocument();
   });
 });

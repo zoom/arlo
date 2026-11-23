@@ -49,6 +49,16 @@ describe('opening Arlo in a meeting', () => {
     expect(screen.queryByRole('tab')).not.toBeInTheDocument();
   });
 
+  test('a guest who opens a signed-in page in a meeting is sent to the Arlo screens, not the old transcript view', async () => {
+    mockFetch({ [arloPath('state')]: () => json(ANA_BROUGHT_ARLO) }, { signedIn: false });
+    openApp({
+      sdk: createZoomSdk({ status: 'authenticated', role: 'attendee', screenName: 'Guest' }),
+      hash: '#/settings',
+    });
+    expect(await screen.findByRole('heading', { name: 'Ana brought Arlo into this meeting' })).toBeInTheDocument();
+    expect(window.location.hash).toBe(`#/guest-meeting/${ID}`);
+  });
+
   test('the temporary routes are gone', async () => {
     mockFetch();
     openApp({ hash: `#/arlo/${ID}` });

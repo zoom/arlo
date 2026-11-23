@@ -74,12 +74,14 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   });
   const canControl = canControlArlo({ guest, arloRole: arlo.role });
 
-  // Out of a meeting there is nothing to show, except the notes of the one that just ended
-  const outsideMeeting = !isGuestMode && !isTestMode && runningContext !== null && runningContext !== 'inMeeting';
+  // Out of a meeting there is nothing to show, except the notes of the one that
+  // just ended. A guest goes to the guest screen for no meeting.
+  const outsideMeeting = !isTestMode && runningContext !== null && runningContext !== 'inMeeting';
   const nothingToShow = outsideMeeting && screen !== 'after';
+  const leaveTo = guest ? '/guest' : '/home';
   useEffect(() => {
-    if (nothingToShow) navigate('/home', { replace: true });
-  }, [nothingToShow, navigate]);
+    if (nothingToShow) navigate(leaveTo, { replace: true });
+  }, [nothingToShow, leaveTo, navigate]);
 
   // Another meeting than the one in the address (the panel stayed open on the
   // notes of the last one): the address follows the meeting
@@ -178,9 +180,10 @@ export default function ArloMeetingView({ isGuestMode = false }) {
     );
   }
 
-  // The existing wording for a request that failed, was declined or ran out
+  // Why a request failed, was declined or ran out, in these screens' words
   const transport = getTransportView({
     phase: rtmsPhase, active: false, paused: false, waitingLong: rtmsWaitingLong, secondsLeft, error: rtmsError, guest,
+    wording: 'arlo',
   });
 
   let content;

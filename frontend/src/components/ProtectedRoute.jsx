@@ -37,12 +37,13 @@ export default function ProtectedRoute({ children }) {
     if (isBrowser) {
       return <Navigate to="/" replace />;
     }
-    // Guest in Zoom — redirect to guest views instead of auth
+    // Guest in Zoom — redirect to guest views instead of auth. In a meeting
+    // that is the Arlo screens (the participant view), as from the root.
     if (isGuest) {
       const inMeeting = runningContext === 'inMeeting';
       const meetingUUID = meetingContext?.meetingUUID;
       if (inMeeting && meetingUUID) {
-        return <Navigate to={`/guest/${encodeURIComponent(meetingUUID)}`} replace />;
+        return <Navigate to={`/guest-meeting/${encodeURIComponent(meetingUUID)}`} replace />;
       }
       return <Navigate to="/guest" replace />;
     }
