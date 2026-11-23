@@ -43,6 +43,10 @@ const JOIN_CONFIRM_TIMEOUT_MS = 15000;
 const AWAIT_ZOOM_SIGNAL_MS = 90000;
 // A connection that held this long was a real recovery: the attempt count starts over
 const STABLE_CONNECTION_MS = 60000;
+// A pause or resume report the backend did not take (it was reloading) is sent
+// again after these delays, then given up: nothing else would correct it
+// before the next pause or resume.
+const PAUSE_REPORT_RETRY_DELAYS_MS = Object.freeze([2000, 5000, 10000]);
 
 const isId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
 const isServerUrls = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_URL_CHARS;
@@ -69,6 +73,23 @@ const MEETING_ENDED = 6;
 const SESSION_EVENT_PAUSE = 3;
 const SESSION_EVENT_RESUME = 4;
 
+// Keys the log tags below. Made once per process and kept nowhere else: a tag
+// tells two ids apart within one run, cannot be compared with another run's,
+// and cannot be found by hashing a guessed id.
+const LOG_TAG_SALT = crypto.randomBytes(16);
+
+/**
+ * Whether a session update is about the stream this connection joined. A
+ * connection also hears of other sessions and streams (a second person starting
+ * Arlo in the same meeting shows up on the first person's connection). An
+ * update without session info (the older SDK form) can only be about the
+ * joined stream; one with info is only when it names that stream.
+ */
+function isAboutJoinedStream(info, joinedStreamId) {
+  if (!info || typeof info !== 'object') return true;
+  return typeof info.streamId === 'string' && info.streamId === joinedStreamId;
+}
+
 /**
  * What a session update is about, for the log, without any id: whether it names
  * the stream this connection joined, and a short tag that tells two sessions
@@ -78,7 +99,7 @@ const SESSION_EVENT_RESUME = 4;
 function describeSessionInfo(info, joinedStreamId) {
   if (!info || typeof info !== 'object') return '(no session info)';
   const tag = (value) => (typeof value === 'string' && value.length > 0
-    ? crypto.createHash('sha256').update(value).digest('hex').slice(0, 6)
+    ? crypto.createHmac('sha256', LOG_TAG_SALT).update(value).digest('hex').slice(0, 6)
     : 'none');
   const flag = (value) => (typeof value === 'boolean' ? value : 'n/a');
   return `(session #${tag(info.sessionId)}, stream #${tag(info.streamId)}, same stream as joined: ${info.streamId === joinedStreamId}, active: ${flag(info.isActive)}, paused: ${flag(info.isPaused)})`;
@@ -141,6 +162,51 @@ function createSessionManager({
     return { session: held[0] || null };
   }
 
+  /** Stop sending a pause or resume report that has not got through. */
+  function dropPauseReport(session) {
+    const pending = session.pauseReport;
+    session.pauseReport = null;
+    if (pending && pending.cancel) pending.cancel();
+  }
+
+  /**
+   * Tell the backend that this stream was paused or resumed, and try again when
+   * it does not take the report. Only the last word counts: a new report, or
+   * the session ending, drops the one before, so a "paused" still waiting is
+   * never delivered after a "resumed". Never throws: it is called from an SDK
+   * callback, and the backend being unreachable must not break the stream.
+   */
+  function reportPauseChange(session, status) {
+    dropPauseReport(session);
+    const pending = { cancel: null };
+    session.pauseReport = pending;
+    const wanted = () => sessions.get(session.streamId) === session && session.pauseReport === pending;
+    const attempt = (retriesMade) => {
+      let sending;
+      try {
+        sending = Promise.resolve(backend.status(session.meetingUuid, status, { streamId: session.streamId }));
+      } catch (error) {
+        sending = Promise.reject(error);
+      }
+      sending.then(() => {
+        if (session.pauseReport === pending) session.pauseReport = null;
+      }, (error) => {
+        log.warn('Failed to send status to the backend:', error && error.message);
+        if (!wanted()) return;
+        if (retriesMade >= PAUSE_REPORT_RETRY_DELAYS_MS.length) {
+          session.pauseReport = null;
+          log.warn(`A pause or resume report was given up after ${retriesMade + 1} attempts`);
+          return;
+        }
+        pending.cancel = schedule(() => {
+          pending.cancel = null;
+          if (wanted()) attempt(retriesMade + 1);
+        }, PAUSE_REPORT_RETRY_DELAYS_MS[retriesMade]);
+      });
+    };
+    attempt(0);
+  }
+
   function clearTimers(session) {
     for (const key of ['cancelTimer', 'cancelChaos']) {
       if (session[key]) session[key]();
@@ -164,6 +230,7 @@ function createSessionManager({
   function release(streamId, session) {
     session.stopping = true;
     clearTimers(session);
+    dropPauseReport(session);
     sessions.delete(streamId);
     dropClient(session);
   }
@@ -238,6 +305,8 @@ function createSessionManager({
       joinedAt: 0,
       cancelTimer: null,
       cancelChaos: null,
+      // The pause or resume report still being sent or retried: { cancel } or null
+      pauseReport: null,
       stopping: false,
       firstTranscriptReceived: false,
       participantNames: new Map(),
@@ -296,6 +365,7 @@ function createSessionManager({
       session.cancelTimer = null;
       if (sessions.get(session.streamId) !== session) return;
       log.warn('No word from Zoom after the RTMS connection closed: reporting the stream as lost');
+      dropPauseReport(session);
       sessions.delete(session.streamId);
       reportFor(session, 'rtms_stopped', { fault: true });
     }, AWAIT_ZOOM_SIGNAL_MS);
@@ -374,6 +444,7 @@ function createSessionManager({
       if (session.stopping || !isCurrent()) return; // our own leave(), already handled
       if (isDeliberateStop(reason)) {
         clearTimers(session);
+        dropPauseReport(session);
         sessions.delete(streamId);
         // The connection is closed, but the SDK client keeps polling and holds
         // its native handle until leave(). Released outside the SDK callback.
@@ -393,12 +464,18 @@ function createSessionManager({
 
     // Someone paused or resumed this stream, with Arlo's button or with Zoom's
     // own controls ("Apps that access meeting content"). Zoom sends no webhook
-    // for it: this is the only place it is heard of.
+    // for it: this is the only place it is heard of. The same callback also
+    // hears of other sessions and streams on this connection: those are logged
+    // and change nothing here.
     client.onSessionUpdate((op, info) => {
       log.log('Session update:', typeof op === 'number' ? op : 'unexpected form', describeSessionInfo(info, streamId));
       if (!isCurrent() || session.state !== 'streaming') return;
-      if (op === SESSION_EVENT_PAUSE) reportFor(session, 'rtms_paused');
-      else if (op === SESSION_EVENT_RESUME) reportFor(session, 'rtms_resumed');
+      if (op !== SESSION_EVENT_PAUSE && op !== SESSION_EVENT_RESUME) return;
+      if (!isAboutJoinedStream(info, streamId)) {
+        log.log('Session update is not about the joined stream: nothing reported');
+        return;
+      }
+      reportPauseChange(session, op === SESSION_EVENT_PAUSE ? 'rtms_paused' : 'rtms_resumed');
     });
 
     // Scenario 3: media dropped while signaling survives. Zoom allows ~30s.

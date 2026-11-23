@@ -2,6 +2,7 @@
 // client is a native module that only runs in the Linux container.
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const {
   createSessionManager, reconnectDelay, isFaultStop,
   MAX_RECONNECT_ATTEMPTS, JOIN_CONFIRM_TIMEOUT_MS, AWAIT_ZOOM_SIGNAL_MS, STABLE_CONNECTION_MS,
@@ -21,7 +22,8 @@ class FakeClient {
 
 function setup({ clientFactory, chaosDropAfterMs } = {}) {
   const clients = [];
-  const sent = { status: [], segments: [], participantEvents: [] };
+  // `sent.failStatus`, when a test sets it: (status) => true makes that report fail
+  const sent = { status: [], segments: [], participantEvents: [], failed: [], failStatus: null };
   const clock = { now: 1_000_000 };
   // Timers are collected, not run: a test fires the one it is about
   const timers = [];
@@ -41,7 +43,13 @@ function setup({ clientFactory, chaosDropAfterMs } = {}) {
   const manager = createSessionManager({
     createClient: clientFactory || (() => { const c = new FakeClient(); clients.push(c); return c; }),
     backend: {
-      status: async (meetingId, status, extra) => { sent.status.push({ meetingId, status, ...extra }); },
+      status: async (meetingId, status, extra) => {
+        if (sent.failStatus && sent.failStatus(status)) {
+          sent.failed.push(status);
+          throw new Error('ECONNREFUSED');
+        }
+        sent.status.push({ meetingId, status, ...extra });
+      },
       segment: async (meetingId, segment, extra) => { sent.segments.push({ meetingId, segment, ...extra }); },
       participantEvents: async (meetingId, events, extra) => { sent.participantEvents.push({ meetingId, events, ...extra }); },
     },
@@ -824,11 +832,11 @@ test('a pause and a resume reported by the RTMS session are passed on for that s
   await tick();
   sent.status.length = 0;
 
-  clients[1].handlers.sessionUpdate(3, { sessionId: 'x' });
+  clients[1].handlers.sessionUpdate(3, { sessionId: 'x', streamId: 'stream-2' });
   await tick();
   assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_paused', streamId: 'stream-2' }]);
 
-  clients[1].handlers.sessionUpdate(4, { sessionId: 'x' });
+  clients[1].handlers.sessionUpdate(4, { sessionId: 'x', streamId: 'stream-2' });
   await tick();
   assert.deepEqual(statuses(sent), ['rtms_paused', 'rtms_resumed']);
   assert.equal(sent.status[1].streamId, 'stream-2');
@@ -894,4 +902,204 @@ test('a session update is logged with what it is about, and never with an id', a
   assert.ok(!line.includes('SESSION-SECRET-2') && !line.includes('stream-OTHER') && !line.includes('MEETING-1'));
   clients[0].handlers.sessionUpdate(1);
   assert.ok(lines.some((l) => l.includes('(no session info)')));
+});
+
+test('a session update about another stream on the same connection reports nothing', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  await tick();
+  sent.status.length = 0;
+
+  // a second person's session shows up on the first person's connection
+  clients[0].handlers.sessionUpdate(3, { sessionId: 'other', streamId: 'stream-OTHER', isPaused: true });
+  clients[0].handlers.sessionUpdate(4, { sessionId: 'other', streamId: 'stream-OTHER', isPaused: false });
+  // an update that names no stream, or names one in an unexpected form, is not known to be about this one
+  clients[0].handlers.sessionUpdate(3, { sessionId: 'other' });
+  clients[0].handlers.sessionUpdate(3, { streamId: 42 });
+  clients[0].handlers.sessionUpdate(3, { streamId: ['stream-1'] });
+  await tick();
+  assert.deepEqual(sent.status, []);
+
+  // one that names the joined stream is
+  clients[0].handlers.sessionUpdate(3, { sessionId: 'mine', streamId: 'stream-1' });
+  await tick();
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_paused', streamId: 'stream-1' }]);
+});
+
+test('a session update without session info (older SDK form) is about the joined stream', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  await tick();
+  sent.status.length = 0;
+  clients[0].handlers.sessionUpdate(3);
+  clients[0].handlers.sessionUpdate(4, null);
+  clients[0].handlers.sessionUpdate(3, 'paused');
+  await tick();
+  assert.deepEqual(statuses(sent), ['rtms_paused', 'rtms_resumed', 'rtms_paused']);
+});
+
+// ---------------------------------------------------------------------------
+// A pause or resume report that the backend did not take is sent again
+// ---------------------------------------------------------------------------
+
+async function streamingQuietly(options) {
+  const ctx = setup(options);
+  await ctx.manager.started(started());
+  ctx.clients[0].handlers.joinConfirm(0);
+  await tick();
+  ctx.sent.status.length = 0;
+  return ctx;
+}
+
+test('a pause report the backend did not take is sent again after 2s, 5s and 10s, then given up', async () => {
+  const { clients, sent, fire, pending } = await streamingQuietly();
+  sent.failStatus = () => true;
+  clients[0].handlers.sessionUpdate(3);
+  await tick();
+  assert.deepEqual(sent.failed, ['rtms_paused']);
+  assert.deepEqual(pending().map((t) => t.ms), [2000]);
+
+  fire(2000);
+  await tick();
+  assert.deepEqual(pending().map((t) => t.ms), [5000]);
+  fire(5000);
+  await tick();
+  assert.deepEqual(pending().map((t) => t.ms), [10000]);
+  fire(10000);
+  await tick();
+  // the first try and three more, and no more after that
+  assert.deepEqual(sent.failed, ['rtms_paused', 'rtms_paused', 'rtms_paused', 'rtms_paused']);
+  assert.deepEqual(pending(), []);
+  assert.deepEqual(sent.status, []);
+});
+
+test('a retried pause report that gets through is delivered once and not sent again', async () => {
+  const { clients, sent, fire, pending } = await streamingQuietly();
+  sent.failStatus = () => true;
+  clients[0].handlers.sessionUpdate(3);
+  await tick();
+  sent.failStatus = null; // the backend is back
+  fire(2000);
+  await tick();
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_paused', streamId: 'stream-1' }]);
+  assert.deepEqual(pending(), []);
+});
+
+test('a resume report is retried the same way', async () => {
+  const { clients, sent, fire, pending } = await streamingQuietly();
+  sent.failStatus = (status) => status === 'rtms_resumed';
+  clients[0].handlers.sessionUpdate(3);
+  clients[0].handlers.sessionUpdate(4);
+  await tick();
+  assert.deepEqual(statuses(sent), ['rtms_paused']);
+  sent.failStatus = null;
+  fire(2000);
+  await tick();
+  assert.deepEqual(statuses(sent), ['rtms_paused', 'rtms_resumed']);
+  assert.deepEqual(pending(), []);
+});
+
+test('a queued "paused" is never delivered after a later "resumed"', async () => {
+  const { clients, sent, pending } = await streamingQuietly();
+  sent.failStatus = (status) => status === 'rtms_paused';
+  clients[0].handlers.sessionUpdate(3);
+  await tick();
+  assert.deepEqual(pending().map((t) => t.ms), [2000]);
+
+  clients[0].handlers.sessionUpdate(4);
+  await tick();
+  assert.deepEqual(pending(), [], 'the queued pause report is cancelled');
+  assert.deepEqual(statuses(sent), ['rtms_resumed']);
+});
+
+test('a resume that arrives while a pause report is still being sent stops that report from being retried', async () => {
+  const { clients, sent, pending } = await streamingQuietly();
+  sent.failStatus = (status) => status === 'rtms_paused';
+  // both before the failed send is known
+  clients[0].handlers.sessionUpdate(3);
+  clients[0].handlers.sessionUpdate(4);
+  await tick();
+  assert.deepEqual(pending(), []);
+  assert.deepEqual(statuses(sent), ['rtms_resumed']);
+});
+
+test('a queued pause report is dropped when the session ends', async () => {
+  const { manager, clients, sent, pending } = await streamingQuietly();
+  sent.failStatus = (status) => status === 'rtms_paused';
+  clients[0].handlers.sessionUpdate(3);
+  await tick();
+  assert.equal(pending().length, 1);
+  await manager.stopped({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-1', stop_reason: 2 });
+  assert.deepEqual(pending(), []);
+  assert.deepEqual(statuses(sent), ['rtms_stopped']);
+});
+
+test('a queued pause report is dropped when Zoom closes the connection on purpose', async () => {
+  const { clients, sent, pending } = await streamingQuietly();
+  sent.failStatus = (status) => status === 'rtms_paused';
+  clients[0].handlers.sessionUpdate(3);
+  await tick();
+  clients[0].handlers.leave(6);
+  await tick();
+  assert.deepEqual(pending(), []);
+  assert.deepEqual(statuses(sent), ['rtms_stopped']);
+});
+
+test('a backend that fails, also by throwing at once, never throws into the SDK callback', async () => {
+  const clients = [];
+  const warnings = [];
+  const manager = createSessionManager({
+    createClient: () => { const c = new FakeClient(); clients.push(c); return c; },
+    backend: {
+      status: (meetingId, status) => {
+        if (status === 'rtms_paused' || status === 'rtms_resumed') throw new Error('ECONNREFUSED');
+        return Promise.resolve();
+      },
+      segment: async () => {},
+      participantEvents: async () => {},
+    },
+    defer: (fn) => fn(),
+    schedule: () => () => {},
+    log: { log() {}, warn: (...args) => warnings.push(args.join(' ')), error() {} },
+  });
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  assert.doesNotThrow(() => clients[0].handlers.sessionUpdate(3));
+  assert.doesNotThrow(() => clients[0].handlers.sessionUpdate(4));
+  await tick();
+  assert.ok(warnings.length >= 2, 'each failure is logged');
+  assert.ok(warnings.every((line) => !line.includes('stream-1') && !line.includes('MEETING-1')));
+});
+
+test('the tag a session update is logged with is salted: stable in this process, not the plain digest of the id', async () => {
+  const lines = [];
+  const clients = [];
+  const manager = createSessionManager({
+    createClient: () => { const c = new FakeClient(); clients.push(c); return c; },
+    backend: { status: async () => {}, segment: async () => {}, participantEvents: async () => {} },
+    defer: (fn) => fn(),
+    schedule: () => () => {},
+    log: { log: (...args) => lines.push(args.join(' ')), warn() {}, error() {} },
+  });
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  const info = { sessionId: 'SESSION-SECRET-2', streamId: 'stream-OTHER' };
+  clients[0].handlers.sessionUpdate(1, info);
+  clients[0].handlers.sessionUpdate(2, { ...info });
+  clients[0].handlers.sessionUpdate(1, { sessionId: 'SESSION-SECRET-3', streamId: 'stream-OTHER' });
+  const tags = lines.filter((l) => l.startsWith('Session update:')).map((l) => ({
+    session: /session #([0-9a-f]{6})/.exec(l)[1],
+    stream: /stream #([0-9a-f]{6})/.exec(l)[1],
+  }));
+  assert.equal(tags.length, 3);
+  // the same id gives the same tag within one run, another id another tag
+  assert.equal(tags[0].session, tags[1].session);
+  assert.equal(tags[0].stream, tags[2].stream);
+  assert.notEqual(tags[0].session, tags[2].session);
+  // and nobody can get the tag by hashing a guessed id
+  const plain = (value) => crypto.createHash('sha256').update(value).digest('hex').slice(0, 6);
+  assert.notEqual(tags[0].session, plain('SESSION-SECRET-2'));
+  assert.notEqual(tags[0].stream, plain('stream-OTHER'));
 });
