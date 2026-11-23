@@ -42,8 +42,9 @@ coverage/
 backend/prisma/migrations/
 !backend/prisma/migrations/.gitkeep
 
-# Storage
+# Storage (uploaded/exported files). The backend's storage code is source, not data.
 storage/
+!backend/src/storage/
 uploads/
 *.vtt
 *.mp4
