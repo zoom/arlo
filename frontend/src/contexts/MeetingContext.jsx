@@ -82,6 +82,11 @@ export function MeetingProvider({ children }) {
   // 'idle' | 'verifying' | 'verified' | 'denied' | 'unavailable'
   const [meetingAccess, setMeetingAccess] = useState({ status: 'idle', isGuest: null, reason: null });
 
+  // Zoom reported that the meeting itself ended (not just the stream). Kept
+  // until another meeting is opened, so the after-meeting screen can stay.
+  const [meetingEnded, setMeetingEnded] = useState(false);
+  const lastMeetingIdRef = useRef(null);
+
   const meetingStartTimeRef = useRef(null);
   const autoStartAttemptedRef = useRef(false);
   const titleSentRef = useRef(false);
@@ -131,6 +136,8 @@ export function MeetingProvider({ children }) {
   // Clean up when meeting ends (meetingId becomes falsy) and prepare for new meetings
   useEffect(() => {
     if (meetingId) {
+      if (lastMeetingIdRef.current !== meetingId) setMeetingEnded(false);
+      lastMeetingIdRef.current = meetingId;
       // New meeting — allow WS reconnects and reset per-meeting refs
       shouldReconnectRef.current = true;
       autoStartAttemptedRef.current = false;
@@ -296,6 +303,12 @@ export function MeetingProvider({ children }) {
           const status = statusFromWs(message.data?.status);
           if (status) {
             dispatchRtms({ type: 'STATUS', status, source: 'server', fault: message.data?.fault === true });
+          }
+          // Only for this socket's meeting: an owner's panel can be told about another one
+          if (message.data?.meetingId === meetingId) {
+            if (status === 'stopped' && message.data.meetingEnded === true) setMeetingEnded(true);
+            // A stream that starts again proves the meeting goes on
+            else if (status === 'started') setMeetingEnded(false);
           }
           break;
         }
@@ -881,6 +894,7 @@ export function MeetingProvider({ children }) {
     rtmsRequestExpiresAt,
     ws,
     meetingId,
+    meetingEnded,
     meetingStartTime: meetingStartTimeRef.current,
     autoStartAttemptedRef,
     viewers,
@@ -900,7 +914,7 @@ export function MeetingProvider({ children }) {
     setWs,
     setTitleUserRenamed,
     reportVoiceState,
-  }), [reportVoiceState, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, viewers, segments, participantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [reportVoiceState, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, meetingEnded, viewers, segments, participantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

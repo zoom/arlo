@@ -4,6 +4,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ZoomSdkProvider, useZoomSdk } from './contexts/ZoomSdkContext';
 import { MeetingProvider } from './contexts/MeetingContext';
+import { ArloProvider } from './contexts/ArloContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { VerticalProvider } from './contexts/VerticalContext';
 import { ServerSettingsProvider } from './contexts/ServerSettingsContext';
@@ -140,6 +141,7 @@ function App() {
               <DemoDataProvider>
                 <FeatureLayoutProvider>
                   <MeetingProvider>
+                  <ArloProvider>
                   <ToastProvider>
                 <ErrorBoundary>
                   <HashRouter>
@@ -188,6 +190,7 @@ function App() {
                   </HashRouter>
                 </ErrorBoundary>
                 </ToastProvider>
+                  </ArloProvider>
                   </MeetingProvider>
                 </FeatureLayoutProvider>
               </DemoDataProvider>

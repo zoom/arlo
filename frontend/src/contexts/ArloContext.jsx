@@ -1,0 +1,261 @@
+import React, { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo } from 'react';
+import { useMeeting } from './MeetingContext';
+import { useAuth } from './AuthContext';
+import { cleanNotes } from '../lib/notesText';
+
+/**
+ * What this panel knows about Arlo in the current meeting: is it here, what is
+ * this person to it (owner or participant), the owner's live notes, and the
+ * private "ask". The server decides all of it; this only holds what it said.
+ *
+ * - State comes from GET …/arlo/state once meeting access is verified, and
+ *   from `arlo.state` on the meeting socket afterwards.
+ * - Notes come from GET …/arlo/notes and `notes.updated`, for owners only.
+ * - A message for another meeting id is ignored (an owner's socket can be
+ *   told about another meeting).
+ * - When the meeting ends the server deletes its data and says so: role
+ *   'participant', no owner. The panel keeps what it had, so the owner's notes
+ *   stay on screen until another meeting is opened.
+ *
+ * Nothing here is logged: state, notes, questions and answers are meeting content.
+ */
+const ArloContext = createContext();
+
+const ROLES = new Set(['owner', 'participant']);
+const WHO_CAN_ASK = new Set(['owner', 'anyone']);
+const MAX_QUESTION_CHARS = 500;
+const MAX_NAME_CHARS = 200;
+const MAX_ANSWER_CHARS = 4000;
+
+// `present` and `role` are null until the server answered: "not known" is not "not here"
+const NOT_LOADED = Object.freeze({
+  loaded: false, present: null, paused: false, role: null, ownerName: null, whoCanAsk: 'owner',
+});
+
+const ASK_MESSAGES = {
+  empty: 'Type a question first.',
+  tooLong: `Keep the question under ${MAX_QUESTION_CHARS} characters.`,
+  busy: 'Arlo is still answering.',
+  noMeeting: 'Open Arlo in a meeting to ask.',
+  401: 'Sign in to ask Arlo.',
+  403: 'You can\'t ask Arlo in this meeting.',
+  409: 'Nothing has been said since Arlo joined.',
+  429: 'Arlo is busy right now. Try again in a minute.',
+  failed: 'Arlo could not answer right now.',
+};
+
+/** The state object the server sends, rebuilt from known fields. null when it is not one. */
+function parseState(data) {
+  if (data === null || typeof data !== 'object') return null;
+  if (typeof data.present !== 'boolean' || !ROLES.has(data.role)) return null;
+  return {
+    present: data.present,
+    paused: data.paused === true,
+    role: data.role,
+    ownerName: typeof data.ownerName === 'string' && data.ownerName.length > 0
+      ? data.ownerName.slice(0, MAX_NAME_CHARS)
+      : null,
+    whoCanAsk: WHO_CAN_ASK.has(data.whoCanAsk) ? data.whoCanAsk : 'owner',
+  };
+}
+
+const arloUrl = (meetingId, name) => `/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/arlo/${name}`;
+
+export function ArloProvider({ children }) {
+  const { ws, meetingId, meetingAccess, meetingEnded } = useMeeting();
+  const { isAuthenticated } = useAuth();
+  const accessVerified = meetingAccess?.status === 'verified';
+
+  const [state, setState] = useState(NOT_LOADED);
+  const [everPresent, setEverPresent] = useState(false);
+  const [notes, setNotes] = useState(null);
+  const [asking, setAsking] = useState(false);
+
+  // Read by the socket handler, which must not wait for a render
+  const stateRef = useRef(NOT_LOADED);
+  const endedRef = useRef(false);
+  const askingRef = useRef(false);
+  const meetingIdRef = useRef(meetingId);
+  meetingIdRef.current = meetingId;
+  // The meeting this state belongs to. Leaving the meeting (no id) keeps it;
+  // only another meeting replaces it.
+  const heldMeetingIdRef = useRef(null);
+
+  useEffect(() => {
+    if (!meetingId || heldMeetingIdRef.current === meetingId) return;
+    const hadMeeting = heldMeetingIdRef.current !== null;
+    heldMeetingIdRef.current = meetingId;
+    if (!hadMeeting) return;
+    stateRef.current = NOT_LOADED;
+    endedRef.current = false;
+    setState(NOT_LOADED);
+    setEverPresent(false);
+    setNotes(null);
+  }, [meetingId]);
+
+  useEffect(() => {
+    endedRef.current = meetingEnded === true;
+  }, [meetingEnded]);
+
+  const applyState = useCallback((data) => {
+    const next = parseState(data);
+    if (!next) return;
+    const prev = stateRef.current;
+    // After the meeting ended the server has nothing left to say about it:
+    // Arlo is gone, and who this person was to it stays as it was.
+    const merged = endedRef.current && prev.loaded
+      ? { ...prev, present: false, paused: false }
+      : { loaded: true, ...next };
+    stateRef.current = merged;
+    setState(merged);
+    if (merged.present) setEverPresent(true);
+  }, []);
+
+  // Newer notes win; notes for someone who is not an owner are not kept
+  const applyNotes = useCallback((value) => {
+    const clean = cleanNotes(value);
+    if (!clean || stateRef.current.role !== 'owner') return;
+    setNotes((prev) => (
+      prev && prev.throughSeqNo !== null && clean.throughSeqNo !== null && prev.throughSeqNo > clean.throughSeqNo
+        ? prev
+        : clean
+    ));
+  }, []);
+
+  // The state, once the server lets this panel ask. Again when the socket is
+  // replaced (a reconnect) and when the person signs in (their role can change).
+  useEffect(() => {
+    if (!meetingId || !accessVerified) return undefined;
+    let cancelled = false;
+    fetch(arloUrl(meetingId, 'state'), { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data) applyState(data); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [meetingId, accessVerified, isAuthenticated, ws, applyState]);
+
+  useEffect(() => {
+    if (!ws || !meetingId) return undefined;
+    const onMessage = (event) => {
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const data = message?.data;
+      if (!data || data.meetingId !== meetingId) return;
+      switch (message.type) {
+        case 'meeting.status':
+          // Set here too, so the `arlo.state` that follows in the same turn is read correctly
+          if (data.status === 'rtms_stopped' && data.meetingEnded === true) endedRef.current = true;
+          else if (data.status === 'rtms_started') endedRef.current = false;
+          break;
+        case 'arlo.state':
+          applyState(data);
+          break;
+        case 'notes.updated':
+          applyNotes(data.notes);
+          break;
+        default:
+          break;
+      }
+    };
+    ws.addEventListener('message', onMessage);
+    return () => ws.removeEventListener('message', onMessage);
+  }, [ws, meetingId, applyState, applyNotes]);
+
+  // Becoming an owner fetches the notes; no longer being one clears them
+  const role = state.role;
+  useEffect(() => {
+    if (role !== 'owner') {
+      setNotes(null);
+      return undefined;
+    }
+    if (!meetingId || !accessVerified) return undefined;
+    let cancelled = false;
+    fetch(arloUrl(meetingId, 'notes'), { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data) applyNotes(data.notes); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [role, meetingId, accessVerified, applyNotes]);
+
+  const setWhoCanAsk = useCallback(async (value) => {
+    const id = meetingIdRef.current;
+    if (!id || !WHO_CAN_ASK.has(value)) return false;
+    try {
+      const res = await fetch(arloUrl(id, 'settings'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ whoCanAsk: value }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => null);
+      if (meetingIdRef.current === id) applyState(data);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [applyState]);
+
+  const ask = useCallback(async (question) => {
+    const text = typeof question === 'string' ? question.trim() : '';
+    if (text.length === 0) return { error: ASK_MESSAGES.empty };
+    if (text.length > MAX_QUESTION_CHARS) return { error: ASK_MESSAGES.tooLong };
+    const id = meetingIdRef.current;
+    if (!id) return { error: ASK_MESSAGES.noMeeting };
+    if (askingRef.current) return { error: ASK_MESSAGES.busy };
+    askingRef.current = true;
+    setAsking(true);
+    try {
+      const res = await fetch(arloUrl(id, 'ask'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ question: text }),
+      });
+      // The server's own error text is not shown: short, known messages only
+      if (!res.ok) return { error: ASK_MESSAGES[res.status] || ASK_MESSAGES.failed };
+      const data = await res.json().catch(() => null);
+      if (typeof data?.answer !== 'string' || data.answer.trim().length === 0) {
+        return { error: ASK_MESSAGES.failed };
+      }
+      return { answer: data.answer.trim().slice(0, MAX_ANSWER_CHARS) };
+    } catch {
+      return { error: ASK_MESSAGES.failed };
+    } finally {
+      askingRef.current = false;
+      setAsking(false);
+    }
+  }, []);
+
+  const value = useMemo(() => ({
+    loaded: state.loaded,
+    present: state.present,
+    paused: state.paused,
+    role: state.role,
+    ownerName: state.ownerName,
+    whoCanAsk: state.whoCanAsk,
+    everPresent,
+    notes,
+    setWhoCanAsk,
+    ask,
+    asking,
+  }), [state, everPresent, notes, setWhoCanAsk, ask, asking]);
+
+  return (
+    <ArloContext.Provider value={value}>
+      {children}
+    </ArloContext.Provider>
+  );
+}
+
+export function useArlo() {
+  const context = useContext(ArloContext);
+  if (!context) {
+    throw new Error('useArlo must be used within an ArloProvider');
+  }
+  return context;
+}

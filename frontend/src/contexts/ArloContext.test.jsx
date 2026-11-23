@@ -1,0 +1,277 @@
+import React, { useEffect } from 'react';
+import { render, waitFor, act } from '@testing-library/react';
+import { vi } from 'vitest';
+import {
+  createZoomSdk, FakeWebSocket, json, mockFetch, resetHarness, serverMessage, arloPath, ARLO_ABSENT,
+} from '../test/harness';
+import { ZoomSdkProvider } from './ZoomSdkContext';
+import { AuthProvider } from './AuthContext';
+import { ServerSettingsProvider } from './ServerSettingsContext';
+import { MeetingProvider, useMeeting } from './MeetingContext';
+import { ArloProvider, useArlo } from './ArloContext';
+
+// The real providers in a fake Zoom meeting. The probe stands where a screen
+// would: it opens the meeting socket and reads what useArlo() gives.
+
+const NOTES = {
+  summary: 'The beta moves to March 3.',
+  decisions: ['Beta launch moves to March 3'],
+  actionItems: [{ text: 'Send the revised timeline', owner: 'Ana' }],
+  updatedAt: '2026-11-23T12:00:00.000Z',
+  throughSeqNo: 7,
+};
+const OWNER = { present: true, role: 'owner', ownerName: 'Ana' };
+
+let arlo;
+let meeting;
+function Probe() {
+  meeting = useMeeting();
+  arlo = useArlo();
+  const { ws, meetingId, connectWebSocket } = meeting;
+  useEffect(() => {
+    if (!ws && meetingId) connectWebSocket(meetingId);
+  }, [ws, meetingId, connectWebSocket]);
+  return null;
+}
+
+const server = () => FakeWebSocket.last;
+const send = (message) => act(async () => { server().serverSend(message); });
+const callsTo = (fetchMock, path) => fetchMock.mock.calls.filter(([url]) => String(url).startsWith(path));
+
+async function open(routes = {}) {
+  const fetchMock = mockFetch(routes);
+  window.zoomSdk = createZoomSdk();
+  FakeWebSocket.instances = [];
+  vi.stubGlobal('WebSocket', FakeWebSocket);
+  localStorage.setItem('arlo-auto-start', 'false');
+  render(
+    <ZoomSdkProvider>
+      <AuthProvider>
+        <ServerSettingsProvider>
+          <MeetingProvider>
+            <ArloProvider>
+              <Probe />
+            </ArloProvider>
+          </MeetingProvider>
+        </ServerSettingsProvider>
+      </AuthProvider>
+    </ZoomSdkProvider>,
+  );
+  await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+  await waitFor(() => expect(arlo.loaded).toBe(true));
+  return fetchMock;
+}
+
+const asOwner = () => open({
+  [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...OWNER }),
+  [arloPath('notes')]: () => json({ notes: NOTES }),
+});
+
+afterEach(resetHarness);
+
+describe('Arlo\'s state', () => {
+  test('is not loaded before the server answered, then comes from the state route', async () => {
+    const fetchMock = await open({
+      [arloPath('state')]: () => json({ ...ARLO_ABSENT, present: true, ownerName: 'Ana', whoCanAsk: 'anyone' }),
+    });
+    expect(arlo).toMatchObject({
+      loaded: true, present: true, paused: false, role: 'participant', ownerName: 'Ana', whoCanAsk: 'anyone', everPresent: true, notes: null,
+    });
+    // After meeting access was verified, with the cookies
+    const urls = fetchMock.mock.calls.map(([url]) => String(url));
+    expect(urls.findIndex((url) => url.startsWith(arloPath('state'))))
+      .toBeGreaterThan(urls.findIndex((url) => url.includes('/api/auth/meeting-access')));
+    callsTo(fetchMock, arloPath('state')).forEach(([, init]) => expect(init.credentials).toBe('include'));
+  });
+
+  test('a participant never asks for the notes', async () => {
+    const fetchMock = await open();
+    expect(arlo.role).toBe('participant');
+    expect(callsTo(fetchMock, arloPath('notes'))).toHaveLength(0);
+  });
+
+  test('an owner gets the notes', async () => {
+    const fetchMock = await asOwner();
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    callsTo(fetchMock, arloPath('notes')).forEach(([, init]) => expect(init.credentials).toBe('include'));
+  });
+
+  test('arlo.state from the socket updates the role, and becoming an owner fetches the notes', async () => {
+    const fetchMock = await open({ [arloPath('notes')]: () => json({ notes: NOTES }) });
+    expect(arlo.everPresent).toBe(false);
+    await send(serverMessage.arloState(OWNER));
+    expect(arlo).toMatchObject({ role: 'owner', present: true, ownerName: 'Ana', everPresent: true });
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    expect(callsTo(fetchMock, arloPath('notes')).length).toBeGreaterThan(0);
+
+    // Arlo leaves: it was here, and the owner is still the owner
+    await send(serverMessage.arloState({ ...OWNER, present: false }));
+    expect(arlo).toMatchObject({ present: false, everPresent: true, role: 'owner' });
+  });
+
+  test('messages for another meeting are ignored', async () => {
+    await asOwner();
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await send(serverMessage.arloState({ present: false, role: 'participant', ownerName: 'Someone else' }, 'OTHER-MEETING'));
+    await send(serverMessage.notes({ ...NOTES, summary: 'Notes of another meeting.' }, 'OTHER-MEETING'));
+    await send({ type: 'meeting.status', data: { meetingId: 'OTHER-MEETING', status: 'rtms_stopped', meetingEnded: true } });
+    expect(arlo).toMatchObject({ role: 'owner', ownerName: 'Ana', present: true });
+    expect(arlo.notes.summary).toBe(NOTES.summary);
+    expect(meeting.meetingEnded).toBe(false);
+  });
+
+  test('notes.updated replaces the notes, with unknown fields dropped', async () => {
+    await asOwner();
+    await send(serverMessage.notes({ ...NOTES, summary: 'Pricing stays as proposed.', html: '<b>no</b>' }));
+    expect(arlo.notes.summary).toBe('Pricing stays as proposed.');
+    expect(arlo.notes).not.toHaveProperty('html');
+    // Something that is not notes changes nothing
+    await send(serverMessage.notes('not notes'));
+    expect(arlo.notes.summary).toBe('Pricing stays as proposed.');
+  });
+
+  test('notes sent to someone who is not an owner are not kept', async () => {
+    await open();
+    await send(serverMessage.notes(NOTES));
+    expect(arlo.notes).toBeNull();
+  });
+
+  test('the notes are cleared when the role stops being owner', async () => {
+    await asOwner();
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await send(serverMessage.arloState({ present: true, role: 'participant', ownerName: 'Ben' }));
+    expect(arlo.role).toBe('participant');
+    expect(arlo.notes).toBeNull();
+  });
+
+  test('a malformed arlo.state is ignored', async () => {
+    await asOwner();
+    await send({ type: 'arlo.state', data: { meetingId: 'MEETING-1==', present: 'yes', role: 'admin' } });
+    expect(arlo).toMatchObject({ role: 'owner', present: true });
+  });
+});
+
+describe('after the meeting ended', () => {
+  test('the owner keeps the role and the notes, although the server has flushed both', async () => {
+    let flushed = false;
+    await open({
+      [arloPath('state')]: () => json(flushed ? { ...ARLO_ABSENT } : { ...ARLO_ABSENT, ...OWNER }),
+      [arloPath('notes')]: () => (flushed ? json({ error: 'Forbidden' }, 403) : json({ notes: NOTES })),
+    });
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    expect(meeting.meetingEnded).toBe(false);
+
+    flushed = true;
+    // Both in one turn, as the server sends them
+    await act(async () => {
+      server().serverSend(serverMessage.status('rtms_stopped', { meetingEnded: true }));
+      server().serverSend(serverMessage.arloState({ present: false, role: 'participant', ownerName: null }));
+    });
+    expect(meeting.meetingEnded).toBe(true);
+    expect(arlo).toMatchObject({ role: 'owner', ownerName: 'Ana', present: false, everPresent: true });
+    expect(arlo.notes).toEqual(NOTES);
+
+    // Later messages change nothing either
+    await send(serverMessage.arloState({ present: false, role: 'participant' }));
+    expect(arlo.role).toBe('owner');
+    expect(arlo.notes).toEqual(NOTES);
+  });
+
+  test('a stop that is not the end of the meeting does not set meetingEnded', async () => {
+    await asOwner();
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.status('rtms_stopped'));
+    expect(meeting.meetingEnded).toBe(false);
+  });
+});
+
+describe('ask', () => {
+  test('sends the trimmed question and nothing else, and gives the answer', async () => {
+    const bodies = [];
+    const fetchMock = await open({
+      [`POST ${arloPath('ask')}`]: ({ body }) => { bodies.push(body); return json({ answer: 'March 3.' }); },
+    });
+    let result;
+    await act(async () => { result = await arlo.ask('  When is the beta?  '); });
+    expect(result).toEqual({ answer: 'March 3.' });
+    expect(bodies).toEqual([{ question: 'When is the beta?' }]);
+    expect(arlo.asking).toBe(false);
+    const [, init] = callsTo(fetchMock, arloPath('ask'))[0];
+    expect(init.credentials).toBe('include');
+    expect(init.headers['Content-Type']).toBe('application/json');
+  });
+
+  test('an empty or too long question is refused without a request', async () => {
+    const fetchMock = await open();
+    let empty; let long; let notText;
+    await act(async () => {
+      empty = await arlo.ask('   ');
+      long = await arlo.ask('x'.repeat(501));
+      notText = await arlo.ask(undefined);
+    });
+    expect(empty.error).toMatch(/question/i);
+    expect(long.error).toMatch(/500/);
+    expect(notText.error).toMatch(/question/i);
+    expect(callsTo(fetchMock, arloPath('ask'))).toHaveLength(0);
+  });
+
+  test.each([
+    [401, { error: 'Authentication required' }, /sign in/i],
+    [403, { error: 'Forbidden', message: 'server text' }, /can't ask Arlo/i],
+    [409, { error: 'no_transcript' }, /nothing has been said/i],
+    [429, { error: 'rate limited' }, /try again in a minute/i],
+    [502, { error: 'bad gateway' }, /could not answer/i],
+    [503, { error: 'AI features are disabled' }, /could not answer/i],
+    [200, { answer: 42 }, /could not answer/i],
+  ])('a %i answer becomes a short message', async (status, body, expected) => {
+    await open({ [`POST ${arloPath('ask')}`]: () => json(body, status) });
+    let result;
+    await act(async () => { result = await arlo.ask('What was decided?'); });
+    expect(result.error).toMatch(expected);
+    expect(result.error).not.toContain('server text');
+    expect(result).not.toHaveProperty('answer');
+    expect(arlo.asking).toBe(false);
+  });
+
+  test('a request that fails to reach the server is a message, not a throw', async () => {
+    await open({ [`POST ${arloPath('ask')}`]: () => { throw new TypeError('Failed to fetch'); } });
+    let result;
+    await act(async () => { result = await arlo.ask('What was decided?'); });
+    expect(result.error).toMatch(/could not answer/i);
+  });
+});
+
+describe('setWhoCanAsk', () => {
+  test('sends exactly { whoCanAsk } and takes the state the server answers', async () => {
+    const bodies = [];
+    const fetchMock = await open({
+      [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...OWNER }),
+      [`PUT ${arloPath('settings')}`]: ({ body }) => {
+        bodies.push(body);
+        return json({ ...ARLO_ABSENT, ...OWNER, whoCanAsk: body.whoCanAsk });
+      },
+    });
+    let ok;
+    await act(async () => { ok = await arlo.setWhoCanAsk('anyone'); });
+    expect(ok).toBe(true);
+    expect(bodies).toEqual([{ whoCanAsk: 'anyone' }]);
+    expect(arlo.whoCanAsk).toBe('anyone');
+    expect(callsTo(fetchMock, arloPath('settings'))[0][1].credentials).toBe('include');
+  });
+
+  test('a value that is not on the list is refused without a request', async () => {
+    const fetchMock = await open();
+    let ok;
+    await act(async () => { ok = await arlo.setWhoCanAsk('everyone'); });
+    expect(ok).toBe(false);
+    expect(callsTo(fetchMock, arloPath('settings'))).toHaveLength(0);
+  });
+
+  test('a refusal leaves the setting as it was', async () => {
+    await open({ [`PUT ${arloPath('settings')}`]: () => json({ error: 'Forbidden' }, 403) });
+    let ok;
+    await act(async () => { ok = await arlo.setWhoCanAsk('anyone'); });
+    expect(ok).toBe(false);
+    expect(arlo.whoCanAsk).toBe('owner');
+  });
+});
