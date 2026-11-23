@@ -49,11 +49,13 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 
 ### Demo Mode (No Database)
 
-This version of Arlo runs in **secure demo mode** — no database required. Your meeting data is processed in real-time and **never stored**:
+This version of Arlo runs in **secure demo mode**, with no database. A meeting's transcript is held **in memory only while that meeting runs** and is deleted when it ends:
 
 - **Live transcription** and AI features work fully during active meetings
-- **No persistent storage** — data exists only in memory during your session
-- **No database setup** — just configure Zoom credentials and go
+- **Catch-up for late joiners:** someone who opens Arlo mid-meeting, or reconnects, sees what was said so far
+- **Nothing between meetings:** when a meeting ends its transcript is deleted, so nothing from one meeting (or one customer demo) is available in the next
+- **Nothing on disk:** no database and no files; a server restart also clears everything
+- **No database setup:** configure Zoom credentials and go
 
 **Want to add persistence?** If you're building a production app and need to store meeting history, search transcripts, or enable features like auto-open meetings, you'll want to add a database. We recommend:
 

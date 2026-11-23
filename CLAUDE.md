@@ -6,17 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Arlo Meeting Assistant** is an open-source Zoom Apps reference implementation demonstrating how to build intelligent meeting assistants that capture real-time transcripts using RTMS (Real-Time Media Streams) — **without requiring a meeting bot**. The app runs natively inside Zoom meetings and provides AI-powered summaries, action items, and real-time AI suggestions.
 
-**IMPORTANT - Demo Mode:** This version runs in **secure demo mode** with **no database**. Customer meeting data is **never stored** — all transcription happens in real-time only and data exists only in memory during the active meeting.
+**IMPORTANT - Demo Mode:** This version runs in **secure demo mode** with **no database**. A meeting's transcript and timeline are held **in memory only while that meeting runs** and are deleted when it ends. Nothing is written to disk and nothing carries from one meeting to the next.
 
 ## Demo Mode Features
 
 ### Available in Demo Mode:
-- **Live transcription** — Real-time via WebSocket (data never stored)
+- **Live transcription** — Real-time via WebSocket; held in memory for the meeting so late or reconnecting panels can catch up
 - **Real-time AI suggestions** — During active meetings
 - **Live AI summary generation** — From current transcript
 - **SOAP notes extraction** — For healthcare use cases
 - **Sentiment analysis** — Real-time customer sentiment
-- **Demo sample data** — Toggle to see UI with sample content
+- **Demo sample data** — Off by default; a toggle in Settings, shown only when the deployment runs in demo mode
 
 ### Not Available in Demo Mode:
 - Meeting history
@@ -90,11 +90,17 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
 ### Data Flow (Demo Mode)
 
 ```
-Zoom RTMS WebSocket → RTMS Service → Backend (broadcast only, NO storage)
+Zoom RTMS WebSocket → RTMS Service → Backend (kept in memory for the meeting, then broadcast)
     → WebSocket broadcast → Frontend (live transcript display, < 1s end-to-end)
+Panel opens late or reconnects → GET /api/meetings/by-zoom-id/{id}/transcript → what was said so far
 ```
 
-**SECURITY:** Data flows through memory only and is never persisted. When the meeting ends or server restarts, all meeting data is gone.
+**SECURITY:** Meeting data lives in memory only (`backend/src/storage/`) and is never written to disk. `backend/src/services/meetingLifecycle.js` deletes a meeting's data when:
+- Zoom reports the stream stopped because the meeting ended (stop reason 6), or
+- the stream is stopped and no Arlo panel has been connected for `MEETING_FLUSH_GRACE_MS` (default 2 minutes), or
+- it is older than 12 hours.
+
+A stop, pause, reconnect or restart inside one meeting keeps the data. A server restart clears everything. A transcript line that arrives within ten minutes after a meeting's data was flushed is dropped, not kept.
 
 ### Stream failover and reconnection
 
@@ -133,6 +139,8 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `server.js` — Express app setup, middleware, route mounting, rate limiting
 - `config.js` — Environment variable validation
 - `lib/memoryStore.js` — In-memory user and token storage (NO DATABASE)
+- `storage/` — The meeting store (transcript segments and timeline per meeting). One in-memory implementation; a database implementation plugs in behind the same interface
+- `services/meetingLifecycle.js` — When a meeting's in-memory data is flushed
 - `routes/` — 9 route modules: auth, meetings, ai, home, rtms, search, highlights, zoom-meetings, preferences
 - `services/` — auth (token/PKCE/encryption), openrouter (LLM), websocket (broadcast)
 - `middleware/auth.js` — `requireAuth` and `optionalAuth` session middleware
@@ -243,6 +251,8 @@ DEFAULT_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free
 FALLBACK_MODEL=nvidia/nemotron-3.5-lightning:free
 LOG_LEVEL=info                  # 'debug' adds request shapes (field names, sizes). No level logs transcript text, names, ids or tokens
 DEMO_MODE=true                  # Always true in this version
+AUTO_START_RTMS=false           # true = request transcription as soon as someone opens Arlo. Off by default: a person clicks first
+MEETING_FLUSH_GRACE_MS=120000   # Whole milliseconds, 100 to 3600000. How long a meeting's in-memory data is kept after its stream stopped and the last panel disconnected
 ```
 
 **Note:** `DATABASE_URL` is NOT required — this version has no database.
@@ -272,13 +282,13 @@ This demo mode version prioritizes security by never storing customer data:
 
 - **No database** — All data exists in memory only
 - **Tokens in memory** — OAuth tokens stored encrypted in memory, cleared on restart
-- **No persistent storage** — Meeting transcripts are broadcast but never saved
+- **No persistent storage** — A meeting's transcript is held in memory while the meeting runs and deleted when it ends; nothing is saved to disk
 - **Session cookies** — httpOnly, secure, SameSite=lax. Three kinds that cannot stand in for each other: `sessionToken` (who you are), `meetingAccess` (which meeting you are in), `sessionRestore` (encrypted, rebuilds a session after a restart)
 - **HMAC verification** — All Zoom webhooks verified with timing-safe comparisons
 - **Rate limiting** — Global, auth, and AI endpoint limits via `express-rate-limit`
 - **WebSocket auth** — verified meeting-access cookie required for all connections
 
-**Privacy Notice:** Your meeting data is processed in real-time and never stored. All data exists only in memory during your active session and is automatically cleared when you leave.
+**Privacy Notice:** Arlo keeps a meeting's transcript and notes in memory while the meeting is running, and they are deleted when the meeting ends. Nothing is written to disk or kept between meetings. Transcript text is sent to the configured AI provider to produce notes and answers; that provider's retention terms apply to what it receives.
 
 ## Branch Information
 

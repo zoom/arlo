@@ -2,7 +2,7 @@
  * Search Routes - Demo Mode
  *
  * SECURITY: Search is not available in demo mode because
- * meeting data is never stored.
+ * meeting data is held in memory only for the meeting and deleted when it ends.
  */
 const express = require('express');
 const { requireAuth, devAuthBypass } = require('../middleware/auth');

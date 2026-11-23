@@ -35,7 +35,7 @@ router.get('/', requireAuth, async (req, res) => {
     total: 0,
     cursor: null,
     demoMode: true,
-    message: 'Meeting history is not available in demo mode. Your meeting data is never stored - all transcription happens in real-time only.',
+    message: 'Meeting history is not available in demo mode. A meeting\'s transcript is held in memory only while the meeting runs and is deleted when it ends.',
   });
 });
 

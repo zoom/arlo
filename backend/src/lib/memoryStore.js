@@ -9,6 +9,8 @@
  * - OAuth tokens (encrypted, in-memory only)
  * - PKCE challenges (short-lived)
  *
+ * Meeting content (transcripts, timeline) is not kept here: see storage/.
+ *
  * All data is automatically cleared when:
  * - The server restarts
  * - The session expires
