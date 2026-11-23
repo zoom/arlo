@@ -450,8 +450,10 @@ function createSessionManager({
         // Nothing else will ever say so: Zoom may send no stop for a stream it
         // replaced, and without this report the backend would count the old
         // stream as running for good, also when the new one cannot be joined.
-        // An ordinary stop: not a fault, and the meeting goes on.
-        reportFor(other, 'rtms_stopped');
+        // Not a fault, and the meeting goes on. `replaced` tells the backend
+        // that a new stream of the same user is being joined right now: it
+        // waits for that stream's start or failure before it shows a stop.
+        reportFor(other, 'rtms_stopped', { replaced: true });
       }
     }
 

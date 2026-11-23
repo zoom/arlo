@@ -114,10 +114,13 @@ test('"meeting ended" is only believed together with a stop', async () => {
 
 test('a browser cannot make the server flush a meeting, signed in or not', async () => {
   const { generateToken } = require('../src/services/auth');
-  const signedIn = { cookie: `sessionToken=${generateToken({ userId: 'u1', zoomUserId: 'z1' })}` };
+  const { userStore } = require('../src/lib/memoryStore');
+  // someone who runs a stream of their own in the meeting: the most a browser can be
+  const user = userStore.upsert('zoom-replay-h', { email: 'h@example.test', displayName: 'Hana', avatarUrl: null });
+  const signedIn = { cookie: `sessionToken=${generateToken({ userId: user.id, zoomUserId: 'zoom-replay-h' })}` };
   const meeting = 'REPLAY-H==';
   const cookie = await cookieFor(meeting);
-  await status(meeting, { status: 'rtms_started' });
+  await status(meeting, { status: 'rtms_started', operatorId: 'zoom-replay-h' });
   await say(meeting, 1, 'Still here.');
   const post = (body, headers) => h.postJson(`${srv.base}/api/rtms/status`, { meetingId: meeting, ...body }, headers);
 

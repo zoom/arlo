@@ -14,6 +14,12 @@ test.after(() => { srv.server.closeAllConnections?.(); srv.server.close(); });
 const url = (p) => `${srv.base}${p}`;
 const withKey = { 'x-arlo-internal-key': h.internalKey() };
 const sessionCookie = () => ({ cookie: `sessionToken=${generateToken({ userId: 'u1', zoomUserId: 'z1' })}` });
+/** Someone signed in to Arlo, who can run a stream of their own (`operatorId: zoomUserId`). */
+function streamOwner(zoomUserId) {
+  const { userStore } = require('../src/lib/memoryStore');
+  const user = userStore.upsert(zoomUserId, { email: `${zoomUserId}@example.test`, displayName: 'Owner', avatarUrl: null });
+  return { zoomUserId, cookie: `sessionToken=${generateToken({ userId: user.id, zoomUserId })}` };
+}
 
 test('internal broadcast requires the internal key', async () => {
   const body = { meetingId: 'm', segment: { text: 'x' } };
@@ -29,12 +35,18 @@ test('internal endpoints validate their payloads', async () => {
   assert.equal((await h.postJson(url('/api/rtms/participant-event'), { meetingId: 'm', events: 'x' }, withKey)).status, 400);
 });
 
-test('status: internal may set any status, browsers only pause/resume', async () => {
+test('status: internal may set any status, browsers only pause/resume, and only for a stream of their own', async () => {
   assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_stopped' })).status, 401);
   assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_stopped' }, withKey)).status, 200);
   const { cookie: access } = await h.postJson(url('/api/auth/meeting-access'), { appContext: h.makeAppContext(h.meetingPayload({ mid: 'm' })) });
-  const inMeeting = { cookie: `${sessionCookie().cookie}; ${access}` };
+  const owner = streamOwner('zoom-status-owner');
+  await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_started', streamId: 's1', operatorId: owner.zoomUserId }, withKey);
+  const inMeeting = { cookie: `${owner.cookie}; ${access}` };
   assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_paused' }, inMeeting)).status, 200);
+  // signed in and in the meeting is not enough: the stream is someone else's
+  const bystander = { cookie: `${sessionCookie().cookie}; ${access}` };
+  assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_paused' }, bystander)).status, 403);
+  assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_resumed' }, bystander)).status, 403);
   assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_stopped' }, inMeeting)).status, 403);
   assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_stopped' }, sessionCookie())).status, 403);
 });
@@ -124,8 +136,9 @@ test('a browser reports pause and resume only for the meeting its meeting-access
   const access = async (mid) => (await h.postJson(url('/api/auth/meeting-access'), { appContext: h.makeAppContext(h.meetingPayload({ mid })) })).cookie;
   const here = await access(meeting);
   const elsewhere = await access('PAUSE-OTHER==');
-  const session = sessionCookie().cookie;
-  await h.postJson(url('/api/rtms/status'), { meetingId: meeting, status: 'rtms_started' }, withKey);
+  const owner = streamOwner('zoom-pause-a-owner');
+  const session = owner.cookie;
+  await h.postJson(url('/api/rtms/status'), { meetingId: meeting, status: 'rtms_started', operatorId: owner.zoomUserId }, withKey);
   const ws = await h.openWs(`${srv.base.replace('http', 'ws')}/ws?meeting_id=${encodeURIComponent(meeting)}`, { cookie: here });
   ws.socket.send(JSON.stringify({ type: 'subscribe', payload: { meetingId: meeting } }));
   await h.wait(100);

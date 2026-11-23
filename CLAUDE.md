@@ -136,7 +136,8 @@ Several Zoom users can each run a stream in the same meeting, each with its own 
 - The primary stream is a live stream of the meeting's original host (`is_original_host` on the webhook) when there is one, otherwise the live stream that started first. It decides nothing about what is stored: its operator is the owner named first (`ownerName`), and its connection trouble ("Reconnecting…") is the meeting's. While the panels show "Reconnecting…", data from another running stream tells them a stream is running.
 - Each stream's operator is remembered, also after the stream stopped, until the meeting is flushed. Every operator who is signed in to Arlo is an owner and gets the notes.
 - The rtms service says with every line and participant event whose stream it is (`streamId`, `operatorId`, `originalHost`). A backend that restarted mid-meeting learns the streams and their owners from the next line, and tells the lifecycle and the panels once that the meeting is running.
-- When the same user starts a new stream, the rtms service leaves their old one and reports it stopped. The backend keeps it as a stopped stream, so a late line from it does not count as a new stream.
+- When the same user starts a new stream, the rtms service leaves their old one and reports it stopped with `replaced: true` (an internal-only field, validated as a boolean). The backend keeps it as a stopped stream, so a late line from it does not count as a new stream. When it was the meeting's only stream, the backend does not show a stop to the panels or tell the lifecycle yet: it waits for the new stream's outcome. `rtms_started` → the meeting ran all along (the panels get their `rtms_started`, no "stopped"). `rtms_failed` or a stop for the new stream → that is the meeting's stop. Nothing within 90 seconds → the stop is reported then. The wait ends with the meeting's flush.
+- Pause is per stream: each user pauses their own. `POST /api/rtms/status` with `rtms_paused` / `rtms_resumed` from a browser is accepted only from a signed-in user who holds the `meetingAccess` cookie for that meeting and runs a live stream of their own there (their Zoom user id is a live stream's operator); otherwise 403. It marks that stream. A line from a stream clears its mark (it is running after all; lines within 3 seconds of the pause report were still on their way and do not count), and a stream that stops loses it. The meeting is paused (`meeting.status` `rtms_paused`, `arlo.state.paused`) only when at least one stream is live and every live stream is paused; the panels are told once when that answer changes, not per report.
 
 ### Live notes
 
@@ -259,7 +260,7 @@ Arlo can act as a test proxy for Zoom's RTMS REST API. A script authenticates wi
 
 ### Arlo in one meeting
 All under `/api/meetings/by-zoom-id/:zoomMeetingId/arlo`. Every route needs the `meetingAccess` cookie for exactly this meeting; being signed in does not replace it. Who is an owner is decided on the server. Responses are `Cache-Control: no-store`.
-- `GET /state` — `{ present, paused, role: 'owner' | 'participant', ownerName, whoCanAsk }`. Open to guests in the meeting (a guest is a participant)
+- `GET /state` — `{ present, paused, myStreamPaused?, role: 'owner' | 'participant', ownerName, whoCanAsk }`. `paused` is the meeting as a whole (every live stream is paused); `myStreamPaused` (boolean, owners only) is the caller's own stream. Open to guests in the meeting (a guest is a participant)
 - `PUT /settings` — `{ whoCanAsk: 'owner' | 'anyone' }`, owners only. Every panel of the meeting is told over its socket
 - `GET /notes` — `{ notes: { summary, decisions, actionItems, updatedAt, throughSeqNo } | null }`, owners only
 - `POST /ask` — `{ question }` (1 to 500 characters) → `{ answer }`, from the stored transcript, private to the asker. For an owner, and for other signed-in people in the meeting when the setting is `anyone`. Shares the AI rate limit. Takes no transcript and no model from the client; questions and answers are not stored or logged
@@ -293,13 +294,13 @@ Client → Server: { type: 'subscribe', meetingId: 'uuid' }
 Server → Client: { type: 'transcript.segment', data: { meetingId, segment: {...} } }
 Server → Client: { type: 'ai.suggestion', data: { meetingId, suggestion: {...} } }
 Server → Client: { type: 'meeting.status', data: { meetingId, status: '...', fault?: true, meetingEnded?: true } }
-Server → Client: { type: 'arlo.state', data: { meetingId, present, paused, role, ownerName, whoCanAsk } }
+Server → Client: { type: 'arlo.state', data: { meetingId, present, paused, myStreamPaused?, role, ownerName, whoCanAsk } }
 Server → Client: { type: 'notes.updated', data: { meetingId, notes } }
 Server → Client: { type: 'participant.event', data: { meetingId, event: {...} } }
 ```
 
 - `meetingEnded: true` on a stop means the meeting is over and its data is deleted now. The panel keeps the notes it already has (the "after the meeting" screen).
-- `arlo.state` differs per person (`role`). It is sent when a socket connects or subscribes, when a stream starts or stops, and when the setting changes.
+- `arlo.state` differs per person (`role`, `myStreamPaused`). `paused` is the meeting-level value: true only when every live stream is paused. `myStreamPaused` is sent to owners only and says whether their own stream is paused; with two streams it can be true while `paused` is false, because the other stream still delivers. It is sent when a socket connects or subscribes, when a stream starts, stops, is paused or resumed, and when the setting changes.
 - `notes.updated` goes only to owners' sockets whose verified meeting is this one. A guest's socket never gets it.
 
 ## Environment Variables

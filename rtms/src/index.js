@@ -247,7 +247,9 @@ async function broadcastParticipantEvents(meetingId, events, stream) {
  * about (a meeting can have several); `operatorId` and `originalHost` say whose
  * stream it is.
  */
-async function notifyBackend(meetingId, status, { streamId, operatorId, originalHost, fault, meetingEnded } = {}) {
+async function notifyBackend(meetingId, status, {
+  streamId, operatorId, originalHost, fault, meetingEnded, replaced,
+} = {}) {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await internalHttp.post(`${backendUrl}/api/rtms/status`, {
@@ -258,6 +260,8 @@ async function notifyBackend(meetingId, status, { streamId, operatorId, original
       ...(originalHost === true && { originalHost: true }),
       ...(fault === true && { fault: true }),
       ...(meetingEnded === true && { meetingEnded: true }),
+      // The stream ended because its user started a new one (see sessions.js)
+      ...(replaced === true && { replaced: true }),
     });
     console.log(`Notified backend: ${status}`);
   } catch (error) {

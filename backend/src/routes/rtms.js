@@ -40,6 +40,7 @@ const { requireInternal, isInternalRequest, INTERNAL_KEY_HEADER, getInternalKey 
 const { getMeetingStore } = require('../storage');
 const { getMeetingLifecycle } = require('../services/meetingLifecycle');
 const { getMeetingStreams } = require('../services/meetingStreams');
+const { getArloPresence } = require('../services/arloPresence');
 const { getNotesEngine } = require('../services/notesEngine');
 
 // RTMS stop reason 6: the stream ended because the meeting did
@@ -49,6 +50,43 @@ const MAX_ID_CHARS = 256;
 const isStreamId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
 /** A stream or operator id from the rtms service: left out, or a sane string. */
 const isOptionalId = (value) => value === undefined || value === null || isStreamId(value);
+
+const arloEvent = (eventType) => ({
+  eventType, participantName: 'Arlo', participantId: null, timestamp: Date.now(),
+});
+
+/**
+ * What the panels are told when a stream of the meeting runs: paused when
+ * every running stream is paused (pause is per stream, see
+ * services/meetingStreams.js), running otherwise.
+ */
+const runningStatus = (meetingId) => (
+  getMeetingStreams().pauseState(meetingId).meeting ? 'rtms_paused' : 'rtms_started'
+);
+
+/**
+ * Tell the panels when the meeting as a whole became paused or stopped being
+ * paused: once per change, not per report. Each user pauses their own stream,
+ * so this can follow a pause or resume report, a line from a stream marked
+ * paused, or a stream starting or stopping. `stored: false` for a change a
+ * browser's report caused: its timeline line is shown but not kept.
+ * Returns how many panels were told.
+ */
+function syncPause(meetingId, { stored = true } = {}) {
+  const streams = getMeetingStreams();
+  const told = currentStreamStatus(meetingId);
+  // Nothing to say about a meeting with no stream known to run. With nothing
+  // live (a replaced stream whose successor is awaited), nothing changes yet.
+  if (told === null || !streams.anyLive(meetingId)) return 0;
+  const paused = streams.pauseState(meetingId).meeting;
+  if (paused === (told === 'rtms_paused')) return 0;
+  const sentCount = broadcastMeetingStatus(meetingId, paused ? 'rtms_paused' : 'rtms_resumed');
+  const event = arloEvent(paused ? 'transcription_paused' : 'transcription_resumed');
+  // eslint-disable-next-line no-use-before-define
+  if (stored) recordParticipantEvent(meetingId, event);
+  else broadcastParticipantEvent(meetingId, event);
+  return sentCount;
+}
 
 /**
  * One stream of a meeting stopped, or never got in. A meeting can have several
@@ -62,9 +100,30 @@ function streamEnded(meetingId, streamId) {
   // The panels may have been told this stream was reconnecting (the primary
   // stream's trouble is the meeting's): another one runs, so a stream is running.
   if (wasPrimary && currentStreamStatus(meetingId) === 'rtms_interrupted') {
-    broadcastMeetingStatus(meetingId, 'rtms_started');
+    broadcastMeetingStatus(meetingId, runningStatus(meetingId));
   }
+  // The streams still running may all be paused, or the paused one just went
+  syncPause(meetingId);
   return false;
+}
+
+/**
+ * The stream that was to replace a user's old one never reported anything:
+ * the stop that was held back (see stopReported) is the meeting's now.
+ * Called from a timer, so nothing may escape.
+ */
+function replacementNeverCame(meetingId) {
+  try {
+    if (getMeetingStreams().anyLive(meetingId) || getMeetingLifecycle().hasEnded(meetingId)) return;
+    getMeetingLifecycle().streamStatus(meetingId, 'rtms_stopped');
+    broadcastMeetingStatus(meetingId, 'rtms_stopped');
+    // eslint-disable-next-line no-use-before-define
+    recordParticipantEvent(meetingId, arloEvent('transcription_stopped'));
+    broadcastArloState(meetingId);
+    console.log('A replaced stream was never followed by a new one: the meeting is marked as stopped');
+  } catch (error) {
+    console.error('Could not report a stream that was never replaced:', error.message);
+  }
 }
 
 /**
@@ -76,15 +135,38 @@ function streamEnded(meetingId, streamId) {
  *   'last'  the meeting's last running stream stopped: a meeting stop.
  *   'quiet' nothing changes for the meeting: another stream is still running,
  *           or the meeting ended a moment ago and this is the report for one
- *           of its other streams.
+ *           of its other streams, or the stream was replaced (below).
+ *
+ * `replaced` (from the rtms service only): the stream ended because its user
+ * started a new one, which the rtms service is joining right now. When it was
+ * the meeting's only stream, the panels would see "stopped" while their new
+ * start is still under way. So the stream is marked stopped, but the meeting
+ * is not: the stop is held back until the new stream's outcome is known. It
+ * started (the start report settles the wait, nothing was shown), it failed
+ * or was stopped (that report is the meeting's stop), or nothing came within
+ * the wait (replacementNeverCame). While waiting, another report about a
+ * stream already known to have stopped (Zoom's own stop for the replaced one)
+ * changes nothing.
  */
-function stopReported(meetingId, streamId, meetingEnded) {
+function stopReported(meetingId, streamId, { meetingEnded = false, replaced = false } = {}) {
   if (getMeetingLifecycle().hasEnded(meetingId)) return 'quiet';
+  const streams = getMeetingStreams();
   if (meetingEnded === true) {
-    getMeetingStreams().stopAll(meetingId);
+    streams.stopAll(meetingId);
     return 'over';
   }
-  return streamEnded(meetingId, streamId) ? 'last' : 'quiet';
+  const wasLive = streams.isLive(meetingId, streamId);
+  const alreadyStopped = streams.hasStopped(meetingId, streamId);
+  if (!streamEnded(meetingId, streamId)) return 'quiet';
+  if (replaced === true) {
+    if (wasLive) streams.awaitReplacement(meetingId, () => replacementNeverCame(meetingId));
+    return 'quiet';
+  }
+  if (streams.awaitingReplacement(meetingId)) {
+    if (alreadyStopped) return 'quiet';
+    streams.settleReplacement(meetingId);
+  }
+  return 'last';
 }
 
 /**
@@ -101,7 +183,10 @@ function dataFrom(meetingId, { streamId, operatorId, originalHost }, decide) {
   if (!lifecycle.dataReceived(meetingId)) return null;
   const streams = getMeetingStreams();
   const operatorsBefore = streams.operators(meetingId).length;
+  const pausedBefore = streams.pauseState(meetingId).streams;
   const answer = decide(streams, { operatorId, originalHost: originalHost === true });
+  // A line from a stream marked paused shows that it is running
+  const pauseCleared = streams.pauseState(meetingId).streams !== pausedBefore;
   const told = currentStreamStatus(meetingId);
   const learnedRunning = told === null && streams.anyLive(meetingId);
   // The panels were told the primary stream is reconnecting, and here is data
@@ -115,17 +200,17 @@ function dataFrom(meetingId, { streamId, operatorId, originalHost }, decide) {
     // Once: from here on the meeting has a status.
     lifecycle.streamStatus(meetingId, 'rtms_started');
     // eslint-disable-next-line no-use-before-define
-    recordParticipantEvent(meetingId, {
-      eventType: 'transcription_started', participantName: 'Arlo', participantId: null, timestamp: Date.now(),
-    });
+    recordParticipantEvent(meetingId, arloEvent('transcription_started'));
     const operator = isStreamId(operatorId) ? userStore.findByZoomId(operatorId) : null;
     if (operator) crossRegisterUser(operator.id, meetingId);
     console.log('A running stream was learned from its data: the meeting is marked as running');
   }
-  if (learnedRunning || anotherRuns) broadcastMeetingStatus(meetingId, 'rtms_started');
-  // Each panel learns what it is to Arlo now: Arlo is here, or whose stream
-  // this is was not known until now (that person brought Arlo in too)
-  if (learnedRunning || anotherRuns || streams.operators(meetingId).length !== operatorsBefore) {
+  if (learnedRunning || anotherRuns) broadcastMeetingStatus(meetingId, runningStatus(meetingId));
+  if (pauseCleared) syncPause(meetingId);
+  // Each panel learns what it is to Arlo now: Arlo is here, whose stream this
+  // is was not known until now (that person brought Arlo in too), or someone's
+  // own stream is no longer paused
+  if (learnedRunning || anotherRuns || pauseCleared || streams.operators(meetingId).length !== operatorsBefore) {
     broadcastArloState(meetingId);
   }
   return answer;
@@ -336,7 +421,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       // says the meeting itself ended.
       if (event === 'meeting.rtms_stopped' && validUuid) {
         const meetingEnded = payload.stop_reason === RTMS_STOP_MEETING_ENDED;
-        if (stopReported(meetingUuid, streamId, meetingEnded) !== 'quiet') {
+        if (stopReported(meetingUuid, streamId, { meetingEnded }) !== 'quiet') {
           broadcastMeetingStatus(meetingUuid, 'rtms_stopped', { meetingEnded });
           getMeetingLifecycle().streamStatus(meetingUuid, 'rtms_stopped', { meetingEnded });
         }
@@ -352,7 +437,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
  * POST /api/rtms/status
  * Receive RTMS status updates from RTMS service
  */
-const BROWSER_STATUSES = new Set(['rtms_paused', 'rtms_resumed']);
+const PAUSE_STATUSES = new Set(['rtms_paused', 'rtms_resumed']);
 const INTERNAL_STATUSES = new Set([
   'rtms_started', 'rtms_stopped', 'rtms_paused', 'rtms_resumed',
   'rtms_interrupted', 'media_interrupted',
@@ -363,8 +448,9 @@ const INTERNAL_STATUSES = new Set([
 /**
  * Internal callers (rtms service) may post any lifecycle status. Browser callers
  * must be signed in and may only report pause/resume (the SDK pause/resume calls
- * happen client-side, so the backend learns about them from the browser), and
- * only for the meeting they were verified to be in: see inMeeting().
+ * happen client-side, so the backend learns about them from the browser), only
+ * for the meeting they were verified to be in (see inMeeting()), and only when
+ * they run a stream of their own there: the report is about that stream.
  */
 const STREAM_RUNNING = new Set(['rtms_started', 'rtms_reconnected']);
 const STREAM_ENDED = new Set(['rtms_stopped', 'rtms_failed']);
@@ -392,15 +478,43 @@ function inMeeting(req, meetingId) {
   }
 }
 
+/**
+ * A pause or resume report. Pause is per stream: the rtms service names the
+ * stream; a browser's report is about the caller's own running stream, found
+ * from who they are (nothing the browser sends names it). The panels hear of
+ * it only when the meeting as a whole changes (see syncPause); each owner's
+ * `arlo.state` says whether their own stream is paused.
+ */
+function pauseReported(req, res, { meetingId, status, streamId }) {
+  const streams = getMeetingStreams();
+  const paused = status === 'rtms_paused';
+  if (req.isInternal) {
+    streams.setPaused(meetingId, { streamId }, paused);
+  } else {
+    const operatorId = getArloPresence().liveStreamOperator(meetingId, req.user.id);
+    if (operatorId === null) {
+      return res.status(403).json({ error: 'Forbidden', message: 'No stream of your own is running in this meeting' });
+    }
+    streams.setPaused(meetingId, { operatorId }, paused);
+  }
+  console.log(`RTMS Status Update: ${status}`);
+  // The lifecycle follows the rtms service's reports only; a pause changes
+  // nothing for it, and a browser cannot start a flush or hold data back
+  if (req.isInternal) getMeetingLifecycle().streamStatus(meetingId, status);
+  const sentCount = syncPause(meetingId, { stored: req.isInternal === true });
+  broadcastArloState(meetingId);
+  return res.status(200).json({ received: true, broadcast: sentCount });
+}
+
 router.post('/status', authorizeStatusUpdate, async (req, res) => {
   const {
-    meetingId, status, streamId, operatorId, originalHost, fault, meetingEnded,
+    meetingId, status, streamId, operatorId, originalHost, fault, meetingEnded, replaced,
   } = req.body || {};
 
   if (typeof meetingId !== 'string' || meetingId.length === 0 || meetingId.length > 200) {
     return res.status(400).json({ error: 'Invalid meetingId' });
   }
-  const allowed = req.isInternal ? INTERNAL_STATUSES : BROWSER_STATUSES;
+  const allowed = req.isInternal ? INTERNAL_STATUSES : PAUSE_STATUSES;
   if (!allowed.has(status)) {
     return res.status(req.isInternal ? 400 : 403).json({ error: 'Status not allowed' });
   }
@@ -408,16 +522,26 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   if (req.isInternal && (!isOptionalId(streamId) || !isOptionalId(operatorId))) {
     return res.status(400).json({ error: 'Invalid streamId or operatorId' });
   }
+  // `replaced` is the rtms service's word only; from a browser it is never read
+  if (req.isInternal && replaced !== undefined && typeof replaced !== 'boolean') {
+    return res.status(400).json({ error: 'Invalid replaced' });
+  }
   // A browser names its own meetingId: without this check a signed-in user
   // could show "paused" to the panels of any meeting whose UUID they know
   if (!req.isInternal && !inMeeting(req, meetingId)) {
     return res.status(403).json({ error: 'Forbidden', message: 'Not a participant of this meeting' });
   }
+  if (PAUSE_STATUSES.has(status)) {
+    return pauseReported(req, res, { meetingId, status, streamId });
+  }
+  // From here on the report is the rtms service's: a browser may only report
+  // pause and resume.
+  //
   // A Zoom meeting UUID that ended does not start again. A start or rejoin
   // report for one (it was on its way, or a rejoin got in as the meeting
   // closed) is answered and otherwise ignored: nothing about the meeting
   // comes back after its flush.
-  if (req.isInternal && STREAM_RUNNING.has(status) && getMeetingLifecycle().hasEnded(meetingId)) {
+  if (STREAM_RUNNING.has(status) && getMeetingLifecycle().hasEnded(meetingId)) {
     return res.status(200).json({ received: true, broadcast: 0 });
   }
 
@@ -427,7 +551,9 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   // service reports each; the meeting as a whole (its panels, its timeline, its
   // data lifecycle) only hears what changes for the meeting:
   //   - a stream starting or rejoining, unless another stream is the primary one,
-  //   - a stream stopping or failing, only when it was the last one running,
+  //   - a stream stopping or failing, only when it was the last one running
+  //     (and not while the stream that replaces it is being joined: see
+  //     stopReported),
   //   - a stop because the meeting itself ended, on whichever stream it is
   //     reported first: every stream is over (`meetingIsOver`),
   //   - an interruption, only on the primary stream (services/meetingStreams.js).
@@ -436,20 +562,27 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   let quiet = false;
   let firstStream = false;
   let meetingIsOver = false;
-  if (req.isInternal) {
-    if (STREAM_RUNNING.has(status)) {
-      firstStream = !streams.anyLive(meetingId);
-      streams.streamStarted(meetingId, {
-        streamId, operatorId, originalHost: originalHost === true,
-      });
-      quiet = !firstStream && !streams.isPrimary(meetingId, streamId);
-    } else if (STREAM_ENDED.has(status)) {
-      const meaning = stopReported(meetingId, streamId, status === 'rtms_stopped' && meetingEnded === true);
-      quiet = meaning === 'quiet';
-      meetingIsOver = meaning === 'over';
-    } else {
-      quiet = isStreamId(streamId) && streams.anyLive(meetingId) && !streams.isPrimary(meetingId, streamId);
-    }
+  let replacementFailed = false;
+  if (STREAM_RUNNING.has(status)) {
+    // The stream that replaces a user's old one got in: the meeting ran all
+    // along, as far as its panels and its timeline know
+    const replacing = streams.settleReplacement(meetingId);
+    firstStream = !replacing && !streams.anyLive(meetingId);
+    streams.streamStarted(meetingId, {
+      streamId, operatorId, originalHost: originalHost === true,
+    });
+    quiet = !firstStream && !streams.isPrimary(meetingId, streamId);
+  } else if (STREAM_ENDED.has(status)) {
+    const waited = streams.awaitingReplacement(meetingId);
+    const meaning = stopReported(meetingId, streamId, {
+      meetingEnded: status === 'rtms_stopped' && meetingEnded === true,
+      replaced: status === 'rtms_stopped' && replaced === true,
+    });
+    quiet = meaning === 'quiet';
+    meetingIsOver = meaning === 'over';
+    replacementFailed = waited && meaning === 'last';
+  } else {
+    quiet = isStreamId(streamId) && streams.anyLive(meetingId) && !streams.isPrimary(meetingId, streamId);
   }
 
   // The meeting's data lifecycle (services/meetingLifecycle.js) follows the rtms
@@ -457,10 +590,10 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   // "The meeting ended" is applied last, after the meeting has been told. A
   // fault counts for the meeting's last stream only.
   const lifecycle = getMeetingLifecycle();
-  if (req.isInternal && !quiet && !meetingIsOver) lifecycle.streamStatus(meetingId, status);
+  if (!quiet && !meetingIsOver) lifecycle.streamStatus(meetingId, status);
 
-  // Cross-register user for WebSocket if we have an operator ID (internal only)
-  if (req.isInternal && status === 'rtms_started' && operatorId) {
+  // Cross-register user for WebSocket if we have an operator ID
+  if (status === 'rtms_started' && operatorId) {
     // Find user by Zoom ID in memory store
     const user = userStore.findByZoomId(operatorId);
     if (user) {
@@ -476,42 +609,37 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
     rtms_failed: 'arlo.join_failed',
     media_interrupted: 'arlo.media_interrupted',
   };
-  if (req.isInternal && ARLO_EVENTS[status]) {
+  if (ARLO_EVENTS[status]) {
     rtmsEvents.record({ event: ARLO_EVENTS[status], meetingUuid: meetingId });
   }
 
   if (quiet) {
-    // The meeting's status is unchanged, but a stream starting or stopping can
-    // change what one person is to Arlo (they brought it in too)
+    // The meeting's status is unchanged, unless the streams that run now are
+    // all paused or no longer all paused. A stream starting or stopping can
+    // also change what one person is to Arlo (they brought it in too).
+    if (STREAM_RUNNING.has(status)) syncPause(meetingId);
     broadcastArloState(meetingId);
     return res.status(200).json({ received: true, broadcast: 0 });
   }
 
-  // Broadcast status change to WebSocket clients. A rejoined stream is a running
-  // stream to them. `fault` (from the rtms service only) marks a stream Zoom
-  // ended because of a connection problem, so the panel can offer a restart.
-  const clientStatus = status === 'rtms_reconnected' ? 'rtms_started' : status;
-  const endedByFault = req.isInternal && status === 'rtms_stopped' && fault === true;
+  // Broadcast status change to WebSocket clients. A started or rejoined stream
+  // is a running stream to them (or a paused one, when it rejoined while
+  // paused and nothing else runs). `fault` marks a stream Zoom ended because
+  // of a connection problem, so the panel can offer a restart.
+  // A stream that starts where every other one is paused ends the meeting's pause
+  if (STREAM_RUNNING.has(status)) syncPause(meetingId);
+  const clientStatus = STREAM_RUNNING.has(status) ? runningStatus(meetingId) : status;
+  const endedByFault = status === 'rtms_stopped' && fault === true;
   const sentCount = broadcastMeetingStatus(meetingId, clientStatus, { fault: endedByFault, meetingEnded: meetingIsOver });
   console.log(`Broadcast status to ${sentCount} clients`);
 
-  // Broadcast transcription lifecycle event for timeline
-  const lifecycleMap = {
-    rtms_started: 'transcription_started',
-    rtms_stopped: 'transcription_stopped',
-    rtms_paused: 'transcription_paused',
-    rtms_resumed: 'transcription_resumed',
-  };
-  // "Transcription started" is one line for the meeting, not one per stream
-  const anotherStreamStarted = req.isInternal && status === 'rtms_started' && !firstStream;
-  const eventType = anotherStreamStarted ? null : lifecycleMap[status];
-  if (eventType) {
-    const event = { eventType, participantName: 'Arlo', participantId: null, timestamp: Date.now() };
-    // Only the rtms service's reports are kept. A browser names its own
-    // meetingId here, so its pause/resume report is passed on but not stored.
-    if (req.isInternal) recordParticipantEvent(meetingId, event);
-    else broadcastParticipantEvent(meetingId, event);
-  }
+  // Transcription lifecycle event for the timeline. "Transcription started" is
+  // one line for the meeting, not one per stream. A failed join is no line,
+  // unless it is the end of a stream whose stop was held back for it.
+  let eventType = null;
+  if (status === 'rtms_started' && firstStream) eventType = 'transcription_started';
+  else if (status === 'rtms_stopped' || replacementFailed) eventType = 'transcription_stopped';
+  if (eventType) recordParticipantEvent(meetingId, arloEvent(eventType));
 
   if (meetingIsOver) lifecycle.streamStatus(meetingId, status, { meetingEnded: true });
 

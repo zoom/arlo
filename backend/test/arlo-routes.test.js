@@ -138,7 +138,7 @@ test('settings, notes and ask need a signed-in user; state does not', async () =
 test('state tells each person what they are to Arlo', async () => {
   const m = await meetingWith('ARLO-STATE==');
   const owner = await call('GET', m.meetingId, 'state', { headers: m.owner });
-  assert.deepEqual(owner.body, { present: true, paused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner' });
+  assert.deepEqual(owner.body, { present: true, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner' });
   const participant = await call('GET', m.meetingId, 'state', { headers: m.participant });
   assert.deepEqual(participant.body, { present: true, paused: false, role: 'participant', ownerName: 'Ana Ruiz', whoCanAsk: 'owner' });
   const guest = await call('GET', m.meetingId, 'state', { headers: m.guest });
@@ -161,7 +161,7 @@ test('only an owner changes who can ask; every panel is told', async () => {
 
   const changed = await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: { whoCanAsk: 'anyone' } });
   assert.equal(changed.status, 200);
-  assert.deepEqual(changed.body, { present: true, paused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'anyone' });
+  assert.deepEqual(changed.body, { present: true, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'anyone' });
   assert.equal(getMeetingStore().getMeta(m.meetingId).whoCanAsk, 'anyone');
   await h.wait(100);
   ws.socket.close();

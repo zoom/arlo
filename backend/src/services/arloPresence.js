@@ -60,15 +60,33 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
   function stateFor(meetingId, userId) {
     const status = streamStatus(meetingId) || null;
     const list = owners(meetingId);
+    const owner = isUserId(userId) && list.some((one) => one.id === userId);
     // operators() lists the primary stream's operator first, so the first owner
     // is that person when they are an Arlo user, and the next owner otherwise
     return {
       present: status !== null,
+      // The meeting as a whole: every running stream is paused
       paused: status === 'rtms_paused',
-      role: isUserId(userId) && list.some((owner) => owner.id === userId) ? 'owner' : 'participant',
+      // Their own stream, for an owner only. It can be paused while the
+      // meeting is not: someone else's stream still runs
+      ...(owner && { myStreamPaused: isTheirs(streams.pauseState(meetingId).operators, userId) }),
+      role: owner ? 'owner' : 'participant',
       ownerName: list.length > 0 ? list[0].name : null,
       whoCanAsk: store.getMeta(meetingId).whoCanAsk,
     };
+  }
+
+  /** Whether one of these Zoom user ids is this Arlo user's. */
+  const isTheirs = (zoomUserIds, userId) => zoomUserIds.some((zoomUserId) => arloUser(zoomUserId)?.id === userId);
+
+  /**
+   * The Zoom user id under which this Arlo user runs a stream of their own in
+   * the meeting right now, or null. Pause and resume are theirs to report only
+   * then: the Apps SDK's pause acts on the caller's own stream.
+   */
+  function liveStreamOperator(meetingId, userId) {
+    if (!isUserId(userId) || !store.has(meetingId)) return null;
+    return streams.liveOperators(meetingId).find((zoomUserId) => arloUser(zoomUserId)?.id === userId) ?? null;
   }
 
   /** Change who may ask Arlo. Any owner may; false for anyone else or a bad value. */
@@ -78,7 +96,7 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
     return store.setMeta(meetingId, { whoCanAsk: value }) !== null;
   }
 
-  return { stateFor, setWhoCanAsk, isOwner, ownerUserIds };
+  return { stateFor, setWhoCanAsk, isOwner, ownerUserIds, liveStreamOperator };
 }
 
 let instance = null;

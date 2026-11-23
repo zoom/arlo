@@ -34,6 +34,16 @@
  * what is stored. It is the stream whose operator is named first (the owner
  * name the panels show) and whose connection trouble is the meeting's.
  *
+ * Pause is per stream too: each user pauses their own. A stream is marked
+ * paused by a report, and the mark goes when a line arrives from it (it is
+ * running after all) or when it stops. The meeting counts as paused only when
+ * at least one stream runs and every running stream is paused.
+ *
+ * When the rtms service replaces a user's stream with their new one, and that
+ * was the meeting's only stream, the stop is not the meeting's yet: the wait
+ * for the new stream's outcome is held here (awaitReplacement), bounded by a
+ * timer, and ends with the meeting.
+ *
  * This module also remembers who ran a stream in the meeting (operator ids),
  * including streams that have stopped, until forget(). The meeting lifecycle
  * calls forget() when it flushes the meeting, so nothing here outlives the
@@ -55,10 +65,22 @@ const DEFAULTS = Object.freeze({
   // The same for participant events, which are compared by arrival only
   maxRecentEvents: 1000,
   sameEventArrivalMs: 10 * 1000,
+  // Lines said just before a pause are still on their way when the pause is
+  // reported: only a line this long after it shows the stream is running
+  pauseSettleMs: 3 * 1000,
+  // How long the outcome of a stream that replaces a user's old one is waited
+  // for (Zoom keeps a stream it announced open for about a minute)
+  replacementWaitMs: 90 * 1000,
 });
 // A report without a stream id (an rtms process from before streams were
 // told apart) is the only stream of its meeting: it gets this key.
 const NO_STREAM_ID = '';
+
+const defaultSchedule = (fn, ms) => {
+  const timer = setTimeout(fn, ms);
+  if (typeof timer.unref === 'function') timer.unref();
+  return () => clearTimeout(timer);
+};
 
 const isId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
 const isMissing = (value) => value === undefined || value === null;
@@ -109,7 +131,7 @@ function eventIdentity(event) {
 }
 
 function createMeetingStreams(options = {}) {
-  const { log = console, now = () => Date.now() } = options;
+  const { log = console, now = () => Date.now(), schedule = defaultSchedule } = options; // schedule: (fn, ms) => cancel
   const limits = { ...DEFAULTS };
   for (const name of Object.keys(DEFAULTS)) {
     if (Number.isInteger(options[name]) && options[name] > 0) limits[name] = options[name];
@@ -128,14 +150,31 @@ function createMeetingStreams(options = {}) {
     arrivalMs: limits.sameEventArrivalMs,
   };
   // meetingId -> {
-  //   streams: Map(key -> { operatorId, originalHost, live, replaced }),
+  //   streams: Map(key -> { operatorId, originalHost, live, replaced, pausedAt }),
   //   primaryKey: the primary stream, or the last one when none is live,
   //   lines, events: what was stored last, oldest first, each
   //     { who, hash, stamp, at, from: Set(stream keys that delivered it) },
+  //   awaiting: { cancel } while a replacing stream's outcome is waited for,
   //   warned }
   // The streams Map keeps the order in which the streams started. `replaced`
-  // marks a stream that ended because its user started a new one.
+  // marks a stream that ended because its user started a new one, `pausedAt`
+  // is when a running stream was reported paused (null: not paused).
   const meetings = new Map();
+
+  /** End the wait for a replacing stream, if there is one. Returns whether there was. */
+  function endWait(state) {
+    if (!state?.awaiting) return false;
+    const { cancel } = state.awaiting;
+    state.awaiting = null;
+    if (typeof cancel === 'function') cancel();
+    return true;
+  }
+
+  /** Drop everything held for a meeting, its timer included. */
+  function drop(meetingId) {
+    endWait(meetings.get(meetingId));
+    return meetings.delete(meetingId);
+  }
 
   function stateFor(meetingId) {
     let state = meetings.get(meetingId);
@@ -144,9 +183,9 @@ function createMeetingStreams(options = {}) {
       meetings.delete(meetingId);
     } else {
       // A backstop only: a meeting normally leaves through forget()
-      if (meetings.size >= limits.maxMeetings) meetings.delete(meetings.keys().next().value);
+      if (meetings.size >= limits.maxMeetings) drop(meetings.keys().next().value);
       state = {
-        streams: new Map(), primaryKey: null, lines: [], events: [], warned: false,
+        streams: new Map(), primaryKey: null, lines: [], events: [], awaiting: null, warned: false,
       };
     }
     meetings.set(meetingId, state);
@@ -172,6 +211,11 @@ function createMeetingStreams(options = {}) {
   const holdsUnnamed = (state, key) => key === NO_STREAM_ID && !state.streams.has(key) && state.streams.size > 0;
 
   const liveKeys = (state) => [...state.streams].filter(([, stream]) => stream.live).map(([key]) => key);
+  /** A stream is over: it no longer runs, so it is no longer paused either. */
+  const end = (stream) => {
+    stream.live = false;
+    stream.pausedAt = null;
+  };
 
   /**
    * Work out the primary stream again after a stream started, stopped or was
@@ -194,7 +238,7 @@ function createMeetingStreams(options = {}) {
       return null;
     }
     const stream = {
-      operatorId: null, originalHost: false, live: true, replaced: false,
+      operatorId: null, originalHost: false, live: true, replaced: false, pausedAt: null,
     };
     state.streams.set(key, stream);
     return stream;
@@ -220,7 +264,7 @@ function createMeetingStreams(options = {}) {
         if (other.replaced) {
           state.streams.delete(otherKey);
         } else {
-          other.live = false;
+          end(other);
           other.replaced = true;
         }
       }
@@ -232,6 +276,8 @@ function createMeetingStreams(options = {}) {
       state.streams.delete(key);
       state.streams.set(key, stream);
     }
+    // A stream that reports itself running again after a rejoin keeps its
+    // pause mark: if it is in fact running, its next line says so
     if (!stream) stream = addStream(state, key);
     if (stream) {
       stream.live = true;
@@ -251,9 +297,9 @@ function createMeetingStreams(options = {}) {
     if (!state) return { anyLive: false };
     const key = resolve(state, streamId);
     if (key === NO_STREAM_ID && !state.streams.has(key)) {
-      for (const stream of state.streams.values()) stream.live = false;
+      for (const stream of state.streams.values()) end(stream);
     } else if (key !== null && state.streams.has(key)) {
-      state.streams.get(key).live = false;
+      end(state.streams.get(key));
     }
     choosePrimary(state);
     return { anyLive: liveKeys(state).length > 0 };
@@ -266,7 +312,8 @@ function createMeetingStreams(options = {}) {
   function stopAll(meetingId) {
     const state = meetings.get(meetingId);
     if (!state) return;
-    for (const stream of state.streams.values()) stream.live = false;
+    for (const stream of state.streams.values()) end(stream);
+    endWait(state);
   }
 
   /**
@@ -293,7 +340,7 @@ function createMeetingStreams(options = {}) {
     if (stream.operatorId === null && isId(details?.operatorId)) stream.operatorId = details.operatorId;
     if (details?.originalHost === true) stream.originalHost = true;
     choosePrimary(state);
-    return { state, key };
+    return { state, key, stream };
   }
 
   /**
@@ -327,7 +374,11 @@ function createMeetingStreams(options = {}) {
    */
   function keepsLine(meetingId, streamId, details) {
     const heard = heardFrom(meetingId, streamId, details);
-    return heard !== null && firstDelivery(heard.state.lines, lineIdentity(details?.line), heard.key, lineRules);
+    if (heard === null) return false;
+    // A line, also a copy, shows that a stream marked paused is running
+    const pausedAt = heard.stream?.pausedAt ?? null;
+    if (pausedAt !== null && now() - pausedAt >= limits.pauseSettleMs) heard.stream.pausedAt = null;
+    return firstDelivery(heard.state.lines, lineIdentity(details?.line), heard.key, lineRules);
   }
 
   /**
@@ -338,6 +389,71 @@ function createMeetingStreams(options = {}) {
     const heard = heardFrom(meetingId, streamId, details);
     return heard !== null && firstDelivery(heard.state.events, eventIdentity(details?.event), heard.key, eventRules);
   }
+
+  /**
+   * Mark a running stream paused or resumed. `who` names it: `{ operatorId }`
+   * is the running stream of that user, `{ streamId }` that stream (without an
+   * id: the meeting's one unnamed stream). Returns whether a stream was marked.
+   */
+  function setPaused(meetingId, who, paused) {
+    const state = meetings.get(meetingId);
+    if (!state || who === null || typeof who !== 'object') return false;
+    let marked = [];
+    if (!isMissing(who.operatorId)) {
+      if (isId(who.operatorId)) marked = [...state.streams.values()].filter((stream) => stream.operatorId === who.operatorId);
+    } else {
+      const stream = state.streams.get(resolve(state, who.streamId));
+      if (stream) marked = [stream];
+    }
+    marked = marked.filter((stream) => stream.live);
+    for (const stream of marked) stream.pausedAt = paused === true ? now() : null;
+    return marked.length > 0;
+  }
+
+  /**
+   * What is paused: `meeting` (at least one stream runs and every running one
+   * is paused), how many `streams`, and their `operators` (each once).
+   */
+  function pauseState(meetingId) {
+    const live = [...(meetings.get(meetingId)?.streams.values() ?? [])].filter((stream) => stream.live);
+    const paused = live.filter((stream) => stream.pausedAt !== null);
+    return {
+      meeting: live.length > 0 && paused.length === live.length,
+      streams: paused.length,
+      operators: [...new Set(paused.map((stream) => stream.operatorId).filter(Boolean))],
+    };
+  }
+
+  /** Operator ids of the streams running now, each once. */
+  function liveOperators(meetingId) {
+    const live = [...(meetings.get(meetingId)?.streams.values() ?? [])].filter((stream) => stream.live);
+    return [...new Set(live.map((stream) => stream.operatorId).filter(Boolean))];
+  }
+
+  /**
+   * Wait for the outcome of the stream that replaces a user's old one. The
+   * caller settles the wait when the outcome is known (settleReplacement);
+   * `onTimeout` is called once if it is not settled within `replacementWaitMs`.
+   * Asked again while waiting, the first wait goes on. The wait ends without a
+   * call when the meeting is forgotten or ends.
+   */
+  function awaitReplacement(meetingId, onTimeout) {
+    const state = meetings.get(meetingId);
+    if (!state || state.awaiting || typeof onTimeout !== 'function') return;
+    const wait = { cancel: null };
+    state.awaiting = wait;
+    wait.cancel = schedule(() => {
+      // Not this wait any more (settled, or the meeting went): nothing to say
+      if (meetings.get(meetingId) !== state || state.awaiting !== wait) return;
+      state.awaiting = null;
+      onTimeout();
+    }, limits.replacementWaitMs);
+  }
+
+  /** The outcome is known: end the wait. Returns whether there was one. */
+  const settleReplacement = (meetingId) => endWait(meetings.get(meetingId));
+
+  const awaitingReplacement = (meetingId) => Boolean(meetings.get(meetingId)?.awaiting);
 
   /** True for the primary stream: see the top of this file. */
   function isPrimary(meetingId, streamId) {
@@ -355,6 +471,14 @@ function createMeetingStreams(options = {}) {
     if (!state) return false;
     const key = resolve(state, streamId);
     return key !== null && state.streams.get(key)?.live === true;
+  }
+
+  /** Whether this stream is known and no longer running. */
+  function hasStopped(meetingId, streamId) {
+    const state = meetings.get(meetingId);
+    if (!state) return false;
+    const key = resolve(state, streamId);
+    return key !== null && state.streams.get(key)?.live === false;
   }
 
   const anyLive = (meetingId) => {
@@ -383,11 +507,13 @@ function createMeetingStreams(options = {}) {
     return state ? { lines: state.lines.length, events: state.events.length } : null;
   };
 
-  const forget = (meetingId) => meetings.delete(meetingId);
+  const forget = (meetingId) => drop(meetingId);
 
   return {
-    streamStarted, streamStopped, stopAll, keepsLine, keepsEvent, isPrimary, isLive, anyLive,
-    operators, primaryOperator, remembered, forget, size: () => meetings.size,
+    streamStarted, streamStopped, stopAll, keepsLine, keepsEvent,
+    setPaused, pauseState, awaitReplacement, settleReplacement, awaitingReplacement,
+    isPrimary, isLive, hasStopped, anyLive, operators, liveOperators, primaryOperator,
+    remembered, forget, size: () => meetings.size,
   };
 }
 

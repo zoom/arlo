@@ -181,8 +181,11 @@ test('a stream replaced because its user started a new one is reported as stoppe
   await manager.started(started({ rtms_stream_id: 'stream-3' })); // op-1 again
   await tick();
 
-  // an ordinary stop of the old stream: not a fault, and the meeting goes on
-  assert.deepEqual(sent.status.at(-1), { meetingId: 'MEETING-1==', status: 'rtms_stopped', streamId: 'stream-1' });
+  // a stop of the old stream that says why: not a fault, the meeting goes on,
+  // and the backend can wait for the new stream before it shows anything
+  assert.deepEqual(sent.status.at(-1), {
+    meetingId: 'MEETING-1==', status: 'rtms_stopped', streamId: 'stream-1', replaced: true,
+  });
   assert.deepEqual(sent.status.filter((s) => s.status === 'rtms_stopped').length, 1);
 
   clients[2].handlers.joinConfirm(0);
@@ -204,10 +207,22 @@ test('when the stream that replaced a user\'s old one cannot be joined, both are
   }
   await tick();
 
-  assert.deepEqual(sent.status.map((s) => [s.status, s.streamId]), [
-    ['rtms_started', 'stream-1'], ['rtms_stopped', 'stream-1'], ['rtms_failed', 'stream-3'],
+  assert.deepEqual(sent.status.map((s) => [s.status, s.streamId, s.replaced === true]), [
+    ['rtms_started', 'stream-1', false], ['rtms_stopped', 'stream-1', true], ['rtms_failed', 'stream-3', false],
   ]);
   assert.equal(manager.size(), 0);
+});
+
+test('only a stream its own user replaced is reported as replaced', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  await manager.stopped({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-1', stop_reason: 1 });
+  await manager.started(started({ rtms_stream_id: 'stream-2' }));
+  clients[1].handlers.joinConfirm(0);
+  clients[1].handlers.leave(2);
+  await tick();
+  assert.equal(sent.status.some((s) => 'replaced' in s), false);
 });
 
 test('lines and participant events say whose stream they come from, so a restarted backend learns it', async () => {

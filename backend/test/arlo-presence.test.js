@@ -41,7 +41,7 @@ test('the operator of the stream, when an Arlo user, is the owner', () => {
   assert.equal(presence.isOwner(M, 'u-ana'), true);
   assert.equal(presence.isOwner(M, 'u-ben'), false);
   assert.deepEqual(presence.stateFor(M, 'u-ana'), {
-    present: true, paused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+    present: true, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
   });
 });
 
@@ -134,7 +134,7 @@ test('a user stays an owner after their stream stops, and present and paused fol
   streams.streamStopped(M, 's1');
   delete status[M];
   assert.deepEqual(presence.stateFor(M, 'u-ana'), {
-    present: false, paused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+    present: false, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
   });
 });
 
@@ -197,4 +197,53 @@ test('a user lookup that throws or returns nonsense adds no owner', () => {
   });
   assert.deepEqual(presence.ownerUserIds(M), []);
   assert.equal(presence.stateFor(M, 42).role, 'participant');
+});
+
+// --- pause is per stream -----------------------------------------------------
+
+test('an owner is told whether their own stream is paused; the meeting is paused only as the status says', () => {
+  const { presence, start, streams, status } = setup();
+  start('s1', 'zoom-ana');
+  start('s2', 'zoom-ben');
+  streams.setPaused(M, { operatorId: 'zoom-ana' }, true);
+
+  assert.deepEqual(presence.stateFor(M, 'u-ana'), {
+    present: true, paused: false, myStreamPaused: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+  });
+  assert.deepEqual(presence.stateFor(M, 'u-ben'), {
+    present: true, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+  });
+  // a participant has no stream: the field is not sent
+  assert.equal('myStreamPaused' in presence.stateFor(M, null), false);
+  assert.equal('myStreamPaused' in presence.stateFor(M, 'u-noname'), false);
+
+  streams.setPaused(M, { operatorId: 'zoom-ben' }, true);
+  status[M] = 'rtms_paused'; // what the status route tells the panels then
+  assert.deepEqual(
+    [presence.stateFor(M, 'u-ben').paused, presence.stateFor(M, 'u-ben').myStreamPaused, presence.stateFor(M, null).paused],
+    [true, true, true],
+  );
+
+  // an owner whose stream stopped has no paused stream
+  streams.streamStopped(M, 's1');
+  assert.equal(presence.stateFor(M, 'u-ana').myStreamPaused, false);
+  assert.equal(presence.stateFor(M, 'u-ana').role, 'owner');
+});
+
+test('liveStreamOperator is the Zoom user id of the caller\'s own running stream, or null', () => {
+  const { presence, start, streams, store } = setup();
+  start('s1', 'zoom-ana');
+  start('s2', 'zoom-guest');
+  assert.equal(presence.liveStreamOperator(M, 'u-ana'), 'zoom-ana');
+  for (const nobody of ['u-ben', 'zoom-ana', 'zoom-guest', null, undefined, '', 42]) {
+    assert.equal(presence.liveStreamOperator(M, nobody), null);
+  }
+  assert.equal(presence.liveStreamOperator('OTHER==', 'u-ana'), null);
+
+  streams.streamStopped(M, 's1');
+  assert.equal(presence.liveStreamOperator(M, 'u-ana'), null); // still an owner, but nothing of theirs runs
+  assert.equal(presence.isOwner(M, 'u-ana'), true);
+  start('s3', 'zoom-ana');
+  store.deleteMeeting(M);
+  assert.equal(presence.liveStreamOperator(M, 'u-ana'), null);
 });

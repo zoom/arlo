@@ -584,3 +584,193 @@ test('forget removes everything known about a meeting, and only that meeting', (
   assert.equal(streams.keepsEvent(M, 'B', { event: joined('12') }), true);
   assert.equal(streams.keepsLine('MEETING-2==', 's8', { line: lineNo(1) }), false);
 });
+
+// --- pause is per stream ------------------------------------------------------
+
+test('one stream: pausing it pauses the meeting, resuming it resumes', () => {
+  const { streams } = started(['A']);
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 0, operators: [] });
+  assert.equal(streams.setPaused(M, { streamId: 'A' }, true), true);
+  assert.deepEqual(streams.pauseState(M), { meeting: true, streams: 1, operators: ['op-A'] });
+  assert.equal(streams.setPaused(M, { streamId: 'A' }, false), true);
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 0, operators: [] });
+});
+
+test('the meeting is paused only when every live stream is', () => {
+  const { streams } = started(['A', 'B']);
+  streams.setPaused(M, { operatorId: 'op-A' }, true); // by whose stream it is
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 1, operators: ['op-A'] });
+  streams.setPaused(M, { streamId: 'B' }, true);
+  assert.deepEqual(streams.pauseState(M), { meeting: true, streams: 2, operators: ['op-A', 'op-B'] });
+  streams.setPaused(M, { operatorId: 'op-A' }, false);
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 1, operators: ['op-B'] });
+});
+
+test('a stream that stops is no longer paused, and the meeting follows the streams that run', () => {
+  const { streams } = started(['A', 'B']);
+  streams.setPaused(M, { streamId: 'A' }, true);
+  streams.streamStopped(M, 'A');
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 0, operators: [] });
+  // the running stream stopping leaves only a paused one: the meeting is paused
+  streams.streamStarted(M, { streamId: 'A2', operatorId: 'op-A' });
+  streams.setPaused(M, { streamId: 'A2' }, true);
+  streams.streamStopped(M, 'B');
+  assert.equal(streams.pauseState(M).meeting, true);
+  // with nothing live, nothing is paused
+  streams.streamStopped(M, 'A2');
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 0, operators: [] });
+  streams.streamStarted(M, { streamId: 'A2', operatorId: 'op-A' }); // started again: running
+  assert.equal(streams.pauseState(M).meeting, false);
+
+  streams.setPaused(M, { streamId: 'A2' }, true);
+  streams.stopAll(M);
+  assert.equal(streams.pauseState(M).streams, 0);
+});
+
+test('a stream that reports itself running again after a rejoin stays paused', () => {
+  const { streams } = started(['A']);
+  streams.setPaused(M, { streamId: 'A' }, true);
+  streams.streamStarted(M, { streamId: 'A', operatorId: 'op-A' });
+  assert.equal(streams.pauseState(M).meeting, true);
+});
+
+test('a line from a paused stream shows it is running, once the lines that were on their way are through', () => {
+  const { streams, after } = started(['A', 'B']);
+  streams.setPaused(M, { streamId: 'A' }, true);
+  streams.setPaused(M, { streamId: 'B' }, true);
+  after(2);
+  assert.equal(streams.keepsLine(M, 'A', { line: lineNo(1) }), true); // said before the pause
+  assert.equal(streams.pauseState(M).meeting, true);
+  after(1);
+  assert.equal(streams.keepsLine(M, 'A', { line: lineNo(2) }), true);
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 1, operators: ['op-B'] });
+  // a copy shows it as well as a first delivery; a participant event does not
+  streams.keepsEvent(M, 'B', { event: { eventType: 'joined', participantId: '1' } });
+  assert.equal(streams.pauseState(M).streams, 1);
+  streams.keepsLine(M, 'B', { line: lineNo(2) });
+  assert.equal(streams.pauseState(M).streams, 0);
+
+  const quick = started(['A'], { pauseSettleMs: 500 });
+  quick.streams.setPaused(M, { streamId: 'A' }, true);
+  quick.after(1);
+  quick.streams.keepsLine(M, 'A', { line: lineNo(1) });
+  assert.equal(quick.streams.pauseState(M).meeting, false);
+});
+
+test('only a running stream can be paused, and only the one named', () => {
+  const { streams } = started(['A', 'B']);
+  streams.streamStopped(M, 'B');
+  assert.equal(streams.setPaused(M, { streamId: 'B' }, true), false);
+  assert.equal(streams.setPaused(M, { streamId: 'nobody' }, true), false);
+  assert.equal(streams.setPaused(M, { operatorId: 'op-B' }, true), false);
+  assert.equal(streams.setPaused(M, { operatorId: 'op-nobody' }, true), false);
+  assert.equal(streams.setPaused(M, { streamId: 42 }, true), false);
+  assert.equal(streams.setPaused(M, { operatorId: 42 }, true), false);
+  assert.equal(streams.setPaused('UNKNOWN==', { streamId: 'A' }, true), false);
+  assert.equal(streams.setPaused(M, undefined, true), false);
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 0, operators: [] });
+  assert.deepEqual(streams.pauseState('UNKNOWN=='), { meeting: false, streams: 0, operators: [] });
+  assert.equal(streams.size(), 1);
+});
+
+test('a pause report without a stream id is about the meeting\'s one stream', () => {
+  const { streams } = setup();
+  streams.streamStarted(M, { operatorId: 'op-1' });
+  assert.equal(streams.setPaused(M, {}, true), true);
+  assert.equal(streams.pauseState(M).meeting, true);
+  assert.equal(streams.setPaused(M, { streamId: 's1' }, false), true); // Zoom names the stream
+  assert.equal(streams.pauseState(M).meeting, false);
+
+  // with several streams known by id it cannot be told whose it is: nothing is marked
+  const two = started(['A', 'B']);
+  assert.equal(two.streams.setPaused(M, {}, true), false);
+  assert.equal(two.streams.pauseState(M).streams, 0);
+});
+
+test('liveOperators lists whose streams are running', () => {
+  const { streams } = started(['A', 'B']);
+  streams.streamStarted(M, { streamId: 'C' }); // no operator known
+  assert.deepEqual(streams.liveOperators(M), ['op-A', 'op-B']);
+  streams.streamStopped(M, 'A');
+  assert.deepEqual(streams.liveOperators(M), ['op-B']);
+  assert.deepEqual(streams.liveOperators('UNKNOWN=='), []);
+});
+
+// --- a stream its user replaced: the wait for the new one ---------------------
+
+function withTimers(options) {
+  const timers = [];
+  const schedule = (fn, ms) => {
+    const timer = { fn, ms, cancelled: false };
+    timers.push(timer);
+    return () => { timer.cancelled = true; };
+  };
+  return { ...started(['A'], { schedule, ...options }), timers };
+}
+
+test('the wait for a replacing stream ends by itself after 90 seconds', () => {
+  const { streams, timers } = withTimers();
+  let calls = 0;
+  streams.streamStopped(M, 'A');
+  assert.equal(streams.awaitingReplacement(M), false);
+  streams.awaitReplacement(M, () => { calls += 1; });
+  assert.equal(streams.awaitingReplacement(M), true);
+  assert.deepEqual(timers.map((t) => t.ms), [90_000]);
+  // asked again while waiting: the first wait goes on, no second timer
+  streams.awaitReplacement(M, () => { calls += 10; });
+  assert.equal(timers.length, 1);
+
+  timers[0].fn();
+  assert.equal(calls, 1);
+  assert.equal(streams.awaitingReplacement(M), false);
+  timers[0].fn(); // a timer that fires twice says nothing twice
+  assert.equal(calls, 1);
+});
+
+test('the wait is settled when the new stream\'s outcome is known, and the timer is cancelled', () => {
+  const { streams, timers } = withTimers({ replacementWaitMs: 5000 });
+  let calls = 0;
+  streams.awaitReplacement(M, () => { calls += 1; });
+  assert.equal(timers[0].ms, 5000);
+  assert.equal(streams.settleReplacement(M), true);
+  assert.equal(timers[0].cancelled, true);
+  assert.equal(streams.awaitingReplacement(M), false);
+  assert.equal(streams.settleReplacement(M), false); // nothing to settle
+  assert.equal(streams.settleReplacement('UNKNOWN=='), false);
+  timers[0].fn(); // a cancelled timer that fires anyway does nothing
+  assert.equal(calls, 0);
+});
+
+test('the wait does not outlive the meeting: forget, the meeting ending and the meeting limit end it', () => {
+  for (const end of [
+    (streams) => streams.forget(M),
+    (streams) => streams.stopAll(M),
+    (streams) => { streams.streamStarted('M2', { streamId: 'x' }); streams.streamStarted('M3', { streamId: 'y' }); },
+  ]) {
+    const { streams, timers } = withTimers({ maxMeetings: 2 });
+    let calls = 0;
+    streams.awaitReplacement(M, () => { calls += 1; });
+    end(streams);
+    assert.equal(timers[0].cancelled, true);
+    assert.equal(streams.awaitingReplacement(M), false);
+    timers[0].fn();
+    assert.equal(calls, 0);
+  }
+  // nothing is awaited for a meeting that is not known, or with a callback that is not one
+  const { streams, timers } = withTimers();
+  streams.awaitReplacement('UNKNOWN==', () => {});
+  streams.awaitReplacement(M, 'not a function');
+  assert.equal(timers.length, 0);
+  assert.equal(streams.size(), 1);
+});
+
+test('hasStopped is true only for a stream that is known and no longer running', () => {
+  const { streams } = started(['A', 'B']);
+  assert.equal(streams.hasStopped(M, 'A'), false);
+  streams.streamStopped(M, 'A');
+  assert.equal(streams.hasStopped(M, 'A'), true);
+  assert.equal(streams.hasStopped(M, 'never-seen'), false);
+  assert.equal(streams.hasStopped(M, undefined), false);
+  assert.equal(streams.hasStopped(M, 42), false);
+  assert.equal(streams.hasStopped('UNKNOWN==', 'A'), false);
+});

@@ -187,7 +187,7 @@ test('the user whose stream started is told they are the owner, everyone else th
   for (const ws of [owner, other, guest]) ws.socket.close();
 
   assert.deepEqual(lastState(owner), {
-    meetingId: meeting, present: true, paused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+    meetingId: meeting, present: true, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
   });
   assert.equal(lastState(other).role, 'participant');
   assert.equal(lastState(guest).role, 'participant');
