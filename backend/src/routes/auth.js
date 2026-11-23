@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const express = require('express');
 const axios = require('axios');
 const { userStore, tokenStore } = require('../lib/memoryStore');
@@ -31,14 +32,22 @@ router.get('/start', (req, res) => {
   try {
     const state = generateState();
 
-    // Store state for CSRF validation (expires in 5 minutes)
-    webOAuthStore.set(state, { timestamp: Date.now() });
+    // PKCE (S256), as in Zoom's own Zoom Apps sample: the verifier stays on the
+    // server and is sent with the token exchange, so an intercepted
+    // authorization code is useless on its own.
+    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
+
+    // Store state for CSRF validation, with its verifier (expires in 5 minutes)
+    webOAuthStore.set(state, { timestamp: Date.now(), codeVerifier });
     setTimeout(() => webOAuthStore.delete(state), 5 * 60 * 1000);
 
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: config.zoomClientId,
       redirect_uri: config.redirectUri,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
       state,
     });
 
@@ -114,21 +123,25 @@ router.get('/callback', async (req, res) => {
     }
 
     // Validate state for web OAuth if present (Marketplace installs may not include state)
+    let webCodeVerifier = null;
     if (state) {
       const storedState = webOAuthStore.get(state);
       if (!storedState) {
         return res.redirect(`${config.publicUrl}/#/auth-error?error=invalid_state&message=${encodeURIComponent('Invalid OAuth state — possible CSRF attack')}`);
       }
+      webCodeVerifier = storedState.codeVerifier || null;
       webOAuthStore.delete(state);
     }
 
-    // Exchange code for tokens (no PKCE — server-side flow)
+    // Exchange code for tokens. A sign-in started here carries its PKCE
+    // verifier; an install started from the Marketplace has none.
     const tokenResponse = await axios.post(
       `${config.zoomOAuthUrl}/token`,
       new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         redirect_uri: config.redirectUri,
+        ...(webCodeVerifier && { code_verifier: webCodeVerifier }),
       }),
       {
         headers: {

@@ -1,4 +1,5 @@
-require('dotenv').config({ path: '../.env' });
+// config.js loads .env (and deliberately skips it under test, so tests never
+// read the developer's real settings or secrets).
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
