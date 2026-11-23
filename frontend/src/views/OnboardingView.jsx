@@ -7,7 +7,13 @@ import OwlIcon from '../components/OwlIcon';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
+import { requestDeeplink } from '../lib/openInZoom';
+import { goTo } from '../lib/navigate';
 import './OnboardingView.css';
+
+// Set once Zoom has been launched from this browser tab, so coming back to the
+// page (Back button, reload) does not launch it again.
+const LAUNCHED_KEY = 'arlo-zoom-launched';
 
 export default function OnboardingView() {
   const [searchParams] = useSearchParams();
@@ -15,6 +21,41 @@ export default function OnboardingView() {
   const { isAuthenticated, isLoading, user } = useAuth();
   const { addToast } = useToast();
   const isFirst = searchParams.get('first') === 'true';
+  // The sign-in callback adds launch=1: the user just authorized, so open Zoom for them
+  const launchRequested = searchParams.get('launch') === '1';
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState(null);
+
+  // Get a deeplink for this user and send the browser to it. Zoom's own launch
+  // page takes over from there (it prompts to open the client, or to download it).
+  const openInZoom = useCallback(async () => {
+    setOpening(true);
+    setOpenError(null);
+    try {
+      const link = await requestDeeplink();
+      try {
+        sessionStorage.setItem(LAUNCHED_KEY, '1');
+      } catch {
+        // storage can be unavailable; the launch still works
+      }
+      goTo(link);
+    } catch {
+      setOpenError('Could not create a link to Arlo. Open Zoom yourself and find Arlo under Apps.');
+    } finally {
+      setOpening(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!launchRequested || !isAuthenticated) return;
+    let alreadyLaunched = false;
+    try {
+      alreadyLaunched = sessionStorage.getItem(LAUNCHED_KEY) === '1';
+    } catch {
+      // treat as not launched
+    }
+    if (!alreadyLaunched) openInZoom();
+  }, [launchRequested, isAuthenticated, openInZoom]);
 
   const [meetings, setMeetings] = useState([]);
   const [loadingMeetings, setLoadingMeetings] = useState(true);
@@ -252,14 +293,20 @@ export default function OnboardingView() {
             variant="default"
             size="lg"
             className="onboarding-open-zoom"
-            onClick={() => { window.open('https://zoom.us', '_blank'); }}
+            onClick={openInZoom}
+            disabled={opening}
           >
-            Open Zoom <ExternalLink size={16} />
+            {opening ? 'Opening Arlo in Zoom…' : 'Open Arlo in Zoom'} <ExternalLink size={16} aria-hidden="true" />
           </Button>
+          {openError && (
+            <p className="text-sans text-sm" role="alert" style={{ textAlign: 'center', color: 'var(--color-danger)' }}>
+              {openError}
+            </p>
+          )}
 
           <p className="text-sans text-sm text-muted" style={{ textAlign: 'center' }}>
             Need help?{' '}
-            <a href="https://github.com/anthropics/arlo-meeting-assistant" target="_blank" rel="noopener noreferrer">
+            <a href="https://github.com/zoom/arlo-meeting-assistant" target="_blank" rel="noopener noreferrer">
               Visit our documentation
             </a>
           </p>

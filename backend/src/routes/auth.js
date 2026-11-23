@@ -198,9 +198,10 @@ router.get('/callback', async (req, res) => {
     setRestoreCookie(res, { user, refreshToken: refresh_token, scopes: scope.split(' ') });
 
     // Redirect to frontend onboarding page
+    // launch=1: the welcome page opens Arlo in the Zoom client right away
     const redirectUrl = isFirstInstall
-      ? `${config.publicUrl}/#/welcome?first=true`
-      : `${config.publicUrl}/#/welcome`;
+      ? `${config.publicUrl}/#/welcome?first=true&launch=1`
+      : `${config.publicUrl}/#/welcome?launch=1`;
     console.log(`Web OAuth success — redirecting to ${redirectUrl} (first install: ${isFirstInstall})`);
     res.redirect(redirectUrl);
   } catch (error) {
