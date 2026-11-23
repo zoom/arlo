@@ -148,6 +148,13 @@ function createMeetingLifecycle({
     // Lines are arriving and nobody said the stream stopped: it is running.
     // (This server may have restarted mid-meeting and missed "started".)
     if (state.running === null) state.running = true;
+    // Told "stopped", yet a line arrives: a late line, or a restart whose
+    // "started" report was lost. Either way the meeting is not idle yet, so
+    // the wait before an idle flush starts over from this line.
+    if (state.cancel) {
+      state.cancel();
+      state.cancel = null;
+    }
     reconsider(meetingId);
     return true;
   }

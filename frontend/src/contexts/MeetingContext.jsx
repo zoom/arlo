@@ -199,7 +199,8 @@ export function MeetingProvider({ children }) {
    * guests (no OAuth needed). Called before every (re)connect so the access
    * token never goes stale.
    */
-  // true when the last access check threw instead of being answered
+  // true when the last access check got no verdict: the request failed to
+  // reach the server, or the server answered 5xx / 429
   const accessCheckFailedToRunRef = useRef(false);
   const verifyMeetingAccess = useCallback(async () => {
     const sdk = zoomSdkRef.current;
@@ -211,13 +212,23 @@ export function MeetingProvider({ children }) {
     accessCheckFailedToRunRef.current = false;
     try {
       const { context } = await sdk.getAppContext();
-      const res = await fetch('/api/auth/meeting-access', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ appContext: context }),
-      });
+      let res;
+      try {
+        res = await fetch('/api/auth/meeting-access', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ appContext: context }),
+        });
+      } catch (networkError) {
+        // No answer at all (network down): worth trying again
+        accessCheckFailedToRunRef.current = true;
+        throw networkError;
+      }
       const data = await res.json().catch(() => ({}));
+      // A gateway error or rate limit while the server restarts is not a
+      // verdict on this user either. A 4xx refusal is, and is not retried.
+      if (res.status >= 500 || res.status === 429) accessCheckFailedToRunRef.current = true;
       if (!res.ok) {
         setMeetingAccess({ status: 'denied', isGuest: null, reason: data.error || 'Could not verify your meeting.' });
         return false;
@@ -226,15 +237,17 @@ export function MeetingProvider({ children }) {
       return true;
     } catch (error) {
       console.error('Meeting access verification failed:', error);
-      // The request never got an answer (network down, server restarting):
-      // worth trying again, unlike a refusal
-      accessCheckFailedToRunRef.current = true;
       setMeetingAccess({ status: 'denied', isGuest: null, reason: 'Could not read your Zoom meeting context.' });
       return false;
     }
   }, []);
 
   const openSocket = useCallback((meetingId) => {
+    // A retry still waiting would replace the socket about to be opened
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
 
     // Close existing socket before creating new one
     setWs(prev => {

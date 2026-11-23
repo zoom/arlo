@@ -262,3 +262,34 @@ test('stream stopped, then the last panel closes: the transcript is deleted afte
   await h.wait(600);
   assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
 });
+
+test('after the meeting ended, a late timeline event is not kept either, and a new start is recorded', async () => {
+  const meeting = 'REPLAY-Q==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'During the meeting.');
+  await status(meeting, { status: 'rtms_stopped', meetingEnded: true });
+
+  await events(meeting, [{ eventType: 'left', participantName: 'Ben', participantId: '12', timestamp: 1700000000000 }]);
+  assert.deepEqual((await history(meeting, 'participant-events', cookie)).body.events, []);
+
+  // the same id running again: the start itself is on the timeline
+  await status(meeting, { status: 'rtms_started' });
+  const stored = (await history(meeting, 'participant-events', cookie)).body.events;
+  assert.deepEqual(stored.map((e) => e.eventType), ['transcription_started']);
+});
+
+test('panels are told the meeting\'s stream stopped before its data is flushed', async () => {
+  const meeting = 'REPLAY-R==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started' });
+  await status(meeting, { status: 'rtms_stopped', meetingEnded: true });
+  await h.wait(150);
+  ws.socket.close();
+
+  const types = ws.messages
+    .filter((m) => m.type === 'meeting.status' || m.type === 'participant.event')
+    .map((m) => (m.type === 'meeting.status' ? m.data.status : m.data.event.eventType));
+  assert.deepEqual(types, ['rtms_started', 'transcription_started', 'rtms_stopped', 'transcription_stopped']);
+});

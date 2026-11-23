@@ -176,6 +176,33 @@ test('a line still in flight after an idle flush is not kept either, but a real 
   assert.deepEqual(store.listSegments('M1').map((s) => s.text), ['new stream']);
 });
 
+test('lines that keep arriving after a "stopped" hold off the idle flush', () => {
+  // The stream restarted but its "started" report never reached this server
+  const { store, lifecycle, pending, fireAll, timers, speak } = setup();
+  lifecycle.streamStatus('M1', 'rtms_started');
+  speak('M1');
+  lifecycle.streamStatus('M1', 'rtms_stopped');
+  const firstTimer = timers.at(-1);
+
+  speak('M1', 'still talking');
+  assert.equal(firstTimer.cancelled, true);
+  assert.equal(pending().length, 1); // a fresh wait, counted from this line
+  speak('M1', 'and again');
+  assert.equal(pending().length, 1);
+  assert.equal(store.listSegments('M1').length, 3);
+
+  fireAll(); // then silence for the whole grace period
+  assert.equal(store.has('M1'), false);
+});
+
+test('a meeting-ended flush is remembered even when nothing was held', () => {
+  const { store, lifecycle, speak } = setup();
+  lifecycle.streamStatus('M1', 'rtms_started');
+  lifecycle.streamStatus('M1', 'rtms_stopped', { meetingEnded: true });
+  assert.equal(speak('M1', 'arrived after the end'), null);
+  assert.equal(store.has('M1'), false);
+});
+
 test('an idle flush of nothing does not silence a stream that is live', () => {
   // The server restarted mid-meeting: no "started" was heard. A panel opens and
   // closes during a silence, then someone speaks.

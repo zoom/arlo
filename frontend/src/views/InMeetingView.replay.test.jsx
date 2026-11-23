@@ -111,3 +111,38 @@ test('when the access check gets no answer after a drop, the panel keeps trying 
     expect(server().readyState).toBe(FakeWebSocket.OPEN);
   }, { timeout: 8000 });
 }, 25000);
+
+test('a gateway error on the access check is retried; a refusal is not', async () => {
+  let answer = () => json({ verified: true, isGuest: false, meetingId: MEETING });
+  const fetchMock = mockFetch({
+    [transcriptPath]: () => json({ segments: [] }),
+    '/api/auth/meeting-access': () => answer(),
+  });
+  const accessCalls = () => fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/auth/meeting-access')).length;
+  renderInMeeting();
+  await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+
+  // 502 while the backend restarts, then healthy: the panel comes back by itself
+  const first = server();
+  let bad = true;
+  answer = () => (bad ? json({ error: 'Bad gateway' }, 502) : json({ verified: true, isGuest: false, meetingId: MEETING }));
+  await act(async () => { first.close(1006); });
+  await act(() => new Promise((resolve) => { setTimeout(resolve, 5500); }));
+  expect(server()).toBe(first);
+  bad = false;
+  await waitFor(() => {
+    expect(server()).not.toBe(first);
+    expect(server().readyState).toBe(FakeWebSocket.OPEN);
+  }, { timeout: 8000 });
+
+  // a refusal is final until the user retries
+  const second = server();
+  answer = () => json({ error: 'Not in this meeting' }, 403);
+  await act(async () => { second.close(1006); });
+  await act(() => new Promise((resolve) => { setTimeout(resolve, 5500); }));
+  const afterRefusal = accessCalls();
+  await act(() => new Promise((resolve) => { setTimeout(resolve, 6000); }));
+  expect(accessCalls()).toBe(afterRefusal);
+  expect(server()).toBe(second);
+
+}, 40000);
