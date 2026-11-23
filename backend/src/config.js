@@ -216,6 +216,12 @@ module.exports = {
 
   // Demo Mode - no database, no persistent storage
   demoMode: process.env.DEMO_MODE === 'true',
+  // How long a meeting's in-memory data is kept after its stream has stopped
+  // and the last Arlo panel has disconnected (milliseconds). Default 2 minutes.
+  meetingFlushGraceMs: (() => {
+    const value = Number.parseInt(process.env.MEETING_FLUSH_GRACE_MS || '', 10);
+    return Number.isInteger(value) && value >= 0 && value <= 60 * 60 * 1000 ? value : 2 * 60 * 1000;
+  })(),
 
   // Security
   sessionSecret: process.env.SESSION_SECRET,
