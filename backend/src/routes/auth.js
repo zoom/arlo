@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const express = require('express');
 const axios = require('axios');
 const { userStore, tokenStore } = require('../lib/memoryStore');
-const { generatePKCE, generateState, encryptToken, decryptToken, generateToken, verifySessionToken } = require('../services/auth');
+const { encryptToken, decryptToken, generateToken, verifySessionToken } = require('../services/auth');
 const {
   AppContextError,
   verifyMeetingAppContext,
@@ -12,16 +12,14 @@ const {
 const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
 const deauthorized = require('../lib/deauthorized');
+const oauthState = require('../services/oauthState');
 const { createDeeplink } = require('../services/deeplink');
 const { setRestoreCookie, clearRestoreCookie } = require('../services/sessionRestore');
 
 const router = express.Router();
 
-// Store PKCE challenges temporarily (in production, use Redis)
-const pkceStore = new Map();
-
-// Store web OAuth state params (for CSRF protection)
-const webOAuthStore = new Map();
+// OAuth state is self-validating and the PKCE verifier is derived from it, so a
+// server restart in the middle of a sign-in does not break it (services/oauthState.js).
 
 /**
  * GET /api/auth/start
@@ -30,17 +28,11 @@ const webOAuthStore = new Map();
  */
 router.get('/start', (req, res) => {
   try {
-    const state = generateState();
-
-    // PKCE (S256), as in Zoom's own Zoom Apps sample: the verifier stays on the
-    // server and is sent with the token exchange, so an intercepted
-    // authorization code is useless on its own.
-    const codeVerifier = crypto.randomBytes(32).toString('base64url');
+    // PKCE (S256), as in Zoom's own Zoom Apps sample: the verifier never leaves
+    // the server and is sent with the token exchange, so an intercepted
+    // authorization code is useless on its own. The state is valid for 5 minutes.
+    const { state, codeVerifier } = oauthState.issue('web');
     const codeChallenge = crypto.createHash('sha256').update(codeVerifier).digest('base64url');
-
-    // Store state for CSRF validation, with its verifier (expires in 5 minutes)
-    webOAuthStore.set(state, { timestamp: Date.now(), codeVerifier });
-    setTimeout(() => webOAuthStore.delete(state), 5 * 60 * 1000);
 
     const params = new URLSearchParams({
       response_type: 'code',
@@ -80,14 +72,13 @@ router.get('/callback', async (req, res) => {
       return res.redirect(`${config.publicUrl}/#/auth-error?error=missing_code&message=${encodeURIComponent('No authorization code received')}`);
     }
 
-    // Check if this is an in-client PKCE flow (state exists in pkceStore)
-    const pkceData = pkceStore.get(state);
-    if (pkceData) {
-      console.log('In-client PKCE OAuth detected, storing code for frontend retrieval');
-      // Store the code temporarily for the frontend to retrieve
-      // The code will be exchanged by the POST callback with the code_verifier
-      pkceData.code = code;
-      pkceData.receivedAt = Date.now();
+    // A state names its own flow. An in-client sign-in (zoomSdk.authorize())
+    // can come back through the browser: keep the code for the panel to pick up.
+    const verifiedState = state ? oauthState.verify(state) : null;
+    if (verifiedState?.kind === 'inclient') {
+      console.log('In-client PKCE OAuth detected, holding code for the panel');
+      // The code is exchanged by the POST callback, with the code_verifier
+      oauthState.holdCode(state, code);
 
       // Return a page that tells the user to return to Zoom
       // and tries to close the window
@@ -125,12 +116,11 @@ router.get('/callback', async (req, res) => {
     // Validate state for web OAuth if present (Marketplace installs may not include state)
     let webCodeVerifier = null;
     if (state) {
-      const storedState = webOAuthStore.get(state);
-      if (!storedState) {
-        return res.redirect(`${config.publicUrl}/#/auth-error?error=invalid_state&message=${encodeURIComponent('Invalid OAuth state — possible CSRF attack')}`);
+      const consumed = oauthState.consume(state, 'web');
+      if (!consumed) {
+        return res.redirect(`${config.publicUrl}/#/auth-error?error=invalid_state&message=${encodeURIComponent('This sign-in link has expired or was already used. Please start again.')}`);
       }
-      webCodeVerifier = storedState.codeVerifier || null;
-      webOAuthStore.delete(state);
+      webCodeVerifier = consumed.codeVerifier;
     }
 
     // Exchange code for tokens. A sign-in started here carries its PKCE
@@ -238,20 +228,19 @@ router.get('/poll-code', (req, res) => {
     return res.status(400).json({ error: 'Missing state parameter' });
   }
 
-  const pkceData = pkceStore.get(state);
-
-  if (!pkceData) {
+  if (oauthState.verify(state)?.kind !== 'inclient') {
     return res.status(404).json({ error: 'State not found or expired', ready: false });
   }
 
-  if (!pkceData.code) {
+  const code = oauthState.heldCode(state);
+  if (!code) {
     // Code not yet received from browser callback
     return res.json({ ready: false });
   }
 
   // Code is ready - return it for the frontend to exchange
   console.log('Poll-code: returning code for pending OAuth state');
-  return res.json({ ready: true, code: pkceData.code });
+  return res.json({ ready: true, code });
 });
 
 /**
@@ -260,14 +249,10 @@ router.get('/poll-code', (req, res) => {
  */
 router.get('/authorize', (req, res) => {
   try {
-    const { codeVerifier, codeChallenge } = generatePKCE();
-    const state = generateState();
-
-    // Store code verifier with state as key (expires in 5 minutes)
-    pkceStore.set(state, { codeVerifier, timestamp: Date.now() });
-
-    // Clean up old entries
-    setTimeout(() => pkceStore.delete(state), 5 * 60 * 1000);
+    // Zoom's in-client authorize() only works with the "plain" PKCE method,
+    // where the challenge is the verifier. The state is valid for 5 minutes.
+    const { state, codeVerifier } = oauthState.issue('inclient');
+    const codeChallenge = codeVerifier;
 
     res.json({
       codeChallenge,
@@ -292,14 +277,14 @@ router.post('/callback', async (req, res) => {
       return res.status(400).json({ error: 'Missing code or state' });
     }
 
-    // Retrieve code verifier
-    const pkceData = pkceStore.get(state);
-    if (!pkceData) {
+    // The state proves this sign-in was started here and yields its verifier
+    const consumed = oauthState.consume(state, 'inclient');
+    if (!consumed) {
       return res.status(400).json({ error: 'Invalid or expired state' });
     }
 
-    const { codeVerifier } = pkceData;
-    pkceStore.delete(state);
+    const { codeVerifier } = consumed;
+    oauthState.releaseCode(state);
 
     // Build token request params
     // NOTE: For in-client OAuth (PKCE flow), redirect_uri should NOT be included
