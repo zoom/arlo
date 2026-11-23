@@ -1,15 +1,15 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import Button from '../ui/Button';
-import StatusLine from './StatusLine';
 import AskArlo from './AskArlo';
 
 /**
  * What someone who did not bring Arlo in sees: that Arlo is here and for whom,
- * the meeting record, and a private ask when the owner allows it. Never the notes.
+ * the meeting record, and a private ask when the owner allows it. Never the notes,
+ * and no controls: the stream belongs to the person who brought Arlo in.
  */
 export default function ParticipantView({
-  present, paused, ownerName, whoCanAsk, guest, meetingEnded, canControl, showRecord, recordPath,
+  present, ownerName, whoCanAsk, guest, meetingEnded, showRecord, recordPath,
   onSignIn, signingIn, signInError,
 }) {
   const heading = !present
@@ -19,9 +19,6 @@ export default function ParticipantView({
 
   return (
     <div className="arlo-screen">
-      {present && canControl && !meetingEnded && (
-        <StatusLine present={present} paused={paused} canControl={canControl} />
-      )}
       <div className="arlo-scroll arlo-participant">
         <h1 className="arlo-title">{heading}</h1>
         {present ? (

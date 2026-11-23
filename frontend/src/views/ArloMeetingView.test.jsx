@@ -314,13 +314,16 @@ describe('participant', () => {
     expect(screen.queryByRole('button', { name: 'Remove Arlo' })).not.toBeInTheDocument();
   });
 
-  test('a host who is not the owner sees the participant view, with Pause', async () => {
+  test('a host who is not the owner sees the plain participant view: the stream is not theirs to control', async () => {
     const { sdk } = await openArlo({ state: ANA_BROUGHT_ARLO });
     await send(serverMessage.status('rtms_started'));
     await screen.findByRole('heading', { name: 'Ana brought Arlo into this meeting' });
     expect(screen.queryByText(/Arlo is listening/)).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Pause' }));
-    expect(sdk.pauseRTMS).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Arlo is in the meeting')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove Arlo' })).not.toBeInTheDocument();
+    expect(sdk.pauseRTMS).not.toHaveBeenCalled();
+    expect(sdk.stopRTMS).not.toHaveBeenCalled();
   });
 
   test('"Only I can ask" hides the input and says who can ask', async () => {
@@ -424,6 +427,46 @@ describe('after the meeting', () => {
     await act(async () => { sdk.emit('onRunningContextChange', { runningContext: 'inMainClient' }); });
     expect(screen.getByRole('heading', { name: 'Planning' })).toBeInTheDocument();
     expect(screen.getByText(NOTES.summary)).toBeInTheDocument();
+  });
+
+  test('"Copy notes" works without the clipboard API, through the page itself', async () => {
+    await openAsOwner();
+    await send(serverMessage.notes(NOTES));
+    await endMeeting();
+
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true });
+    const copied = [];
+    const execCommand = document.execCommand;
+    document.execCommand = vi.fn(() => { copied.push(document.activeElement?.value); return true; });
+    try {
+      await user.click(screen.getByRole('button', { name: 'Copy notes' }));
+      expect(await screen.findByText('Notes copied')).toBeInTheDocument();
+      expect(copied).toHaveLength(1);
+      expect(copied[0]).toContain('Planning\n\nSummary\n');
+    } finally {
+      document.execCommand = execCommand;
+    }
+  });
+
+  test('"Copy notes" says so when nothing could be copied', async () => {
+    await openAsOwner();
+    await send(serverMessage.notes(NOTES));
+    await endMeeting();
+
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: async () => { throw new Error('NotAllowedError'); } }, configurable: true,
+    });
+    const execCommand = document.execCommand;
+    document.execCommand = vi.fn(() => false);
+    try {
+      await user.click(screen.getByRole('button', { name: 'Copy notes' }));
+      expect(await screen.findByText('Could not copy the notes')).toBeInTheDocument();
+      expect(screen.queryByText('Notes copied')).not.toBeInTheDocument();
+    } finally {
+      document.execCommand = execCommand;
+    }
   });
 
   test('without the demo flag there is no demo line', async () => {

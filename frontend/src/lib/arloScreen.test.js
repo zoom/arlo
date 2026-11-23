@@ -56,8 +56,10 @@ describe('getArloScreen', () => {
 describe('canControlArlo', () => {
   test.each([
     [{ guest: false, zoomRole: 'attendee', arloRole: 'owner' }, true],
-    [{ guest: false, zoomRole: 'host', arloRole: 'participant' }, true],
-    [{ guest: false, zoomRole: 'coHost', arloRole: 'participant' }, true],
+    [{ guest: false, zoomRole: 'host', arloRole: 'owner' }, true],
+    // A host's click in the panel acts on the host's own stream, not on someone else's
+    [{ guest: false, zoomRole: 'host', arloRole: 'participant' }, false],
+    [{ guest: false, zoomRole: 'coHost', arloRole: 'participant' }, false],
     [{ guest: false, zoomRole: 'attendee', arloRole: 'participant' }, false],
     [{ guest: false, zoomRole: undefined, arloRole: null }, false],
     [{ guest: true, zoomRole: 'host', arloRole: 'participant' }, false],

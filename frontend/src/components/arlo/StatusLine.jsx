@@ -23,8 +23,8 @@ function arloStatus({ phase, present, paused }) {
 
 /**
  * Where Arlo is, and the few things that can be done about it. The actions
- * are for people who may control Arlo (lib/arloScreen.js canControlArlo);
- * everyone else sees the status only. Each action is a request: the label
+ * are for an owner only (lib/arloScreen.js canControlArlo): they act on the
+ * caller's own stream. Each action is a request: the label
  * changes when Zoom confirms it.
  */
 export default function StatusLine({ present, paused, canControl }) {

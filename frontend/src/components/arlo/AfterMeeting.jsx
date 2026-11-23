@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { useToast } from '../../contexts/ToastContext';
 import { notesToText } from '../../lib/notesText';
+import { copyText } from '../../lib/copyText';
 import Button from '../ui/Button';
 import NotesDocument from './NotesDocument';
 
@@ -10,13 +11,10 @@ export default function AfterMeeting({ title, notes, demoMode, recordPath }) {
   const { addToast } = useToast();
 
   const copyNotes = async () => {
-    try {
-      await navigator.clipboard.writeText(notesToText(notes, { title }));
-      addToast('Notes copied', 'success');
-    } catch {
-      // No clipboard in this webview, or permission refused
-      addToast('Could not copy the notes', 'error');
-    }
+    // False when this webview has no way to copy, or refused
+    const copied = await copyText(notesToText(notes, { title }));
+    if (copied) addToast('Notes copied', 'success');
+    else addToast('Could not copy the notes', 'error');
   };
 
   return (

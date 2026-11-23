@@ -46,8 +46,14 @@ export function getArloScreen({
   return ZOOM_ROLES_THAT_BRING_ARLO_IN.has(zoomRole) ? 'bring-in' : 'ask-host';
 }
 
-/** Pause, resume, remove and bring back: the owner, the host and co-hosts. Never a guest. */
-export function canControlArlo({ guest, zoomRole, arloRole }) {
+/**
+ * Pause, resume, remove and bring back: only an owner, the person whose stream
+ * it is. Never a guest, and not a host or co-host who is not an owner: the Apps
+ * SDK's pause and stop act on the calling user's own stream, so a host's click
+ * in the panel cannot be relied on to affect someone else's. A host stops
+ * other people's streams with Zoom's own controls.
+ */
+export function canControlArlo({ guest, arloRole }) {
   if (guest) return false;
-  return arloRole === 'owner' || ZOOM_ROLES_THAT_BRING_ARLO_IN.has(zoomRole);
+  return arloRole === 'owner';
 }

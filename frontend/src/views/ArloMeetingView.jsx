@@ -55,7 +55,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
     hasNotes: arlo.notes !== null,
     everPresent: arlo.everPresent,
   });
-  const canControl = canControlArlo({ guest, zoomRole, arloRole: arlo.role });
+  const canControl = canControlArlo({ guest, arloRole: arlo.role });
 
   // Out of a meeting there is nothing to show, except the notes of the one that just ended
   const outsideMeeting = !isGuestMode && !isTestMode && runningContext !== null && runningContext !== 'inMeeting';
@@ -199,12 +199,10 @@ export default function ArloMeetingView({ isGuestMode = false }) {
       content = (
         <ParticipantView
           present={present}
-          paused={arlo.paused}
           ownerName={arlo.ownerName}
           whoCanAsk={arlo.whoCanAsk}
           guest={guest}
           meetingEnded={meetingEnded}
-          canControl={canControl}
           showRecord={present || arlo.everPresent}
           recordPath={recordPath}
           onSignIn={signIn}
