@@ -39,6 +39,14 @@
  * stays in `error` after the other stream's next line shows Arlo is still in
  * the meeting, until the person asks again.
  *
+ * The mark outlives the request. It stays when the request ends without a
+ * stream (denied, failed, expired, stalled), when the other stream's lines and
+ * statuses then settle the phase (active, paused, interrupted), and when that
+ * stream stops: none of it is this person's stream. It goes when the server
+ * says their own stream is live, when they ask for a start that is not beside
+ * another stream, and on a reset. While it is there, nothing may treat the
+ * running stream as one this panel started (see `ownStartUnconfirmed`).
+ *
  * `pending` is the request this client is waiting on ('start' | 'stop' |
  * 'pause' | 'resume'), `error` is { action, code, message } for the UI.
  */
@@ -153,18 +161,35 @@ const OWN_START_ENDED = new Set(['denied', 'failed', 'expired', 'stalled']);
 // What the server reports about a stream that runs: here, the other person's
 const RUNNING_STATUSES = new Set(['started', 'resumed', 'paused', 'interrupted']);
 
-/** `alongside` states: what another person's stream and the server's word about one's own do. */
+/**
+ * True while this panel's own start, made beside another person's stream, has
+ * not been confirmed by the server: the stream the phase follows is not one
+ * this panel started.
+ */
+export const ownStartUnconfirmed = (state) => state.alongside === true;
+
+/**
+ * `alongside` states: what another person's stream and the server's word about
+ * one's own do. Null: the event is handled as usual, and the mark is kept.
+ */
 function besideAnotherStream(state, event) {
-  const waiting = OWN_START_WAITING.has(state.phase);
-  if (event.type === 'OWN_STREAM_LIVE') return settled('active');
+  if (event.type === 'OWN_STREAM_LIVE') {
+    // Confirmed, and the mark goes. A phase that already follows a running
+    // stream stays what it is (the other stream may be paused or reconnecting).
+    return RUNNING_PHASES.has(state.phase)
+      ? { ...settled(state.phase), pending: state.pending }
+      : settled('active');
+  }
   const fromOtherStream = event.type === 'TRANSCRIPT'
     || (event.type === 'STATUS' && event.source !== 'sdk' && RUNNING_STATUSES.has(event.status));
   if (!fromOtherStream) return null;
   // Not this person's stream: the request goes on waiting
-  if (waiting) return state;
-  // Arlo is still in the meeting through the other stream; why their own did not start stays
+  if (OWN_START_WAITING.has(state.phase)) return state;
+  if (!OWN_START_ENDED.has(state.phase)) return null;
+  // Arlo is still in the meeting through the other stream; why their own did
+  // not start stays, and so does the mark: this is still not their stream
   const phase = event.status === 'paused' || event.status === 'interrupted' ? event.status : 'active';
-  return settled(phase, state.error);
+  return { ...settled(phase, state.error), alongside: true };
 }
 
 export function rtmsReducer(state, event) {
@@ -178,9 +203,10 @@ export function rtmsReducer(state, event) {
   const beside = besideAnotherStream(state, event);
   if (beside) return beside;
   const next = reduce(state, event);
-  // The mark stays while the request waits and once it ended without a stream
-  const keeps = next !== state && (OWN_START_WAITING.has(next.phase) || OWN_START_ENDED.has(next.phase));
-  return keeps && next.alongside !== true ? { ...next, alongside: true } : next;
+  // The mark stays whatever happens next (see the top of this file): only the
+  // server's word, a start that is not beside another stream, or a reset ends it
+  if (next === state || event.type === 'RESET' || next.alongside === true) return next;
+  return { ...next, alongside: true };
 }
 
 function reduce(state, event) {

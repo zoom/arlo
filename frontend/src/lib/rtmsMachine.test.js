@@ -10,6 +10,7 @@ import {
   shouldAutoRestart,
   shouldRestartAfterFault,
   FAULT_RESTART_LIMIT,
+  STREAM_FAULT,
   canStartRtms,
 } from './rtmsMachine';
 
@@ -637,6 +638,65 @@ describe('a start of one\'s own while another person\'s stream runs', () => {
     expect(rtmsReducer(again, { type: 'TRANSCRIPT' })).toBe(again);
     const alone = rtmsReducer(ended, request('start'));
     expect(rtmsReducer(alone, { type: 'TRANSCRIPT' }).phase).toBe('active');
+  });
+
+  // The mark is what keeps this panel from counting the other person's stream
+  // as one it started (Zoom's indicator, the restart after a fault, the chat notice).
+  const endings = [
+    ['Zoom says a stream already exists (10308), then nothing arrives', [failed('start', '10308', 'already running'), { type: 'STALL' }], 'stalled'],
+    ['the Zoom client says started, then nothing arrives', [status('started', 'sdk'), { type: 'STALL' }], 'stalled'],
+    ['declined', [{ type: 'REQUEST_STATUS', status: 3 }], 'denied'],
+    ['expired', [{ type: 'EXPIRE' }], 'expired'],
+    ['refused by Zoom', [failed('start', '10301', 'RTMS is not enabled')], 'failed'],
+  ];
+
+  test.each(endings)('%s: it stays a start beside another stream', (name, events, phase) => {
+    const ended = run(events, asked);
+    expect(ended.phase).toBe(phase);
+    expect(ended.alongside).toBe(true);
+  });
+
+  test.each(endings)('%s: the other stream\'s lines and statuses settle the phase, and never make the stream this panel\'s', (name, events) => {
+    const ended = run(events, asked);
+    for (const first of [{ type: 'TRANSCRIPT' }, status('started'), status('resumed'), status('paused'), status('interrupted')]) {
+      let state = rtmsReducer(ended, first);
+      expect(isRtmsActive(state)).toBe(true);
+      expect(state.alongside).toBe(true);
+      // whatever the other stream does next
+      for (const later of [status('paused'), { type: 'TRANSCRIPT' }, status('resumed'), status('interrupted'), status('started'), { type: 'TRANSCRIPT' }, { type: 'TIMEOUT' }]) {
+        state = rtmsReducer(state, later);
+        expect(state.alongside).toBe(true);
+      }
+      expect(state.phase).toBe('active');
+    }
+  });
+
+  test('once settled by the other stream, only the server\'s word about one\'s own stream removes the mark', () => {
+    const settledByOthers = run([{ type: 'EXPIRE' }, { type: 'TRANSCRIPT' }], asked);
+    expect(settledByOthers).toMatchObject({ phase: 'active', alongside: true });
+    const confirmed = rtmsReducer(settledByOthers, ownLive);
+    expect(confirmed).toEqual({ phase: 'active', pending: null, error: null, waitingLong: false });
+    // while the other stream is paused, the confirmation does not claim it runs
+    const pausedByOthers = rtmsReducer(settledByOthers, status('paused'));
+    expect(rtmsReducer(pausedByOthers, ownLive)).toEqual({ phase: 'paused', pending: null, error: null, waitingLong: false });
+  });
+
+  test('the other stream stopping, also by a fault, leaves the mark: the stream that ended was never this panel\'s', () => {
+    const settledByOthers = run([failed('start', '10308', 'already running'), { type: 'STALL' }, { type: 'TRANSCRIPT' }], asked);
+    const faulted = rtmsReducer(settledByOthers, { ...status('stopped'), fault: true });
+    expect(faulted).toMatchObject({ phase: 'stopped', alongside: true });
+    expect(faulted.error.code).toBe(STREAM_FAULT);
+    // while the request still waits on Zoom's word, too
+    const starting = rtmsReducer(asked, status('started', 'sdk'));
+    expect(rtmsReducer(starting, { ...status('stopped'), fault: true })).toMatchObject({ phase: 'stopped', alongside: true });
+    // the other stream coming back is still the other stream
+    expect(rtmsReducer(faulted, status('started'))).toMatchObject({ phase: 'active', alongside: true });
+    expect(rtmsReducer(faulted, { type: 'TRANSCRIPT' })).toMatchObject({ phase: 'active', alongside: true });
+    // a start asked for with nothing else running is an ordinary one
+    const alone = rtmsReducer(faulted, request('start'));
+    expect(alone.alongside).toBeUndefined();
+    expect(rtmsReducer(alone, { type: 'TRANSCRIPT' })).toEqual({ phase: 'active', pending: null, error: null, waitingLong: false });
+    expect(rtmsReducer(faulted, { type: 'RESET' })).toEqual(initialRtmsState);
   });
 
   test('the server\'s word about one\'s own stream changes nothing without such a request', () => {

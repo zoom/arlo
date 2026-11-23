@@ -15,6 +15,7 @@ import {
   shouldRestartAfterFault,
   STREAM_FAULT,
   canStartRtms,
+  ownStartUnconfirmed,
 } from '../lib/rtmsMachine';
 import { addSegment, mergeHistory } from '../lib/transcript';
 import { readMeetingMessage } from '../lib/meetingMessage';
@@ -173,6 +174,17 @@ export function MeetingProvider({ children }) {
   // person's own, beside that stream (see lib/rtmsMachine.js `alongside`).
   // From `arlo.state` on the socket; false until the server says so.
   const besideAnotherStreamRef = useRef(false);
+  // Whether the server has said, on the socket open now, what this person is
+  // to Arlo. Until it has, `besideAnotherStreamRef` is not known, only false.
+  const arloStateKnownRef = useRef(false);
+  // This panel's own start, made beside another person's stream, has not been
+  // confirmed by the server (`arlo.state`: an owner whose own stream is live).
+  // The machine's `alongside` mark, readable before the next render: set when
+  // such a start is asked for, cleared when the server confirms it. While it
+  // is true the stream the phase follows is someone else's, so nothing may
+  // count it as started here: see startedHereConfirmed().
+  const ownStartUnconfirmedRef = useRef(false);
+  ownStartUnconfirmedRef.current = ownStartUnconfirmed(rtms);
   const stoppedStreamWasOursRef = useRef(false);
   const faultRestartsRef = useRef(0);
   const isGuestRef = useRef(isGuest);
@@ -191,6 +203,19 @@ export function MeetingProvider({ children }) {
   const readVerifiedMeetingId = useCallback(() => {
     const held = verifiedRef.current;
     return held && (held.forMeeting === null || held.forMeeting === meetingIdRef.current) ? held.id : null;
+  }, []);
+
+  /**
+   * "This panel started the running stream": what Zoom's indicator, the chat
+   * notice and the restart after a fault go by. Never for a start made beside
+   * another person's stream that the server has not confirmed.
+   */
+  const startedHereConfirmed = useCallback(() => startedHereRef.current && !ownStartUnconfirmedRef.current, []);
+  /** A start of this panel's ended without a stream: nothing says "started here" any more. */
+  const forgetStartedHere = useCallback(() => {
+    startedHereRef.current = false;
+    setStartAskedHere(false);
+    setStreamStartedHere(false);
   }, []);
 
   if (rtmsActive) {
@@ -406,6 +431,7 @@ export function MeetingProvider({ children }) {
     ownPauseOnServerRef.current = null;
     setOwnPauseOnServer(null);
     besideAnotherStreamRef.current = false;
+    arloStateKnownRef.current = false;
     // A retry still waiting would replace the socket about to be opened
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -463,9 +489,9 @@ export function MeetingProvider({ children }) {
           dispatchRtms({ type: 'TRANSCRIPT' });
           // Tell the meeting chat once, on the first real transcript line, and only
           // from the client that started transcription (not from every open panel).
-          // Not while this person's own start still waits beside someone else's
-          // stream: this line came through that one.
-          if (startedHereRef.current && !startNoticeSentRef.current && rtmsRef.current.alongside !== true) {
+          // Not for this person's own start beside someone else's stream that
+          // the server has not confirmed: this line came through that one.
+          if (startedHereConfirmed() && !startNoticeSentRef.current) {
             startNoticeSentRef.current = true;
             sendChatNoticeRef.current('start');
           }
@@ -494,11 +520,15 @@ export function MeetingProvider({ children }) {
           // Whose stream runs. An owner's `myStreamLive` is false while Arlo is
           // here only through another person's stream; a participant has none.
           // A server that does not send it: an owner's stream is taken to run.
+          arloStateKnownRef.current = true;
           if (data.present === true && (data.role === 'owner' || data.role === 'participant')) {
             const ownStreamLive = data.role === 'owner' && data.myStreamLive !== false;
             besideAnotherStreamRef.current = !ownStreamLive;
             // Confirms a start this person asked for beside someone else's stream
-            if (ownStreamLive) dispatchRtms({ type: 'OWN_STREAM_LIVE' });
+            if (ownStreamLive) {
+              ownStartUnconfirmedRef.current = false;
+              dispatchRtms({ type: 'OWN_STREAM_LIVE' });
+            }
           } else {
             besideAnotherStreamRef.current = false;
           }
@@ -559,7 +589,7 @@ export function MeetingProvider({ children }) {
 
     setWs(socket);
     return socket;
-  }, []);
+  }, [startedHereConfirmed]);
 
   const connectWebSocket = useCallback((meetingId) => {
     if (!meetingId || meetingId === 'undefined' || meetingId === 'null') {
@@ -749,7 +779,7 @@ export function MeetingProvider({ children }) {
       alreadyRunningRef.current = false;
       autoRestartedRef.current = false;
       localActionRef.current = null;
-      setStreamStartedHere(startedHereRef.current);
+      setStreamStartedHere(startedHereConfirmed());
     } else if (next === 'paused') {
       if (local === 'pause') {
         sendChatNoticeRef.current('pause');
@@ -761,8 +791,10 @@ export function MeetingProvider({ children }) {
         sendChatNoticeRef.current('stop');
         notify('info', 'Transcription stopped');
       }
-      // Remembered for a restart after a fault; the server's reason may come later
-      stoppedStreamWasOursRef.current = startedHereRef.current && local !== 'stop';
+      // Remembered for a restart after a fault; the server's reason may come later.
+      // Never for another person's stream that stopped while this panel's own
+      // start beside it was unconfirmed.
+      stoppedStreamWasOursRef.current = startedHereConfirmed() && local !== 'stop';
       localActionRef.current = null;
       startedHereRef.current = false;
       setStartAskedHere(false);
@@ -775,10 +807,16 @@ export function MeetingProvider({ children }) {
     }
     // 'starting' and 'stalled' keep startedHereRef: the stream may still arrive
     // (e.g. the user clicks Zoom's own Start button) and the chat notice is ours.
+    // Not for a start made beside another person's stream: the stream that
+    // will be seen next is that person's. Such a start that stalled has ended.
+    if (next === 'stalled' && ownStartUnconfirmedRef.current) {
+      localActionRef.current = null;
+      forgetStartedHere();
+    }
     if (next === 'stopped' || next === 'idle' || next === 'denied' || next === 'failed' || next === 'expired') {
       setStreamStartedHere(false);
     }
-  }, [rtms.phase, notify, postTimelineStatus]);
+  }, [rtms.phase, notify, postTimelineStatus, startedHereConfirmed, forgetStartedHere]);
 
   // Arlo's status in Zoom's own meeting window (see lib/dynamicIndicator.js)
   useDynamicIndicator({
@@ -814,9 +852,24 @@ export function MeetingProvider({ children }) {
     if (rtms.error) notify('warning', rtms.error.message);
   }, [rtms.error, notify]);
 
+  /**
+   * Tell the machine a request was made. A start is marked as made beside
+   * another person's stream when the server says Arlo is here through one that
+   * is not this person's; and, while the server has not spoken on a socket
+   * just opened, when the start before it was such a one and still is
+   * unconfirmed (anything but a stop of every stream since).
+   */
+  const dispatchRequest = useCallback((action) => {
+    const current = rtmsRef.current;
+    const stillBeside = !arloStateKnownRef.current && ownStartUnconfirmed(current) && current.phase !== 'stopped';
+    const alongside = action === 'start' && (besideAnotherStreamRef.current || stillBeside);
+    if (alongside) ownStartUnconfirmedRef.current = true;
+    dispatchRtms({ type: 'REQUEST', action, alongside });
+  }, []);
+
   const requestRtms = useCallback(async (action, options) => {
     localActionRef.current = action;
-    dispatchRtms({ type: 'REQUEST', action, alongside: action === 'start' && besideAnotherStreamRef.current });
+    dispatchRequest(action);
     try {
       const apiName = `${action}RTMS`;
       if (options) {
@@ -837,13 +890,16 @@ export function MeetingProvider({ children }) {
       localActionRef.current = null;
       if (action === 'start' && String(error?.code) === '10308') {
         alreadyRunningRef.current = true; // already running: no "started" toast
+        // Beside another person's stream, "already running" is about that
+        // stream: this panel's own start has ended without one
+        if (ownStartUnconfirmedRef.current) forgetStartedHere();
       }
       dispatchRtms({
         type: 'REQUEST_FAILED', action, code: error?.code, message: error?.message, serverPaused: ownPauseOnServerRef.current,
       });
       return false;
     }
-  }, [zoomSdk, rtmsStatusSupported]);
+  }, [zoomSdk, rtmsStatusSupported, dispatchRequest, forgetStartedHere]);
 
   const startRTMS = useCallback(async (isAutoStart = false) => {
     // Also allowed while a request is waiting on the host (see canStartRtms),
@@ -881,9 +937,12 @@ export function MeetingProvider({ children }) {
   useEffect(() => {
     if (rtms.phase !== 'starting' || !zoomSdk || !ws) return undefined;
     const timer = setTimeout(() => {
+      // Beside another person's stream only this person's own click counts,
+      // and only while it stands (not after Zoom answered "already running")
       const wantsTranscription = !isGuestRef.current
         && (startedHereRef.current
-          || (autoStartAvailableRef.current && localStorage.getItem('arlo-auto-start') !== 'false'));
+          || (!ownStartUnconfirmedRef.current
+            && autoStartAvailableRef.current && localStorage.getItem('arlo-auto-start') !== 'false'));
       if (!shouldAutoRestart({
         phase: rtmsRef.current.phase,
         wantsTranscription,
@@ -907,7 +966,7 @@ export function MeetingProvider({ children }) {
     const mayRestart = () => shouldRestartAfterFault({
       phase: rtmsRef.current.phase,
       errorCode: rtmsRef.current.error?.code,
-      startedHere: stoppedStreamWasOursRef.current,
+      startedHere: stoppedStreamWasOursRef.current && !ownStartUnconfirmedRef.current,
       restarts: faultRestartsRef.current,
       guest: isGuestRef.current,
     });
@@ -992,7 +1051,7 @@ export function MeetingProvider({ children }) {
         localActionRef.current = 'start';
         startedHereRef.current = true;
         setStartAskedHere(true);
-        dispatchRtms({ type: 'REQUEST', action: 'start' });
+        dispatchRequest('start');
       } else if (action === 'stop' && isRtmsActive(current) && !isRtmsBusy(current)) {
         localActionRef.current = 'stop';
         dispatchRtms({ type: 'REQUEST', action: 'stop' });
@@ -1005,7 +1064,7 @@ export function MeetingProvider({ children }) {
     } finally {
       setApiActionLoading(false);
     }
-  }, [apiActionLoading, meetingId, meetingContext, readVerifiedMeetingId]);
+  }, [apiActionLoading, meetingId, meetingContext, readVerifiedMeetingId, dispatchRequest]);
 
   // Convenience wrappers
   const startRTMSViaAPI = useCallback(() => rtmsViaAPI('start'), [rtmsViaAPI]);
