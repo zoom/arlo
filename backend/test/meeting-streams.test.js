@@ -241,3 +241,205 @@ test('a report without a stream id in a meeting whose streams are known by id is
   assert.equal(streams.isSource(M, 's1'), true); // and nothing was added or replaced
   assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: false });
 });
+
+// --- the meeting ended: every stream is over -------------------------------
+
+test('stopAll marks every stream of the meeting stopped and keeps who ran them', () => {
+  const { streams } = setup();
+  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
+  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
+  streams.streamStarted('OTHER==', { streamId: 's9', operatorId: 'op-9' });
+  streams.stopAll(M);
+
+  assert.equal(streams.anyLive(M), false);
+  assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
+  assert.equal(streams.anyLive('OTHER=='), true);
+  // the stop reports that follow for each stream change nothing
+  assert.deepEqual(streams.streamStopped(M, 's2'), { anyLive: false });
+  assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: false });
+  streams.stopAll('UNKNOWN=='); // nothing known: nothing to do
+  assert.equal(streams.size(), 2);
+});
+
+// --- a source that went silent without a stop report ------------------------
+
+function timed(options) {
+  const clock = { now: 1_000_000 };
+  const { streams, warnings } = setup({ now: () => clock.now, ...options });
+  const after = (seconds) => { clock.now += seconds * 1000; };
+  return { streams, warnings, clock, after };
+}
+
+test('a line from another live stream takes over when the source has delivered nothing for 30 seconds', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
+  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
+  assert.equal(streams.acceptsDataFrom(M, 's1'), true);
+
+  after(29);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), false); // not yet
+  after(1);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true); // its line is kept
+  assert.equal(streams.isSource(M, 's2'), true);
+  assert.equal(streams.isSource(M, 's1'), false);
+  assert.equal(streams.sourceOperator(M), 'op-2');
+  assert.deepEqual(streams.operators(M), ['op-2', 'op-1']);
+  assert.equal(streams.anyLive(M), true);
+});
+
+test('the source is not switched while it keeps delivering', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1' });
+  streams.streamStarted(M, { streamId: 's2' });
+  for (let i = 0; i < 10; i += 1) {
+    after(20);
+    assert.equal(streams.acceptsDataFrom(M, 's1'), true);
+    assert.equal(streams.acceptsDataFrom(M, 's2'), false);
+  }
+  assert.equal(streams.isSource(M, 's1'), true);
+});
+
+test('silence in the meeting switches nothing: only a line from another stream can', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1' });
+  streams.streamStarted(M, { streamId: 's2' });
+  streams.acceptsDataFrom(M, 's1');
+  after(600); // nobody spoke for ten minutes
+  assert.equal(streams.isSource(M, 's1'), true);
+  streams.streamStarted(M, { streamId: 's3' }); // nor does a stream starting
+  assert.equal(streams.isSource(M, 's1'), true);
+  assert.equal(streams.acceptsDataFrom(M, 's1'), true);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
+});
+
+test('a source that never delivered counts as silent from when it became the source', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1' });
+  after(10);
+  streams.streamStarted(M, { streamId: 's2' });
+  after(19);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
+  after(1);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
+});
+
+test('a stream that took over is given 30 seconds of its own before it can be replaced', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1' });
+  streams.streamStarted(M, { streamId: 's2' });
+  streams.streamStarted(M, { streamId: 's3' });
+  after(30);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
+  after(29);
+  assert.equal(streams.acceptsDataFrom(M, 's3'), false);
+  after(1);
+  assert.equal(streams.acceptsDataFrom(M, 's3'), true);
+});
+
+test('a silent original-host stream loses the source role, and gets it back only by the same rule', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 'host', operatorId: 'op-host', originalHost: true });
+  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
+  streams.acceptsDataFrom(M, 'host');
+  after(31);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
+
+  // it does not come back because it is the original host: not when another
+  // stream starts, not when it reports itself running, not when it delivers
+  // while the current source is delivering too
+  after(60);
+  streams.acceptsDataFrom(M, 's2');
+  streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3' });
+  streams.streamStarted(M, { streamId: 'host', operatorId: 'op-host', originalHost: true });
+  assert.equal(streams.isSource(M, 's2'), true);
+  assert.equal(streams.acceptsDataFrom(M, 'host'), false);
+  after(20);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
+  assert.equal(streams.acceptsDataFrom(M, 'host'), false);
+
+  // the current source goes silent: the host's line takes over, like anyone's
+  after(30);
+  assert.equal(streams.acceptsDataFrom(M, 'host'), true);
+  assert.equal(streams.isSource(M, 'host'), true);
+  // and from then on it is the preferred stream again
+  streams.streamStopped(M, 's3');
+  streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3' });
+  assert.equal(streams.isSource(M, 'host'), true);
+});
+
+test('an original-host stream that stopped and started again is preferred again', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 'host', originalHost: true });
+  streams.streamStarted(M, { streamId: 's2' });
+  after(30);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
+  streams.streamStopped(M, 'host');
+  streams.streamStarted(M, { streamId: 'host', originalHost: true });
+  assert.equal(streams.isSource(M, 'host'), true);
+});
+
+test('when the source stops, a stream that lost the role through silence is chosen last', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1' });
+  streams.streamStarted(M, { streamId: 's2' });
+  streams.streamStarted(M, { streamId: 's3' });
+  after(30);
+  streams.acceptsDataFrom(M, 's2'); // s1 went silent
+  after(10);
+  streams.streamStopped(M, 's2');
+  assert.equal(streams.isSource(M, 's3'), true);
+  streams.streamStopped(M, 's3');
+  assert.equal(streams.isSource(M, 's1'), true); // the only one left
+});
+
+test('after a pause in the talk, the stream whose copy arrives first does not keep the role from a source that is alive', () => {
+  // Every stream carries the same speech. After 30 quiet seconds the first
+  // line of the next sentence can arrive from another stream a moment before
+  // the source's copy. That is not a dead source.
+  const { streams, clock, after } = timed();
+  streams.streamStarted(M, { streamId: 'host', operatorId: 'op-host', originalHost: true });
+  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
+  streams.acceptsDataFrom(M, 'host');
+  after(45);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true); // kept: one copy of the line
+  clock.now += 80;
+  assert.equal(streams.acceptsDataFrom(M, 'host'), false); // the same line again: dropped
+  assert.equal(streams.isSource(M, 'host'), true); // and the source is who it was
+  assert.equal(streams.sourceOperator(M), 'op-host');
+  after(1);
+  assert.equal(streams.acceptsDataFrom(M, 'host'), true);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
+});
+
+test('a displaced source that delivers only later does not get the role back for that', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1' });
+  streams.streamStarted(M, { streamId: 's2' });
+  after(30);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
+  after(6); // past the 5 seconds in which a copy of the same line would arrive
+  assert.equal(streams.acceptsDataFrom(M, 's1'), false);
+  assert.equal(streams.isSource(M, 's2'), true);
+});
+
+test('a stopped stream never takes over, however silent the source is', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1' });
+  streams.streamStarted(M, { streamId: 's2' });
+  streams.streamStopped(M, 's2');
+  after(120);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
+  assert.equal(streams.isSource(M, 's1'), true);
+  // nor a stream past the limit, nor a bad id
+  assert.equal(streams.acceptsDataFrom(M, 42), false);
+});
+
+test('the silence limit can be set', () => {
+  const { streams, after } = timed({ sourceSilentMs: 5000 });
+  streams.streamStarted(M, { streamId: 's1' });
+  streams.streamStarted(M, { streamId: 's2' });
+  after(4);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
+  after(1);
+  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
+});

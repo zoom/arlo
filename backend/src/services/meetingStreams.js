@@ -11,13 +11,30 @@
  * The source stays the source while it runs. It is chosen again when it stops
  * or when the original host's stream starts.
  *
+ * A stream can also die without any stop report reaching this server. So the
+ * source is watched through its lines: when a line arrives from another live
+ * stream and the source has delivered nothing for 30 seconds, that other
+ * stream becomes the source and its line is kept. Silence alone changes
+ * nothing (nobody speaking is normal); only another stream's line can. A
+ * stream that lost the role this way, the original host's included, gets it
+ * back only by the same rule or by stopping and starting again.
+ *
  * This module also remembers who ran a stream in the meeting (operator ids),
  * including streams that have stopped, until forget(). The meeting lifecycle
  * calls forget() when it flushes the meeting, so nothing here outlives the
  * meeting's data. Ids only: no meeting content is held or logged.
  */
 const MAX_ID_CHARS = 256;
-const DEFAULTS = Object.freeze({ maxStreamsPerMeeting: 20, maxMeetings: 5000 });
+const DEFAULTS = Object.freeze({
+  maxStreamsPerMeeting: 20,
+  maxMeetings: 5000,
+  // The source is taken to be dead when another stream delivers a line and the
+  // source has delivered nothing for this long
+  sourceSilentMs: 30 * 1000,
+  // After such a switch, a line from the old source within this time shows it
+  // was alive after all (see acceptsDataFrom): it gets the role back
+  sourceRevertMs: 5 * 1000,
+});
 // A report without a stream id (an rtms process from before streams were
 // told apart) is the only stream of its meeting: it gets this key.
 const NO_STREAM_ID = '';
@@ -31,13 +48,19 @@ const keyFor = (streamId) => {
 };
 
 function createMeetingStreams(options = {}) {
-  const { log = console } = options;
+  const { log = console, now = () => Date.now() } = options;
   const limits = { ...DEFAULTS };
   for (const name of Object.keys(DEFAULTS)) {
     if (Number.isInteger(options[name]) && options[name] > 0) limits[name] = options[name];
   }
-  // meetingId -> { streams: Map(key -> { operatorId, originalHost, live }), sourceKey, warned }
-  // The streams Map keeps the order in which the streams started.
+  // meetingId -> {
+  //   streams: Map(key -> { operatorId, originalHost, live, demoted }),
+  //   sourceKey,
+  //   sourceHeardAt: when the source last delivered, or became the source,
+  //   displaced: { key, at } the source replaced for silence a moment ago, or null,
+  //   warned }
+  // The streams Map keeps the order in which the streams started. `demoted`
+  // marks a stream that lost the source role through silence.
   const meetings = new Map();
 
   function stateFor(meetingId) {
@@ -48,7 +71,7 @@ function createMeetingStreams(options = {}) {
     } else {
       // A backstop only: a meeting normally leaves through forget()
       if (meetings.size >= limits.maxMeetings) meetings.delete(meetings.keys().next().value);
-      state = { streams: new Map(), sourceKey: null, warned: false };
+      state = { streams: new Map(), sourceKey: null, sourceHeardAt: now(), displaced: null, warned: false };
     }
     meetings.set(meetingId, state);
     return state;
@@ -74,16 +97,28 @@ function createMeetingStreams(options = {}) {
 
   const liveKeys = (state) => [...state.streams].filter(([, stream]) => stream.live).map(([key]) => key);
 
+  /** Make a stream the source. Its 30 seconds of silence are counted from now. */
+  function setSource(state, key) {
+    state.sourceKey = key;
+    state.sourceHeardAt = now();
+    state.displaced = null;
+  }
+
+  // The original host's stream is preferred, unless it lost the role through silence
+  const preferred = (stream) => stream.originalHost && !stream.demoted;
+
   /** Keep the source while it runs; otherwise pick the next one. */
   function chooseSource(state) {
     const live = liveKeys(state);
-    const hostKey = live.find((key) => state.streams.get(key).originalHost);
+    const hostKey = live.find((key) => preferred(state.streams.get(key)));
     const current = state.streams.get(state.sourceKey);
-    if (current?.live && (current.originalHost || hostKey === undefined)) return;
+    if (current?.live && (preferred(current) || hostKey === undefined)) return;
     // Nothing live: the stream that was the source keeps that place, so its
     // last lines, still on their way, are kept
     if (live.length === 0 && current) return;
-    state.sourceKey = hostKey ?? live[0] ?? null;
+    // A stream that went silent is the last choice
+    const next = hostKey ?? live.find((key) => !state.streams.get(key).demoted) ?? live[0] ?? null;
+    if (next !== state.sourceKey) setSource(state, next);
   }
 
   /** Add a stream to a meeting. Returns it, or null when the meeting is full. */
@@ -95,7 +130,7 @@ function createMeetingStreams(options = {}) {
       }
       return null;
     }
-    const stream = { operatorId: null, originalHost: false, live: true };
+    const stream = { operatorId: null, originalHost: false, live: true, demoted: false };
     state.streams.set(key, stream);
     return stream;
   }
@@ -122,6 +157,7 @@ function createMeetingStreams(options = {}) {
       // Stopped and started again: it takes its place after the streams running now
       state.streams.delete(key);
       state.streams.set(key, stream);
+      stream.demoted = false; // a new start: whatever silenced it before is over
     }
     if (!stream) stream = addStream(state, key);
     if (stream) {
@@ -149,6 +185,17 @@ function createMeetingStreams(options = {}) {
     return { anyLive: liveKeys(state).length > 0 };
   }
 
+  /**
+   * The meeting itself ended: every stream of it is over, whichever stream the
+   * report came on. Who ran the streams is kept until forget().
+   */
+  function stopAll(meetingId) {
+    const state = meetings.get(meetingId);
+    if (!state) return;
+    for (const stream of state.streams.values()) stream.live = false;
+    state.displaced = null;
+  }
+
   /** True for the one stream whose lines are stored. */
   function isSource(meetingId, streamId) {
     const state = meetings.get(meetingId);
@@ -164,16 +211,54 @@ function createMeetingStreams(options = {}) {
    * isSource(), except that a stream first heard of through its data counts as
    * started: this server may have restarted mid-meeting and missed the report.
    * A stream known to have stopped is not brought back by a late line.
+   *
+   * This is also where a dead source is noticed (see the top of this file): a
+   * line from another live stream, when the source has delivered nothing for
+   * `sourceSilentMs`, makes that stream the source.
+   *
+   * One case looks the same and is not a dead source. After a pause in the
+   * talk every stream has been silent, and the first line of the next sentence
+   * may arrive from another stream a moment before the source's own copy. The
+   * other stream's line is kept (one copy is stored either way), and when the
+   * old source's copy follows within `sourceRevertMs` it is dropped as the
+   * duplicate it is and the old source has the role again.
    */
   function acceptsDataFrom(meetingId, streamId) {
     if (!isId(meetingId) || keyFor(streamId) === null) return false;
     const state = stateFor(meetingId);
     const key = resolve(state, streamId);
-    if (!state.streams.has(key) && !holdsUnnamed(state, key)) {
+    if (holdsUnnamed(state, key)) {
+      state.sourceHeardAt = now();
+      return true;
+    }
+    if (!state.streams.has(key)) {
       addStream(state, key);
       chooseSource(state);
     }
-    return isSource(meetingId, streamId);
+    const stream = state.streams.get(key);
+    if (!stream) return false; // the meeting is full
+    const at = now();
+    if (state.sourceKey === key) {
+      state.sourceHeardAt = at;
+      return true;
+    }
+    if (!stream.live) return false;
+
+    const { displaced } = state;
+    if (displaced && displaced.key === key && at - displaced.at < limits.sourceRevertMs) {
+      stream.demoted = false;
+      setSource(state, key);
+      return false;
+    }
+    if (at - state.sourceHeardAt < limits.sourceSilentMs) return false;
+
+    const silent = state.streams.get(state.sourceKey);
+    const silentKey = state.sourceKey;
+    if (silent) silent.demoted = true;
+    stream.demoted = false;
+    setSource(state, key);
+    if (silent?.live) state.displaced = { key: silentKey, at };
+    return true;
   }
 
   const anyLive = (meetingId) => {
@@ -199,7 +284,7 @@ function createMeetingStreams(options = {}) {
   const forget = (meetingId) => meetings.delete(meetingId);
 
   return {
-    streamStarted, streamStopped, isSource, acceptsDataFrom, anyLive,
+    streamStarted, streamStopped, stopAll, isSource, acceptsDataFrom, anyLive,
     operators, sourceOperator, forget, size: () => meetings.size,
   };
 }

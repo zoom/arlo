@@ -4,7 +4,7 @@
  * Inside one meeting nothing is flushed: a stop, pause, reconnect or restart
  * keeps the data, and a restarted stream continues it. The data goes when the
  * meeting ends:
- *   - Zoom reports the stream stopped because the meeting ended, or
+ *   - Zoom reports a stream stopped because the meeting ended, or
  *   - the stream is not running and no Arlo panel is connected for the
  *     grace period (a panel knows the meeting is still going; none left
  *     means nobody is there to read the data), or
@@ -48,7 +48,7 @@ function createMeetingLifecycle({
   const grace = Number.isFinite(graceMs) && graceMs >= 0 ? graceMs : 2 * 60 * 1000;
   // running: true | false as told by the rtms service, null = never told
   const meetings = new Map(); // meetingId -> { running, panels, cancel }
-  const flushedAt = new Map(); // meetingId -> when it was flushed
+  const flushedAt = new Map(); // meetingId -> { at: when it was flushed, ended: because the meeting ended }
 
   function stateFor(meetingId) {
     let state = meetings.get(meetingId);
@@ -59,21 +59,33 @@ function createMeetingLifecycle({
     return state;
   }
 
-  function rememberFlushed(meetingId) {
+  function rememberFlushed(meetingId, reason) {
+    const ended = reason === 'meeting_ended' || flushedAt.get(meetingId)?.ended === true;
     flushedAt.delete(meetingId);
     if (flushedAt.size >= MAX_FLUSHED_REMEMBERED) flushedAt.delete(flushedAt.keys().next().value);
-    flushedAt.set(meetingId, now());
+    flushedAt.set(meetingId, { at: now(), ended });
   }
 
-  function wasJustFlushed(meetingId) {
-    const at = flushedAt.get(meetingId);
-    if (at === undefined) return false;
-    if (now() - at > FLUSHED_MEMORY_MS) {
+  /** The record of a flush a moment ago, or null. */
+  function recentFlush(meetingId) {
+    const flushed = flushedAt.get(meetingId);
+    if (flushed === undefined) return null;
+    if (now() - flushed.at > FLUSHED_MEMORY_MS) {
       flushedAt.delete(meetingId);
-      return false;
+      return null;
     }
-    return true;
+    return flushed;
   }
+
+  const wasJustFlushed = (meetingId) => recentFlush(meetingId) !== null;
+
+  /**
+   * Whether Zoom said a moment ago that this meeting is over, and no stream
+   * has run for it since. A meeting with several streams gets a stop report
+   * per stream; after the first one that says "the meeting ended", the rest
+   * are about a meeting that is already gone.
+   */
+  const hasEnded = (meetingId) => recentFlush(meetingId)?.ended === true;
 
   function forget(meetingId) {
     try {
@@ -98,7 +110,7 @@ function createMeetingLifecycle({
     // something to flush or the meeting is over. An idle flush of nothing (a
     // panel opened and closed before anyone spoke) must not silence a stream
     // that is in fact live.
-    if (hadData || reason === 'meeting_ended') rememberFlushed(meetingId);
+    if (hadData || reason === 'meeting_ended') rememberFlushed(meetingId, reason);
     forget(meetingId);
     try {
       onFlush(reason, hadData);
@@ -183,13 +195,15 @@ function createMeetingLifecycle({
         forget(meetingId);
       }
     }
-    for (const [meetingId, at] of flushedAt) {
-      if (now() - at > FLUSHED_MEMORY_MS) flushedAt.delete(meetingId);
+    for (const [meetingId, flushed] of flushedAt) {
+      if (now() - flushed.at > FLUSHED_MEMORY_MS) flushedAt.delete(meetingId);
     }
     return deleted;
   }
 
-  return { streamStatus, panelsChanged, dataReceived, sweep, tracked: () => meetings.size };
+  return {
+    streamStatus, panelsChanged, dataReceived, hasEnded, sweep, tracked: () => meetings.size,
+  };
 }
 
 let instance = null;

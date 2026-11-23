@@ -187,24 +187,97 @@ test('participant events from a stream that is not the stored one are dropped', 
   assert.deepEqual(stored, ['transcription_started', 'joined']);
 });
 
-test('the meeting ending with the last stream flushes; one of two streams ending does not', async () => {
+test('the meeting ending, reported on any one stream, ends every stream and flushes', async () => {
   const { getMeetingStreams } = require('../src/services/meetingStreams');
   const meeting = 'MULTI-I==';
   const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
   await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
   await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' });
   await say(meeting, 's1', 1, 'Said during the meeting.');
 
-  await status(meeting, { status: 'rtms_stopped', streamId: 's2', meetingEnded: true });
+  // only the boolean counts: this is one stream stopping, and the other runs on
+  await status(meeting, { status: 'rtms_stopped', streamId: 's2', meetingEnded: 'true' });
   assert.deepEqual(await texts(meeting, cookie), ['Said during the meeting.']);
-  assert.deepEqual(getMeetingStreams().operators(meeting), ['op-1', 'op-2']);
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' });
 
-  await status(meeting, { status: 'rtms_stopped', streamId: 's1', meetingEnded: true });
+  // the report comes on the stream that is not the stored one, while the other is live
+  const ended = await status(meeting, { status: 'rtms_stopped', streamId: 's2', meetingEnded: true });
+  assert.equal(ended.status, 200);
   assert.deepEqual(await texts(meeting, cookie), []);
+  assert.deepEqual((await history(meeting, 'participant-events', cookie)).events, []);
+  assert.equal(getMeetingStreams().anyLive(meeting), false);
   // what was known about the meeting's streams went with the flush
   assert.deepEqual(getMeetingStreams().operators(meeting), []);
   assert.equal((await say(meeting, 's1', 2, 'Arrived after the end.')).body.stored, false);
-  assert.equal(getMeetingStreams().anyLive(meeting), false);
+
+  // the other stream's own stop reports, with and without the reason, change nothing
+  const later = await status(meeting, { status: 'rtms_stopped', streamId: 's1', meetingEnded: true });
+  await status(meeting, { status: 'rtms_stopped', streamId: 's1' });
+  await status(meeting, { status: 'rtms_stopped', streamId: 's1', fault: true });
+  await status(meeting, { status: 'rtms_failed', streamId: 's1' });
+  assert.deepEqual(later.body, { received: true, broadcast: 0 });
+  await h.wait(150);
+  ws.socket.close();
+
+  const told = ofType(ws, 'meeting.status');
+  assert.deepEqual(told.map((d) => d.status), ['rtms_started', 'rtms_stopped']);
+  assert.equal(told[1].meetingEnded, true);
+  assert.equal('fault' in told[1], false);
+  const lines = ofType(ws, 'participant.event').map((d) => d.event.eventType);
+  assert.deepEqual(lines, ['transcription_started', 'transcription_stopped']);
+  // each panel's last word about Arlo: not here
+  assert.equal(ofType(ws, 'arlo.state').at(-1).present, false);
+  assert.deepEqual(await texts(meeting, cookie), []);
+  assert.equal((await say(meeting, 's1', 3, 'Still refused.')).body.stored, false);
+});
+
+test('after a meeting ended, the same meeting id can run again', async () => {
+  const meeting = 'MULTI-I2==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started', streamId: 's1' });
+  await status(meeting, { status: 'rtms_started', streamId: 's2' });
+  await status(meeting, { status: 'rtms_stopped', streamId: 's1', meetingEnded: true });
+  await status(meeting, { status: 'rtms_started', streamId: 's3' });
+  await say(meeting, 's3', 1, 'again');
+  assert.deepEqual(await texts(meeting, cookie), ['again']);
+  // and a stop is a stop again
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_stopped', streamId: 's3' });
+  await h.wait(100);
+  ws.socket.close();
+  assert.deepEqual(ofType(ws, 'meeting.status').map((d) => d.status), ['rtms_started', 'rtms_stopped']);
+});
+
+test('a source stream that goes silent without a stop report is replaced by the stream that still delivers', async () => {
+  const meeting = 'MULTI-N==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' });
+  await say(meeting, 's1', 1, 'one');
+  await status(meeting, { status: 'rtms_interrupted', streamId: 's1' }); // the panels show "Reconnecting…"
+  assert.equal((await say(meeting, 's2', 1, 'dropped')).body.stored, false);
+
+  const realNow = Date.now;
+  Date.now = () => realNow() + 31_000;
+  try {
+    const kept = await say(meeting, 's2', 2, 'two');
+    assert.equal('stored' in kept.body, false);
+    await say(meeting, 's2', 3, 'three');
+  } finally {
+    Date.now = realNow;
+  }
+  await h.wait(100);
+  ws.socket.close();
+
+  const { segments } = await history(meeting, 'transcript', cookie);
+  assert.deepEqual(segments.map((s) => [s.seqNo, s.text]), [[1, 'one'], [2, 'two'], [3, 'three']]);
+  // the panels learn that a stream is running again
+  assert.deepEqual(ofType(ws, 'meeting.status').map((d) => d.status), ['rtms_started', 'rtms_interrupted', 'rtms_started']);
+  // trouble on the old stream is no longer the meeting's
+  const quiet = await status(meeting, { status: 'rtms_interrupted', streamId: 's1' });
+  assert.deepEqual(quiet.body, { received: true, broadcast: 0 });
 });
 
 test('an idle flush forgets the meeting\'s streams too', async () => {
@@ -255,14 +328,32 @@ test('Zoom\'s own stop webhook for one of two streams, with the rtms service unr
   await status(meeting, { status: 'rtms_started', streamId: 's2' });
   await say(meeting, 's1', 1, 'kept');
 
-  await h.postWebhook(srv.base, { event: 'meeting.rtms_stopped', payload: { meeting_uuid: meeting, rtms_stream_id: 's2', stop_reason: 6 } });
+  await h.postWebhook(srv.base, { event: 'meeting.rtms_stopped', payload: { meeting_uuid: meeting, rtms_stream_id: 's2', stop_reason: 1 } });
   await h.wait(100);
   assert.deepEqual(ofType(ws, 'meeting.status').map((d) => d.status), ['rtms_started']);
   assert.deepEqual(await texts(meeting, cookie), ['kept']);
 
-  await h.postWebhook(srv.base, { event: 'meeting.rtms_stopped', payload: { meeting_uuid: meeting, rtms_stream_id: 's1', stop_reason: 6 } });
+  await h.postWebhook(srv.base, { event: 'meeting.rtms_stopped', payload: { meeting_uuid: meeting, rtms_stream_id: 's1', stop_reason: 1 } });
   await h.wait(100);
   ws.socket.close();
   assert.deepEqual(ofType(ws, 'meeting.status').map((d) => d.status), ['rtms_started', 'rtms_stopped']);
+  assert.deepEqual(await texts(meeting, cookie), ['kept']);
+});
+
+test('Zoom\'s own stop webhook saying the meeting ended, for one of two streams, ends the meeting', async () => {
+  const meeting = 'MULTI-O==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started', streamId: 's1' });
+  await status(meeting, { status: 'rtms_started', streamId: 's2' });
+  await say(meeting, 's1', 1, 'kept until the end');
+
+  await h.postWebhook(srv.base, { event: 'meeting.rtms_stopped', payload: { meeting_uuid: meeting, rtms_stream_id: 's2', stop_reason: 6 } });
+  assert.deepEqual(await texts(meeting, cookie), []);
+  await h.postWebhook(srv.base, { event: 'meeting.rtms_stopped', payload: { meeting_uuid: meeting, rtms_stream_id: 's1', stop_reason: 6 } });
+  await h.wait(100);
+  ws.socket.close();
+  const told = ofType(ws, 'meeting.status');
+  assert.deepEqual(told.map((d) => [d.status, d.meetingEnded === true]), [['rtms_started', false], ['rtms_stopped', true]]);
   assert.deepEqual(await texts(meeting, cookie), []);
 });

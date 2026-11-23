@@ -29,6 +29,7 @@ const {
   broadcastMeetingStatus,
   broadcastArloState,
   broadcastRtmsRequestStatus,
+  currentStreamStatus,
   disconnectUser,
   crossRegisterUser,
   getStats,
@@ -63,13 +64,43 @@ function streamEnded(meetingId, streamId) {
 }
 
 /**
+ * A stop or failed-join report for a stream. Returns what it means for the
+ * meeting:
+ *   'over'  Zoom says the meeting itself ended (stop reason 6). Whichever
+ *           stream the report came on, every stream of the meeting is over:
+ *           the panels are told and the meeting's data is flushed.
+ *   'last'  the meeting's last running stream stopped: a meeting stop.
+ *   'quiet' nothing changes for the meeting: another stream is still running,
+ *           or the meeting ended a moment ago and this is the report for one
+ *           of its other streams.
+ */
+function stopReported(meetingId, streamId, meetingEnded) {
+  if (getMeetingLifecycle().hasEnded(meetingId)) return 'quiet';
+  if (meetingEnded === true) {
+    getMeetingStreams().stopAll(meetingId);
+    return 'over';
+  }
+  return streamEnded(meetingId, streamId) ? 'last' : 'quiet';
+}
+
+/**
  * Whether lines and events from this stream are the ones kept. Answers false
  * for a meeting that was flushed a moment ago, before anything is noted about
  * its streams, so nothing about a meeting comes back after its flush.
  */
 function keepsDataFrom(meetingId, streamId) {
-  return getMeetingLifecycle().dataReceived(meetingId)
-    && getMeetingStreams().acceptsDataFrom(meetingId, streamId);
+  if (!getMeetingLifecycle().dataReceived(meetingId)) return false;
+  const streams = getMeetingStreams();
+  const wasSource = streams.isSource(meetingId, streamId);
+  const kept = streams.acceptsDataFrom(meetingId, streamId);
+  // This stream just took over from one that went silent without a stop
+  // report. If the panels were told the old one was reconnecting, for them a
+  // stream is running again, and whose stream is stored may have changed.
+  if (kept && !wasSource && currentStreamStatus(meetingId) === 'rtms_interrupted') {
+    broadcastMeetingStatus(meetingId, 'rtms_started');
+    broadcastArloState(meetingId);
+  }
+  return kept;
 }
 
 /**
@@ -273,11 +304,14 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       // A stop the rtms service never hears about would never be reported back,
       // so the meeting's data would stay in memory after the meeting. Zoom's
       // signed webhook is enough to act on: tell the panels and the lifecycle,
-      // once the meeting's last stream has stopped.
-      if (event === 'meeting.rtms_stopped' && validUuid && streamEnded(meetingUuid, streamId)) {
+      // once the meeting's last stream has stopped, or at once when the stop
+      // says the meeting itself ended.
+      if (event === 'meeting.rtms_stopped' && validUuid) {
         const meetingEnded = payload.stop_reason === RTMS_STOP_MEETING_ENDED;
-        broadcastMeetingStatus(meetingUuid, 'rtms_stopped', { meetingEnded });
-        getMeetingLifecycle().streamStatus(meetingUuid, 'rtms_stopped', { meetingEnded });
+        if (stopReported(meetingUuid, streamId, meetingEnded) !== 'quiet') {
+          broadcastMeetingStatus(meetingUuid, 'rtms_stopped', { meetingEnded });
+          getMeetingLifecycle().streamStatus(meetingUuid, 'rtms_stopped', { meetingEnded });
+        }
       }
       if (validUuid) broadcastArloState(meetingUuid);
     }
@@ -338,11 +372,14 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   // data lifecycle) only hears what changes for the meeting:
   //   - a stream starting or rejoining, unless another stream is the one stored,
   //   - a stream stopping or failing, only when it was the last one running,
+  //   - a stop because the meeting itself ended, on whichever stream it is
+  //     reported first: every stream is over (`meetingIsOver`),
   //   - an interruption, only on the stream that is stored.
   // `quiet` marks a report that changes nothing for the meeting.
   const streams = getMeetingStreams();
   let quiet = false;
   let firstStream = false;
+  let meetingIsOver = false;
   if (req.isInternal) {
     if (STREAM_RUNNING.has(status)) {
       firstStream = !streams.anyLive(meetingId);
@@ -351,7 +388,9 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
       });
       quiet = !firstStream && !streams.isSource(meetingId, streamId);
     } else if (STREAM_ENDED.has(status)) {
-      quiet = !streamEnded(meetingId, streamId);
+      const meaning = stopReported(meetingId, streamId, status === 'rtms_stopped' && meetingEnded === true);
+      quiet = meaning === 'quiet';
+      meetingIsOver = meaning === 'over';
     } else {
       quiet = isStreamId(streamId) && streams.anyLive(meetingId) && !streams.isSource(meetingId, streamId);
     }
@@ -359,10 +398,9 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
 
   // The meeting's data lifecycle (services/meetingLifecycle.js) follows the rtms
   // service's reports only: a browser cannot start a flush or hold data back.
-  // "The meeting ended" is applied last, after the meeting has been told, and
-  // like a fault it counts for the meeting's last stream only.
+  // "The meeting ended" is applied last, after the meeting has been told. A
+  // fault counts for the meeting's last stream only.
   const lifecycle = getMeetingLifecycle();
-  const meetingIsOver = req.isInternal && !quiet && status === 'rtms_stopped' && meetingEnded === true;
   if (req.isInternal && !quiet && !meetingIsOver) lifecycle.streamStatus(meetingId, status);
 
   // Cross-register user for WebSocket if we have an operator ID (internal only)

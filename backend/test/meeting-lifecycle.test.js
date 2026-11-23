@@ -381,3 +381,30 @@ test('a stop inside the meeting forgets nothing, and a listener that throws does
   assert.deepEqual(forgotten, ['M1']);
   assert.equal(store.has('M1'), false);
 });
+
+test('hasEnded: true after the meeting ended, until a stream runs for it again or the memory of it lapses', () => {
+  const { lifecycle, speak, clock, fireAll } = setup();
+  assert.equal(lifecycle.hasEnded('M1'), false);
+  lifecycle.streamStatus('M1', 'rtms_started');
+  speak('M1');
+  assert.equal(lifecycle.hasEnded('M1'), false);
+  lifecycle.streamStatus('M1', 'rtms_stopped', { meetingEnded: true });
+  assert.equal(lifecycle.hasEnded('M1'), true);
+  assert.equal(lifecycle.hasEnded('M2'), false);
+  assert.equal(lifecycle.hasEnded(42), false);
+
+  lifecycle.streamStatus('M1', 'rtms_started');
+  assert.equal(lifecycle.hasEnded('M1'), false);
+
+  lifecycle.streamStatus('M1', 'rtms_stopped', { meetingEnded: true });
+  clock.now += 11 * 60 * 1000;
+  assert.equal(lifecycle.hasEnded('M1'), false);
+
+  // an idle flush is not the meeting ending
+  lifecycle.streamStatus('M3', 'rtms_started');
+  speak('M3');
+  lifecycle.streamStatus('M3', 'rtms_stopped');
+  fireAll();
+  assert.equal(lifecycle.hasEnded('M3'), false);
+  assert.equal(lifecycle.dataReceived('M3'), false); // though its late lines are still refused
+});
