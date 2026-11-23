@@ -55,7 +55,7 @@ const DEFAULT_MESSAGES = {
 export default function SettingsView() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
-  const { vertical, clearVertical } = useVertical();
+  const { vertical } = useVertical();
   const { showDemoData, setShowDemoData } = useDemoData();
   const { autoStartAvailable, demoMode } = useServerSettings();
   const { complianceEnabled, setComplianceEnabled } = useComplianceSettings();
@@ -360,10 +360,7 @@ export default function SettingsView() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    clearVertical();
-                    navigate('/select-vertical', { replace: true });
-                  }}
+                  onClick={() => navigate('/select-vertical')}
                 >
                   Switch
                   <ChevronRight size={14} />

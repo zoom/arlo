@@ -122,10 +122,13 @@ export const FEATURES = {
   compliance: { name: 'Compliance Checklist', description: 'Required disclosures tracking' },
 };
 
+// Everyone starts on Notes. Another vertical is a choice made in Settings.
+const DEFAULT_VERTICAL = 'notes';
+
 const VerticalContext = createContext();
 
 export function VerticalProvider({ children }) {
-  // Initialize from localStorage or default to null (show selector)
+  // The saved choice, or Notes. There is never "no vertical".
   const [verticalId, setVerticalId] = useState(() => {
     try {
       const saved = localStorage.getItem('arlo-vertical');
@@ -135,7 +138,7 @@ export function VerticalProvider({ children }) {
     } catch {
       // localStorage unavailable
     }
-    return null;
+    return DEFAULT_VERTICAL;
   });
 
   // Get the full vertical config
@@ -172,9 +175,9 @@ export function VerticalProvider({ children }) {
     }
   }, []);
 
-  // Clear selection (return to selector)
+  // Forget the saved choice and return to Notes
   const clearVertical = useCallback(() => {
-    setVerticalId(null);
+    setVerticalId(DEFAULT_VERTICAL);
     try {
       localStorage.removeItem('arlo-vertical');
     } catch {

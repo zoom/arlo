@@ -5,7 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ZoomSdkProvider, useZoomSdk } from './contexts/ZoomSdkContext';
 import { MeetingProvider } from './contexts/MeetingContext';
 import { ToastProvider } from './contexts/ToastContext';
-import { VerticalProvider, useVertical } from './contexts/VerticalContext';
+import { VerticalProvider } from './contexts/VerticalContext';
 import { ServerSettingsProvider } from './contexts/ServerSettingsContext';
 import { DemoDataProvider } from './hooks/useDemoData';
 import { FeatureLayoutProvider } from './hooks/useFeatureLayout';
@@ -35,24 +35,18 @@ import VerticalSelectorView from './views/VerticalSelectorView';
 /**
  * Root route handler — decides what to show at "/".
  * - Inside Zoom: redirect to /auth (in-client PKCE flow)
- * - Browser + authenticated: redirect to /home (or /select-vertical if not selected)
+ * - Browser + authenticated: redirect to /home
  * - Browser + unauthenticated: show marketing landing page
  */
 function RootView() {
   const { isTestMode: isBrowser, isGuest, meetingContext, runningContext, sdkError } = useZoomSdk();
   const { isAuthenticated, isLoading } = useAuth();
-  const { isVerticalSelected } = useVertical();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (isBrowser) {
       if (!isLoading && isAuthenticated) {
-        // Check if vertical is selected, if not go to selector
-        if (!isVerticalSelected) {
-          navigate('/select-vertical', { replace: true });
-        } else {
-          navigate('/home', { replace: true });
-        }
+        navigate('/home', { replace: true });
       }
       return;
     }
@@ -103,8 +97,6 @@ function RootView() {
         if (inMeeting && routeId) {
           console.log('Authorized user with session, routing to meeting');
           navigate(`/meeting/${encodeURIComponent(routeId)}`, { replace: true });
-        } else if (!isVerticalSelected) {
-          navigate('/select-vertical', { replace: true });
         } else {
           navigate('/home', { replace: true });
         }
@@ -113,7 +105,7 @@ function RootView() {
         navigate('/auth', { replace: true });
       }
     }
-  }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate, isVerticalSelected, sdkError]);
+  }, [isBrowser, isAuthenticated, isLoading, isGuest, runningContext, meetingContext, navigate, sdkError]);
 
   // Show spinner while loading
   // Wait for: auth check, SDK guest status, and meetingContext (if in meeting)
@@ -136,31 +128,6 @@ function RootView() {
   }
 
   return <LandingPageView />;
-}
-
-/**
- * Protected route that also requires vertical selection.
- * Redirects to /select-vertical if no vertical is chosen.
- */
-function VerticalProtectedRoute({ children }) {
-  const { isVerticalSelected } = useVertical();
-  const navigate = useNavigate();
-
-  useEffect(() => {
-    if (!isVerticalSelected) {
-      navigate('/select-vertical', { replace: true });
-    }
-  }, [isVerticalSelected, navigate]);
-
-  if (!isVerticalSelected) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <LoadingSpinner />
-      </div>
-    );
-  }
-
-  return children;
 }
 
 function App() {
@@ -187,7 +154,7 @@ function App() {
                       <Route path="/welcome" element={<OnboardingView />} />
                       <Route path="/auth-error" element={<OAuthErrorView />} />
 
-                      {/* Vertical selector (after auth, before main app) */}
+                      {/* Vertical selector, reached from Settings */}
                       <Route path="/select-vertical" element={
                         <ProtectedRoute>
                           <VerticalSelectorView />
@@ -200,12 +167,10 @@ function App() {
                       {/* Guest full meeting view - same features as authenticated, but read-only */}
                       <Route path="/guest-meeting/:id" element={<InMeetingView isGuestMode={true} />} />
 
-                      {/* Authenticated routes (inside AppShell, requires vertical selection) */}
+                      {/* Authenticated routes (inside AppShell) */}
                       <Route element={
                         <ProtectedRoute>
-                          <VerticalProtectedRoute>
-                            <AppShell />
-                          </VerticalProtectedRoute>
+                          <AppShell />
                         </ProtectedRoute>
                       }>
                         <Route path="/home" element={<HomeView />} />
