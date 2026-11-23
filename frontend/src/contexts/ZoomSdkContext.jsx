@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { resolveUserStatus } from '../lib/userStatus';
 
 const ZoomSdkContext = createContext();
 
@@ -133,19 +134,17 @@ export function ZoomSdkProvider({ children }) {
         const context = contextResponse.context || contextResponse;
         setRunningContext(context);
 
-        // Get user context
+        // Get user context. Guest mode only exists in a meeting; outside one the
+        // person opened their own app and is never a guest (lib/userStatus.js).
         let user = null;
         try {
           user = await zoomSdk.getUserContext();
-          setUserContext(user);
         } catch (err) {
-          console.warn('getUserContext failed (may be guest):', err);
-          setUserContext({ status: 'unauthenticated' });
+          console.warn('getUserContext failed:', err?.message || err);
         }
-
-        // Derive guest status: authorized = not guest, anything else = guest
-        const userStatus = user?.status;
-        setIsGuest(userStatus !== 'authorized');
+        const resolved = resolveUserStatus({ runningContext: context, reported: user?.status || null });
+        setUserContext({ ...(user || {}), status: resolved.status });
+        setIsGuest(resolved.isGuest);
 
         async function fetchMeetingContext() {
           let data = {};
@@ -216,8 +215,13 @@ export function ZoomSdkProvider({ children }) {
         zoomSdk.onMyUserContextChange(async (event) => {
           const newStatus = event.status;
           console.log('User context changed:', newStatus);
-          setUserContext(prev => ({ ...prev, ...event }));
-          setIsGuest(newStatus !== 'authorized');
+          const current = await zoomSdk.getRunningContext().catch(() => null);
+          const resolvedNow = resolveUserStatus({
+            runningContext: current?.context || current || context,
+            reported: newStatus || null,
+          });
+          setUserContext(prev => ({ ...prev, ...event, status: resolvedNow.status }));
+          setIsGuest(resolvedNow.isGuest);
 
           // When user becomes authorized, re-configure SDK and fetch meeting context
           if (newStatus === 'authorized') {

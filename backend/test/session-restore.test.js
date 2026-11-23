@@ -50,11 +50,17 @@ test('the Zoom refresh token comes back too, still encrypted in memory', async (
   assert.equal(new Date(stored.expiresAt) <= new Date(), true); // access token must be refreshed before use
 });
 
-test('without the restore cookie a restart still signs the user out', async () => {
+test('without the restore cookie a restart signs the user out cleanly', async () => {
   const signedIn = signIn();
   restart();
   const res = await me(cookies({ session: signedIn.session }));
-  assert.notEqual(res.status, 200);
+  // 401, not 404: the session is no longer valid, and that is what a client
+  // (and the Zoom webview's console) should be told
+  assert.equal(res.status, 401);
+  // the dead cookies are removed so the next load starts clean
+  const cleared = res.headers.getSetCookie().filter((c) => /Expires=Thu, 01 Jan 1970/.test(c)).map((c) => c.split('=')[0]);
+  assert.ok(cleared.includes('sessionToken'));
+  assert.ok(cleared.includes(RESTORE_COOKIE));
 });
 
 test('a restore cookie only restores the user the session token names', async () => {

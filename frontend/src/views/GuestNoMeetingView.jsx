@@ -26,7 +26,12 @@ export default function GuestNoMeetingView() {
 
   const handleInstall = () => {
     if (!isTestMode && zoomSdk?.promptAuthorize) {
-      zoomSdk.promptAuthorize().catch(() => {});
+      // Guest-mode API: only works inside a meeting. Outside one the app never
+      // shows this screen (see lib/userStatus.js); fall back to sign-in if it fails.
+      zoomSdk.promptAuthorize().catch((err) => {
+        console.warn('promptAuthorize failed:', err?.message || err);
+        navigate('/auth');
+      });
     }
   };
 

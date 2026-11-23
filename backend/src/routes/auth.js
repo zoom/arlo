@@ -419,7 +419,12 @@ router.get('/me', async (req, res) => {
     const user = userStore.findById(req.user.id);
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+      // A valid session token for a user the server no longer holds (restarted,
+      // and no usable restore cookie). The session is over: say so and remove
+      // the dead cookies so the next load starts clean.
+      res.clearCookie('sessionToken', { httpOnly: true, secure: config.secureCookies, sameSite: 'lax' });
+      clearRestoreCookie(res);
+      return res.status(401).json({ error: 'Unauthorized', message: 'Session expired' });
     }
 
     res.json({

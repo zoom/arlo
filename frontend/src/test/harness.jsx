@@ -16,6 +16,8 @@ export function createZoomSdk({
   screenName = 'Ana',
   rtmsStatus = [],
   startRTMS = async () => ({ message: 'Success' }),
+  runningContext = 'inMeeting',
+  userContextFails = false, // outside a meeting Zoom may not answer getUserContext
 } = {}) {
   const listeners = new Map();
   const on = (event) => (handler) => {
@@ -25,8 +27,11 @@ export function createZoomSdk({
   const sdk = {
     rtmsStatus,
     config: vi.fn(async ({ capabilities }) => ({ clientVersion: '6.6.0', capabilities })),
-    getRunningContext: vi.fn(async () => ({ context: 'inMeeting' })),
-    getUserContext: vi.fn(async () => ({ status, role, screenName })),
+    getRunningContext: vi.fn(async () => ({ context: runningContext })),
+    getUserContext: vi.fn(async () => {
+      if (userContextFails) throw new Error('getUserContext is not available in this context');
+      return { status, role, screenName };
+    }),
     getMeetingUUID: vi.fn(async () => ({ meetingUUID: MEETING })),
     getMeetingContext: vi.fn(async () => ({ meetingTopic: 'Planning', meetingID: '123456' })),
     getAppContext: vi.fn(async () => ({ context: 'signed-app-context' })),
