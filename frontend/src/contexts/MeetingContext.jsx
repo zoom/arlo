@@ -76,6 +76,8 @@ export function MeetingProvider({ children }) {
   // they keep filling while the user is on another screen and survive navigation.
   const [segments, setSegments] = useState([]);
   const [participantEvents, setParticipantEvents] = useState([]);
+  // Counts the server's "subscribed" confirmations; each one reloads history
+  const [subscribedCount, setSubscribedCount] = useState(0);
   // Server-verified meeting access (Zoom App Context). status:
   // 'idle' | 'verifying' | 'verified' | 'denied' | 'unavailable'
   const [meetingAccess, setMeetingAccess] = useState({ status: 'idle', isGuest: null, reason: null });
@@ -197,6 +199,8 @@ export function MeetingProvider({ children }) {
    * guests (no OAuth needed). Called before every (re)connect so the access
    * token never goes stale.
    */
+  // true when the last access check threw instead of being answered
+  const accessCheckFailedToRunRef = useRef(false);
   const verifyMeetingAccess = useCallback(async () => {
     const sdk = zoomSdkRef.current;
     if (!sdk || typeof sdk.getAppContext !== 'function') {
@@ -204,6 +208,7 @@ export function MeetingProvider({ children }) {
       return false;
     }
     setMeetingAccess((prev) => ({ ...prev, status: 'verifying', reason: null }));
+    accessCheckFailedToRunRef.current = false;
     try {
       const { context } = await sdk.getAppContext();
       const res = await fetch('/api/auth/meeting-access', {
@@ -221,6 +226,9 @@ export function MeetingProvider({ children }) {
       return true;
     } catch (error) {
       console.error('Meeting access verification failed:', error);
+      // The request never got an answer (network down, server restarting):
+      // worth trying again, unlike a refusal
+      accessCheckFailedToRunRef.current = true;
       setMeetingAccess({ status: 'denied', isGuest: null, reason: 'Could not read your Zoom meeting context.' });
       return false;
     }
@@ -278,10 +286,20 @@ export function MeetingProvider({ children }) {
           }
           break;
         }
-        case 'participant.event':
-          if (message.data?.event) {
-            setParticipantEvents((prev) => [...prev, message.data.event]);
+        case 'participant.event': {
+          const incoming = message.data?.event;
+          if (incoming) {
+            // The same event can arrive here and in the history response
+            setParticipantEvents((prev) => (
+              incoming.id && prev.some((event) => event.id === incoming.id) ? prev : [...prev, incoming]
+            ));
           }
+          break;
+        }
+        case 'subscribed':
+          // From here on the server sends this socket every new line, so
+          // history loaded now cannot have a gap before the live lines.
+          setSubscribedCount((count) => count + 1);
           break;
         case 'rtms.request_status':
           // Zoom's webhook says why a request did not start (3 = host denied)
@@ -336,7 +354,18 @@ export function MeetingProvider({ children }) {
 
     verifyMeetingAccess()
       .then((ok) => {
-        if (ok) openSocket(meetingId);
+        if (ok) {
+          openSocket(meetingId);
+          return;
+        }
+        // No answer at all: keep trying, so the panel comes back by itself when
+        // the network or the server does. A refusal is not retried.
+        if (accessCheckFailedToRunRef.current && shouldReconnectRef.current) {
+          if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+          reconnectTimerRef.current = setTimeout(() => {
+            if (shouldReconnectRef.current) connectWebSocketRef.current(meetingId);
+          }, 5000);
+        }
       })
       .finally(() => {
         connectingRef.current = false;
@@ -775,7 +804,9 @@ export function MeetingProvider({ children }) {
 
   // What the server holds for this meeting so far: the transcript and timeline
   // from before this panel opened, or from while its connection was down.
-  // Loaded again each time the socket (re)connects, then merged with live lines.
+  // Loaded when access is verified, when the socket is replaced, and again when
+  // the server confirms the subscription (only then is every new line sent
+  // live, so that load closes the gap). Merging drops what is already here.
   useEffect(() => {
     if (!meetingId || !accessVerified) return undefined;
     let cancelled = false;
@@ -795,7 +826,7 @@ export function MeetingProvider({ children }) {
       });
     });
     return () => { cancelled = true; };
-  }, [meetingId, accessVerified, ws]);
+  }, [meetingId, accessVerified, ws, subscribedCount]);
 
   // Send Zoom meeting topic to backend to replace generic "Meeting M/D/YYYY" title
   // Wait for rtmsActive so the meeting record exists in the DB before patching

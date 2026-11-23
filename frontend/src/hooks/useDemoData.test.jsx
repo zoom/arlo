@@ -9,8 +9,8 @@ function Probe() {
 }
 
 function renderWith({ demoMode, stored }) {
-  if (stored === undefined) localStorage.removeItem('arlo-show-demo-data');
-  else localStorage.setItem('arlo-show-demo-data', JSON.stringify(stored));
+  if (stored === undefined) localStorage.removeItem('arlo-sample-data');
+  else localStorage.setItem('arlo-sample-data', String(stored));
   vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ demoMode }), {
     status: 200, headers: { 'Content-Type': 'application/json' },
   })));
@@ -31,5 +31,15 @@ test('in demo mode a user who turned it on sees it', async () => {
 
 test('outside demo mode sample data is never shown, whatever was saved', async () => {
   renderWith({ demoMode: false, stored: true });
-  await waitFor(() => expect(screen.getByText('show:false available:false')).toBeInTheDocument());
+  // the settings request has been answered, so this is the settled state, not the first render
+  await waitFor(() => expect(fetch).toHaveBeenCalled());
+  await new Promise((resolve) => { setTimeout(resolve, 50); });
+  expect(screen.getByText('show:false available:false')).toBeInTheDocument();
+});
+
+test('the old setting, which every browser had as "true" without asking, does not turn sample data on', async () => {
+  localStorage.setItem('arlo-show-demo-data', 'true');
+  renderWith({ demoMode: true });
+  expect(await screen.findByText('show:false available:true')).toBeInTheDocument();
+  expect(localStorage.getItem('arlo-show-demo-data')).toBeNull();
 });

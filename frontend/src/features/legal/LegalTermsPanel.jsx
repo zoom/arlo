@@ -111,7 +111,7 @@ export default function LegalTermsPanel({ segments, onJumpToSegment, showDemoDat
   };
 
   const copyAllTerms = () => {
-    const allTerms = Object.entries(DEMO_TERMS)
+    const allTerms = Object.entries(termsData)
       .map(([category, terms]) => {
         const config = CATEGORY_CONFIG[category];
         return `${config.label}:\n${terms.map(t => `  - ${t.term}${t.context ? ` (${t.context})` : ''}`).join('\n')}`;
@@ -123,7 +123,7 @@ export default function LegalTermsPanel({ segments, onJumpToSegment, showDemoDat
     setTimeout(() => setCopiedTerm(null), 2000);
   };
 
-  const totalTerms = Object.values(DEMO_TERMS).reduce((sum, terms) => sum + terms.length, 0);
+  const totalTerms = Object.values(termsData).reduce((sum, terms) => sum + terms.length, 0);
 
   return (
     <Card className={`legal-terms-panel ${collapsed ? 'feature-collapsed' : ''}`}>

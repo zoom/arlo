@@ -127,6 +127,20 @@ describe('auto-start', () => {
     expect(await startButton()).toBeEnabled();
   });
 
+  test('flag off, first-time user: Zoom reporting "started" with no stream does not make Arlo request one', async () => {
+    // The "allowed but not started" recovery calls startRTMS for a user who wants
+    // transcription. With the flag off, only a click means that.
+    mockFetch({ '/api/auth/settings': () => json({ demoMode: true }) });
+    const { sdk } = renderInMeeting({ autoStart: true });
+    localStorage.removeItem('arlo-auto-start'); // a first-time user has no saved preference
+    await screen.findByText('Transcription not started');
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+
+    await act(async () => { sdk.emit('onRTMSStatusChange', { status: 'started' }); });
+    await new Promise((resolve) => setTimeout(resolve, 7500)); // past the 6s recovery delay
+    expect(startCalls(sdk)).toHaveLength(0);
+  }, 15000);
+
   test('with the deployment flag off, nothing is requested even if the user turned auto-start on', async () => {
     mockFetch({ '/api/auth/settings': () => json({ demoMode: true }) });
     const { sdk } = renderInMeeting({ autoStart: true });

@@ -56,8 +56,8 @@ export default function SettingsView() {
   const navigate = useNavigate();
   const { theme, toggleTheme } = useTheme();
   const { vertical } = useVertical();
-  const { showDemoData, setShowDemoData } = useDemoData();
-  const { autoStartAvailable, demoMode } = useServerSettings();
+  const { showDemoData, setShowDemoData, demoDataAvailable } = useDemoData();
+  const { autoStartAvailable } = useServerSettings();
   const { complianceEnabled, setComplianceEnabled } = useComplianceSettings();
   const { meetingId, rtmsActive, rtmsLoading, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
   const [apiStartSuccess, setApiStartSuccess] = useState(false);
@@ -372,7 +372,7 @@ export default function SettingsView() {
       )}
 
       {/* Demo Mode: sample data exists only when the deployment runs in demo mode */}
-      {demoMode && (
+      {demoDataAvailable && (
       <section className="settings-section">
         <h2 className="text-serif text-xl">Demo Mode</h2>
         <Card>

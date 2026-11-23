@@ -50,3 +50,64 @@ test('after the connection drops and returns, the missed lines are fetched', asy
   const transcriptCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith(transcriptPath));
   expect(transcriptCalls.length).toBeGreaterThanOrEqual(2);
 }, 15000);
+
+test('history is loaded again when the server confirms the subscription, closing the gap before live lines', async () => {
+  let segments = [stored(1, 'First line.')];
+  const fetchMock = mockFetch({ [transcriptPath]: () => json({ segments }) });
+  renderInMeeting();
+  await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+  const callsBefore = fetchMock.mock.calls.filter(([url]) => String(url).startsWith(transcriptPath)).length;
+
+  // A line is stored after the first load but before this socket is subscribed
+  segments = [stored(1, 'First line.'), stored(2, 'Said in the gap.')];
+  await send({ type: 'subscribed', data: { meetingId: MEETING } });
+  await send(serverMessage.status('rtms_started'));
+
+  expect(await screen.findByText('Said in the gap.')).toBeInTheDocument();
+  const callsAfter = fetchMock.mock.calls.filter(([url]) => String(url).startsWith(transcriptPath)).length;
+  expect(callsAfter).toBe(callsBefore + 1);
+});
+
+test('a timeline event that arrives both in history and live is shown once', async () => {
+  const eventsPath = `/api/meetings/by-zoom-id/${encodeURIComponent(MEETING)}/participant-events`;
+  const joined = { id: 'event-1', eventType: 'joined', participantName: 'Bo', participantId: '12', timestamp: Date.now() };
+  mockFetch({
+    [transcriptPath]: () => json({ segments: [stored(1, 'Hello.')] }),
+    [eventsPath]: () => json({ events: [joined] }),
+  });
+  renderInMeeting();
+  await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+  await send(serverMessage.status('rtms_started'));
+  expect(await screen.findByText('Hello.')).toBeInTheDocument();
+
+  const before = screen.queryAllByText(/Bo/).length;
+  expect(before).toBeGreaterThan(0);
+  await send({ type: 'participant.event', data: { meetingId: MEETING, event: joined } });
+  await send({ type: 'participant.event', data: { meetingId: MEETING, event: joined } });
+  expect(screen.queryAllByText(/Bo/)).toHaveLength(before);
+});
+
+test('when the access check gets no answer after a drop, the panel keeps trying and comes back by itself', async () => {
+  let networkDown = false;
+  mockFetch({
+    [transcriptPath]: () => json({ segments: [] }),
+    '/api/auth/meeting-access': () => {
+      if (networkDown) throw new TypeError('Failed to fetch');
+      return json({ verified: true, isGuest: false, meetingId: MEETING });
+    },
+  });
+  renderInMeeting();
+  await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+  const first = server();
+
+  networkDown = true;
+  await act(async () => { first.close(1006); });
+  await act(() => new Promise((resolve) => { setTimeout(resolve, 6000); })); // first retry fails
+  expect(server()).toBe(first);
+
+  networkDown = false;
+  await waitFor(() => {
+    expect(server()).not.toBe(first);
+    expect(server().readyState).toBe(FakeWebSocket.OPEN);
+  }, { timeout: 8000 });
+}, 25000);

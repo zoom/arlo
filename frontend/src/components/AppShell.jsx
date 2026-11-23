@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Search, Settings } from 'lucide-react';
 import ArloLogo from './ArloLogo';
-import { useVertical } from '../contexts/VerticalContext';
 import Button from './ui/Button';
 import LiveMeetingBanner from './LiveMeetingBanner';
 import './AppShell.css';
@@ -10,7 +9,6 @@ import './AppShell.css';
 export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { clearVertical } = useVertical();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -20,11 +18,10 @@ export default function AppShell() {
   // Show back arrow on sub-pages (not /home)
   const showBack = location.pathname !== '/home' && location.pathname !== '/';
 
-  // Handle logo click — navigate to vertical selector
+  // The logo goes home. The vertical is changed in Settings, nowhere else.
   const handleLogoClick = useCallback(() => {
-    clearVertical();
-    navigate('/select-vertical');
-  }, [clearVertical, navigate]);
+    navigate('/home');
+  }, [navigate]);
 
   // Close search on outside click
   useEffect(() => {
@@ -71,10 +68,9 @@ export default function AppShell() {
   }, [searchQuery]);
 
   const handleBack = useCallback(() => {
-    // From meeting view, go back to vertical selector
+    // From the meeting view, back goes home (history may be empty inside Zoom)
     if (location.pathname === '/meeting' || location.pathname.startsWith('/meeting/')) {
-      clearVertical();
-      navigate('/select-vertical');
+      navigate('/home');
       return;
     }
     // Otherwise use browser history
@@ -83,7 +79,7 @@ export default function AppShell() {
     } else {
       navigate('/home');
     }
-  }, [navigate, location.pathname, clearVertical]);
+  }, [navigate, location.pathname]);
 
   const handleResultClick = (result) => {
     setSearchOpen(false);
@@ -97,7 +93,7 @@ export default function AppShell() {
       <header className="app-header">
         <div className="header-left">
           {showBack ? (
-            <Button variant="ghost" size="icon" onClick={handleBack}>
+            <Button variant="ghost" size="icon" onClick={handleBack} aria-label="Back">
               <ArrowLeft size={16} />
             </Button>
           ) : (

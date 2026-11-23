@@ -149,7 +149,7 @@ const DEMO_DETECTED = {
 /**
  * HealthcareTagsSummary — Shows a summary bar of detected medical terms
  */
-export function HealthcareTagsSummary({ segments, onTagClick, demoMode = true }) {
+export function HealthcareTagsSummary({ segments, onTagClick, demoMode = false }) {
   const scannedDetected = useMemo(() => scanTranscript(segments), [segments]);
 
   // Use demo data if no real segments or in demo mode

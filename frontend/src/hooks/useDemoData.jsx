@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useMemo, createContext, useContext } 
 import { useServerSettings } from '../contexts/ServerSettingsContext';
 
 // Context for demo data setting
+// 'true' only after the user turned sample data on in Settings
+const STORAGE_KEY = 'arlo-sample-data';
 const DemoDataContext = createContext(null);
 
 /**
@@ -12,15 +14,29 @@ export function DemoDataProvider({ children }) {
   const { demoMode, loaded } = useServerSettings();
   const [wanted, setWanted] = useState(() => {
     try {
-      return JSON.parse(localStorage.getItem('arlo-show-demo-data')) === true;
+      return localStorage.getItem(STORAGE_KEY) === 'true';
     } catch {
       return false;
     }
   });
 
+  // The old key was written as "true" for every user without anyone asking
+  // for sample data, so it says nothing about what the user wants. Drop it.
+  useEffect(() => {
+    try {
+      localStorage.removeItem('arlo-show-demo-data');
+    } catch {
+      // localStorage unavailable
+    }
+  }, []);
+
   // Persist to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('arlo-show-demo-data', JSON.stringify(wanted));
+    try {
+      localStorage.setItem(STORAGE_KEY, wanted ? 'true' : 'false');
+    } catch {
+      // localStorage unavailable
+    }
   }, [wanted]);
 
   const setShowDemoData = useCallback((value) => {

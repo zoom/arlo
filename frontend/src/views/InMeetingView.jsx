@@ -449,6 +449,7 @@ export default function InMeetingView({ isGuestMode = false }) {
                 {isHealthcare && hasFeature('symptoms') && (
                   <HealthcareTagsSummary
                     segments={segments}
+                    demoMode={showDemoData}
                     onTagClick={(occurrence) => {
                       // Scroll to the relevant segment
                       if (transcriptRef.current) {
