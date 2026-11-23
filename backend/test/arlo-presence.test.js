@@ -41,7 +41,7 @@ test('the operator of the stream, when an Arlo user, is the owner', () => {
   assert.equal(presence.isOwner(M, 'u-ana'), true);
   assert.equal(presence.isOwner(M, 'u-ben'), false);
   assert.deepEqual(presence.stateFor(M, 'u-ana'), {
-    present: true, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+    present: true, paused: false, myStreamPaused: false, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
   });
 });
 
@@ -134,7 +134,7 @@ test('a user stays an owner after their stream stops, and present and paused fol
   streams.streamStopped(M, 's1');
   delete status[M];
   assert.deepEqual(presence.stateFor(M, 'u-ana'), {
-    present: false, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+    present: false, paused: false, myStreamPaused: false, myStreamLive: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
   });
 });
 
@@ -208,10 +208,10 @@ test('an owner is told whether their own stream is paused; the meeting is paused
   streams.setPaused(M, { operatorId: 'zoom-ana' }, true);
 
   assert.deepEqual(presence.stateFor(M, 'u-ana'), {
-    present: true, paused: false, myStreamPaused: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+    present: true, paused: false, myStreamPaused: true, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
   });
   assert.deepEqual(presence.stateFor(M, 'u-ben'), {
-    present: true, paused: false, myStreamPaused: false, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+    present: true, paused: false, myStreamPaused: false, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
   });
   // a participant has no stream: the field is not sent
   assert.equal('myStreamPaused' in presence.stateFor(M, null), false);
@@ -246,4 +246,37 @@ test('liveStreamOperator is the Zoom user id of the caller\'s own running stream
   start('s3', 'zoom-ana');
   store.deleteMeeting(M);
   assert.equal(presence.liveStreamOperator(M, 'u-ana'), null);
+});
+
+// --- whose own stream is live -------------------------------------------------
+
+test('an owner is told their own stream is live while it runs', () => {
+  const { presence, start } = setup();
+  start('s1', 'zoom-ana');
+  assert.equal(presence.stateFor(M, 'u-ana').myStreamLive, true);
+});
+
+test('an owner whose stream stopped while another owner\'s runs is still an owner, with no live stream', () => {
+  const { presence, start, streams } = setup();
+  start('s1', 'zoom-ana');
+  start('s2', 'zoom-ben');
+  streams.streamStopped(M, 's1');
+
+  assert.deepEqual(presence.stateFor(M, 'u-ana'), {
+    present: true, paused: false, myStreamPaused: false, myStreamLive: false, role: 'owner', ownerName: 'Ben Okafor', whoCanAsk: 'owner',
+  });
+  assert.equal(presence.stateFor(M, 'u-ben').myStreamLive, true);
+
+  // their new stream is theirs again
+  start('s3', 'zoom-ana');
+  assert.equal(presence.stateFor(M, 'u-ana').myStreamLive, true);
+});
+
+test('a participant is not told about a stream of their own', () => {
+  const { presence, start } = setup();
+  start('s1', 'zoom-ana');
+  start('s2', 'zoom-guest'); // runs a stream, never signed in to Arlo
+  for (const notOwner of ['u-ben', 'u-noname', null, undefined]) {
+    assert.equal('myStreamLive' in presence.stateFor(M, notOwner), false);
+  }
 });

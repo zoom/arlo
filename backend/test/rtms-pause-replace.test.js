@@ -684,3 +684,59 @@ test('after a rejoin a native pause stands, but a line then shows the stream is 
   assert.equal(told(owner).at(-1), 'rtms_resumed');
   assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [false, false]);
 });
+
+// --- whose own stream is live -------------------------------------------------
+
+test('each owner is told whether their own stream is live, again whenever a stream starts or stops; GET says the same', async () => {
+  const meeting = 'LIVE-1==';
+  const anaPanel = await openPanel(meeting, ana());
+  const benPanel = await openPanel(meeting, ben());
+  const cyPanel = await openPanel(meeting, cy());
+  const guest = await openPanel(meeting, null);
+  const count = (ws) => ofType(ws, 'arlo.state').length;
+  const fromGet = async (who) => {
+    const cookie = [who?.session, await cookieFor(meeting)].filter(Boolean).join('; ');
+    const res = await fetch(`${srv.base}/api/meetings/by-zoom-id/${encodeURIComponent(meeting)}/arlo/state`, { headers: { cookie } });
+    return res.json();
+  };
+  const agrees = async (ws, who) => assert.deepEqual(state(ws), { meetingId: meeting, ...(await fromGet(who)) });
+
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+  await h.wait(100);
+  assert.deepEqual([state(anaPanel).role, state(anaPanel).myStreamLive], ['owner', true]);
+  assert.equal(state(benPanel).role, 'participant');
+  assert.equal('myStreamLive' in state(benPanel), false);
+
+  // a second stream starts: every panel is told again
+  let before = [anaPanel, benPanel, cyPanel, guest].map(count);
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: ben().zoomUserId });
+  await h.wait(100);
+  [anaPanel, benPanel, cyPanel, guest].forEach((ws, i) => assert.ok(count(ws) > before[i], `panel ${i} was told of the start`));
+  assert.deepEqual([state(benPanel).role, state(benPanel).myStreamLive], ['owner', true]);
+  assert.equal(state(anaPanel).myStreamLive, true);
+
+  // one of two streams stops: its owner stays an owner, without a live stream
+  before = [anaPanel, benPanel, cyPanel, guest].map(count);
+  await status(meeting, { status: 'rtms_stopped', streamId: 's1' });
+  await h.wait(100);
+  [anaPanel, benPanel, cyPanel, guest].forEach((ws, i) => assert.ok(count(ws) > before[i], `panel ${i} was told of the stop`));
+  assert.deepEqual(
+    [state(anaPanel).present, state(anaPanel).role, state(anaPanel).myStreamLive],
+    [true, 'owner', false],
+  );
+  assert.equal(state(benPanel).myStreamLive, true);
+  for (const ws of [cyPanel, guest]) {
+    assert.equal(state(ws).role, 'participant');
+    assert.equal('myStreamLive' in state(ws), false);
+  }
+  await agrees(anaPanel, ana());
+  await agrees(benPanel, ben());
+  await agrees(cyPanel, cy());
+  await agrees(guest, null);
+
+  // the last stream stops: nobody's stream is live
+  await status(meeting, { status: 'rtms_stopped', streamId: 's2' });
+  await h.wait(100);
+  for (const ws of [anaPanel, benPanel, cyPanel, guest]) ws.socket.close();
+  assert.deepEqual([state(benPanel).present, state(benPanel).role, state(benPanel).myStreamLive], [false, 'owner', false]);
+});

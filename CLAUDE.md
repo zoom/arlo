@@ -260,7 +260,7 @@ Arlo can act as a test proxy for Zoom's RTMS REST API. A script authenticates wi
 
 ### Arlo in one meeting
 All under `/api/meetings/by-zoom-id/:zoomMeetingId/arlo`. Every route needs the `meetingAccess` cookie for exactly this meeting; being signed in does not replace it. Who is an owner is decided on the server. Responses are `Cache-Control: no-store`.
-- `GET /state` — `{ present, paused, myStreamPaused?, role: 'owner' | 'participant', ownerName, whoCanAsk }`. `paused` is the meeting as a whole (every live stream is paused); `myStreamPaused` (boolean, owners only) is the caller's own stream. Open to guests in the meeting (a guest is a participant)
+- `GET /state` — `{ present, paused, myStreamPaused?, myStreamLive?, role: 'owner' | 'participant', ownerName, whoCanAsk }`. `paused` is the meeting as a whole (every live stream is paused); `myStreamPaused` and `myStreamLive` (booleans, owners only) are about the caller's own stream: whether it is paused, and whether it is running right now. Open to guests in the meeting (a guest is a participant)
 - `PUT /settings` — `{ whoCanAsk: 'owner' | 'anyone' }`, owners only. Every panel of the meeting is told over its socket
 - `GET /notes` — `{ notes: { summary, decisions, actionItems, updatedAt, throughSeqNo } | null }`, owners only
 - `POST /ask` — `{ question }` (1 to 500 characters) → `{ answer }`, from the stored transcript, private to the asker. For an owner, and for other signed-in people in the meeting when the setting is `anyone`. Shares the AI rate limit. Takes no transcript and no model from the client; questions and answers are not stored or logged
@@ -294,13 +294,13 @@ Client → Server: { type: 'subscribe', meetingId: 'uuid' }
 Server → Client: { type: 'transcript.segment', data: { meetingId, segment: {...} } }
 Server → Client: { type: 'ai.suggestion', data: { meetingId, suggestion: {...} } }
 Server → Client: { type: 'meeting.status', data: { meetingId, status: '...', fault?: true, meetingEnded?: true } }
-Server → Client: { type: 'arlo.state', data: { meetingId, present, paused, myStreamPaused?, role, ownerName, whoCanAsk } }
+Server → Client: { type: 'arlo.state', data: { meetingId, present, paused, myStreamPaused?, myStreamLive?, role, ownerName, whoCanAsk } }
 Server → Client: { type: 'notes.updated', data: { meetingId, notes } }
 Server → Client: { type: 'participant.event', data: { meetingId, event: {...} } }
 ```
 
 - `meetingEnded: true` on a stop means the meeting is over and its data is deleted now. The panel keeps the notes it already has (the "after the meeting" screen).
-- `arlo.state` differs per person (`role`, `myStreamPaused`). `paused` is the meeting-level value: true only when every live stream is paused. `myStreamPaused` is sent to owners only and says whether their own stream is paused; with two streams it can be true while `paused` is false, because the other stream still delivers. It is sent when a socket connects or subscribes, when a stream starts, stops, is paused or resumed, and when the setting changes.
+- `arlo.state` differs per person (`role`, `myStreamPaused`, `myStreamLive`). `paused` is the meeting-level value: true only when every live stream is paused. `myStreamPaused` is sent to owners only and says whether their own stream is paused; with two streams it can be true while `paused` is false, because the other stream still delivers. `myStreamLive` is sent to owners only and is true while a stream whose operator is that user runs in this meeting; someone stays an owner after their stream stops, so it can be false while `present` is true (another person's stream still runs). The state is sent when a socket connects or subscribes, when a stream starts, stops, is paused or resumed, and when the setting changes.
 - `notes.updated` goes only to owners' sockets whose verified meeting is this one. A guest's socket never gets it.
 
 ## Environment Variables

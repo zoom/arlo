@@ -80,7 +80,12 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
       paused: status === 'rtms_paused',
       // Their own stream, for an owner only. It can be paused while the
       // meeting is not: someone else's stream still runs
-      ...(owner && { myStreamPaused: isTheirs(streams.pauseState(meetingId).operators, userId) }),
+      ...(owner && {
+        myStreamPaused: isTheirs(streams.pauseState(meetingId).operators, userId),
+        // Whether a stream of their own runs right now. Someone stays an owner
+        // after their stream stops, also while another person's still runs
+        myStreamLive: isTheirs(streams.liveOperators(meetingId), userId),
+      }),
       role: owner ? 'owner' : 'participant',
       ownerName: list.length > 0 ? list[0].name : null,
       whoCanAsk: store.getMeta(meetingId).whoCanAsk,
