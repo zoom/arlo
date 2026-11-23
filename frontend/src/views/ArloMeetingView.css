@@ -178,7 +178,9 @@
   background: var(--muted-foreground);
 }
 
-.arlo-status[data-status='reconnecting'] .arlo-dot {
+.arlo-status[data-status='reconnecting'] .arlo-dot,
+.arlo-status[data-status='returning'] .arlo-dot,
+.arlo-status[data-status='asking'] .arlo-dot {
   background: var(--color-warning);
 }
 
@@ -284,4 +286,19 @@
 
 .arlo-waiting-spinner {
   display: inline-flex;
+}
+
+/* The owner's "who can ask" setting: one quiet line under the ask input */
+.arlo-who-can-ask {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.8125rem;
+}
+
+/* A screen's heading takes the focus when the screen changes: no ring for a
+   focus the user did not move there */
+.arlo-view [data-arlo-focus]:focus {
+  outline: none;
 }

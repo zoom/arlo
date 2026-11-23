@@ -4,8 +4,9 @@ import { actionItemText } from '../../lib/notesText';
 /**
  * The notes as one document: Summary, Decisions, Action items. A section with
  * nothing in it is not rendered. Only the summary is announced when it changes.
+ * `listening` is false when Arlo is not in the meeting (it left, or is on its way back).
  */
-export default function NotesDocument({ notes }) {
+export default function NotesDocument({ notes, listening = true }) {
   const summary = typeof notes?.summary === 'string' ? notes.summary.trim() : '';
   const decisions = Array.isArray(notes?.decisions) ? notes.decisions : [];
   const actionItems = Array.isArray(notes?.actionItems) ? notes.actionItems : [];
@@ -13,7 +14,9 @@ export default function NotesDocument({ notes }) {
   if (!summary && decisions.length === 0 && actionItems.length === 0) {
     return (
       <div className="arlo-notes">
-        <p className="arlo-notes-empty">Arlo is listening. Notes appear after the first minute or so.</p>
+        <p className="arlo-notes-empty">
+          {listening ? 'Arlo is listening. Notes appear after the first minute or so.' : 'No notes yet.'}
+        </p>
       </div>
     );
   }

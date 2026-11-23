@@ -132,6 +132,9 @@ export function MeetingProvider({ children }) {
   // Dynamic Indicator inputs: is the confirmed stream one this client started,
   // and what the meeting screen reports about voice commands.
   const [streamStartedHere, setStreamStartedHere] = useState(false);
+  // This panel asked Zoom for the stream (a click, or its own restart) and the
+  // request has not ended. Known before the stream is confirmed.
+  const [startAskedHere, setStartAskedHere] = useState(false);
   const [voiceState, setVoiceState] = useState({ enabled: false, processing: false });
   const stoppedStreamWasOursRef = useRef(false);
   const faultRestartsRef = useRef(0);
@@ -184,6 +187,7 @@ export function MeetingProvider({ children }) {
       meetingStartTimeRef.current = null;
       localActionRef.current = null;
       startedHereRef.current = false;
+      setStartAskedHere(false);
       alreadyRunningRef.current = false;
       autoRestartedRef.current = false;
       stoppedStreamWasOursRef.current = false;
@@ -623,11 +627,13 @@ export function MeetingProvider({ children }) {
       stoppedStreamWasOursRef.current = startedHereRef.current && local !== 'stop';
       localActionRef.current = null;
       startedHereRef.current = false;
+      setStartAskedHere(false);
       startNoticeSentRef.current = false;
       autoRestartedRef.current = false;
     } else if (next === 'denied' || next === 'failed' || next === 'expired') {
       localActionRef.current = null;
       startedHereRef.current = false;
+      setStartAskedHere(false);
     }
     // 'starting' and 'stalled' keep startedHereRef: the stream may still arrive
     // (e.g. the user clicks Zoom's own Start button) and the chat notice is ours.
@@ -705,6 +711,7 @@ export function MeetingProvider({ children }) {
     sessionStorage.setItem(startingKey, Date.now().toString());
 
     startedHereRef.current = true;
+    setStartAskedHere(true);
     autoRestartedRef.current = false;
     setStartAttempt((n) => n + 1);
     try {
@@ -730,6 +737,7 @@ export function MeetingProvider({ children }) {
       })) return;
       autoRestartedRef.current = true;
       startedHereRef.current = true;
+      setStartAskedHere(true);
       console.log('RTMS allowed but not streaming: asking Zoom to start again');
       requestRtms('start', START_OPTIONS);
     }, AUTO_RESTART_DELAY_MS);
@@ -755,6 +763,7 @@ export function MeetingProvider({ children }) {
       stoppedStreamWasOursRef.current = false;
       faultRestartsRef.current += 1;
       startedHereRef.current = true;
+      setStartAskedHere(true);
       setStartAttempt((n) => n + 1);
       console.log('RTMS stream ended by a fault: asking Zoom for a new stream');
       requestRtms('start', START_OPTIONS);
@@ -816,6 +825,7 @@ export function MeetingProvider({ children }) {
       if (action === 'start' && !isRtmsActive(current) && !isRtmsBusy(current)) {
         localActionRef.current = 'start';
         startedHereRef.current = true;
+        setStartAskedHere(true);
         dispatchRtms({ type: 'REQUEST', action: 'start' });
       } else if (action === 'stop' && isRtmsActive(current) && !isRtmsBusy(current)) {
         localActionRef.current = 'stop';
@@ -965,6 +975,7 @@ export function MeetingProvider({ children }) {
     rtmsRequestExpiresAt,
     ws,
     meetingId,
+    startAskedHere,
     lastMeetingId,
     switchingMeeting,
     leftMeeting,
@@ -989,7 +1000,7 @@ export function MeetingProvider({ children }) {
     setWs,
     setTitleUserRenamed,
     reportVoiceState,
-  }), [reportVoiceState, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, lastMeetingId, switchingMeeting, leftMeeting, shownMeetingEnded, viewers, shownSegments, shownParticipantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [reportVoiceState, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, startAskedHere, lastMeetingId, switchingMeeting, leftMeeting, shownMeetingEnded, viewers, shownSegments, shownParticipantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

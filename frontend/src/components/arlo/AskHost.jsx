@@ -5,7 +5,7 @@ import Button from '../ui/Button';
 export default function AskHost({ onAsk, disabled, message }) {
   return (
     <div className="arlo-center">
-      <h1 className="arlo-title">Arlo isn&apos;t in this meeting yet</h1>
+      <h1 className="arlo-title" tabIndex={-1} data-arlo-focus>Arlo isn&apos;t in this meeting yet</h1>
       <p className="arlo-muted">The host decides whether Arlo joins.</p>
       <Button onClick={onAsk} disabled={disabled}>Ask the host to bring Arlo in</Button>
       {message && <p className="arlo-error" role="alert">{message}</p>}

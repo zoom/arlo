@@ -9,7 +9,7 @@ import AskArlo from './AskArlo';
  * and no controls: the stream belongs to the person who brought Arlo in.
  */
 export default function ParticipantView({
-  present, ownerName, whoCanAsk, guest, meetingEnded, showRecord, recordPath,
+  present, ownerName, whoCanAsk, guest, canBringIn = false, meetingEnded, showRecord, recordPath,
   onSignIn, signingIn, signInError,
 }) {
   const heading = !present
@@ -20,7 +20,7 @@ export default function ParticipantView({
   return (
     <div className="arlo-screen">
       <div className="arlo-scroll arlo-participant">
-        <h1 className="arlo-title">{heading}</h1>
+        <h1 className="arlo-title" tabIndex={-1} data-arlo-focus>{heading}</h1>
         {present ? (
           <p className="arlo-muted">
             Arlo reads Zoom&apos;s live transcript to take notes for {forWhom}. Nothing is stored after the meeting ends.
@@ -34,6 +34,13 @@ export default function ParticipantView({
         {present && guest && (
           <div className="arlo-sign-in">
             <Button onClick={onSignIn} disabled={signingIn}>Sign in to ask Arlo</Button>
+            {signInError && <p className="arlo-error" role="alert">{signInError}</p>}
+          </div>
+        )}
+        {/* A guest who is the Zoom host or co-host could bring Arlo in, once signed in */}
+        {!present && !meetingEnded && guest && canBringIn && (
+          <div className="arlo-sign-in">
+            <Button onClick={onSignIn} disabled={signingIn}>Sign in to bring Arlo in</Button>
             {signInError && <p className="arlo-error" role="alert">{signInError}</p>}
           </div>
         )}

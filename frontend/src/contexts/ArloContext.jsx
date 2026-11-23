@@ -30,6 +30,8 @@ const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 const MAX_QUESTION_CHARS = 500;
 const MAX_NAME_CHARS = 200;
 const MAX_ANSWER_CHARS = 4000;
+// After a stream started: how long to wait for the server to say whose it is
+const STATE_AFTER_START_MS = 3000;
 
 // `present` and `role` are null until the server answered: "not known" is not "not here"
 const NOT_LOADED = Object.freeze({
@@ -77,6 +79,10 @@ export function ArloProvider({ children }) {
   const [state, setState] = useState(NOT_LOADED);
   const [everPresent, setEverPresent] = useState(false);
   const [notes, setNotes] = useState(null);
+  // The notes route has answered for this meeting (an owner without notes is known then)
+  const [notesAnswered, setNotesAnswered] = useState(false);
+  // The server said a stream started and has not yet sent the state that follows it
+  const [awaitingState, setAwaitingState] = useState(false);
   const [asking, setAsking] = useState(false);
 
   // Read by the socket handler, which must not wait for a render
@@ -99,7 +105,15 @@ export function ArloProvider({ children }) {
     setState(NOT_LOADED);
     setEverPresent(false);
     setNotes(null);
+    setNotesAnswered(false);
+    setAwaitingState(false);
   }, [meetingId]);
+
+  useEffect(() => {
+    if (!awaitingState) return undefined;
+    const timer = setTimeout(() => setAwaitingState(false), STATE_AFTER_START_MS);
+    return () => clearTimeout(timer);
+  }, [awaitingState]);
 
   useEffect(() => {
     endedRef.current = meetingOver;
@@ -157,9 +171,14 @@ export function ArloProvider({ children }) {
         case 'meeting.status':
           // Set here too, so the `arlo.state` that follows in the same turn is read correctly
           if (data.status === 'rtms_stopped' && data.meetingEnded === true) endedRef.current = true;
-          else if (data.status === 'rtms_started') endedRef.current = false;
+          else if (data.status === 'rtms_started') {
+            endedRef.current = false;
+            // The server sends `arlo.state` right after this: until then the role may be stale
+            setAwaitingState(true);
+          }
           break;
         case 'arlo.state':
+          setAwaitingState(false);
           applyState(data);
           break;
         case 'notes.updated':
@@ -170,7 +189,10 @@ export function ArloProvider({ children }) {
       }
     };
     ws.addEventListener('message', onMessage);
-    return () => ws.removeEventListener('message', onMessage);
+    return () => {
+      ws.removeEventListener('message', onMessage);
+      setAwaitingState(false);
+    };
   }, [ws, meetingId, applyState, applyNotes]);
 
   // Becoming an owner fetches the notes; no longer being one clears them
@@ -185,7 +207,8 @@ export function ArloProvider({ children }) {
     fetch(arloUrl(meetingId, 'notes'), { credentials: 'include' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => { if (!cancelled && data) applyNotes(data.notes); })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setNotesAnswered(true); });
     return () => { cancelled = true; };
   }, [role, meetingId, accessVerified, applyNotes]);
 
@@ -250,6 +273,9 @@ export function ArloProvider({ children }) {
   const shownNotes = switchingMeeting ? null : notes;
   // The meeting whose notes are still on screen after it is over, for the way back to them
   const afterNotesMeetingId = !switchingMeeting && holdsNotes && meetingOver ? lastMeetingId : null;
+  // An owner whose notes are on their way: not yet "an owner without notes"
+  const notesPending = role === 'owner' && notes === null && !notesAnswered
+    && Boolean(meetingId) && accessVerified && !switchingMeeting;
 
   const value = useMemo(() => ({
     loaded: shown.loaded,
@@ -260,12 +286,14 @@ export function ArloProvider({ children }) {
     whoCanAsk: shown.whoCanAsk,
     everPresent: everPresent && !switchingMeeting,
     notes: shownNotes,
+    notesPending,
+    awaitingState,
     meetingOver: meetingOver && !switchingMeeting,
     afterNotesMeetingId,
     setWhoCanAsk,
     ask,
     asking,
-  }), [shown, everPresent, switchingMeeting, shownNotes, meetingOver, afterNotesMeetingId, setWhoCanAsk, ask, asking]);
+  }), [shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, ask, asking]);
 
   return (
     <ArloContext.Provider value={value}>

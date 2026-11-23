@@ -5,9 +5,10 @@ import { useArlo } from '../contexts/ArloContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import { useServerSettings } from '../contexts/ServerSettingsContext';
+import { useToast } from '../contexts/ToastContext';
 import useZoomAuth from '../hooks/useZoomAuth';
 import useSecondsLeft from '../hooks/useSecondsLeft';
-import { getArloScreen, canControlArlo } from '../lib/arloScreen';
+import { getArloScreen, canControlArlo, canBringArloIn } from '../lib/arloScreen';
 import { getTransportView } from '../lib/transportView';
 import { accessHidesScreen } from '../lib/meetingAccess';
 import MeetingAccessNotice from '../components/MeetingAccessNotice';
@@ -21,6 +22,14 @@ import AfterMeeting from '../components/arlo/AfterMeeting';
 import './ArloMeetingView.css';
 
 const FALLBACK_TITLE = 'Meeting notes';
+const STILL_IN_FORCE = { owner: 'Only you', anyone: 'Anyone' };
+
+/** Text is being typed into this element (a radio or a button is not typing). */
+function isTextEntry(element) {
+  if (!element || element === document.body || !element.isConnected) return false;
+  if (element.tagName === 'TEXTAREA' || element.isContentEditable) return true;
+  return element.tagName === 'INPUT' && !['radio', 'checkbox', 'button', 'submit', 'reset'].includes(element.type);
+}
 
 /**
  * Arlo in a meeting: one screen at a time, chosen by lib/arloScreen.js from
@@ -34,8 +43,9 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   const navigate = useNavigate();
   const {
     ws, meetingId, meetingAccess, connectWebSocket,
-    rtmsPhase, rtmsLoading, rtmsError, rtmsWaitingLong, rtmsRequestExpiresAt, startRTMS,
+    rtmsPhase, rtmsLoading, rtmsError, rtmsWaitingLong, rtmsRequestExpiresAt, startRTMS, startAskedHere,
   } = useMeeting();
+  const { addToast } = useToast();
   const arlo = useArlo();
   const { isAuthenticated } = useAuth();
   const { meetingContext, userContext, isTestMode, runningContext } = useZoomSdk();
@@ -57,6 +67,10 @@ export default function ArloMeetingView({ isGuestMode = false }) {
     meetingEnded,
     hasNotes: arlo.notes !== null,
     everPresent: arlo.everPresent,
+    streamFault: rtmsPhase === 'stopped' && rtmsError?.code === 'stream_fault',
+    // This panel asked, the stream is up, and the server has not said yet whose it is
+    awaitingRole: startAskedHere && arlo.awaitingState,
+    notesPending: arlo.notesPending,
   });
   const canControl = canControlArlo({ guest, arloRole: arlo.role });
 
@@ -93,21 +107,32 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   const [whoCanAskChoice, setWhoCanAskChoice] = useState('owner');
   const pendingChoiceRef = useRef(null);
   const { role: arloRole, whoCanAsk, setWhoCanAsk } = arlo;
+  const whoCanAskRef = useRef(whoCanAsk);
+  whoCanAskRef.current = whoCanAsk;
+  // A choice that was not saved is never silent: say so, and which setting still holds
+  const saveWhoCanAsk = useCallback(async (value) => {
+    const saved = await setWhoCanAsk(value);
+    if (!saved) {
+      const inForce = STILL_IN_FORCE[whoCanAskRef.current] || STILL_IN_FORCE.owner;
+      addToast(`Couldn't change who can ask. It is still: ${inForce}.`, 'error');
+    }
+    return saved;
+  }, [setWhoCanAsk, addToast]);
   useEffect(() => {
     if (arloRole !== 'owner' || pendingChoiceRef.current === null) return;
     const choice = pendingChoiceRef.current;
     pendingChoiceRef.current = null;
-    if (choice !== whoCanAsk) setWhoCanAsk(choice);
-  }, [arloRole, whoCanAsk, setWhoCanAsk]);
+    if (choice !== whoCanAsk) saveWhoCanAsk(choice);
+  }, [arloRole, whoCanAsk, saveWhoCanAsk]);
 
   const bringArloIn = useCallback(() => {
     if (arloRole === 'owner') {
-      if (whoCanAskChoice !== whoCanAsk) setWhoCanAsk(whoCanAskChoice);
+      if (whoCanAskChoice !== whoCanAsk) saveWhoCanAsk(whoCanAskChoice);
     } else {
       pendingChoiceRef.current = whoCanAskChoice;
     }
     startRTMS(false);
-  }, [arloRole, whoCanAsk, whoCanAskChoice, setWhoCanAsk, startRTMS]);
+  }, [arloRole, whoCanAsk, whoCanAskChoice, saveWhoCanAsk, startRTMS]);
 
   const signIn = useCallback(() => {
     // The reason is shown next to the button; nothing else to do with it here
@@ -120,9 +145,24 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   const recordId = encodeURIComponent(meetingId || routeId || '');
   const recordPath = `${isGuestMode ? '/guest-meeting' : '/meeting'}/${recordId}/record`;
 
+  // A new screen takes the focus to its heading, so it is not left on <body>
+  // when what had it is gone. Never from an input the user is typing in that
+  // is still there (the header's search, for one).
+  const accessNotice = accessHidesScreen(meetingAccess) && screen !== 'after';
+  const viewRef = useRef(null);
+  const focusedScreenRef = useRef(null);
+  useEffect(() => {
+    if (nothingToShow || accessNotice || focusedScreenRef.current === screen) return;
+    const target = viewRef.current?.querySelector('[data-arlo-focus]');
+    if (!target) return;
+    focusedScreenRef.current = screen;
+    if (isTextEntry(document.activeElement)) return;
+    target.focus();
+  }, [screen, nothingToShow, accessNotice]);
+
   if (nothingToShow) return null;
 
-  if (accessHidesScreen(meetingAccess) && screen !== 'after') {
+  if (accessNotice) {
     return (
       <div className="arlo-view">
         {meetingAccess.status === 'idle' ? (
@@ -164,7 +204,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
       const waitingOnHost = rtmsPhase === 'requested' && zoomRole !== 'host';
       content = (
         <div className="arlo-center">
-          <div className="arlo-waiting" role="status" aria-live="polite">
+          <div className="arlo-waiting" role="status" aria-live="polite" tabIndex={-1} data-arlo-focus>
             <span className="arlo-waiting-spinner" aria-hidden="true"><LoadingSpinner size={16} /></span>
             <span>
               {waitingOnHost
@@ -189,6 +229,8 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           paused={arlo.paused}
           canControl={canControl}
           recordPath={recordPath}
+          whoCanAsk={arlo.whoCanAsk}
+          onWhoCanAskChange={saveWhoCanAsk}
         />
       );
       break;
@@ -212,6 +254,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           ownerName={arlo.ownerName}
           whoCanAsk={arlo.whoCanAsk}
           guest={guest}
+          canBringIn={canBringArloIn(zoomRole)}
           meetingEnded={meetingEnded}
           showRecord={present || arlo.everPresent}
           recordPath={recordPath}
@@ -227,7 +270,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   }
 
   return (
-    <div className="arlo-view" data-screen={screen}>
+    <div className="arlo-view" data-screen={screen} ref={viewRef}>
       {content}
     </div>
   );

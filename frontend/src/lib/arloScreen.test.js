@@ -30,12 +30,25 @@ describe('getArloScreen', () => {
     // 3. a request is not a state
     ['requested, host', { phase: 'requested', zoomRole: 'host' }, 'waiting'],
     ['requested, attendee', { phase: 'requested' }, 'waiting'],
-    ['requested never shows the notes', { phase: 'requested', arloRole: 'owner', hasNotes: true, everPresent: true }, 'waiting'],
+    ['requested, an owner who never had the notes screen', { phase: 'requested', arloRole: 'owner' }, 'waiting'],
     ['starting', { phase: 'starting', zoomRole: 'host' }, 'waiting'],
+    // 3a. ...and the owner's notes stay on screen through one
+    ['requested, owner with notes', { phase: 'requested', arloRole: 'owner', hasNotes: true, everPresent: true }, 'notes'],
+    ['requested, owner Arlo was here for, no notes yet', { phase: 'requested', arloRole: 'owner', everPresent: true }, 'notes'],
+    ['starting, owner with notes', { phase: 'starting', arloRole: 'owner', hasNotes: true }, 'notes'],
+    ['starting, participant Arlo was here for', { phase: 'starting', everPresent: true }, 'waiting'],
+    // 3b. this panel asked and the stream is up, but the server has not said yet whose it is
+    ['own start confirmed, role not re-sent yet', { phase: 'active', zoomRole: 'host', awaitingRole: true }, 'waiting'],
+    ['own start confirmed, already the owner', { phase: 'active', arloRole: 'owner', awaitingRole: true }, 'notes'],
+    ['ended wins over waiting for the role', { meetingEnded: true, phase: 'active', awaitingRole: true }, 'participant'],
     // 4. Arlo has left, the owner keeps the notes
     ['left, owner with notes', { arloRole: 'owner', hasNotes: true, everPresent: true, phase: 'stopped' }, 'notes'],
     ['left, owner without notes, host', { arloRole: 'owner', everPresent: true, zoomRole: 'host', phase: 'stopped' }, 'bring-in'],
-    ['never present, owner with notes, attendee', { arloRole: 'owner', hasNotes: true }, 'ask-host'],
+    ['left before this panel opened, owner with notes, attendee', { arloRole: 'owner', hasNotes: true }, 'notes'],
+    ['left before this panel opened, owner with notes, host', { arloRole: 'owner', hasNotes: true, zoomRole: 'host' }, 'notes'],
+    ['owner, the notes are still being fetched', { arloRole: 'owner', notesPending: true, zoomRole: 'host' }, 'loading'],
+    ['left by a fault before the first notes, owner', { arloRole: 'owner', everPresent: true, zoomRole: 'host', phase: 'stopped', streamFault: true }, 'notes'],
+    ['a fault, participant', { everPresent: true, phase: 'stopped', streamFault: true }, 'ask-host'],
     // 5. not present
     ['not present, host', { zoomRole: 'host' }, 'bring-in'],
     ['not present, co-host', { zoomRole: 'coHost' }, 'bring-in'],

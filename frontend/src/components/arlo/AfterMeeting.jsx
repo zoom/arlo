@@ -19,9 +19,9 @@ export default function AfterMeeting({ title, notes, demoMode, recordPath }) {
 
   return (
     <div className="arlo-screen">
-      <h1 className="arlo-title arlo-after-title">{title}</h1>
+      <h1 className="arlo-title arlo-after-title" tabIndex={-1} data-arlo-focus>{title}</h1>
       <div className="arlo-scroll">
-        <NotesDocument notes={notes} />
+        <NotesDocument notes={notes} listening={false} />
       </div>
       {demoMode && <p className="arlo-muted">Demo mode: meetings and notes are not stored.</p>}
       <Link className="arlo-link" to={recordPath}>Meeting record</Link>

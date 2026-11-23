@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useMeeting } from '../../contexts/MeetingContext';
+import { useZoomSdk } from '../../contexts/ZoomSdkContext';
 import { getTransportView } from '../../lib/transportView';
 import Button from '../ui/Button';
 
@@ -7,13 +8,22 @@ const LABELS = {
   live: 'Arlo is in the meeting',
   paused: 'Arlo is paused',
   reconnecting: 'Reconnecting…',
+  returning: 'Bringing Arlo back…',
+  asking: 'Waiting for the host to allow Arlo…',
   left: 'Arlo has left',
 };
+// A stream that exists: the only statuses with Pause, Resume or Remove
+const IN_MEETING = new Set(['live', 'paused', 'reconnecting']);
 // How long "Remove Arlo?" waits for the second click
 const CONFIRM_MS = 5000;
 
-/** The confirmed stream phase first; what the server says about Arlo otherwise. */
-function arloStatus({ phase, present, paused }) {
+/**
+ * A request first (it is not a state, and says so), then the confirmed stream
+ * phase; what the server says about Arlo otherwise.
+ */
+function arloStatus({ phase, present, paused, waitingOnHost }) {
+  if (phase === 'requested') return waitingOnHost ? 'asking' : 'returning';
+  if (phase === 'starting') return 'returning';
   if (phase === 'interrupted') return 'reconnecting';
   if (phase === 'paused') return 'paused';
   if (phase === 'active') return 'live';
@@ -29,16 +39,22 @@ function arloStatus({ phase, present, paused }) {
  */
 export default function StatusLine({ present, paused, canControl }) {
   const {
-    rtmsPhase, rtmsActive, rtmsPaused, rtmsLoading, rtmsError,
+    rtmsPhase, rtmsActive, rtmsPaused, rtmsLoading, rtmsError, rtmsWaitingLong,
     startRTMS, stopRTMS, pauseRTMS, resumeRTMS,
   } = useMeeting();
+  const { userContext } = useZoomSdk();
   const [confirmingRemove, setConfirmingRemove] = useState(false);
 
-  const status = arloStatus({ phase: rtmsPhase, present, paused });
+  // The host's own request needs nobody's permission
+  const waitingOnHost = userContext?.role !== 'host';
+  const status = arloStatus({ phase: rtmsPhase, present, paused, waitingOnHost });
+  const inMeeting = IN_MEETING.has(status);
   // The existing wording for a failed control or a stream fault
   const { message } = getTransportView({
     phase: rtmsPhase, active: rtmsActive, paused: rtmsPaused, hasContent: true, error: rtmsError, guest: !canControl,
   });
+  // Zoom does not say when the host allows Arlo: after a while the owner may ask again
+  const mayAskAgain = rtmsPhase === 'requested' && rtmsWaitingLong;
 
   useEffect(() => {
     if (!confirmingRemove) return undefined;
@@ -46,8 +62,8 @@ export default function StatusLine({ present, paused, canControl }) {
     return () => clearTimeout(timer);
   }, [confirmingRemove]);
   useEffect(() => {
-    if (status === 'left') setConfirmingRemove(false);
-  }, [status]);
+    if (!inMeeting) setConfirmingRemove(false);
+  }, [inMeeting]);
 
   const remove = () => {
     if (!confirmingRemove) {
@@ -73,7 +89,7 @@ export default function StatusLine({ present, paused, canControl }) {
             {status === 'paused' && (
               <Button variant="ghost" size="sm" onClick={() => resumeRTMS()} disabled={rtmsLoading}>Resume</Button>
             )}
-            {status !== 'left' && (
+            {inMeeting && (
               <Button
                 variant="ghost"
                 size="sm"
@@ -83,6 +99,9 @@ export default function StatusLine({ present, paused, canControl }) {
               >
                 {confirmingRemove ? 'Remove Arlo?' : 'Remove Arlo'}
               </Button>
+            )}
+            {mayAskAgain && (
+              <Button variant="outline" size="sm" onClick={() => startRTMS(false)}>Try again</Button>
             )}
             {status === 'left' && (
               <Button variant="outline" size="sm" onClick={() => startRTMS(false)} disabled={rtmsLoading}>
