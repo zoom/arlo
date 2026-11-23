@@ -5,13 +5,17 @@
  * The notes are one document per meeting, kept in the meeting store with the
  * transcript and deleted with it. Each run gives the model the notes so far
  * and the lines stored since, and replaces the notes with its answer:
- *   - nothing runs for a meeting without an owner: nobody would see the notes;
+ *   - nothing runs for a meeting without an owner, or while no owner has a
+ *     panel open in it: nobody would see the notes. The lines wait, and a run
+ *     follows when an owner's panel connects;
  *   - the first run happens when `firstRunSegments` lines are stored, or one
  *     interval after the first line, whichever is first;
  *   - after that at most one run per interval, and only when there are new lines;
  *   - one run at a time per meeting; lines stored during a run wait for the next;
  *   - a failed run keeps the old notes and is tried again after the interval
- *     (after two minutes when the models are rate limited).
+ *     (after two minutes when the models are rate limited). After five failed
+ *     runs in a row nothing more is tried until a new line is stored; the
+ *     count then starts over.
  *
  * The model's answer is untrusted input. It is rebuilt here from the known
  * fields (validNotes) and bounded again by the store before anything is kept
@@ -30,6 +34,9 @@ const RATE_LIMIT_WAIT_MS = 2 * 60 * 1000;
 // More than the store keeps (20 decisions, 30 action items); the store cuts the rest
 const MAX_LIST_ENTRIES = 100;
 const DEFAULT_INTERVAL_MS = 45000;
+const MAX_FAILED_RUNS = 5;
+// What models write in an owner field when nobody was named
+const NOBODY = new Set(['null', 'none', 'n/a', 'unknown']);
 
 const isMeetingId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -39,6 +46,11 @@ const textOf = (object, key) => {
   if (!hasOwn(object, key) || typeof object[key] !== 'string') return null;
   const trimmed = object[key].trim();
   return trimmed.length > 0 ? trimmed : null;
+};
+/** An action item's owner: a name, or null also when the model wrote a word for "nobody". */
+const ownerOf = (item) => {
+  const owner = textOf(item, 'owner');
+  return owner === null || NOBODY.has(owner.toLowerCase()) ? null : owner;
 };
 const defaultSchedule = (fn, ms) => {
   const timer = setTimeout(fn, ms);
@@ -60,7 +72,7 @@ function validNotes(answer) {
     .filter((line) => line.length > 0);
   const actionItems = list('actionItems')
     .filter((item) => isPlainObject(item) && textOf(item, 'text') !== null)
-    .map((item) => ({ text: textOf(item, 'text'), owner: textOf(item, 'owner') }));
+    .map((item) => ({ text: textOf(item, 'text'), owner: ownerOf(item) }));
   const summary = answer.summary.trim();
   if (summary.length === 0 && decisions.length === 0 && actionItems.length === 0) return null;
   return { summary, decisions, actionItems };
@@ -71,6 +83,9 @@ function createNotesEngine({
   generate,
   presence,
   send = () => {},
+  // (meetingId, ownerUserIds) => whether one of them has a panel open in that
+  // meeting. Injected: this module knows nothing about sockets.
+  hasOwnerPanel = () => true,
   schedule = defaultSchedule,
   now = () => Date.now(),
   intervalMs = DEFAULT_INTERVAL_MS,
@@ -86,6 +101,7 @@ function createNotesEngine({
   //   dueAt: the earliest time of the next run,
   //   attempted: a run was tried, so the "five lines" start no longer applies,
   //   running: a run is in progress,
+  //   failures: failed runs in a row,
   //   cancel: cancels the timer, or null }
   const meetings = new Map();
 
@@ -102,7 +118,9 @@ function createNotesEngine({
     if (!state) {
       // A backstop only: a meeting normally leaves through forget()
       if (meetings.size >= maxMeetings) forget(meetings.keys().next().value);
-      state = { waiting: 0, dueAt: now() + interval, attempted: false, running: false, cancel: null };
+      state = {
+        waiting: 0, dueAt: now() + interval, attempted: false, running: false, failures: 0, cancel: null,
+      };
       meetings.set(meetingId, state);
     }
     return state;
@@ -116,6 +134,21 @@ function createNotesEngine({
     } catch {
       return [];
     }
+  }
+
+  /** Whether one of the owners has a panel open in the meeting. A lookup that fails finds none. */
+  function panelOpen(meetingId, ownerUserIds) {
+    try {
+      return hasOwnerPanel(meetingId, ownerUserIds) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Whether notes written now would have a reader: an owner with a panel open. */
+  function hasReader(meetingId) {
+    const owners = ownersOf(meetingId);
+    return owners.length > 0 && panelOpen(meetingId, owners);
   }
 
   /** The lines after `throughSeqNo` as "<speaker>: <text>", newest kept within the size limit. */
@@ -145,7 +178,7 @@ function createNotesEngine({
       return false;
     }
     const state = stateFor(meetingId);
-    if (state.running || ownersOf(meetingId).length === 0) return false;
+    if (state.running || !hasReader(meetingId)) return false;
 
     const previous = store.getNotes(meetingId);
     const { lines, through } = inputFor(meetingId, previous ? previous.throughSeqNo : 0);
@@ -181,9 +214,11 @@ function createNotesEngine({
         forget(meetingId);
         return false;
       }
+      state.failures = 0;
     } catch (error) {
       // The lines of this run are still to be written up
       state.waiting += taken;
+      state.failures += 1;
       if (error && error.code === 'rate_limited') wait = RATE_LIMIT_WAIT_MS;
       // The code only: an error message can quote what the model wrote
       const code = error && typeof error.code === 'string' ? error.code : 'error';
@@ -213,8 +248,10 @@ function createNotesEngine({
       return;
     }
     if (state.waiting === 0) return; // nothing new: the next line starts things again
+    // Given up for now: the next line starts things again (see segmentStored)
+    if (state.failures >= MAX_FAILED_RUNS) return;
     const due = now() >= state.dueAt || (!state.attempted && state.waiting >= firstRunSegments);
-    if (due && ownersOf(meetingId).length > 0) {
+    if (due && hasReader(meetingId)) {
       runNow(meetingId).catch(() => {
         // runNow handles its own failures; this is only so nothing is ever unhandled
       });
@@ -232,14 +269,33 @@ function createNotesEngine({
         forget(meetingId);
         return;
       }
-      stateFor(meetingId).waiting += 1;
+      const state = stateFor(meetingId);
+      state.waiting += 1;
+      // Something new to write up: the runs that failed before count no more
+      if (state.failures >= MAX_FAILED_RUNS) state.failures = 0;
       consider(meetingId);
     } catch {
       // Writing notes must never get in the way of keeping the transcript
     }
   }
 
-  return { segmentStored, runNow, forget, size: () => meetings.size };
+  /**
+   * A signed-in person's panel connected or subscribed to this meeting. If
+   * lines are waiting for a reader, a run follows as soon as one is due.
+   * Starts nothing for a meeting without stored lines. Never throws.
+   */
+  function ownerPanelConnected(meetingId) {
+    if (!enabled || !isMeetingId(meetingId) || !meetings.has(meetingId)) return;
+    try {
+      consider(meetingId);
+    } catch {
+      // A panel connecting must never fail because of the notes
+    }
+  }
+
+  return {
+    segmentStored, ownerPanelConnected, runNow, forget, size: () => meetings.size,
+  };
 }
 
 let instance = null;
@@ -253,7 +309,7 @@ function getNotesEngine() {
     const config = require('../config');
     const { getMeetingStore } = require('../storage');
     const { getArloPresence } = require('./arloPresence');
-    const { sendNotesUpdated } = require('./websocket');
+    const { sendNotesUpdated, hasOwnerPanel } = require('./websocket');
     const openrouter = require('./openrouter');
     /* eslint-enable global-require */
     instance = createNotesEngine({
@@ -262,6 +318,7 @@ function getNotesEngine() {
       // Through the module object, so tests can replace the model call
       generate: (input) => openrouter.generateLiveNotes({ ...input, model: config.notesModel }),
       send: sendNotesUpdated,
+      hasOwnerPanel,
       intervalMs: config.notesIntervalMs,
       enabled: config.aiEnabled,
     });

@@ -32,7 +32,10 @@ test('internal endpoints validate their payloads', async () => {
 test('status: internal may set any status, browsers only pause/resume', async () => {
   assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_stopped' })).status, 401);
   assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_stopped' }, withKey)).status, 200);
-  assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_paused' }, sessionCookie())).status, 200);
+  const { cookie: access } = await h.postJson(url('/api/auth/meeting-access'), { appContext: h.makeAppContext(h.meetingPayload({ mid: 'm' })) });
+  const inMeeting = { cookie: `${sessionCookie().cookie}; ${access}` };
+  assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_paused' }, inMeeting)).status, 200);
+  assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_stopped' }, inMeeting)).status, 403);
   assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: 'm', status: 'rtms_stopped' }, sessionCookie())).status, 403);
 });
 
@@ -114,4 +117,37 @@ test('per-user data routes require a session', async () => {
     assert.equal((await fetch(url(path))).status, 401, `${path} without a session`);
     assert.equal((await fetch(url(path), { headers: sessionCookie() })).status, 200, `${path} with a session`);
   }
+});
+
+test('a browser reports pause and resume only for the meeting its meeting-access cookie names', async () => {
+  const meeting = 'PAUSE-A==';
+  const access = async (mid) => (await h.postJson(url('/api/auth/meeting-access'), { appContext: h.makeAppContext(h.meetingPayload({ mid })) })).cookie;
+  const here = await access(meeting);
+  const elsewhere = await access('PAUSE-OTHER==');
+  const session = sessionCookie().cookie;
+  await h.postJson(url('/api/rtms/status'), { meetingId: meeting, status: 'rtms_started' }, withKey);
+  const ws = await h.openWs(`${srv.base.replace('http', 'ws')}/ws?meeting_id=${encodeURIComponent(meeting)}`, { cookie: here });
+  ws.socket.send(JSON.stringify({ type: 'subscribe', payload: { meetingId: meeting } }));
+  await h.wait(100);
+  const post = (status, cookie, meetingId = meeting) => h.postJson(url('/api/rtms/status'), { meetingId, status }, cookie ? { cookie } : {});
+
+  for (const status of ['rtms_paused', 'rtms_resumed']) {
+    assert.equal((await post(status, null)).status, 401, `${status} with no cookies`);
+    assert.equal((await post(status, here)).status, 401, `${status} not signed in`);
+    assert.equal((await post(status, session)).status, 403, `${status} without meeting access`);
+    assert.equal((await post(status, `${session}; ${elsewhere}`)).status, 403, `${status} with another meeting's access`);
+    assert.equal((await post(status, `${session}; meetingAccess=not-a-token`)).status, 403, `${status} with a bad token`);
+    // a session cookie does not stand in for meeting access
+    assert.equal((await post(status, `${session}; meetingAccess=${session.split('=')[1]}`)).status, 403);
+  }
+  await h.wait(100);
+  assert.deepEqual(ws.messages.filter((m) => m.type === 'meeting.status').map((m) => m.data.status), ['rtms_started']);
+
+  assert.equal((await post('rtms_paused', `${session}; ${here}`)).status, 200);
+  assert.equal((await post('rtms_resumed', `${session}; ${here}`)).status, 200);
+  await h.wait(100);
+  ws.socket.close();
+  assert.deepEqual(ws.messages.filter((m) => m.type === 'meeting.status').map((m) => m.data.status), ['rtms_started', 'rtms_paused', 'rtms_resumed']);
+  // the rtms service is not asked for a cookie
+  assert.equal((await h.postJson(url('/api/rtms/status'), { meetingId: meeting, status: 'rtms_paused' }, withKey)).status, 200);
 });

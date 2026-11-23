@@ -122,6 +122,7 @@ function initWebSocketServer(server) {
     }
     connections.get(meetingId).add(ws);
     reportPanels(meetingId);
+    notesReaderConnected(ws, meetingId);
 
     // Heartbeat
     ws.on('pong', () => {
@@ -241,6 +242,7 @@ async function handleWebSocketMessage(ws, data) {
         }
         connections.get(meetingId).add(ws);
         reportPanels(meetingId); // counted again after an unsubscribe
+        notesReaderConnected(ws, meetingId);
         ws.send(JSON.stringify({
           type: 'subscribed',
           data: { meetingId },
@@ -427,10 +429,44 @@ function sendNotesUpdated(meetingId, ownerUserIds, notes) {
   const owners = new Set((Array.isArray(ownerUserIds) ? ownerUserIds : []).filter((id) => typeof id === 'string' && id.length > 0));
   if (owners.size === 0) return 0;
   return sendToMeetingSockets(meetingId, (ws) => (
-    owners.has(ws.userId) && ws.allowedMeetingId === meetingId
+    isOwnerPanel(ws, meetingId, owners)
       ? { type: 'notes.updated', data: { meetingId, notes } }
       : null
   ));
+}
+
+/** The sockets notes for this meeting may go to: see sendNotesUpdated(). */
+const isOwnerPanel = (ws, meetingId, owners) => owners.has(ws.userId) && ws.allowedMeetingId === meetingId;
+
+/**
+ * Whether one of `ownerUserIds` has a panel open in this meeting: the same
+ * sockets sendNotesUpdated() would send to. The notes engine asks before it
+ * writes notes, so none are written (and no transcript goes to the AI
+ * provider for them) while nobody could read them.
+ */
+function hasOwnerPanel(meetingId, ownerUserIds) {
+  const owners = new Set((Array.isArray(ownerUserIds) ? ownerUserIds : []).filter((id) => typeof id === 'string' && id.length > 0));
+  const clients = connections.get(meetingId);
+  if (!clients || owners.size === 0) return false;
+  for (const ws of clients) {
+    if (ws.readyState === WebSocket.OPEN && isOwnerPanel(ws, meetingId, owners)) return true;
+  }
+  return false;
+}
+
+/**
+ * A signed-in person's panel connected or subscribed: if it is an owner's and
+ * lines are waiting to be written up, the notes engine takes it from here.
+ */
+function notesReaderConnected(ws, meetingId) {
+  if (!ws.userId) return;
+  try {
+    // Required here: the notes engine's neighbours require this module
+    // eslint-disable-next-line global-require
+    require('./notesEngine').getNotesEngine().ownerPanelConnected(meetingId);
+  } catch {
+    // A panel connecting must never fail because of the notes
+  }
 }
 
 /**
@@ -650,6 +686,7 @@ module.exports = {
   broadcastArloState,
   sendToMeetingSockets,
   sendNotesUpdated,
+  hasOwnerPanel,
   currentStreamStatus,
   broadcastRtmsRequestStatus,
   disconnectUser,

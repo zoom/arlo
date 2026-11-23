@@ -196,7 +196,12 @@ test('settings accept exactly { whoCanAsk: "owner" | "anyone" }', async () => {
 
 test('the notes are for owners only', async () => {
   const m = await meetingWith('ARLO-NOTES==', 5); // five lines: the notes are written
+  // once the owner has a panel open in the meeting to read them
+  assert.deepEqual((await call('GET', m.meetingId, 'notes', { headers: m.owner })).body, { notes: null });
+  const panel = await h.openWs(`${srv.wsBase}?meeting_id=${encodeURIComponent(m.meetingId)}`, m.owner);
+  assert.equal(panel.open, true);
   await h.wait(100);
+  panel.socket.close();
   const owner = await call('GET', m.meetingId, 'notes', { headers: m.owner });
   assert.equal(owner.status, 200);
   assert.deepEqual(Object.keys(owner.body), ['notes']);
@@ -326,4 +331,18 @@ test('after the meeting ended there is no owner, no notes and nothing to ask abo
   assert.equal((await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: BODIES.settings })).status, 403);
   assert.equal((await call('POST', m.meetingId, 'ask', { headers: m.owner, body: BODIES.ask })).status, 403);
   assert.equal(asked.length, 0);
+});
+
+test('ask: a meeting flushed while the model was answering gets no answer', async () => {
+  const m = await meetingWith('ARLO-ASK-FLUSHED==');
+  answer = async () => {
+    await status(m.meetingId, { status: 'rtms_stopped', streamId: 's1', meetingEnded: true });
+    return 'On Friday.';
+  };
+  const res = await call('POST', m.meetingId, 'ask', { headers: m.owner, body: BODIES.ask });
+  assert.equal(asked.length, 1);
+  assert.equal(res.status, 409);
+  assert.equal(res.body.error, 'no_transcript');
+  assert.equal(JSON.stringify(res.body).includes('Friday'), false);
+  assert.equal(res.cache, 'no-store');
 });

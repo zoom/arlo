@@ -141,6 +141,11 @@ router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, a
     if (typeof answer !== 'string' || answer.trim().length === 0) {
       throw Object.assign(new Error('empty answer'), { code: 'empty_response' });
     }
+    // Flushed while the model was answering: the answer is about a transcript
+    // that is deleted, and what is deleted is not handed out afterwards
+    if (!store.has(meetingId)) {
+      return res.status(409).json({ error: 'no_transcript', message: 'The meeting has ended.' });
+    }
     return res.json({ answer: answer.trim().slice(0, MAX_ANSWER_CHARS) });
   } catch (error) {
     // The code only: an error message can quote the model or the transcript

@@ -105,9 +105,11 @@ test('a line that is dropped does not reach the engine', async () => {
 test('when the meeting ends, the notes go with it and the engine keeps nothing', async () => {
   const meeting = 'NOTES-C==';
   const ana = person('zoom-notes-ana', 'Ana Ruiz');
+  const owner = await openPanel(meeting, ana.session);
   await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana.zoomUserId });
   for (let i = 1; i <= 6; i += 1) await say(meeting, 's1', `line ${i}`);
   await h.wait(100);
+  owner.socket.close();
   assert.notEqual(getMeetingStore().getNotes(meeting), null);
   const before = getNotesEngine().size();
 
@@ -130,4 +132,48 @@ test('a model answer that arrives after the meeting ended is not stored or sent'
   owner.socket.close();
   assert.equal(getMeetingStore().has(meeting), false);
   assert.deepEqual(notesSent(owner), []);
+});
+
+test('notes for a meeting are never sent to an owner\'s panel in another meeting, though it is listed under this one', async () => {
+  const { crossRegisterUser, sendNotesUpdated, broadcastToMeeting } = require('../src/services/websocket');
+  const meeting = 'NOTES-E==';
+  const other = 'NOTES-E-OTHER==';
+  const ana = person('zoom-notes-ana', 'Ana Ruiz');
+  const here = await openPanel(meeting, ana.session);
+  const elsewhere = await openPanel(other, ana.session);
+  // what a stream start does: the operator's sockets are all listed under the stream's meeting
+  assert.equal(crossRegisterUser(ana.user.id, meeting), 2);
+
+  const notes = { summary: 'For this meeting only.', decisions: [], actionItems: [], updatedAt: 1, throughSeqNo: 1 };
+  assert.equal(sendNotesUpdated(meeting, [ana.user.id], notes), 1);
+  // the other panel is reachable under this meeting: only the check on its verified meeting keeps the notes from it
+  assert.equal(broadcastToMeeting(meeting, { type: 'test.reach', data: {} }), 2);
+  await h.wait(100);
+  for (const ws of [here, elsewhere]) ws.socket.close();
+
+  assert.equal(elsewhere.messages.some((m) => m.type === 'test.reach'), true);
+  assert.deepEqual(notesSent(elsewhere), []);
+  assert.equal(notesSent(here).length, 1);
+});
+
+test('no notes are written while no owner has a panel open; they are when the owner opens one', async () => {
+  const meeting = 'NOTES-F==';
+  const other = 'NOTES-F-OTHER==';
+  const ana = person('zoom-notes-ana', 'Ana Ruiz');
+  const ben = person('zoom-notes-ben', 'Ben Okafor');
+  const participant = await openPanel(meeting, ben.session);
+  const guest = await openPanel(meeting, null);
+  const ownerElsewhere = await openPanel(other, ana.session); // listed under this meeting at the start, and not counted
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana.zoomUserId });
+  for (let i = 1; i <= 6; i += 1) await say(meeting, 's1', `line ${i}`);
+  await h.wait(150);
+  assert.equal(modelCalls.length, 0);
+  assert.equal(getMeetingStore().getNotes(meeting), null);
+
+  const owner = await openPanel(meeting, ana.session);
+  await h.wait(150);
+  for (const ws of [participant, guest, ownerElsewhere, owner]) ws.socket.close();
+  assert.equal(modelCalls.length, 1);
+  assert.equal(modelCalls[0].lines.length, 6);
+  assert.equal(notesSent(owner).length, 1);
 });

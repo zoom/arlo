@@ -245,21 +245,42 @@ test('the meeting ending, reported on any one stream, ends every stream and flus
   assert.equal((await say(meeting, 's1', 3, 'Still refused.')).body.stored, false);
 });
 
-test('after a meeting ended, the same meeting id can run again', async () => {
+test('after a meeting ended, a start or reconnect report or a line for it does not bring it back', async () => {
+  const { getMeetingStreams } = require('../src/services/meetingStreams');
+  const rtmsEvents = require('../src/lib/rtmsEvents');
   const meeting = 'MULTI-I2==';
   const cookie = await cookieFor(meeting);
-  await status(meeting, { status: 'rtms_started', streamId: 's1' });
-  await status(meeting, { status: 'rtms_started', streamId: 's2' });
-  await status(meeting, { status: 'rtms_stopped', streamId: 's1', meetingEnded: true });
-  await status(meeting, { status: 'rtms_started', streamId: 's3' });
-  await say(meeting, 's3', 1, 'again');
-  assert.deepEqual(await texts(meeting, cookie), ['again']);
-  // and a stop is a stop again
   const ws = await openPanel(meeting, cookie);
-  await status(meeting, { status: 'rtms_stopped', streamId: 's3' });
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' });
+  await status(meeting, { status: 'rtms_stopped', streamId: 's1', meetingEnded: true });
+  const recorded = () => JSON.stringify(rtmsEvents.list('op-3', { since: 0 }));
+  const before = recorded();
+
+  // a report that was on its way, or a rejoin that got in as the meeting closed
+  for (const report of [
+    { status: 'rtms_started', streamId: 's3', operatorId: 'op-3' },
+    { status: 'rtms_reconnected', streamId: 's2', operatorId: 'op-2' },
+    { status: 'rtms_started' },
+  ]) {
+    const answer = await status(meeting, report);
+    assert.equal(answer.status, 200);
+    assert.deepEqual(answer.body, { received: true, broadcast: 0 });
+  }
+  assert.equal((await say(meeting, 's3', 1, 'after the end')).body.stored, false);
+  assert.equal((await say(meeting, 's9', 1, 'from a stream never heard of')).body.stored, false);
   await h.wait(100);
   ws.socket.close();
+
+  assert.deepEqual(await texts(meeting, cookie), []);
+  assert.deepEqual((await history(meeting, 'participant-events', cookie)).events, []);
+  assert.equal(getMeetingStreams().anyLive(meeting), false);
+  assert.deepEqual(getMeetingStreams().operators(meeting), []);
+  assert.equal(recorded(), before);
   assert.deepEqual(ofType(ws, 'meeting.status').map((d) => d.status), ['rtms_started', 'rtms_stopped']);
+  assert.equal(ofType(ws, 'arlo.state').at(-1).present, false);
+  // the stop reports that follow are still answered quietly
+  assert.deepEqual((await status(meeting, { status: 'rtms_stopped', streamId: 's3' })).body, { received: true, broadcast: 0 });
 });
 
 test('a source stream that goes silent without a stop report is replaced by the stream that still delivers', async () => {

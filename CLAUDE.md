@@ -105,7 +105,7 @@ Stored lines → notes engine (timer) → notes in the meeting store → `notes.
 - the stream is stopped and no Arlo panel has been connected for `MEETING_FLUSH_GRACE_MS` (default 2 minutes), or
 - it is older than 12 hours.
 
-The notes, the "who can ask" setting, what is known about the meeting's streams (and so who its owners are) and the notes engine's timer go in the same flush. A stop, pause, reconnect or restart inside one meeting keeps the data. A server restart clears everything. A transcript line that arrives within ten minutes after a meeting's data was flushed is dropped, not kept.
+The notes, the "who can ask" setting, what is known about the meeting's streams (and so who its owners are) and the notes engine's timer go in the same flush. A stop, pause, reconnect or restart inside one meeting keeps the data. A server restart clears everything. A transcript line that arrives within ten minutes after a meeting's data was flushed is dropped, not kept. In the ten minutes after Zoom said a meeting ended, a start or reconnect report for it is ignored too: a meeting UUID that ended does not start again.
 
 ### Arlo screens
 
@@ -142,10 +142,10 @@ Several Zoom users can each run a stream in the same meeting, each with its own 
 
 `backend/src/services/notesEngine.js` writes one notes document per meeting (summary, decisions, action items) from the stored transcript:
 
-- Nothing runs for a meeting without an owner.
+- Nothing runs for a meeting without an owner, or while no owner has a panel open in that meeting. The lines wait; a run follows when an owner's panel connects.
 - The first run happens when 5 lines are stored or one interval after the first line, whichever is first. After that at most one run per `NOTES_INTERVAL_MS`, and only when there are new lines.
 - Each run gives the model (`NOTES_MODEL`) the notes so far and the new lines. The answer is treated as untrusted input and rebuilt from the known fields.
-- A failed run keeps the old notes and is tried again after the interval (two minutes when the models are rate limited).
+- A failed run keeps the old notes and is tried again after the interval (two minutes when the models are rate limited). After 5 failed runs in a row nothing is tried until a new line is stored.
 - The notes live in the meeting store and are sent as `notes.updated` only to sockets of owners whose verified meeting is this one.
 
 ### Stream failover and reconnection

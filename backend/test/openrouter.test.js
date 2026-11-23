@@ -157,3 +157,11 @@ test('answerFromTranscript passes failures on with their code', async () => {
     (error) => error.code === 'rate_limited',
   );
 });
+
+test('the notes prompt shows a missing owner as a JSON null, never as the word in quotes', async () => {
+  stubModels(() => ({ content: JSON.stringify(notesAnswer) }));
+  await openrouter.generateLiveNotes({ previous: null, lines: ['Ana: hello'] });
+  const system = calls[0].messages[0].content;
+  assert.equal(/"owner":\s*"[^"]*\bnull\b[^"]*"/.test(system), false);
+  assert.match(system, /"owner":\s*null/);
+});

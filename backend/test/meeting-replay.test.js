@@ -124,8 +124,9 @@ test('a browser cannot make the server flush a meeting, signed in or not', async
   assert.equal((await post({ status: 'rtms_stopped', meetingEnded: true })).status, 401);
   assert.equal((await post({ status: 'rtms_stopped', meetingEnded: true }, signedIn)).status, 403);
   // pause is a status a browser may report; "meeting ended" riding on it is ignored
-  assert.equal((await post({ status: 'rtms_paused', meetingEnded: true }, signedIn)).status, 200);
-  assert.equal((await post({ status: 'rtms_resumed', meetingEnded: true }, signedIn)).status, 200);
+  const inMeeting = { cookie: `${signedIn.cookie}; ${cookie}` };
+  assert.equal((await post({ status: 'rtms_paused', meetingEnded: true }, inMeeting)).status, 200);
+  assert.equal((await post({ status: 'rtms_resumed', meetingEnded: true }, inMeeting)).status, 200);
   await h.wait(400);
 
   const kept = (await history(meeting, 'transcript', cookie)).body.segments;
@@ -263,7 +264,7 @@ test('stream stopped, then the last panel closes: the transcript is deleted afte
   assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
 });
 
-test('after the meeting ended, a late timeline event is not kept either, and a new start is recorded', async () => {
+test('after the meeting ended, a late timeline event is not kept either, and a start report does not bring the meeting back', async () => {
   const meeting = 'REPLAY-Q==';
   const cookie = await cookieFor(meeting);
   await status(meeting, { status: 'rtms_started' });
@@ -273,10 +274,10 @@ test('after the meeting ended, a late timeline event is not kept either, and a n
   await events(meeting, [{ eventType: 'left', participantName: 'Ben', participantId: '12', timestamp: 1700000000000 }]);
   assert.deepEqual((await history(meeting, 'participant-events', cookie)).body.events, []);
 
-  // the same id running again: the start itself is on the timeline
+  // a meeting that ended does not start again: a late start report stores nothing
   await status(meeting, { status: 'rtms_started' });
-  const stored = (await history(meeting, 'participant-events', cookie)).body.events;
-  assert.deepEqual(stored.map((e) => e.eventType), ['transcription_started']);
+  await status(meeting, { status: 'rtms_reconnected' });
+  assert.deepEqual((await history(meeting, 'participant-events', cookie)).body.events, []);
 });
 
 test('panels are told the meeting\'s stream stopped before its data is flushed', async () => {

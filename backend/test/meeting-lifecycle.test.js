@@ -230,14 +230,15 @@ test('a late line after a stop, with a panel still open, is kept and does not ma
 });
 
 test('panels still connected when the meeting ends stay counted', () => {
-  const { store, lifecycle, pending, speak } = setup();
+  const { store, lifecycle, pending, speak, clock } = setup();
   lifecycle.panelsChanged('M1', 2);
   lifecycle.streamStatus('M1', 'rtms_started');
   speak('M1');
   lifecycle.streamStatus('M1', 'rtms_stopped', { meetingEnded: true });
   assert.equal(store.has('M1'), false);
 
-  // Zoom was wrong, or the same id runs again: with the panels still there, a stop keeps the data
+  // much later the same id runs again: with the panels still there, a stop keeps the data
+  clock.now += 11 * 60 * 1000;
   lifecycle.streamStatus('M1', 'rtms_started');
   speak('M1', 'second run');
   lifecycle.streamStatus('M1', 'rtms_stopped');
@@ -246,7 +247,7 @@ test('panels still connected when the meeting ends stay counted', () => {
 });
 
 test('a timer from before a flush cannot flush what came after it', () => {
-  const { store, lifecycle, timers, speak } = setup();
+  const { store, lifecycle, timers, speak, clock } = setup();
   lifecycle.streamStatus('M1', 'rtms_started');
   speak('M1');
   lifecycle.streamStatus('M1', 'rtms_stopped'); // idle timer pending
@@ -254,6 +255,7 @@ test('a timer from before a flush cannot flush what came after it', () => {
   lifecycle.streamStatus('M1', 'rtms_stopped', { meetingEnded: true });
   assert.equal(stale.cancelled, true);
 
+  clock.now += 11 * 60 * 1000; // long enough for the same id to count as a meeting again
   lifecycle.streamStatus('M1', 'rtms_started');
   speak('M1', 'new meeting data');
   stale.fn(); // even if a cancelled timer somehow ran
@@ -382,7 +384,7 @@ test('a stop inside the meeting forgets nothing, and a listener that throws does
   assert.equal(store.has('M1'), false);
 });
 
-test('hasEnded: true after the meeting ended, until a stream runs for it again or the memory of it lapses', () => {
+test('hasEnded: true after the meeting ended, whatever is reported for it, until the memory of it lapses', () => {
   const { lifecycle, speak, clock, fireAll } = setup();
   assert.equal(lifecycle.hasEnded('M1'), false);
   lifecycle.streamStatus('M1', 'rtms_started');
@@ -393,12 +395,20 @@ test('hasEnded: true after the meeting ended, until a stream runs for it again o
   assert.equal(lifecycle.hasEnded('M2'), false);
   assert.equal(lifecycle.hasEnded(42), false);
 
+  // a meeting that ended does not start again: a start or rejoin report that
+  // was still on its way changes nothing, and its lines stay refused
+  const tracked = lifecycle.tracked();
   lifecycle.streamStatus('M1', 'rtms_started');
-  assert.equal(lifecycle.hasEnded('M1'), false);
+  lifecycle.streamStatus('M1', 'rtms_reconnected');
+  assert.equal(lifecycle.hasEnded('M1'), true);
+  assert.equal(lifecycle.dataReceived('M1'), false);
+  assert.equal(speak('M1'), null);
+  assert.equal(lifecycle.tracked(), tracked);
 
-  lifecycle.streamStatus('M1', 'rtms_stopped', { meetingEnded: true });
   clock.now += 11 * 60 * 1000;
   assert.equal(lifecycle.hasEnded('M1'), false);
+  lifecycle.streamStatus('M1', 'rtms_started');
+  assert.notEqual(speak('M1'), null);
 
   // an idle flush is not the meeting ending
   lifecycle.streamStatus('M3', 'rtms_started');

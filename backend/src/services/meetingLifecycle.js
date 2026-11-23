@@ -80,10 +80,11 @@ function createMeetingLifecycle({
   const wasJustFlushed = (meetingId) => recentFlush(meetingId) !== null;
 
   /**
-   * Whether Zoom said a moment ago that this meeting is over, and no stream
-   * has run for it since. A meeting with several streams gets a stop report
-   * per stream; after the first one that says "the meeting ended", the rest
-   * are about a meeting that is already gone.
+   * Whether Zoom said a moment ago that this meeting is over. A meeting with
+   * several streams gets a stop report per stream; after the first one that
+   * says "the meeting ended", the rest are about a meeting that is already
+   * gone. So is a start or rejoin report: a Zoom meeting UUID that ended does
+   * not start again, so nothing brings the meeting back while this is true.
    */
   const hasEnded = (meetingId) => recentFlush(meetingId)?.ended === true;
 
@@ -142,7 +143,8 @@ function createMeetingLifecycle({
       return;
     }
     if (RUNNING.has(status)) {
-      flushedAt.delete(meetingId); // a real stream again: its lines are wanted
+      if (hasEnded(meetingId)) return; // the meeting is over: this report was still on its way
+      flushedAt.delete(meetingId); // a real stream again after an idle flush: its lines are wanted
       stateFor(meetingId).running = true;
     } else if (NOT_RUNNING.has(status)) {
       stateFor(meetingId).running = false;

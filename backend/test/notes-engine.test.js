@@ -464,3 +464,103 @@ test('newestLines: one line per segment, newest kept within the limit, and where
   assert.deepEqual(newestLines([{ seqNo: 1, speakerLabel: 'A\nB', text: 'x\r\ny' }], 100).lines, ['A B: x y']);
   assert.deepEqual(newestLines([{ seqNo: 1, speakerLabel: 'Ana', text: 'z'.repeat(500) }], 50).lines[0].length, 50);
 });
+
+// --- review fixes ------------------------------------------------------------
+
+test('validNotes: an owner that is a word for "nobody" is no owner', () => {
+  const nobody = ['null', 'NULL', 'Null', ' null ', 'none', 'None', 'n/a', 'N/A', 'unknown', 'Unknown', '', '   ', null, undefined, 42];
+  const answer = {
+    summary: 'ok',
+    actionItems: [...nobody.map((owner) => ({ text: 'Do it', owner })), { text: 'Do it' }, { text: 'Do it', owner: ' Ben ' }, { text: 'Do it', owner: 'Nullah Nonez' }],
+  };
+  const owners = validNotes(answer).actionItems.map((item) => item.owner);
+  assert.deepEqual(owners, [...nobody.map(() => null), null, 'Ben', 'Nullah Nonez']);
+});
+
+test('after five failed runs in a row nothing is tried until a new line is stored, then the count starts over', async () => {
+  const { calls, pending, logged, say, sayMany, advance, model, store } = setup();
+  model.answer = () => { throw new Error('down'); };
+  sayMany(5);
+  await tick();
+  for (let i = 0; i < 10; i += 1) await advance(INTERVAL);
+  assert.equal(calls.length, 5);
+  assert.deepEqual(pending(), []); // no timer is left looking
+  assert.equal(logged.length, 5);
+
+  // a new line: tried again, five times at most
+  say('something new');
+  await tick();
+  for (let i = 0; i < 10; i += 1) await advance(INTERVAL);
+  assert.equal(calls.length, 10);
+  assert.deepEqual(pending(), []);
+
+  // and it works again when the model does; the waiting lines are all in the run
+  model.answer = () => good('Recovered.');
+  say('one more');
+  await tick();
+  await advance(INTERVAL);
+  assert.equal(calls.length, 11);
+  assert.equal(calls[10].lines.length, 7);
+  assert.equal(store.getNotes(M).summary, 'Recovered.');
+});
+
+test('a run that works starts the count of failed runs over', async () => {
+  const { calls, say, sayMany, advance, model } = setup();
+  sayMany(5);
+  await tick();
+  for (let round = 0; round < 3; round += 1) {
+    model.answer = () => { throw new Error('down'); };
+    say();
+    for (let i = 0; i < 4; i += 1) await advance(INTERVAL); // four failures
+    model.answer = () => good();
+    await advance(INTERVAL); // and a run that works
+  }
+  assert.equal(calls.length, 1 + 3 * 5);
+});
+
+test('nothing runs while no owner has a panel open in the meeting; it runs when one connects', async () => {
+  const panels = { open: false, asked: [] };
+  const { engine, calls, sent, sayMany, advance } = setup({
+    hasOwnerPanel: (meetingId, ownerUserIds) => { panels.asked.push([meetingId, ownerUserIds]); return panels.open; },
+  });
+  sayMany(8);
+  await tick();
+  await advance(INTERVAL);
+  await advance(INTERVAL);
+  assert.equal(await engine.runNow(M), false);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(panels.asked[0], [M, ['u-ana']]);
+
+  panels.open = true;
+  engine.ownerPanelConnected(M);
+  await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].lines.length, 8);
+  assert.equal(sent.length, 1);
+
+  // nothing waiting: a panel connecting starts nothing
+  engine.ownerPanelConnected(M);
+  engine.ownerPanelConnected('UNKNOWN==');
+  engine.ownerPanelConnected(42);
+  await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(engine.size(), 1);
+});
+
+test('a panel connecting before a run is due does not run early, and a panel lookup that throws finds none', async () => {
+  const panels = { open: false };
+  const { engine, calls, sayMany, advance } = setup({ hasOwnerPanel: () => panels.open });
+  sayMany(2); // fewer than five: due one interval after the first line
+  panels.open = true;
+  engine.ownerPanelConnected(M);
+  await tick();
+  assert.equal(calls.length, 0);
+  await advance(INTERVAL);
+  assert.equal(calls.length, 1);
+
+  const broken = setup({ hasOwnerPanel: () => { throw new Error('lookup down'); } });
+  broken.sayMany(6);
+  await tick();
+  assert.equal(await broken.engine.runNow(M), false);
+  assert.equal(broken.calls.length, 0);
+});

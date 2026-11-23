@@ -35,6 +35,7 @@ const {
   getStats,
 } = require('../services/websocket');
 const { requireAuth } = require('../middleware/auth');
+const { verifyMeetingAccessToken } = require('../services/zoomAppContext');
 const { requireInternal, isInternalRequest, INTERNAL_KEY_HEADER, getInternalKey } = require('../lib/internalAuth');
 const { getMeetingStore } = require('../storage');
 const { getMeetingLifecycle } = require('../services/meetingLifecycle');
@@ -364,7 +365,8 @@ const INTERNAL_STATUSES = new Set([
 /**
  * Internal callers (rtms service) may post any lifecycle status. Browser callers
  * must be signed in and may only report pause/resume (the SDK pause/resume calls
- * happen client-side, so the backend learns about them from the browser).
+ * happen client-side, so the backend learns about them from the browser), and
+ * only for the meeting they were verified to be in: see inMeeting().
  */
 const STREAM_RUNNING = new Set(['rtms_started', 'rtms_reconnected']);
 const STREAM_ENDED = new Set(['rtms_stopped', 'rtms_failed']);
@@ -375,6 +377,21 @@ function authorizeStatusUpdate(req, res, next) {
     return next();
   }
   return requireAuth(req, res, next);
+}
+
+/**
+ * Whether the caller's meeting-access cookie (issued from the Zoom App Context,
+ * the same proof that opens the WebSocket) names exactly this meeting. Being
+ * signed in does not replace it.
+ */
+function inMeeting(req, meetingId) {
+  const token = req.cookies?.meetingAccess;
+  if (typeof token !== 'string' || token.length === 0) return false;
+  try {
+    return verifyMeetingAccessToken(token).meetingId === meetingId;
+  } catch {
+    return false;
+  }
 }
 
 router.post('/status', authorizeStatusUpdate, async (req, res) => {
@@ -392,6 +409,18 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
 
   if (req.isInternal && (!isOptionalId(streamId) || !isOptionalId(operatorId))) {
     return res.status(400).json({ error: 'Invalid streamId or operatorId' });
+  }
+  // A browser names its own meetingId: without this check a signed-in user
+  // could show "paused" to the panels of any meeting whose UUID they know
+  if (!req.isInternal && !inMeeting(req, meetingId)) {
+    return res.status(403).json({ error: 'Forbidden', message: 'Not a participant of this meeting' });
+  }
+  // A Zoom meeting UUID that ended does not start again. A start or rejoin
+  // report for one (it was on its way, or a rejoin got in as the meeting
+  // closed) is answered and otherwise ignored: nothing about the meeting
+  // comes back after its flush.
+  if (req.isInternal && STREAM_RUNNING.has(status) && getMeetingLifecycle().hasEnded(meetingId)) {
+    return res.status(200).json({ received: true, broadcast: 0 });
   }
 
   console.log(`RTMS Status Update: ${status}`);
