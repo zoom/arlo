@@ -92,6 +92,17 @@ function createSessionManager({
   ));
   const reportFor = (session, status, extra) => report(session.meetingUuid, session.streamId, status, extra);
 
+  /**
+   * Which stream a line or participant event comes from, and whose it is. Sent
+   * with every one, so a backend that restarted mid-meeting (and so never saw
+   * this stream's start report) still knows who brought Arlo in.
+   */
+  const whose = (session) => ({
+    streamId: session.streamId,
+    ...(session.operatorId && { operatorId: session.operatorId }),
+    ...(session.originalHost && { originalHost: true }),
+  });
+
   const sessionsOf = (meetingUuid) => [...sessions.values()].filter((s) => s.meetingUuid === meetingUuid);
 
   /**
@@ -153,7 +164,7 @@ function createSessionManager({
       tStartMs,
       tEndMs: tStartMs,
       seqNo: session.seqCounter,
-    }, { streamId: session.streamId }));
+    }, whose(session)));
   }
 
   function onParticipants(session, event, participants) {
@@ -187,7 +198,7 @@ function createSessionManager({
       };
     });
     if (events.length > 0) {
-      send('participant events', backend.participantEvents(session.meetingUuid, events, { streamId: session.streamId }));
+      send('participant events', backend.participantEvents(session.meetingUuid, events, whose(session)));
     }
   }
 
@@ -436,6 +447,11 @@ function createSessionManager({
       if (operatorId && other.operatorId === operatorId) {
         log.log('The same user started a new stream in this meeting: replacing their old stream');
         release(other.streamId, other);
+        // Nothing else will ever say so: Zoom may send no stop for a stream it
+        // replaced, and without this report the backend would count the old
+        // stream as running for good, also when the new one cannot be joined.
+        // An ordinary stop: not a fault, and the meeting goes on.
+        reportFor(other, 'rtms_stopped');
       }
     }
 

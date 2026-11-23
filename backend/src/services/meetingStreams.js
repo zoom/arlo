@@ -94,7 +94,7 @@ function createMeetingStreams(options = {}) {
     if (Number.isInteger(options[name]) && options[name] > 0) limits[name] = options[name];
   }
   // meetingId -> {
-  //   streams: Map(key -> { operatorId, originalHost, live, demoted }),
+  //   streams: Map(key -> { operatorId, originalHost, live, demoted, replaced }),
   //   sourceKey,
   //   sourceHeardAt: when the source last delivered, or became the source,
   //   displaced: { key, at } the source replaced for silence a moment ago, or null,
@@ -103,7 +103,8 @@ function createMeetingStreams(options = {}) {
   //   recent: Map(line key -> when stored) the lines stored last, oldest first,
   //   warned }
   // The streams Map keeps the order in which the streams started. `demoted`
-  // marks a stream that lost the source role through silence.
+  // marks a stream that lost the source role through silence, `replaced` one
+  // that ended because its user started a new one.
   const meetings = new Map();
 
   function stateFor(meetingId) {
@@ -216,7 +217,9 @@ function createMeetingStreams(options = {}) {
       }
       return null;
     }
-    const stream = { operatorId: null, originalHost: false, live: true, demoted: false };
+    const stream = {
+      operatorId: null, originalHost: false, live: true, demoted: false, replaced: false,
+    };
     state.streams.set(key, stream);
     return stream;
   }
@@ -231,12 +234,19 @@ function createMeetingStreams(options = {}) {
     const operator = isId(operatorId) ? operatorId : null;
 
     // The same user started again: the rtms service has replaced their old
-    // stream without a stop report, so it is replaced here too
+    // stream, so it is over here too, whether or not the stop report for it
+    // has arrived. It is kept as a stopped stream, so a line of it still on
+    // its way is not taken for a new stream; the one it had replaced itself
+    // goes, so a user who keeps restarting does not fill the meeting.
     if (operator) {
       for (const [otherKey, other] of state.streams) {
-        if (otherKey !== key && other.operatorId === operator) {
+        if (otherKey === key || other.operatorId !== operator) continue;
+        if (other.replaced && otherKey !== state.sourceKey) {
           state.streams.delete(otherKey);
           state.handover.delete(otherKey);
+        } else {
+          other.live = false;
+          other.replaced = true;
         }
       }
     }
@@ -251,6 +261,7 @@ function createMeetingStreams(options = {}) {
     if (!stream) stream = addStream(state, key);
     if (stream) {
       stream.live = true;
+      stream.replaced = false;
       if (operator) stream.operatorId = operator;
       if (originalHost === true) stream.originalHost = true;
     }
@@ -298,12 +309,16 @@ function createMeetingStreams(options = {}) {
 
   /**
    * Whether a transcript line or a timeline event from this stream is to be
-   * kept. Pass a line as `{ line: { speakerId, tStartMs, text } }`; without
-   * `line` the call is about a timeline event.
+   * kept. `details` is `{ line: { speakerId, tStartMs, text }, operatorId,
+   * originalHost }`, each optional; without `line` the call is about a
+   * timeline event.
    *
    * A stream first heard of through its data counts as started: this server
-   * may have restarted mid-meeting and missed the report. A stream known to
-   * have stopped is not brought back by a late line.
+   * may have restarted mid-meeting and missed the report. The rtms service
+   * says with every line whose stream it is (`operatorId`, `originalHost`), so
+   * such a stream has its operator, and one known without an operator gets it.
+   * Data never replaces another stream of the same user: only a start report
+   * does. A stream known to have stopped is not brought back by a late line.
    *
    * This is also where a dead source is noticed (see the top of this file): a
    * line from another live stream, when the source has delivered nothing for
@@ -331,12 +346,13 @@ function createMeetingStreams(options = {}) {
       state.sourceHeardAt = at;
       return keep();
     }
-    if (!state.streams.has(key)) {
-      addStream(state, key);
-      chooseSource(state);
-    }
-    const stream = state.streams.get(key);
+    const learned = !state.streams.has(key);
+    const stream = learned ? addStream(state, key) : state.streams.get(key);
     if (!stream) return false; // the meeting is full
+    const becameHost = details?.originalHost === true && !stream.originalHost;
+    if (stream.operatorId === null && isId(details?.operatorId)) stream.operatorId = details.operatorId;
+    if (becameHost) stream.originalHost = true;
+    if (learned || becameHost) chooseSource(state);
     if (state.sourceKey === key) {
       state.sourceHeardAt = at;
       return keep();

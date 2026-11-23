@@ -86,21 +86,47 @@ function stopReported(meetingId, streamId, meetingEnded) {
 
 /**
  * Whether a line (`line` given) or a timeline event from this stream is kept:
- * see acceptsDataFrom() in services/meetingStreams.js. Answers false for a
- * meeting that was flushed a moment ago, before anything is noted about its
- * streams, so nothing about a meeting comes back after its flush.
+ * see acceptsDataFrom() in services/meetingStreams.js. `stream` is what the
+ * rtms service says with it: { streamId, operatorId, originalHost }. Answers
+ * false for a meeting that was flushed a moment ago, before anything is noted
+ * about its streams, so nothing about a meeting comes back after its flush.
  */
-function keepsDataFrom(meetingId, streamId, line) {
-  if (!getMeetingLifecycle().dataReceived(meetingId)) return false;
+function keepsDataFrom(meetingId, { streamId, operatorId, originalHost }, line) {
+  const lifecycle = getMeetingLifecycle();
+  if (!lifecycle.dataReceived(meetingId)) return false;
   const streams = getMeetingStreams();
   const wasSource = streams.isSource(meetingId, streamId);
-  const kept = streams.acceptsDataFrom(meetingId, streamId, line === undefined ? undefined : { line });
+  const operatorsBefore = streams.operators(meetingId).length;
+  const kept = streams.acceptsDataFrom(meetingId, streamId, {
+    ...(line !== undefined && { line }),
+    operatorId,
+    originalHost: originalHost === true,
+  });
+  const told = currentStreamStatus(meetingId);
+  const learnedRunning = told === null && streams.anyLive(meetingId);
   // This stream just took over from one that went silent without a stop
-  // report. If the panels were told the old one was reconnecting, for them a
-  // stream is running again, and whose stream is stored may have changed.
-  const tookOver = !wasSource && streams.isSource(meetingId, streamId);
-  if (tookOver && currentStreamStatus(meetingId) === 'rtms_interrupted') {
-    broadcastMeetingStatus(meetingId, 'rtms_started');
+  // report, and the panels were told the old one was reconnecting: for them a
+  // stream is running again.
+  const tookOver = told === 'rtms_interrupted' && !wasSource && streams.isSource(meetingId, streamId);
+  if (learnedRunning) {
+    // A stream is running that nobody announced: this server restarted
+    // mid-meeting and learned it from its data. The lifecycle, the panels and
+    // the timeline get what the lost start report would have given them.
+    // Once: from here on the meeting has a status.
+    lifecycle.streamStatus(meetingId, 'rtms_started');
+    // eslint-disable-next-line no-use-before-define
+    recordParticipantEvent(meetingId, {
+      eventType: 'transcription_started', participantName: 'Arlo', participantId: null, timestamp: Date.now(),
+    });
+    const operator = isStreamId(operatorId) ? userStore.findByZoomId(operatorId) : null;
+    if (operator) crossRegisterUser(operator.id, meetingId);
+    console.log('A running stream was learned from its data: the meeting is marked as running');
+  }
+  if (learnedRunning || tookOver) broadcastMeetingStatus(meetingId, 'rtms_started');
+  // Each panel learns what it is to Arlo now: whose stream is stored may have
+  // changed, or whose stream this is was not known until now (that person
+  // brought Arlo in too)
+  if (learnedRunning || tookOver || streams.operators(meetingId).length !== operatorsBefore) {
     broadcastArloState(meetingId);
   }
   return kept;
@@ -475,8 +501,11 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
  * until the meeting ends) and sent to the panels connected to it.
  */
 router.post('/broadcast', requireInternal, async (req, res) => {
-  const { meetingId, segment, streamId } = req.body || {};
-  if (typeof meetingId !== 'string' || !segment || typeof segment !== 'object' || !isOptionalId(streamId)) {
+  const {
+    meetingId, segment, streamId, operatorId, originalHost,
+  } = req.body || {};
+  if (typeof meetingId !== 'string' || !segment || typeof segment !== 'object'
+      || !isOptionalId(streamId) || !isOptionalId(operatorId)) {
     return res.status(400).json({ error: 'Invalid broadcast payload' });
   }
 
@@ -488,7 +517,7 @@ router.post('/broadcast', requireInternal, async (req, res) => {
   // a line that is stored already (each user's stream carries the same speech;
   // one copy is kept). The line's own fields decide what a duplicate is.
   const line = { speakerId: segment.speakerId, tStartMs: segment.tStartMs, text: segment.text };
-  if (!keepsDataFrom(meetingId, streamId, line)) {
+  if (!keepsDataFrom(meetingId, { streamId, operatorId, originalHost }, line)) {
     return res.status(200).json({ received: true, stored: false, broadcast: 0 });
   }
   const stored = getMeetingStore().appendSegment(meetingId, segment);
@@ -509,14 +538,17 @@ router.post('/broadcast', requireInternal, async (req, res) => {
  * Kept for the meeting (in memory) and sent to its panels
  */
 router.post('/participant-event', requireInternal, async (req, res) => {
-  const { meetingId, events, streamId } = req.body || {};
-  if (typeof meetingId !== 'string' || !Array.isArray(events) || !isOptionalId(streamId)) {
+  const {
+    meetingId, events, streamId, operatorId, originalHost,
+  } = req.body || {};
+  if (typeof meetingId !== 'string' || !Array.isArray(events)
+      || !isOptionalId(streamId) || !isOptionalId(operatorId)) {
     return res.status(400).json({ error: 'Invalid participant-event payload' });
   }
 
   logger.debug(`Participant events received: ${events.length}`);
   // Every stream of a meeting reports the same people: one stream's are kept
-  if (!keepsDataFrom(meetingId, streamId)) {
+  if (!keepsDataFrom(meetingId, { streamId, operatorId, originalHost })) {
     return res.status(200).json({ received: true, stored: false, broadcast: 0 });
   }
 

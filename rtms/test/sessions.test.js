@@ -172,6 +172,68 @@ test('the same user starting again replaces their own old stream, and nobody els
   assert.equal(manager.size(), 2);
 });
 
+test('a stream replaced because its user started a new one is reported as stopped', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  await manager.started(second());
+  clients[1].handlers.joinConfirm(0);
+  await manager.started(started({ rtms_stream_id: 'stream-3' })); // op-1 again
+  await tick();
+
+  // an ordinary stop of the old stream: not a fault, and the meeting goes on
+  assert.deepEqual(sent.status.at(-1), { meetingId: 'MEETING-1==', status: 'rtms_stopped', streamId: 'stream-1' });
+  assert.deepEqual(sent.status.filter((s) => s.status === 'rtms_stopped').length, 1);
+
+  clients[2].handlers.joinConfirm(0);
+  await tick();
+  assert.deepEqual(sent.status.slice(-2).map((s) => [s.status, s.streamId]), [
+    ['rtms_stopped', 'stream-1'], ['rtms_started', 'stream-3'],
+  ]);
+});
+
+test('when the stream that replaced a user\'s old one cannot be joined, both are reported: nothing is left running', async () => {
+  const { manager, clients, sent, fire } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  await manager.started(started({ rtms_stream_id: 'stream-3' }));
+  clients[1].handlers.joinConfirm(16);
+  for (let attempt = 1; attempt <= MAX_RECONNECT_ATTEMPTS; attempt += 1) {
+    fire(reconnectDelay(attempt));
+    clients[attempt + 1].handlers.joinConfirm(16);
+  }
+  await tick();
+
+  assert.deepEqual(sent.status.map((s) => [s.status, s.streamId]), [
+    ['rtms_started', 'stream-1'], ['rtms_stopped', 'stream-1'], ['rtms_failed', 'stream-3'],
+  ]);
+  assert.equal(manager.size(), 0);
+});
+
+test('lines and participant events say whose stream they come from, so a restarted backend learns it', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started({ is_original_host: true }));
+  await manager.started(second());
+  await manager.started(second({ rtms_stream_id: 'stream-3', operator_id: undefined }));
+  for (const client of clients) {
+    client.handlers.joinConfirm(0);
+    client.handlers.participant('join', 1, [{ participantId: 11, userName: 'Ana' }]);
+    client.handlers.transcript(Buffer.from('Hello'), 5, 1_700_000_000_000_000, { userId: 11, userName: 'Ana' });
+  }
+  await tick();
+
+  const whose = ({ streamId, operatorId, originalHost }) => ({ streamId, operatorId, originalHost });
+  const expected = [
+    { streamId: 'stream-1', operatorId: 'op-1', originalHost: true },
+    { streamId: 'stream-2', operatorId: 'op-2', originalHost: undefined },
+    { streamId: 'stream-3', operatorId: undefined, originalHost: undefined },
+  ];
+  assert.deepEqual(sent.segments.map(whose), expected);
+  assert.deepEqual(sent.participantEvents.map(whose), expected);
+  assert.equal('operatorId' in sent.segments[2], false);
+  assert.equal('originalHost' in sent.segments[1], false);
+});
+
 test('streams whose user is not known are never taken for the same user', async () => {
   const { manager, clients } = setup();
   await manager.started(started({ operator_id: undefined }));
@@ -315,6 +377,7 @@ test('transcript data is forwarded as numbered segments with the speaker and a m
   assert.deepEqual(sent.segments[0], {
     meetingId: 'MEETING-1==',
     streamId: 'stream-1',
+    operatorId: 'op-1',
     segment: { speakerId: '7', speakerLabel: 'Ana', text: 'We ship on Friday.', tStartMs: 1_700_000_000_123, tEndMs: 1_700_000_000_123, seqNo: 1 },
   });
   assert.equal(sent.segments[1].segment.speakerLabel, 'Speaker 8');

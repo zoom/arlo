@@ -626,3 +626,80 @@ test('timeline events from a stream that is not the source are dropped, also aro
   assert.equal(streams.acceptsDataFrom(M, 'B'), true);
   assert.equal(streams.acceptsDataFrom(M, 'A', { line: lineNo(1) }), true); // its lines are
 });
+
+// --- whose stream it is, learned from its data (this server restarted) -------
+
+test('a stream first heard of through its lines gets its operator and original-host flag from them', () => {
+  const { streams } = setup();
+  assert.equal(streams.acceptsDataFrom(M, 's1', { line: lineNo(1), operatorId: 'op-1' }), true);
+  assert.deepEqual(streams.operators(M), ['op-1']);
+  assert.equal(streams.sourceOperator(M), 'op-1');
+
+  // a second one is known too, though its lines are not the stored ones
+  assert.equal(streams.acceptsDataFrom(M, 's2', { line: lineNo(2), operatorId: 'op-2' }), false);
+  assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
+  assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: true });
+
+  // the original host's stream takes over, as it does when its start is reported
+  assert.equal(streams.acceptsDataFrom(M, 's3', { operatorId: 'op-host', originalHost: true }), true);
+  assert.equal(streams.isSource(M, 's3'), true);
+  assert.deepEqual(streams.operators(M), ['op-host', 'op-1', 'op-2']);
+});
+
+test('data fills in an operator that was not known, and never changes one that was', () => {
+  const { streams } = setup();
+  streams.streamStarted(M, { streamId: 's1' });
+  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
+  streams.acceptsDataFrom(M, 's1', { line: lineNo(1), operatorId: 'op-1' });
+  streams.acceptsDataFrom(M, 's2', { line: lineNo(1), operatorId: 'op-other' });
+  assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
+
+  // values that are not sane are not used; only the boolean marks the original host
+  streams.acceptsDataFrom(M, 's4', { line: lineNo(2), operatorId: 42, originalHost: 'true' });
+  streams.acceptsDataFrom(M, 's5', { line: lineNo(2), operatorId: 'x'.repeat(257), originalHost: 1 });
+  assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
+  assert.equal(streams.isSource(M, 's1'), true);
+});
+
+test('a known stream learned to be the original host\'s from its data becomes the source', () => {
+  const { streams } = setup();
+  streams.acceptsDataFrom(M, 's1', { line: lineNo(1), operatorId: 'op-1' });
+  streams.acceptsDataFrom(M, 's2', { line: lineNo(1), operatorId: 'op-2' });
+  assert.equal(streams.isSource(M, 's1'), true);
+  assert.equal(streams.acceptsDataFrom(M, 's2', { line: lineNo(2), operatorId: 'op-2', originalHost: true }), true);
+  assert.equal(streams.isSource(M, 's2'), true);
+});
+
+test('data from a stream never replaces another stream of the same user', () => {
+  const { streams } = setup();
+  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
+  streams.acceptsDataFrom(M, 's0', { line: lineNo(1), operatorId: 'op-1' }); // a line of an older stream of theirs
+  assert.equal(streams.isSource(M, 's1'), true);
+  assert.equal(streams.acceptsDataFrom(M, 's1', { line: lineNo(2) }), true);
+});
+
+test('a stream its user replaced counts as stopped: late lines do not bring it back', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
+  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-1' });
+  assert.equal(streams.isSource(M, 's2'), true);
+  // its lines still on their way are kept for a moment, like any stopped source's
+  assert.equal(streams.acceptsDataFrom(M, 's1', { line: lineNo(1), operatorId: 'op-1' }), true);
+  after(11);
+  assert.equal(streams.acceptsDataFrom(M, 's1', { line: lineNo(2), operatorId: 'op-1' }), false);
+  assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: true }); // the rtms service's report for it
+  assert.deepEqual(streams.streamStopped(M, 's2'), { anyLive: false });
+  assert.deepEqual(streams.operators(M), ['op-1']);
+});
+
+test('a user who keeps starting new streams does not fill the meeting with old ones', () => {
+  const { streams, warnings } = setup();
+  streams.streamStarted(M, { streamId: 'other', operatorId: 'op-2' });
+  for (let i = 1; i <= 60; i += 1) streams.streamStarted(M, { streamId: `s${i}`, operatorId: 'op-1' });
+  assert.deepEqual(warnings, []);
+  streams.streamStarted(M, { streamId: 'third', operatorId: 'op-3' });
+  assert.deepEqual(streams.operators(M), ['op-2', 'op-1', 'op-3']);
+  streams.streamStopped(M, 'other');
+  streams.streamStopped(M, 'third');
+  assert.deepEqual(streams.streamStopped(M, 's60'), { anyLive: false });
+});

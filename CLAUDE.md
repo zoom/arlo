@@ -135,6 +135,8 @@ Several Zoom users can each run a stream in the same meeting, each with its own 
 - A source can die without a stop report. When a line arrives from another live stream and the source has delivered nothing for 30 seconds, that stream becomes the source. Silence alone changes nothing. If the old source delivers again within 5 seconds, it has the role back.
 - Losing a line is worse than storing one twice. For 10 seconds after any change of source, lines from the previous source are accepted too (also when it was just reported stopped: its lines can still be on their way). Every accepted line is checked against a short per-meeting memory of stored lines (speaker id + start time + a hash of the text; the last 200 lines or 2 minutes) and dropped only when it is already there. A change of role never drops a line by itself. The memory goes with the meeting's flush.
 - Each stream's operator is remembered, also after the stream stopped, until the meeting is flushed. Every operator who is signed in to Arlo is an owner and gets the notes.
+- The rtms service says with every line and participant event whose stream it is (`streamId`, `operatorId`, `originalHost`). A backend that restarted mid-meeting learns the streams and their owners from the next line, and tells the lifecycle and the panels once that the meeting is running.
+- When the same user starts a new stream, the rtms service leaves their old one and reports it stopped. The backend keeps it as a stopped stream, so a late line from it does not count as a new stream.
 
 ### Live notes
 

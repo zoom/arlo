@@ -197,16 +197,27 @@ app.post('/webhook', async (req, res) => {
 });
 
 /**
+ * Which stream a report is about and whose it is, as sent to the backend.
+ * `operatorId` and `originalHost` go with lines and participant events too, so
+ * a backend that restarted mid-meeting learns them from the next line.
+ */
+const streamFields = ({ streamId, operatorId, originalHost } = {}) => ({
+  ...(streamId && { streamId }),
+  ...(operatorId && { operatorId }),
+  ...(originalHost === true && { originalHost: true }),
+});
+
+/**
  * Broadcast segment to WebSocket clients via backend
  */
-async function broadcastSegment(meetingId, segment, { streamId } = {}) {
+async function broadcastSegment(meetingId, segment, stream) {
   try {
     // Use Docker service name for inter-container communication
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await internalHttp.post(`${backendUrl}/api/rtms/broadcast`, {
       meetingId,
       segment,
-      ...(streamId && { streamId }),
+      ...streamFields(stream),
     });
   } catch (error) {
     // Non-critical, just log
@@ -217,13 +228,13 @@ async function broadcastSegment(meetingId, segment, { streamId } = {}) {
 /**
  * Broadcast participant events to frontend via backend
  */
-async function broadcastParticipantEvents(meetingId, events, { streamId } = {}) {
+async function broadcastParticipantEvents(meetingId, events, stream) {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await internalHttp.post(`${backendUrl}/api/rtms/participant-event`, {
       meetingId,
       events,
-      ...(streamId && { streamId }),
+      ...streamFields(stream),
     });
     console.log(`Sent ${events.length} participant events to backend for broadcast`);
   } catch (error) {
