@@ -769,8 +769,9 @@ export function MeetingProvider({ children }) {
     return () => { cancelled = true; };
   }, [isAuthenticated, meetingId, rtmsActive, accessVerified]);
 
-  // Stored transcript and timeline for this meeting, when the server keeps one
-  // (database mode). In demo mode these return nothing.
+  // What the server holds for this meeting so far: the transcript and timeline
+  // from before this panel opened, or from while its connection was down.
+  // Loaded again each time the socket (re)connects, then merged with live lines.
   useEffect(() => {
     if (!meetingId || !accessVerified) return undefined;
     let cancelled = false;
@@ -790,7 +791,7 @@ export function MeetingProvider({ children }) {
       });
     });
     return () => { cancelled = true; };
-  }, [meetingId, accessVerified]);
+  }, [meetingId, accessVerified, ws]);
 
   // Send Zoom meeting topic to backend to replace generic "Meeting M/D/YYYY" title
   // Wait for rtmsActive so the meeting record exists in the DB before patching
