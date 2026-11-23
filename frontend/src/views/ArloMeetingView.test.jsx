@@ -814,6 +814,55 @@ describe('a pause made with Zoom\'s own controls', () => {
   });
 });
 
+describe('Zoom\'s indicator while Arlo is paused', () => {
+  const lastText = (sdk) => sdk.setDynamicIndicator.mock.calls.at(-1)?.[0]?.text;
+
+  /** This panel brought Arlo in, and the stream is confirmed. */
+  async function broughtInHere() {
+    const result = await openArlo();
+    await userEvent.click(await screen.findByRole('button', { name: 'Bring Arlo into this meeting' }));
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.arloState(OWNER));
+    await screen.findByText('Arlo is in the meeting');
+    await waitFor(() => expect(lastText(result.sdk)).toBe('Arlo is transcribing'));
+    return result;
+  }
+
+  test('a pause the server reports: "Arlo is paused"; the resume: transcribing again; a stop removes it', async () => {
+    const { sdk } = await broughtInHere();
+    await send(serverMessage.status('rtms_paused'));
+    await send(serverMessage.arloState({ ...OWNER, paused: true, myStreamPaused: true }));
+    await waitFor(() => expect(lastText(sdk)).toBe('Arlo is paused'));
+    expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({ text: 'Arlo is paused' });
+    expect(sdk.removeDynamicIndicator).not.toHaveBeenCalled();
+
+    await send(serverMessage.status('rtms_resumed'));
+    await send(serverMessage.arloState(OWNER));
+    await waitFor(() => expect(lastText(sdk)).toBe('Arlo is transcribing'));
+    expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(3);
+
+    await send(serverMessage.status('rtms_stopped'));
+    await send(serverMessage.arloState({ ...OWNER, present: false }));
+    await waitFor(() => expect(sdk.removeDynamicIndicator).toHaveBeenCalledTimes(1));
+  });
+
+  test('only this owner\'s stream is paused (the meeting is not): the indicator says paused all the same', async () => {
+    const { sdk } = await broughtInHere();
+    await send(serverMessage.arloState({ ...OWNER, paused: false, myStreamPaused: true }));
+    await waitFor(() => expect(lastText(sdk)).toBe('Arlo is paused'));
+    await send(serverMessage.arloState({ ...OWNER, paused: false, myStreamPaused: false }));
+    await waitFor(() => expect(lastText(sdk)).toBe('Arlo is transcribing'));
+  });
+
+  test('a panel that did not start the stream sets nothing when it is paused', async () => {
+    const { sdk } = await openAsOwner();
+    await send(serverMessage.status('rtms_paused'));
+    await send(serverMessage.arloState({ ...OWNER, paused: true, myStreamPaused: true }));
+    await screen.findByText('Arlo is paused');
+    expect(sdk.setDynamicIndicator).not.toHaveBeenCalled();
+  });
+});
+
 describe('several people each run a stream: whose pause it is', () => {
   test('an owner whose own stream is paused sees "Arlo is paused" and Resume, though the meeting is not paused', async () => {
     const { sdk } = await openAsOwner();

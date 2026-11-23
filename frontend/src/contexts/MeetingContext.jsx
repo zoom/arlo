@@ -166,6 +166,8 @@ export function MeetingProvider({ children }) {
   // From `arlo.state` on the socket. A pause made with Zoom's own controls is
   // only known this way.
   const ownPauseOnServerRef = useRef(null);
+  // The same, as state, for what is rendered from it (Zoom's indicator)
+  const [ownPauseOnServer, setOwnPauseOnServer] = useState(null);
   const stoppedStreamWasOursRef = useRef(false);
   const faultRestartsRef = useRef(0);
   const isGuestRef = useRef(isGuest);
@@ -397,6 +399,7 @@ export function MeetingProvider({ children }) {
   const openSocket = useCallback((meetingId) => {
     // A new socket (another meeting, or a reconnect): the server says it again
     ownPauseOnServerRef.current = null;
+    setOwnPauseOnServer(null);
     // A retry still waiting would replace the socket about to be opened
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -476,6 +479,7 @@ export function MeetingProvider({ children }) {
           ownPauseOnServerRef.current = data.present === true && data.role === 'owner' && typeof data.myStreamPaused === 'boolean'
             ? data.myStreamPaused
             : null;
+          setOwnPauseOnServer(ownPauseOnServerRef.current);
           if (ownPauseOnServerRef.current !== null) {
             dispatchRtms({ type: 'SERVER_PAUSE', paused: ownPauseOnServerRef.current });
           }
@@ -763,6 +767,7 @@ export function MeetingProvider({ children }) {
     supported: dynamicIndicatorSupported,
     text: indicatorText({
       phase: rtms.phase,
+      pausedOnServer: ownPauseOnServer === true,
       startedHere: streamStartedHere,
       guest: isGuest,
       voiceEnabled: voiceState.enabled,
@@ -772,9 +777,13 @@ export function MeetingProvider({ children }) {
   // Why the indicator is or is not shown, on every change (status only, no content)
   useEffect(() => {
     console.log('[indicator] state:', {
-      supported: dynamicIndicatorSupported, phase: rtms.phase, startedHere: streamStartedHere, guest: isGuest,
+      supported: dynamicIndicatorSupported,
+      phase: rtms.phase,
+      pausedOnServer: ownPauseOnServer === true,
+      startedHere: streamStartedHere,
+      guest: isGuest,
     });
-  }, [dynamicIndicatorSupported, rtms.phase, streamStartedHere, isGuest]);
+  }, [dynamicIndicatorSupported, rtms.phase, ownPauseOnServer, streamStartedHere, isGuest]);
   const reportVoiceState = useCallback((enabled, processing) => {
     setVoiceState((prev) => (
       prev.enabled === enabled && prev.processing === processing ? prev : { enabled, processing }
