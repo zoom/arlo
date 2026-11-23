@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Search, Settings } from 'lucide-react';
 import { useServerSettings } from '../contexts/ServerSettingsContext';
+import { useArlo } from '../contexts/ArloContext';
 import ArloLogo from './ArloLogo';
 import Button from './ui/Button';
 import LiveMeetingBanner from './LiveMeetingBanner';
@@ -11,6 +12,7 @@ export default function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const { showSearch } = useServerSettings();
+  const { afterNotesMeetingId } = useArlo();
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -81,13 +83,18 @@ export default function AppShell() {
       navigate('/home');
       return;
     }
+    // The notes of the meeting that just ended are still held: back is those notes
+    if (afterNotesMeetingId !== null) {
+      navigate(`/meeting/${encodeURIComponent(afterNotesMeetingId)}`);
+      return;
+    }
     // Otherwise use browser history
     if (window.history.length > 1) {
       navigate(-1);
     } else {
       navigate('/home');
     }
-  }, [navigate, location.pathname]);
+  }, [navigate, location.pathname, afterNotesMeetingId]);
 
   const handleResultClick = (result) => {
     setSearchOpen(false);

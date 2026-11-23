@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMeeting } from '../contexts/MeetingContext';
+import { useArlo } from '../contexts/ArloContext';
+import { accessHidesScreen } from '../lib/meetingAccess';
 import { useAuth } from '../contexts/AuthContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import MeetingAccessNotice from '../components/MeetingAccessNotice';
@@ -24,8 +26,11 @@ export default function MeetingRecordView({ isGuestMode = false }) {
   const { id: routeId } = useParams();
   const navigate = useNavigate();
   const {
-    ws, meetingId, meetingAccess, meetingEnded, connectWebSocket, segments, participantEvents,
+    ws, meetingId, meetingAccess, connectWebSocket, segments, participantEvents,
   } = useMeeting();
+  const { meetingOver, afterNotesMeetingId } = useArlo();
+  // The owner's notes of a meeting that is over are still held, and its record with them
+  const afterMeeting = afterNotesMeetingId !== null;
   const { isAuthenticated } = useAuth();
   const { isTestMode, runningContext } = useZoomSdk();
   const [onlyArlo, setOnlyArlo] = useState(false);
@@ -38,9 +43,9 @@ export default function MeetingRecordView({ isGuestMode = false }) {
   const hasAnything = useMemo(() => buildTimeline(segments, participantEvents).length > 0, [segments, participantEvents]);
   const hasShown = useMemo(() => buildTimeline(shownSegments, shownEvents).length > 0, [shownSegments, shownEvents]);
 
-  // Out of a meeting there is no record to read
+  // Out of a meeting there is no record to read, except the one kept with the owner's notes
   const outsideMeeting = !isGuestMode && !isTestMode && runningContext !== null && runningContext !== 'inMeeting';
-  const nothingToShow = outsideMeeting && !hasAnything;
+  const nothingToShow = outsideMeeting && !hasAnything && !afterMeeting;
   useEffect(() => {
     if (nothingToShow) navigate('/home', { replace: true });
   }, [nothingToShow, navigate]);
@@ -56,7 +61,7 @@ export default function MeetingRecordView({ isGuestMode = false }) {
   if (nothingToShow) return null;
 
   let content;
-  if (meetingAccess.status !== 'verified' && !hasAnything) {
+  if (accessHidesScreen(meetingAccess) && !hasAnything && !afterMeeting) {
     content = meetingAccess.status === 'idle' ? (
       <div className="arlo-center"><LoadingSpinner size={24} /></div>
     ) : (
@@ -69,7 +74,7 @@ export default function MeetingRecordView({ isGuestMode = false }) {
   } else {
     let empty = 'Nothing has been said since Arlo joined.';
     if (onlyArlo) empty = 'Arlo has not done anything yet.';
-    else if (meetingEnded) empty = 'The meeting has ended. Its record is not stored.';
+    else if (meetingOver) empty = 'The meeting has ended. Its record is not stored.';
     content = (
       <>
         <label className="record-toggle">

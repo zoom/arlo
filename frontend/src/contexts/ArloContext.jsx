@@ -16,6 +16,10 @@ import { cleanNotes } from '../lib/notesText';
  * - When the meeting ends the server deletes its data and says so: role
  *   'participant', no owner. The panel keeps what it had, so the owner's notes
  *   stay on screen until another meeting is opened.
+ * - Leaving the meeting is the same for this panel as the meeting ending
+ *   (`meetingOver`): the server's word may never arrive, the socket is closed.
+ * - While the owner's notes are held, the meeting's transcript and timeline are
+ *   held with them (MeetingContext), so the meeting record still opens.
  *
  * Nothing here is logged: state, notes, questions and answers are meeting content.
  */
@@ -62,7 +66,11 @@ function parseState(data) {
 const arloUrl = (meetingId, name) => `/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/arlo/${name}`;
 
 export function ArloProvider({ children }) {
-  const { ws, meetingId, meetingAccess, meetingEnded } = useMeeting();
+  const {
+    ws, meetingId, meetingAccess, meetingEnded, leftMeeting, lastMeetingId, switchingMeeting, setRecordRetained,
+  } = useMeeting();
+  // Over for this panel: Zoom said the meeting ended, or this person left it
+  const meetingOver = meetingEnded === true || leftMeeting === true;
   const { isAuthenticated } = useAuth();
   const accessVerified = meetingAccess?.status === 'verified';
 
@@ -94,8 +102,8 @@ export function ArloProvider({ children }) {
   }, [meetingId]);
 
   useEffect(() => {
-    endedRef.current = meetingEnded === true;
-  }, [meetingEnded]);
+    endedRef.current = meetingOver;
+  }, [meetingOver]);
 
   const applyState = useCallback((data) => {
     const next = parseState(data);
@@ -231,19 +239,33 @@ export function ArloProvider({ children }) {
     }
   }, []);
 
+  const holdsNotes = role === 'owner' && notes !== null;
+  useEffect(() => {
+    setRecordRetained(holdsNotes);
+  }, [holdsNotes, setRecordRetained]);
+
+  // The render between Zoom reporting another meeting and the reset above
+  // already shows nothing of the previous one
+  const shown = switchingMeeting ? NOT_LOADED : state;
+  const shownNotes = switchingMeeting ? null : notes;
+  // The meeting whose notes are still on screen after it is over, for the way back to them
+  const afterNotesMeetingId = !switchingMeeting && holdsNotes && meetingOver ? lastMeetingId : null;
+
   const value = useMemo(() => ({
-    loaded: state.loaded,
-    present: state.present,
-    paused: state.paused,
-    role: state.role,
-    ownerName: state.ownerName,
-    whoCanAsk: state.whoCanAsk,
-    everPresent,
-    notes,
+    loaded: shown.loaded,
+    present: shown.present,
+    paused: shown.paused,
+    role: shown.role,
+    ownerName: shown.ownerName,
+    whoCanAsk: shown.whoCanAsk,
+    everPresent: everPresent && !switchingMeeting,
+    notes: shownNotes,
+    meetingOver: meetingOver && !switchingMeeting,
+    afterNotesMeetingId,
     setWhoCanAsk,
     ask,
     asking,
-  }), [state, everPresent, notes, setWhoCanAsk, ask, asking]);
+  }), [shown, everPresent, switchingMeeting, shownNotes, meetingOver, afterNotesMeetingId, setWhoCanAsk, ask, asking]);
 
   return (
     <ArloContext.Provider value={value}>

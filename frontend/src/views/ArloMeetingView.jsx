@@ -9,6 +9,7 @@ import useZoomAuth from '../hooks/useZoomAuth';
 import useSecondsLeft from '../hooks/useSecondsLeft';
 import { getArloScreen, canControlArlo } from '../lib/arloScreen';
 import { getTransportView } from '../lib/transportView';
+import { accessHidesScreen } from '../lib/meetingAccess';
 import MeetingAccessNotice from '../components/MeetingAccessNotice';
 import Button from '../components/ui/Button';
 import LoadingSpinner from '../components/ui/LoadingSpinner';
@@ -32,7 +33,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams();
   const navigate = useNavigate();
   const {
-    ws, meetingId, meetingAccess, meetingEnded, connectWebSocket,
+    ws, meetingId, meetingAccess, connectWebSocket,
     rtmsPhase, rtmsLoading, rtmsError, rtmsWaitingLong, rtmsRequestExpiresAt, startRTMS,
   } = useMeeting();
   const arlo = useArlo();
@@ -45,6 +46,8 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   // Signed in to Arlo or not, whichever route opened the screen
   const guest = !isAuthenticated;
   const zoomRole = userContext?.role;
+  // Over for this panel: Zoom said the meeting ended, or this person left it
+  const meetingEnded = arlo.meetingOver;
   const screen = getArloScreen({
     guest,
     zoomRole,
@@ -63,6 +66,13 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   useEffect(() => {
     if (nothingToShow) navigate('/home', { replace: true });
   }, [nothingToShow, navigate]);
+
+  // Another meeting than the one in the address (the panel stayed open on the
+  // notes of the last one): the address follows the meeting
+  useEffect(() => {
+    if (!meetingId || !routeId || routeId === meetingId) return;
+    navigate(`${isGuestMode ? '/guest-meeting' : '/meeting'}/${encodeURIComponent(meetingId)}`, { replace: true });
+  }, [meetingId, routeId, isGuestMode, navigate]);
 
   // The meeting socket: signed-in people and guests alike; access is the verified meeting
   useEffect(() => {
@@ -112,7 +122,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
 
   if (nothingToShow) return null;
 
-  if (meetingAccess.status !== 'verified' && screen !== 'after') {
+  if (accessHidesScreen(meetingAccess) && screen !== 'after') {
     return (
       <div className="arlo-view">
         {meetingAccess.status === 'idle' ? (

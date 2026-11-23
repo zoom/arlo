@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useMeeting } from '../contexts/MeetingContext';
+import { useArlo } from '../contexts/ArloContext';
 import { useVertical } from '../contexts/VerticalContext';
 import { useServerSettings } from '../contexts/ServerSettingsContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
@@ -147,6 +148,7 @@ export default function HomeView() {
  */
 function DemoHome() {
   const { meetingId } = useMeeting();
+  const { afterNotesMeetingId } = useArlo();
   const { runningContext } = useZoomSdk();
   const inMeeting = runningContext === 'inMeeting' && Boolean(meetingId);
 
@@ -157,6 +159,11 @@ function DemoHome() {
       {inMeeting ? (
         <Link className="home-demo-link text-sans text-sm" to={`/meeting/${encodeURIComponent(meetingId)}`}>
           Back to the meeting
+        </Link>
+      ) : afterNotesMeetingId !== null ? (
+        // The notes of the meeting that just ended are still held: the one way back
+        <Link className="home-demo-link text-sans text-sm" to={`/meeting/${encodeURIComponent(afterNotesMeetingId)}`}>
+          Back to your notes
         </Link>
       ) : (
         <p className="text-sans text-sm">Open Arlo from a Zoom meeting to bring it in.</p>
@@ -170,6 +177,7 @@ function StoredHome() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { meetingId, rtmsActive } = useMeeting();
+  const { afterNotesMeetingId } = useArlo();
   const { verticalId, vertical } = useVertical();
   const { showMeetingHistory } = useServerSettings();
   const { showDemoData } = useDemoData();
@@ -302,6 +310,13 @@ function StoredHome() {
           </p>
         )}
       </div>
+
+      {!meetingId && afterNotesMeetingId !== null && (
+        // The notes of the meeting that just ended are still held: the one way back
+        <Link className="home-demo-link text-sans text-sm" to={`/meeting/${encodeURIComponent(afterNotesMeetingId)}`}>
+          Back to your notes
+        </Link>
+      )}
 
       {showMeetingInProgress && (
         <Card className="home-meeting-card" onClick={handleGoToMeeting} style={{ cursor: 'pointer' }}>
