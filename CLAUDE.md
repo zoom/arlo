@@ -130,9 +130,10 @@ The notes, the "who can ask" setting, what is known about the meeting's streams 
 
 Several Zoom users can each run a stream in the same meeting, each with its own stream id under the same meeting UUID. The server stores one transcript per meeting (`backend/src/services/meetingStreams.js`):
 
-- The source is a live stream of the meeting's original host (`is_original_host` on the webhook) when there is one, otherwise the live stream that started first. Lines and timeline events from the other streams are dropped.
+- The source is a live stream of the meeting's original host (`is_original_host` on the webhook) when there is one, otherwise the live stream that started first. While the source delivers normally, lines and timeline events from the other streams are dropped.
 - The source stays the source while it runs. It is chosen again when it stops or when the original host's stream starts.
-- A source can die without a stop report. When a line arrives from another live stream and the source has delivered nothing for 30 seconds, that stream becomes the source. Silence alone changes nothing. If the old source's copy of the line follows within 5 seconds, it is dropped as a duplicate and the old source has the role back.
+- A source can die without a stop report. When a line arrives from another live stream and the source has delivered nothing for 30 seconds, that stream becomes the source. Silence alone changes nothing. If the old source delivers again within 5 seconds, it has the role back.
+- Losing a line is worse than storing one twice. For 10 seconds after any change of source, lines from the previous source are accepted too (also when it was just reported stopped: its lines can still be on their way). Every accepted line is checked against a short per-meeting memory of stored lines (speaker id + start time + a hash of the text; the last 200 lines or 2 minutes) and dropped only when it is already there. A change of role never drops a line by itself. The memory goes with the meeting's flush.
 - Each stream's operator is remembered, also after the stream stopped, until the meeting is flushed. Every operator who is signed in to Arlo is an owner and gets the notes.
 
 ### Live notes

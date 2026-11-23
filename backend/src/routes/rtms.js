@@ -85,19 +85,21 @@ function stopReported(meetingId, streamId, meetingEnded) {
 }
 
 /**
- * Whether lines and events from this stream are the ones kept. Answers false
- * for a meeting that was flushed a moment ago, before anything is noted about
- * its streams, so nothing about a meeting comes back after its flush.
+ * Whether a line (`line` given) or a timeline event from this stream is kept:
+ * see acceptsDataFrom() in services/meetingStreams.js. Answers false for a
+ * meeting that was flushed a moment ago, before anything is noted about its
+ * streams, so nothing about a meeting comes back after its flush.
  */
-function keepsDataFrom(meetingId, streamId) {
+function keepsDataFrom(meetingId, streamId, line) {
   if (!getMeetingLifecycle().dataReceived(meetingId)) return false;
   const streams = getMeetingStreams();
   const wasSource = streams.isSource(meetingId, streamId);
-  const kept = streams.acceptsDataFrom(meetingId, streamId);
+  const kept = streams.acceptsDataFrom(meetingId, streamId, line === undefined ? undefined : { line });
   // This stream just took over from one that went silent without a stop
   // report. If the panels were told the old one was reconnecting, for them a
   // stream is running again, and whose stream is stored may have changed.
-  if (kept && !wasSource && currentStreamStatus(meetingId) === 'rtms_interrupted') {
+  const tookOver = !wasSource && streams.isSource(meetingId, streamId);
+  if (tookOver && currentStreamStatus(meetingId) === 'rtms_interrupted') {
     broadcastMeetingStatus(meetingId, 'rtms_started');
     broadcastArloState(meetingId);
   }
@@ -482,9 +484,11 @@ router.post('/broadcast', requireInternal, async (req, res) => {
     return res.status(400).json({ error: 'Invalid segment' });
   }
   // Dropped: a line still in flight for a meeting whose data was just flushed,
-  // and a line from a stream other than the one the transcript is taken from
-  // (each user's stream carries the same speech; one copy is kept)
-  if (!keepsDataFrom(meetingId, streamId)) {
+  // a line from a stream other than the one the transcript is taken from, and
+  // a line that is stored already (each user's stream carries the same speech;
+  // one copy is kept). The line's own fields decide what a duplicate is.
+  const line = { speakerId: segment.speakerId, tStartMs: segment.tStartMs, text: segment.text };
+  if (!keepsDataFrom(meetingId, streamId, line)) {
     return res.status(200).json({ received: true, stored: false, broadcast: 0 });
   }
   const stored = getMeetingStore().appendSegment(meetingId, segment);

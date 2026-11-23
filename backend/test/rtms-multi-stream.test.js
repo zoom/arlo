@@ -42,6 +42,16 @@ async function openPanel(meetingId, cookie) {
   await h.wait(100);
   return ws;
 }
+/** Run `fn` with the server's clock moved ahead (the tests share the process with it). */
+async function later(ms, fn) {
+  const realNow = Date.now;
+  Date.now = () => realNow() + ms;
+  try {
+    return await fn();
+  } finally {
+    Date.now = realNow;
+  }
+}
 const ofType = (ws, type) => ws.messages.filter((m) => m.type === type).map((m) => m.data);
 const texts = async (meetingId, cookie) => (await history(meetingId, 'transcript', cookie)).segments.map((s) => s.text);
 
@@ -90,9 +100,12 @@ test('the original host\'s stream becomes the one that is stored when it starts'
   await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
   await say(meeting, 's1', 1, 'before the host stream');
   await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-host', originalHost: true });
-  await say(meeting, 's1', 2, 'dropped');
-  await say(meeting, 's2', 1, 'from the host stream');
-  assert.deepEqual(await texts(meeting, cookie), ['before the host stream', 'from the host stream']);
+  // a line of the old source still on its way is kept, once
+  await say(meeting, 's1', 2, 'in flight at the change');
+  assert.equal((await say(meeting, 's2', 1, 'in flight at the change')).body.stored, false);
+  await say(meeting, 's2', 2, 'from the host stream');
+  await later(11_000, () => say(meeting, 's1', 3, 'dropped'));
+  assert.deepEqual(await texts(meeting, cookie), ['before the host stream', 'in flight at the change', 'from the host stream']);
 
   // only the boolean counts
   const other = 'MULTI-C2==';
@@ -356,4 +369,75 @@ test('Zoom\'s own stop webhook saying the meeting ended, for one of two streams,
   const told = ofType(ws, 'meeting.status');
   assert.deepEqual(told.map((d) => [d.status, d.meetingEnded === true]), [['rtms_started', false], ['rtms_stopped', true]]);
   assert.deepEqual(await texts(meeting, cookie), []);
+});
+
+// --- no line is lost, and none stored twice, around a change of source -------
+
+test('the stopped source\'s copy of a line still in flight is stored when the other stream\'s copy was dropped', async () => {
+  const meeting = 'MULTI-P==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' });
+  await say(meeting, 's1', 1, 'one');
+  assert.equal((await say(meeting, 's2', 1, 'one')).body.stored, false);
+  assert.equal((await say(meeting, 's2', 2, 'two')).body.stored, false); // s1 is the source
+  await status(meeting, { status: 'rtms_stopped', streamId: 's1' });
+  await say(meeting, 's1', 2, 'two'); // was on its way when the stop was reported
+  await say(meeting, 's2', 3, 'three');
+  assert.deepEqual((await say(meeting, 's1', 3, 'three')).body, { received: true, stored: false, broadcast: 0 });
+  await h.wait(100);
+  ws.socket.close();
+
+  assert.deepEqual(await texts(meeting, cookie), ['one', 'two', 'three']);
+  assert.deepEqual(ofType(ws, 'transcript.segment').map((d) => d.segment.text), ['one', 'two', 'three']);
+  // told once more at the handover (a stream is running), and not again for the late lines
+  assert.deepEqual(ofType(ws, 'meeting.status').map((d) => d.status), ['rtms_started', 'rtms_started']);
+  await later(11_000, async () => {
+    assert.equal((await say(meeting, 's1', 4, 'too late')).body.stored, false);
+  });
+});
+
+test('after a silent source was replaced, its next line arriving first is stored and the other copy dropped', async () => {
+  const meeting = 'MULTI-Q==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' });
+  await say(meeting, 's1', 1, 'one');
+  await later(35_000, () => say(meeting, 's2', 1, 'two'));
+  await later(38_000, async () => {
+    await say(meeting, 's1', 2, 'three');
+    assert.equal((await say(meeting, 's2', 2, 'three')).body.stored, false);
+  });
+  assert.deepEqual(await texts(meeting, cookie), ['one', 'two', 'three']);
+});
+
+test('after a silent source was replaced, its late copies of lines stored from the other stream are dropped', async () => {
+  const meeting = 'MULTI-R==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started', streamId: 's1' });
+  await status(meeting, { status: 'rtms_started', streamId: 's2' });
+  await say(meeting, 's1', 1, 'one');
+  await later(35_000, async () => {
+    await say(meeting, 's2', 1, 'two');
+    await say(meeting, 's2', 2, 'three');
+    await say(meeting, 's1', 2, 'two');
+    await say(meeting, 's1', 3, 'three');
+  });
+  assert.deepEqual(await texts(meeting, cookie), ['one', 'two', 'three']);
+});
+
+test('the same words from the same speaker at another time are stored again', async () => {
+  const meeting = 'MULTI-S==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started', streamId: 's1' });
+  const yes = (tStartMs) => h.postJson(
+    `${srv.base}/api/rtms/broadcast`,
+    { meetingId: meeting, streamId: 's1', segment: { seqNo: 1, text: 'Yes.', speakerId: '7', speakerLabel: 'Ana', tStartMs, tEndMs: tStartMs } },
+    internal,
+  );
+  await yes(1000);
+  assert.equal((await yes(1000)).body.stored, false);
+  await yes(9000);
+  assert.deepEqual(await texts(meeting, cookie), ['Yes.', 'Yes.']);
 });

@@ -17,13 +17,29 @@
  * stream becomes the source and its line is kept. Silence alone changes
  * nothing (nobody speaking is normal); only another stream's line can. A
  * stream that lost the role this way, the original host's included, gets it
- * back only by the same rule or by stopping and starting again.
+ * back by delivering again within 5 seconds (it was alive after all), by the
+ * same rule, or by stopping and starting again.
+ *
+ * Losing a line is worse than storing one twice, so around a change of source
+ * nothing is assumed about which copy of a line is the duplicate:
+ *   - while the source delivers normally, lines from the other streams are
+ *     dropped unread (the cheap, steady state);
+ *   - for 10 seconds after any change of source, lines from the previous
+ *     source are accepted too, also when it has just been reported stopped:
+ *     its lines can still be on their way;
+ *   - every accepted line is checked against a short memory of the lines
+ *     stored for the meeting (speaker id, start time and a hash of the text;
+ *     the last 200 lines or 2 minutes, whichever is less). A line already
+ *     there is a duplicate and is dropped, whichever stream sent it.
+ * A change of role never drops a line by itself.
  *
  * This module also remembers who ran a stream in the meeting (operator ids),
  * including streams that have stopped, until forget(). The meeting lifecycle
  * calls forget() when it flushes the meeting, so nothing here outlives the
  * meeting's data. Ids only: no meeting content is held or logged.
  */
+const crypto = require('node:crypto');
+
 const MAX_ID_CHARS = 256;
 const DEFAULTS = Object.freeze({
   maxStreamsPerMeeting: 20,
@@ -34,6 +50,12 @@ const DEFAULTS = Object.freeze({
   // After such a switch, a line from the old source within this time shows it
   // was alive after all (see acceptsDataFrom): it gets the role back
   sourceRevertMs: 5 * 1000,
+  // After any change of source, the previous source's lines are accepted too
+  // for this long (duplicates are dropped by content)
+  changeWindowMs: 10 * 1000,
+  // The memory of stored lines used to tell a duplicate: this many, this long
+  maxRecentLines: 200,
+  recentLineMs: 2 * 60 * 1000,
 });
 // A report without a stream id (an rtms process from before streams were
 // told apart) is the only stream of its meeting: it gets this key.
@@ -47,6 +69,24 @@ const keyFor = (streamId) => {
   return isId(streamId) ? streamId : null;
 };
 
+/**
+ * What identifies a transcript line across the streams that carry it: who
+ * spoke, when the line started, and the words (as a hash, so the text is not
+ * held a second time). Null for a line without a start time: the same words
+ * from the same speaker cannot then be told from their being said again, so
+ * such a line is never taken for a duplicate.
+ */
+function lineKey(line) {
+  if (line === null || typeof line !== 'object') return null;
+  const { speakerId, tStartMs, text } = line;
+  if (typeof text !== 'string' || !Number.isFinite(tStartMs)) return null;
+  const speaker = typeof speakerId === 'string' ? speakerId.slice(0, MAX_ID_CHARS) : '';
+  return crypto.createHash('sha256')
+    .update(JSON.stringify([speaker, tStartMs]))
+    .update(text)
+    .digest('base64');
+}
+
 function createMeetingStreams(options = {}) {
   const { log = console, now = () => Date.now() } = options;
   const limits = { ...DEFAULTS };
@@ -58,6 +98,9 @@ function createMeetingStreams(options = {}) {
   //   sourceKey,
   //   sourceHeardAt: when the source last delivered, or became the source,
   //   displaced: { key, at } the source replaced for silence a moment ago, or null,
+  //   handover: Map(key -> until) streams that were the source a moment ago:
+  //     their lines are accepted until that time,
+  //   recent: Map(line key -> when stored) the lines stored last, oldest first,
   //   warned }
   // The streams Map keeps the order in which the streams started. `demoted`
   // marks a stream that lost the source role through silence.
@@ -71,7 +114,15 @@ function createMeetingStreams(options = {}) {
     } else {
       // A backstop only: a meeting normally leaves through forget()
       if (meetings.size >= limits.maxMeetings) meetings.delete(meetings.keys().next().value);
-      state = { streams: new Map(), sourceKey: null, sourceHeardAt: now(), displaced: null, warned: false };
+      state = {
+        streams: new Map(),
+        sourceKey: null,
+        sourceHeardAt: now(),
+        displaced: null,
+        handover: new Map(),
+        recent: new Map(),
+        warned: false,
+      };
     }
     meetings.set(meetingId, state);
     return state;
@@ -97,11 +148,46 @@ function createMeetingStreams(options = {}) {
 
   const liveKeys = (state) => [...state.streams].filter(([, stream]) => stream.live).map(([key]) => key);
 
-  /** Make a stream the source. Its 30 seconds of silence are counted from now. */
+  /**
+   * Make a stream the source. Its 30 seconds of silence are counted from now,
+   * and the stream it takes over from is still heard for a moment.
+   */
   function setSource(state, key) {
+    const previous = state.sourceKey;
+    const at = now();
+    if (previous !== null && previous !== key && state.streams.has(previous)) {
+      state.handover.set(previous, at + limits.changeWindowMs);
+    }
+    state.handover.delete(key);
     state.sourceKey = key;
-    state.sourceHeardAt = now();
+    state.sourceHeardAt = at;
     state.displaced = null;
+  }
+
+  /** Whether this stream was the source a moment ago. */
+  function inHandover(state, key, at) {
+    const until = state.handover.get(key);
+    if (until === undefined) return false;
+    if (at < until) return true;
+    state.handover.delete(key);
+    return false;
+  }
+
+  /**
+   * Note a line that is about to be stored. False when it was stored a moment
+   * ago already: a duplicate. A line that cannot be identified is never one.
+   */
+  function isNewLine(state, key, at) {
+    if (key === null) return true;
+    const storedAt = state.recent.get(key);
+    if (storedAt !== undefined && at - storedAt < limits.recentLineMs) return false;
+    state.recent.delete(key);
+    state.recent.set(key, at);
+    for (const [oldKey, oldAt] of state.recent) {
+      if (state.recent.size <= limits.maxRecentLines && at - oldAt < limits.recentLineMs) break;
+      state.recent.delete(oldKey);
+    }
+    return true;
   }
 
   // The original host's stream is preferred, unless it lost the role through silence
@@ -148,7 +234,10 @@ function createMeetingStreams(options = {}) {
     // stream without a stop report, so it is replaced here too
     if (operator) {
       for (const [otherKey, other] of state.streams) {
-        if (otherKey !== key && other.operatorId === operator) state.streams.delete(otherKey);
+        if (otherKey !== key && other.operatorId === operator) {
+          state.streams.delete(otherKey);
+          state.handover.delete(otherKey);
+        }
       }
     }
 
@@ -194,6 +283,7 @@ function createMeetingStreams(options = {}) {
     if (!state) return;
     for (const stream of state.streams.values()) stream.live = false;
     state.displaced = null;
+    state.handover.clear();
   }
 
   /** True for the one stream whose lines are stored. */
@@ -207,10 +297,13 @@ function createMeetingStreams(options = {}) {
   }
 
   /**
-   * Whether a line or participant event from this stream is to be kept. Like
-   * isSource(), except that a stream first heard of through its data counts as
-   * started: this server may have restarted mid-meeting and missed the report.
-   * A stream known to have stopped is not brought back by a late line.
+   * Whether a transcript line or a timeline event from this stream is to be
+   * kept. Pass a line as `{ line: { speakerId, tStartMs, text } }`; without
+   * `line` the call is about a timeline event.
+   *
+   * A stream first heard of through its data counts as started: this server
+   * may have restarted mid-meeting and missed the report. A stream known to
+   * have stopped is not brought back by a late line.
    *
    * This is also where a dead source is noticed (see the top of this file): a
    * line from another live stream, when the source has delivered nothing for
@@ -218,18 +311,25 @@ function createMeetingStreams(options = {}) {
    *
    * One case looks the same and is not a dead source. After a pause in the
    * talk every stream has been silent, and the first line of the next sentence
-   * may arrive from another stream a moment before the source's own copy. The
-   * other stream's line is kept (one copy is stored either way), and when the
-   * old source's copy follows within `sourceRevertMs` it is dropped as the
-   * duplicate it is and the old source has the role again.
+   * may arrive from another stream a moment before the source's own copy. When
+   * the old source delivers again within `sourceRevertMs` it has the role back.
+   *
+   * Lines: the source's are kept, and so are those of a stream that was the
+   * source up to `changeWindowMs` ago, in both cases unless the same line was
+   * stored already. Neither change of role drops a line by itself.
+   * Timeline events: only the source's are kept. The event with which a
+   * displaced source takes the role back is the copy of one kept already.
    */
-  function acceptsDataFrom(meetingId, streamId) {
+  function acceptsDataFrom(meetingId, streamId, details) {
     if (!isId(meetingId) || keyFor(streamId) === null) return false;
     const state = stateFor(meetingId);
     const key = resolve(state, streamId);
+    const isLine = details !== null && typeof details === 'object' && details.line !== undefined;
+    const at = now();
+    const keep = () => !isLine || isNewLine(state, lineKey(details.line), at);
     if (holdsUnnamed(state, key)) {
-      state.sourceHeardAt = now();
-      return true;
+      state.sourceHeardAt = at;
+      return keep();
     }
     if (!state.streams.has(key)) {
       addStream(state, key);
@@ -237,28 +337,30 @@ function createMeetingStreams(options = {}) {
     }
     const stream = state.streams.get(key);
     if (!stream) return false; // the meeting is full
-    const at = now();
     if (state.sourceKey === key) {
       state.sourceHeardAt = at;
-      return true;
+      return keep();
     }
-    if (!stream.live) return false;
 
-    const { displaced } = state;
-    if (displaced && displaced.key === key && at - displaced.at < limits.sourceRevertMs) {
-      stream.demoted = false;
-      setSource(state, key);
-      return false;
+    if (stream.live) {
+      const { displaced } = state;
+      if (displaced && displaced.key === key && at - displaced.at < limits.sourceRevertMs) {
+        stream.demoted = false;
+        setSource(state, key);
+        return isLine ? keep() : false;
+      }
+      if (at - state.sourceHeardAt >= limits.sourceSilentMs) {
+        const silent = state.streams.get(state.sourceKey);
+        const silentKey = state.sourceKey;
+        if (silent) silent.demoted = true;
+        stream.demoted = false;
+        setSource(state, key);
+        if (silent?.live) state.displaced = { key: silentKey, at };
+        return keep();
+      }
     }
-    if (at - state.sourceHeardAt < limits.sourceSilentMs) return false;
-
-    const silent = state.streams.get(state.sourceKey);
-    const silentKey = state.sourceKey;
-    if (silent) silent.demoted = true;
-    stream.demoted = false;
-    setSource(state, key);
-    if (silent?.live) state.displaced = { key: silentKey, at };
-    return true;
+    // Not the source: its lines are kept only if it was the source a moment ago
+    return isLine && inHandover(state, key, at) && keep();
   }
 
   const anyLive = (meetingId) => {

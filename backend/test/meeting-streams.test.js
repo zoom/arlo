@@ -443,3 +443,186 @@ test('the silence limit can be set', () => {
   after(1);
   assert.equal(streams.acceptsDataFrom(M, 's2'), true);
 });
+
+// --- around a change of source: decide by content, never lose a line ---------
+
+// Every stream carries the same speech: line n is the same speaker, time and
+// words on each of them
+const lineNo = (n) => ({ speakerId: '7', tStartMs: 50_000 + n * 1000, text: `line ${n}` });
+/** Feed lines as [streamId, n] pairs; returns the numbers of the lines kept, in order. */
+function replay(streams, sequence, stored = []) {
+  for (const [streamId, n] of sequence) {
+    if (streams.acceptsDataFrom(M, streamId, { line: lineNo(n) })) stored.push(n);
+  }
+  return stored;
+}
+/** Streams A (the source) and B, A silent for 35 seconds after line 0. */
+function silentSource() {
+  const t = timed();
+  t.streams.streamStarted(M, { streamId: 'A', operatorId: 'op-a' });
+  t.streams.streamStarted(M, { streamId: 'B', operatorId: 'op-b' });
+  t.stored = replay(t.streams, [['A', 0]]);
+  t.after(35);
+  return t;
+}
+
+test('after a silence switch, the old source\'s next line arriving first is kept, and the other copy dropped', () => {
+  const { streams, stored, after } = silentSource();
+  replay(streams, [['B', 1]], stored);
+  assert.equal(streams.isSource(M, 'B'), true);
+  after(3);
+  replay(streams, [['A', 2], ['B', 2]], stored);
+  assert.deepEqual(stored, [0, 1, 2]);
+  assert.equal(streams.isSource(M, 'A'), true); // it delivered within the revert time
+});
+
+test('after a silence switch, two lines from the new source followed by the old source\'s copies are stored once each', () => {
+  const { streams, stored } = silentSource();
+  replay(streams, [['B', 1], ['B', 2], ['A', 1], ['A', 2]], stored);
+  assert.deepEqual(stored, [0, 1, 2]);
+});
+
+test('after a silence switch, copies interleaved in any order are stored once each', () => {
+  for (const order of [
+    [['B', 1], ['A', 1], ['B', 2], ['A', 2], ['A', 3], ['B', 3]],
+    [['B', 1], ['A', 1], ['A', 2], ['B', 2], ['B', 3], ['A', 3]],
+    [['B', 1], ['B', 2], ['A', 1], ['B', 3], ['A', 2], ['A', 3]],
+    [['B', 1], ['A', 2], ['A', 1], ['B', 3], ['B', 2], ['A', 3]],
+  ]) {
+    const { streams, stored } = silentSource();
+    replay(streams, order, stored);
+    assert.deepEqual([...stored].sort(), [0, 1, 2, 3], JSON.stringify(order));
+    assert.equal(stored.length, 4, JSON.stringify(order));
+  }
+});
+
+test('when the source stops, its copy of a line still in flight is kept, though the other stream\'s copy was dropped', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 'A' });
+  streams.streamStarted(M, { streamId: 'B' });
+  const stored = replay(streams, [['A', 1], ['B', 1], ['B', 2]]); // B's copies: A is the source
+  assert.deepEqual(stored, [1]);
+  streams.streamStopped(M, 'A');
+  assert.equal(streams.isSource(M, 'B'), true);
+  after(1);
+  replay(streams, [['A', 2], ['B', 3], ['A', 3]], stored);
+  assert.deepEqual(stored, [1, 2, 3]);
+  assert.equal(streams.anyLive(M), true);
+  assert.equal(streams.isSource(M, 'B'), true); // a stopped stream's late lines do not bring it back
+
+  // only for a moment: later lines from the stopped stream are not kept
+  after(10);
+  assert.deepEqual(replay(streams, [['A', 4]]), []);
+  assert.deepEqual(replay(streams, [['B', 4]]), [4]);
+});
+
+test('when the source stops after its copy was stored, the next source\'s copy of that line is dropped', () => {
+  const { streams } = timed();
+  streams.streamStarted(M, { streamId: 'A' });
+  streams.streamStarted(M, { streamId: 'B' });
+  const stored = replay(streams, [['A', 1]]);
+  streams.streamStopped(M, 'A');
+  replay(streams, [['B', 1], ['B', 2], ['A', 2]], stored);
+  assert.deepEqual(stored, [1, 2]);
+});
+
+test('when the original host\'s stream takes over, the old source\'s lines in flight are kept once', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 's1' });
+  const stored = replay(streams, [['s1', 1]]);
+  streams.streamStarted(M, { streamId: 'host', originalHost: true });
+  replay(streams, [['s1', 2], ['host', 2], ['host', 3], ['s1', 3]], stored);
+  assert.deepEqual(stored, [1, 2, 3]);
+  after(10);
+  replay(streams, [['s1', 4], ['host', 4]], stored);
+  assert.deepEqual(stored, [1, 2, 3, 4]);
+  assert.equal(streams.isSource(M, 'host'), true);
+});
+
+test('the time around a change of source in which both streams are heard can be set', () => {
+  const { streams, after } = timed({ changeWindowMs: 2000 });
+  streams.streamStarted(M, { streamId: 'A' });
+  streams.streamStarted(M, { streamId: 'B' });
+  streams.streamStopped(M, 'A');
+  after(1);
+  assert.deepEqual(replay(streams, [['A', 1]]), [1]);
+  after(1);
+  assert.deepEqual(replay(streams, [['A', 2]]), []);
+});
+
+test('two streams delivering the same lines in steady state store one copy of each', () => {
+  const { streams, after } = timed();
+  streams.streamStarted(M, { streamId: 'A' });
+  streams.streamStarted(M, { streamId: 'B' });
+  const stored = [];
+  for (let n = 1; n <= 6; n += 1) {
+    after(4);
+    replay(streams, n % 2 ? [['A', n], ['B', n]] : [['B', n], ['A', n]], stored);
+  }
+  assert.deepEqual(stored, [1, 2, 3, 4, 5, 6]);
+  assert.equal(streams.isSource(M, 'A'), true);
+});
+
+test('the same line twice from the source itself is stored once', () => {
+  const { streams } = timed();
+  streams.streamStarted(M, { streamId: 'A' });
+  assert.deepEqual(replay(streams, [['A', 1], ['A', 1], ['A', 2]]), [1, 2]);
+});
+
+test('the same speaker saying the same words again later is stored', () => {
+  const { streams } = timed();
+  streams.streamStarted(M, { streamId: 'A' });
+  const said = (tStartMs, speakerId = '7') => streams.acceptsDataFrom(M, 'A', { line: { speakerId, tStartMs, text: 'Yes.' } });
+  assert.equal(said(1000), true);
+  assert.equal(said(1000), false);
+  assert.equal(said(4000), true);
+  assert.equal(said(4000, '8'), true); // someone else, at the same moment
+});
+
+test('a line without a usable timestamp is never taken for a duplicate', () => {
+  const { streams } = timed();
+  streams.streamStarted(M, { streamId: 'A' });
+  for (const tStartMs of [undefined, null, '1000', NaN]) {
+    assert.equal(streams.acceptsDataFrom(M, 'A', { line: { speakerId: '7', tStartMs, text: 'Yes.' } }), true);
+    assert.equal(streams.acceptsDataFrom(M, 'A', { line: { speakerId: '7', tStartMs, text: 'Yes.' } }), true);
+  }
+  assert.equal(streams.acceptsDataFrom(M, 'A', { line: null }), true);
+});
+
+test('the memory of stored lines is bounded by count and by age', () => {
+  const { streams, after } = timed({ maxRecentLines: 3 });
+  streams.streamStarted(M, { streamId: 'A' });
+  assert.deepEqual(replay(streams, [['A', 1], ['A', 2], ['A', 3], ['A', 4]]), [1, 2, 3, 4]);
+  assert.deepEqual(replay(streams, [['A', 4], ['A', 3]]), []); // still remembered
+  assert.deepEqual(replay(streams, [['A', 1]]), [1]); // the oldest was let go
+  after(121);
+  assert.deepEqual(replay(streams, [['A', 4]]), [4]); // two minutes on, nothing is remembered
+
+  const many = timed();
+  many.streams.streamStarted(M, { streamId: 'A' });
+  const all = Array.from({ length: 201 }, (unused, i) => ['A', i + 1]);
+  assert.equal(replay(many.streams, all).length, 201);
+  assert.deepEqual(replay(many.streams, [['A', 2]]), []);
+  assert.deepEqual(replay(many.streams, [['A', 1]]), [1]); // 200 are remembered, not 201
+});
+
+test('forget removes the memory of stored lines with the rest', () => {
+  const { streams } = timed();
+  streams.streamStarted(M, { streamId: 'A' });
+  streams.streamStarted('OTHER==', { streamId: 'A' });
+  assert.equal(streams.acceptsDataFrom(M, 'A', { line: lineNo(1) }), true);
+  assert.equal(streams.acceptsDataFrom('OTHER==', 'A', { line: lineNo(1) }), true); // per meeting
+  streams.forget(M);
+  assert.equal(streams.acceptsDataFrom(M, 'A', { line: lineNo(1) }), true);
+  assert.equal(streams.acceptsDataFrom('OTHER==', 'A', { line: lineNo(1) }), false);
+});
+
+test('timeline events from a stream that is not the source are dropped, also around a change of source', () => {
+  const { streams } = timed();
+  streams.streamStarted(M, { streamId: 'A' });
+  streams.streamStarted(M, { streamId: 'B' });
+  streams.streamStopped(M, 'A');
+  assert.equal(streams.acceptsDataFrom(M, 'A'), false); // no line: an event
+  assert.equal(streams.acceptsDataFrom(M, 'B'), true);
+  assert.equal(streams.acceptsDataFrom(M, 'A', { line: lineNo(1) }), true); // its lines are
+});
