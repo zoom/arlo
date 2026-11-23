@@ -111,6 +111,7 @@ Rules live in `rtms/src/sessions.js` (tested with a fake client in `rtms/test/se
 | `meeting.rtms_started` again for a stream it holds (server failover) | Rejoins at once with the new `server_urls` | Reconnecting… |
 | `meeting.rtms_interrupted` (signaling dropped, ~60s window) | Rejoins after a backoff: 3s, 6s, 12s, 24s, 30s; gives up after 5 attempts | Reconnecting… |
 | Media connection interrupted (~30s window) | Same rejoin: the `@zoom/rtms` SDK has only `join()`/`leave()`, so there is no media-only reconnect | Reconnecting… |
+| Zoom refuses a join with a status code (16 seen on a start a few seconds after a stop) | Retries with the same backoff, on a first join too. If Zoom ends the stream meanwhile, that is reported as a fault | Starting…, then live or the fault message |
 | `meeting.rtms_stopped` with stop reason 10–19 or 24 | Reports the stop as a fault | "Transcription stopped because of a connection problem" + Restart |
 
 After a fault stop, the panel that started the stream calls `startRTMS` again by itself (at most 3 times per meeting); other panels show the Restart button. A connection that closes on its own is never rejoined before Zoom says what happened.

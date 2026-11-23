@@ -177,6 +177,7 @@ function createSessionManager({
       // connecting → streaming; after a drop: waiting (for Zoom's signal) or backoff → connecting
       state: 'connecting',
       reconnecting: false, // true from the first rejoin until Zoom confirms one
+      everJoined: false, // false while the first join is still being tried
       attempts: 0,
       joinedAt: 0,
       cancelTimer: null,
@@ -277,9 +278,11 @@ function createSessionManager({
       if (!isCurrent()) return;
       if (session.cancelTimer) { session.cancelTimer(); session.cancelTimer = null; }
       if (reason === 0) {
-        const rejoined = session.reconnecting;
+        // A first join that got in after a refusal is a start, not a reconnection
+        const rejoined = session.reconnecting && session.everJoined;
         session.state = 'streaming';
         session.reconnecting = false;
+        session.everJoined = true;
         session.joinedAt = now();
         log.log(rejoined ? 'Rejoined RTMS session' : 'Joined RTMS session');
         send('status', backend.status(
@@ -298,8 +301,12 @@ function createSessionManager({
         return;
       }
       log.error(`RTMS join refused by Zoom, status code ${reason}. See RTMS_STATUS_CODE in the Zoom RTMS docs.`);
-      // Handled outside the SDK callback so the next join is clean
-      defer(() => { if (isCurrent()) joinFailed(session); });
+      // Zoom announced the stream, so it keeps it open for about a minute: a
+      // refusal is retried with the reconnect backoff, on a first join too
+      // (seen 2026-11-23: status 16 on a start a few seconds after a stop, and
+      // no new stream could be started until Zoom gave up on this one).
+      // Handled outside the SDK callback so the next join is clean.
+      defer(() => { if (isCurrent()) scheduleReconnect(session); });
     });
 
     // The connection closed. `reason` is an RTMS_STOP_REASON.
@@ -309,6 +316,10 @@ function createSessionManager({
       if (isDeliberateStop(reason)) {
         clearTimers(session);
         sessions.delete(streamId);
+        // The connection is closed, but the SDK client keeps polling and holds
+        // its native handle until leave(). Released outside the SDK callback.
+        session.stopping = true;
+        defer(() => dropClient(session));
         // Tell the meeting now instead of waiting for the stopped webhook
         send('status', backend.status(
           meetingUuid,
@@ -432,6 +443,7 @@ function createSessionManager({
         return;
       }
       session = newSession({ meetingUuid, streamId, serverUrls: payload.server_urls });
+      session.everJoined = true; // the stream was running before this process knew it
       sessions.set(streamId, session);
     } else {
       if (isServerUrls(payload.server_urls)) session.serverUrls = payload.server_urls;

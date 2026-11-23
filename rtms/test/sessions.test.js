@@ -72,19 +72,54 @@ test('a stream is reported as started only after Zoom confirms the join', async 
   assert.equal(manager.size(), 1);
 });
 
-test('a refused join (status 16) is reported as failed and the client is released', async () => {
-  const { manager, clients, sent } = setup();
+test('a first join that Zoom refuses (status 16) is retried, and reported as started when it gets in', async () => {
+  const { manager, clients, sent, fire } = setup();
   await manager.started(started());
   clients[0].handlers.joinConfirm(16);
   await tick();
 
-  assert.deepEqual(statuses(sent), ['rtms_failed']);
+  // nothing is reported yet: Zoom keeps the stream open for about a minute
+  assert.deepEqual(statuses(sent), []);
   assert.equal(clients[0].left, 1);
+  assert.equal(manager.size(), 1);
+
+  fire(3000);
+  assert.equal(clients.length, 2);
+  assert.deepEqual(clients[1].joined, { meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-1', server_urls: 'wss://zoom.example' });
+  clients[1].handlers.joinConfirm(0);
+  await tick();
+  // a first start, not a reconnection: the operator goes with it
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_started', operatorId: 'op-1' }]);
+});
+
+test('a first join that keeps being refused is given up and reported as failed', async () => {
+  const { manager, clients, sent, fire } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(16);
+  for (let attempt = 1; attempt <= MAX_RECONNECT_ATTEMPTS; attempt += 1) {
+    fire(reconnectDelay(attempt));
+    clients[attempt].handlers.joinConfirm(16);
+  }
+  await tick();
+
+  assert.deepEqual(statuses(sent), ['rtms_failed']);
   assert.equal(manager.size(), 0);
+  assert.ok(clients.every((c) => c.left === 1));
 
   // the same stream can be started again afterwards
   await manager.started(started());
-  assert.equal(clients.length, 2);
+  assert.equal(clients.length, MAX_RECONNECT_ATTEMPTS + 2);
+});
+
+test('Zoom ending a stream whose first join is still being retried is a fault, so the panel asks for a new one', async () => {
+  const { manager, clients, sent, pending } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(16);
+  await manager.stopped({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-1', stop_reason: 2 });
+
+  assert.deepEqual(pending(), []);
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_stopped', fault: true }]);
+  assert.equal(manager.size(), 0);
 });
 
 test('a join that throws is reported as failed and leaves no session behind', async () => {
@@ -167,7 +202,8 @@ test('when Zoom closes the connection the session is dropped and reported, witho
 
   assert.equal(manager.size(), 0);
   assert.deepEqual(statuses(sent), ['rtms_started', 'rtms_stopped']);
-  assert.equal(clients[0].left, 0); // already closed by Zoom: nothing to leave
+  // the connection is closed, but the SDK client still polls until it is released
+  assert.equal(clients[0].left, 1);
 });
 
 test('leaving on our own stop is not reported twice', async () => {
