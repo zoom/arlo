@@ -20,19 +20,50 @@ test('segments are kept per meeting, in order', () => {
 
 test('a stored segment has only the known fields, with long values cut', () => {
   const store = createMemoryMeetingStore();
-  const stored = store.appendSegment('M1', {
-    ...segment(1, 'x'.repeat(5000)), speakerLabel: 'n'.repeat(300), extra: 'dropped', __proto__: { polluted: true },
-  });
+  // As it arrives over HTTP: JSON.parse makes "__proto__" and "constructor" own keys
+  const raw = JSON.parse(JSON.stringify({ ...segment(1, 'x'.repeat(5000)), speakerLabel: 'n'.repeat(300), extra: 'dropped' })
+    .replace('"extra"', '"__proto__":{"polluted":true},"constructor":"c","extra"'));
+  const stored = store.appendSegment('M1', raw);
 
   assert.deepEqual(Object.keys(stored).sort(), ['seqNo', 'speakerId', 'speakerLabel', 'tEndMs', 'tStartMs', 'text']);
+  assert.equal(Object.getPrototypeOf(stored), Object.prototype);
+  assert.equal(stored.polluted, undefined);
   assert.equal(stored.text.length, 4000);
   assert.equal(stored.speakerLabel.length, 200);
-  assert.equal({}.polluted, undefined);
+  assert.deepEqual(store.listSegments('M1')[0], stored);
+});
+
+test('a cut value is a copy, so an oversized original is not kept in memory', () => {
+  const store = createMemoryMeetingStore();
+  const cut = store.appendSegment('M1', segment(1, `${'x'.repeat(3999)}\u{1F600}${'y'.repeat(100000)}`)).text;
+  // Cutting in the middle of an emoji must not leave half a character behind
+  assert.equal(/[\uD800-\uDBFF]$/.test(cut), false);
+  assert.ok(cut.length <= 4000);
+  assert.equal(store.appendEvent('M1', { eventType: 'e'.repeat(500) }).eventType.length, 50);
+});
+
+test('sequence numbers that are not sane whole numbers are replaced, and do not break later lines', () => {
+  const store = createMemoryMeetingStore();
+  const numbers = [Number.MAX_SAFE_INTEGER, 1e308, -5, 1.5, '7', NaN, undefined]
+    .map((seqNo) => store.appendSegment('M1', { text: 'line', seqNo }).seqNo);
+  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(store.appendSegment('M1', { text: 'explicit', seqNo: 40 }).seqNo, 40);
+  assert.equal(store.appendSegment('M1', { text: 'next' }).seqNo, 41);
+});
+
+test('times that make no sense are replaced', () => {
+  const store = createMemoryMeetingStore({ now: () => 9000 });
+  const stored = store.appendSegment('M1', { text: 'x', tStartMs: 10, tEndMs: -1e300 });
+  assert.equal(stored.tStartMs, 10);
+  assert.equal(stored.tEndMs, 10);
+  assert.equal(store.appendSegment('M1', { text: 'x', tStartMs: -1 }).tStartMs, 9000);
+  assert.equal(store.appendEvent('M1', { eventType: 'joined', timestamp: -1 }).timestamp, 9000);
 });
 
 test('a segment without text is refused; a missing sequence number is assigned', () => {
   const store = createMemoryMeetingStore();
   assert.equal(store.appendSegment('M1', { seqNo: 1 }), null);
+  assert.equal(store.appendSegment('M1', { seqNo: 1, text: '' }), null);
   assert.equal(store.appendSegment('M1', null), null);
   assert.equal(store.appendSegment('', segment(1)), null);
   assert.equal(store.has('M1'), false);
@@ -41,12 +72,19 @@ test('a segment without text is refused; a missing sequence number is assigned',
   assert.equal(store.appendSegment('M1', { text: 'still none' }).seqNo, 2);
 });
 
-test('returned lists are copies: callers cannot change what is stored', () => {
+test('everything returned is a copy: callers cannot change what is stored', () => {
   const store = createMemoryMeetingStore();
-  store.appendSegment('M1', segment(1));
+  const appended = store.appendSegment('M1', segment(1));
+  appended.text = 'changed through the append result';
   store.listSegments('M1').push({ text: 'injected' });
   store.listSegments('M1')[0].text = 'changed';
   assert.deepEqual(store.listSegments('M1').map((s) => s.text), ['line 1']);
+
+  const event = store.appendEvent('M1', { eventType: 'joined', participantName: 'Ben' });
+  event.participantName = 'changed through the append result';
+  store.listEvents('M1').push({ eventType: 'injected' });
+  store.listEvents('M1')[0].participantName = 'changed';
+  assert.deepEqual(store.listEvents('M1').map((e) => e.participantName), ['Ben']);
 });
 
 test('timeline events get an id and are kept per meeting', () => {
@@ -83,12 +121,17 @@ test('the oldest lines are dropped past the per-meeting limit', () => {
   assert.deepEqual(store.listEvents('M1').map((e) => e.eventType), ['e3', 'e4']);
 });
 
-test('the oldest meeting is dropped past the meeting limit', () => {
+test('past the meeting limit, the meeting written to longest ago is dropped, not one still in use', () => {
   const store = createMemoryMeetingStore({ maxMeetings: 2 });
-  store.appendSegment('M1', segment(1));
-  store.appendSegment('M2', segment(1));
-  store.appendSegment('M3', segment(1));
-  assert.equal(store.has('M1'), false);
+  store.appendSegment('LIVE', segment(1));
+  store.appendSegment('IDLE', segment(1));
+  store.appendSegment('LIVE', segment(2)); // LIVE is older but still being written to
+  store.appendSegment('NEW', segment(1));
+
+  assert.equal(store.has('IDLE'), false);
+  assert.equal(store.has('LIVE'), true);
+  assert.equal(store.has('NEW'), true);
+  assert.deepEqual(store.listSegments('LIVE').map((s) => s.seqNo), [1, 2]);
   assert.equal(store.size(), 2);
 });
 
