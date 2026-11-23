@@ -55,7 +55,7 @@ const DEMO_DECISIONS = [
   },
 ];
 
-export default function DecisionsLog({ segments, onJumpToSegment, showDemoData = true }) {
+export default function DecisionsLog({ segments, onJumpToSegment, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('decisions-log');
   const [decisions, setDecisions] = useState(showDemoData ? DEMO_DECISIONS : []);

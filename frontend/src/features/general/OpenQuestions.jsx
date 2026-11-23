@@ -51,7 +51,7 @@ const DEMO_QUESTIONS = [
   },
 ];
 
-export default function OpenQuestions({ segments, onJumpToSegment, showDemoData = true }) {
+export default function OpenQuestions({ segments, onJumpToSegment, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('open-questions');
   const [questions, setQuestions] = useState(showDemoData ? DEMO_QUESTIONS : []);

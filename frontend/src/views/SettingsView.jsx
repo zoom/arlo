@@ -374,7 +374,8 @@ export default function SettingsView() {
         </section>
       )}
 
-      {/* Demo Mode */}
+      {/* Demo Mode: sample data exists only when the deployment runs in demo mode */}
+      {demoMode && (
       <section className="settings-section">
         <h2 className="text-serif text-xl">Demo Mode</h2>
         <Card>
@@ -403,6 +404,7 @@ export default function SettingsView() {
           </div>
         </Card>
       </section>
+      )}
 
       {/* Transcription Preferences */}
       <section className="settings-section">

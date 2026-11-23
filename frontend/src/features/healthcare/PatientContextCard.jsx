@@ -24,7 +24,7 @@ const DEMO_PATIENT_INFO = {
   medications: ['Metformin 1000mg BID', 'Lisinopril 20mg daily', 'Gabapentin 300mg TID', 'Duloxetine 30mg daily'],
 };
 
-export default function PatientContextCard({ segments, meetingId, showDemoData = true }) {
+export default function PatientContextCard({ segments, meetingId, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('patient-context');
   const [patientInfo, setPatientInfo] = useState(showDemoData ? DEMO_PATIENT_INFO : null);

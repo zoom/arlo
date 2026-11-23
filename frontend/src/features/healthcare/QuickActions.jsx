@@ -155,7 +155,7 @@ This summary is for your reference. It does not replace
 the conversation you had with your healthcare provider.`;
 };
 
-export default function QuickActions({ soapData, onAction, showDemoData = true }) {
+export default function QuickActions({ soapData, onAction, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('quick-actions');
   const [expandedAction, setExpandedAction] = useState(null);

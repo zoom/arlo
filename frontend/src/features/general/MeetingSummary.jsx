@@ -56,7 +56,7 @@ function buildTranscriptText(segments) {
     .join('\n');
 }
 
-export default function MeetingSummary({ segments, meetingId, showDemoData = true }) {
+export default function MeetingSummary({ segments, meetingId, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('meeting-summary');
   const [summary, setSummary] = useState(EMPTY_SUMMARY);

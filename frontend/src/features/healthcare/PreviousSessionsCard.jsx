@@ -45,7 +45,7 @@ const DEMO_PREVIOUS_SESSIONS = [
   },
 ];
 
-export default function PreviousSessionsCard({ patientId, showDemoData = true }) {
+export default function PreviousSessionsCard({ patientId, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('previous-sessions');
   const [expandedSession, setExpandedSession] = useState(null);

@@ -41,7 +41,7 @@ const DEMO_DEAL = {
   notes: 'Strong technical validation complete. Legal reviewing MSA. Competing against Snowflake on price. Need executive sponsor meeting with Rachel (CTO) before final sign-off.',
 };
 
-export default function DealTracker({ segments, meetingId, showDemoData = true }) {
+export default function DealTracker({ segments, meetingId, showDemoData = false }) {
   const [deal, setDeal] = useState(showDemoData ? DEMO_DEAL : null);
   const [isExpanded, setIsExpanded] = useState(true);
   const [editingField, setEditingField] = useState(null);

@@ -66,7 +66,7 @@ const CATEGORY_CONFIG = {
 
 const EMPTY_TERMS = { parties: [], dates: [], amounts: [], locations: [], documents: [], citations: [] };
 
-export default function LegalTermsPanel({ segments, onJumpToSegment, showDemoData = true }) {
+export default function LegalTermsPanel({ segments, onJumpToSegment, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('legal-terms');
   const [expandedCategories, setExpandedCategories] = useState(['parties', 'dates']);

@@ -83,7 +83,7 @@ const SENTIMENT_CONFIG = {
   mixed: { icon: AlertTriangle, color: '#f59e0b', label: 'Mixed' },
 };
 
-export default function CompetitorMentions({ segments, onJumpToSegment, showDemoData = true }) {
+export default function CompetitorMentions({ segments, onJumpToSegment, showDemoData = false }) {
   const [competitors] = useState(showDemoData ? DEMO_COMPETITORS : []);
   const [watchList, setWatchList] = useState(showDemoData ? WATCH_LIST : []);
   const [expandedId, setExpandedId] = useState(1);

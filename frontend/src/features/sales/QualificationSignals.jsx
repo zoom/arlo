@@ -109,7 +109,7 @@ const EMPTY_SIGNALS = {
   timeline: { status: 'unknown', signals: [], notes: '' },
 };
 
-export default function QualificationSignals({ segments, onJumpToSegment, showDemoData = true }) {
+export default function QualificationSignals({ segments, onJumpToSegment, showDemoData = false }) {
   const [signals, setSignals] = useState(showDemoData ? DEMO_SIGNALS : EMPTY_SIGNALS);
   const [expandedId, setExpandedId] = useState('need');
   const [showQuestions, setShowQuestions] = useState(null);

@@ -25,7 +25,7 @@ const DEMO_BOOKMARKS = [
   { id: 4, type: 'favorite', note: 'Design specs shipping tomorrow!', timestamp: '10:28:45 AM', seqNo: 78 },
 ];
 
-export default function SmartBookmarks({ segments, onJumpToSegment, currentSeqNo, showDemoData = true }) {
+export default function SmartBookmarks({ segments, onJumpToSegment, currentSeqNo, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('smart-bookmarks');
   const [bookmarks, setBookmarks] = useState(showDemoData ? DEMO_BOOKMARKS : []);

@@ -76,7 +76,7 @@ const DEMO_ALERTS = [
   },
 ];
 
-export default function ClinicalAlerts({ segments, patientInfo, showDemoData = true }) {
+export default function ClinicalAlerts({ segments, patientInfo, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('clinical-alerts');
   const [alerts, setAlerts] = useState(showDemoData ? DEMO_ALERTS : []);

@@ -1,34 +1,47 @@
-import { useState, useEffect, useCallback, createContext, useContext } from 'react';
+import { useState, useEffect, useCallback, useMemo, createContext, useContext } from 'react';
+import { useServerSettings } from '../contexts/ServerSettingsContext';
 
 // Context for demo data setting
 const DemoDataContext = createContext(null);
 
 /**
- * Provider component for demo data setting.
- * Wrap your app with this to enable the useDemoData hook.
+ * Sample data exists only in demo mode, and only for a user who asked for it:
+ * it is off until turned on in Settings. Outside demo mode it is never shown.
  */
 export function DemoDataProvider({ children }) {
-  const [showDemoData, setShowDemoDataState] = useState(() => {
-    // Default to true (show demo data) for first-time users
-    const stored = localStorage.getItem('arlo-show-demo-data');
-    return stored === null ? true : JSON.parse(stored);
+  const { demoMode, loaded } = useServerSettings();
+  const [wanted, setWanted] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('arlo-show-demo-data')) === true;
+    } catch {
+      return false;
+    }
   });
 
   // Persist to localStorage whenever it changes
   useEffect(() => {
-    localStorage.setItem('arlo-show-demo-data', JSON.stringify(showDemoData));
-  }, [showDemoData]);
+    localStorage.setItem('arlo-show-demo-data', JSON.stringify(wanted));
+  }, [wanted]);
 
   const setShowDemoData = useCallback((value) => {
-    setShowDemoDataState(value);
+    setWanted(value === true);
   }, []);
 
   const toggleDemoData = useCallback(() => {
-    setShowDemoDataState(prev => !prev);
+    setWanted((prev) => !prev);
   }, []);
 
+  // Until the server has answered, assume the stricter case: no sample data
+  const demoDataAvailable = loaded && demoMode === true;
+  const value = useMemo(() => ({
+    showDemoData: demoDataAvailable && wanted,
+    demoDataAvailable,
+    setShowDemoData,
+    toggleDemoData,
+  }), [demoDataAvailable, wanted, setShowDemoData, toggleDemoData]);
+
   return (
-    <DemoDataContext.Provider value={{ showDemoData, setShowDemoData, toggleDemoData }}>
+    <DemoDataContext.Provider value={value}>
       {children}
     </DemoDataContext.Provider>
   );
@@ -36,7 +49,7 @@ export function DemoDataProvider({ children }) {
 
 /**
  * Hook to access demo data setting.
- * Returns { showDemoData, setShowDemoData, toggleDemoData }
+ * Returns { showDemoData, demoDataAvailable, setShowDemoData, toggleDemoData }
  */
 export function useDemoData() {
   const context = useContext(DemoDataContext);

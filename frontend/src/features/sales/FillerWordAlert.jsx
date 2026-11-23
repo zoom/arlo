@@ -60,7 +60,7 @@ function playBeep(frequency = 800, duration = 100, volume = 0.3) {
   }
 }
 
-export default function FillerWordAlert({ segments = [], showDemoData = true }) {
+export default function FillerWordAlert({ segments = [], showDemoData = false }) {
   const [alertsEnabled, setAlertsEnabled] = useState(true);
   const [fillerWords, setFillerWords] = useState(DEFAULT_FILLER_WORDS);
   const [detections, setDetections] = useState([]);

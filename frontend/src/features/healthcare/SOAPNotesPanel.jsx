@@ -76,7 +76,7 @@ const SOAP_SECTIONS = [
   },
 ];
 
-export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoData = true }) {
+export default function SOAPNotesPanel({ segments, meetingId, isLive, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('soap-notes');
 

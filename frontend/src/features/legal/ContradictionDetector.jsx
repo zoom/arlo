@@ -118,7 +118,7 @@ const SEVERITY_CONFIG = {
   low: { color: '#6b7280', label: 'Low', bgColor: 'rgba(107, 114, 128, 0.1)' },
 };
 
-export default function ContradictionDetector({ segments, onJumpToSegment, showDemoData = true }) {
+export default function ContradictionDetector({ segments, onJumpToSegment, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('contradiction-detector');
   const [contradictions, setContradictions] = useState(showDemoData ? DEMO_CONTRADICTIONS : []);

@@ -44,7 +44,7 @@ async function analyzeKeyMomentAI(text) {
   }
 }
 
-export default function KeyMoments({ segments, onJumpToSegment, showDemoData = true }) {
+export default function KeyMoments({ segments, onJumpToSegment, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('key-moments');
   const [moments, setMoments] = useState([]);

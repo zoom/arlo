@@ -107,7 +107,7 @@ function formatDate(timestamp) {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-export default function BillableTimeTracker({ meetingId, meetingStartTime, showDemoData = true }) {
+export default function BillableTimeTracker({ meetingId, meetingStartTime, showDemoData = false }) {
   const [entries, setEntries] = useState(showDemoData ? DEMO_ENTRIES : []);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isAddingEntry, setIsAddingEntry] = useState(false);

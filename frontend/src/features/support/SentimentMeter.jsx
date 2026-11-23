@@ -44,7 +44,7 @@ async function analyzeSentimentAI(text) {
   }
 }
 
-export default function SentimentMeter({ segments, showDemoData = true }) {
+export default function SentimentMeter({ segments, showDemoData = false }) {
   const [currentSentiment, setCurrentSentiment] = useState('neutral');
   const [previousSentiment, setPreviousSentiment] = useState('neutral');
   const [history, setHistory] = useState([]);

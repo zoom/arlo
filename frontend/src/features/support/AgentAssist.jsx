@@ -57,7 +57,7 @@ const DEMO_COMPLIANCE = [
   { id: 7, text: 'Create ticket for engineering if systemic issue', required: false, completed: false },
 ];
 
-export default function AgentAssist({ segments, showDemoData = true }) {
+export default function AgentAssist({ segments, showDemoData = false }) {
   const [suggestions] = useState(showDemoData ? DEMO_SUGGESTIONS : []);
   const [compliance, setCompliance] = useState(showDemoData ? DEMO_COMPLIANCE : []);
   const [activeTab, setActiveTab] = useState('suggestions');

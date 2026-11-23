@@ -46,7 +46,7 @@ const DEMO_ALERTS = [
   },
 ];
 
-export default function EscalationAlerts({ segments, onJumpToSegment, showDemoData = true }) {
+export default function EscalationAlerts({ segments, onJumpToSegment, showDemoData = false }) {
   const [alerts, setAlerts] = useState(showDemoData ? DEMO_ALERTS : []);
   const [muted, setMuted] = useState(false);
 

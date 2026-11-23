@@ -44,7 +44,7 @@ const EMPTY_STATE = {
   targetHandleTime: 15 * 60 * 1000,
 };
 
-export default function ResolutionTracker({ segments, showDemoData = true }) {
+export default function ResolutionTracker({ segments, showDemoData = false }) {
   const [state, setState] = useState(showDemoData ? DEMO_STATE : EMPTY_STATE);
   const [showDetails, setShowDetails] = useState(true);
 

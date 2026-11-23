@@ -99,7 +99,7 @@ const STATUS_CONFIG = {
   pending: { label: 'Pending', color: '#6b7280', bgColor: 'rgba(107, 114, 128, 0.1)' },
 };
 
-export default function ExhibitTracker({ segments, onJumpToSegment, showDemoData = true }) {
+export default function ExhibitTracker({ segments, onJumpToSegment, showDemoData = false }) {
   const [exhibits, setExhibits] = useState(showDemoData ? DEMO_EXHIBITS : []);
   const [expandedId, setExpandedId] = useState('A');
   const [isAddingNew, setIsAddingNew] = useState(false);

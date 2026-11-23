@@ -19,7 +19,7 @@ const DEMO_PARTICIPANTS = [
   { id: 5, name: 'You', talkTime: 150, segments: 12, color: '#22c55e', role: '' },
 ];
 
-export default function ParticipantStats({ segments, showDemoData = true }) {
+export default function ParticipantStats({ segments, showDemoData = false }) {
   const { isCollapsed, toggleCollapsed } = useFeatureLayout();
   const collapsed = isCollapsed('participant-stats');
   const [participants] = useState(showDemoData ? DEMO_PARTICIPANTS : []);
