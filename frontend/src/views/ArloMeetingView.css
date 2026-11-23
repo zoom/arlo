@@ -1,0 +1,287 @@
+/* Arlo's single-action screens. Chrome in Inter, the notes document in the
+   serif stack. Existing tokens only (see index.css). Fits a 280px side panel. */
+
+.arlo-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  padding: 0 12px 12px;
+  font-family: var(--font-sans);
+  color: var(--foreground);
+}
+
+.arlo-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* The part that scrolls: the document, between the status line and the input */
+.arlo-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.arlo-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  flex: 1;
+  padding: 24px 4px;
+  text-align: center;
+}
+
+.arlo-title {
+  font-family: var(--font-serif);
+  font-size: 1.25rem;
+  font-weight: 500;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.arlo-after-title {
+  padding-top: 4px;
+}
+
+.arlo-muted {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.arlo-error {
+  color: var(--destructive);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.arlo-link {
+  align-self: flex-start;
+  color: var(--accent);
+  font-size: 0.875rem;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.arlo-link::after {
+  content: ' ›';
+}
+
+.arlo-link:hover {
+  text-decoration: underline;
+}
+
+.arlo-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Bring Arlo in: who can ask */
+.arlo-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.arlo-choice-label {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.arlo-choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 16px;
+}
+
+.arlo-choice-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.arlo-choice-option input {
+  accent-color: var(--accent);
+}
+
+/* Waiting on the host */
+.arlo-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 0.875rem;
+}
+
+/* Status line */
+.arlo-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.arlo-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  min-height: 32px;
+}
+
+.arlo-status-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.arlo-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.arlo-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-success);
+}
+
+.arlo-status[data-status='paused'] .arlo-dot,
+.arlo-status[data-status='left'] .arlo-dot {
+  background: var(--muted-foreground);
+}
+
+.arlo-status[data-status='reconnecting'] .arlo-dot {
+  background: var(--color-warning);
+}
+
+.arlo-remove-confirm {
+  color: var(--destructive);
+}
+
+/* The notes document */
+.arlo-notes {
+  font-family: var(--font-serif);
+  font-size: 1rem;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.arlo-notes section + section {
+  margin-top: 16px;
+}
+
+.arlo-notes-heading {
+  margin-bottom: 4px;
+  font-family: var(--font-sans);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+
+.arlo-notes ul {
+  padding-left: 18px;
+}
+
+.arlo-notes li + li {
+  margin-top: 4px;
+}
+
+.arlo-notes-empty {
+  color: var(--muted-foreground);
+}
+
+/* Participant view */
+.arlo-participant {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 8px;
+}
+
+.arlo-sign-in {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+/* Ask Arlo */
+.arlo-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.arlo-ask-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.arlo-ask-form .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.arlo-ask-answer {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.arlo-ask-answer-text {
+  font-family: var(--font-serif);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.arlo-ask-answer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.arlo-ask-answer-foot .arlo-muted {
+  font-size: 0.75rem;
+}
+
+.arlo-waiting-spinner {
+  display: inline-flex;
+}

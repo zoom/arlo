@@ -21,6 +21,7 @@ import HomeView from './views/HomeView';
 import MeetingsListView from './views/MeetingsListView';
 import MeetingDetailView from './views/MeetingDetailView';
 import InMeetingView from './views/InMeetingView';
+import ArloMeetingView from './views/ArloMeetingView';
 import SettingsView from './views/SettingsView';
 import GuestNoMeetingView from './views/GuestNoMeetingView';
 import GuestInMeetingView from './views/GuestInMeetingView';
@@ -168,6 +169,8 @@ function App() {
                       <Route path="/guest/:id" element={<GuestInMeetingView />} />
                       {/* Guest full meeting view - same features as authenticated, but read-only */}
                       <Route path="/guest-meeting/:id" element={<InMeetingView isGuestMode={true} />} />
+                      {/* The single-action Arlo screens, for a guest */}
+                      <Route path="/guest-arlo/:id" element={<ArloMeetingView isGuestMode />} />
 
                       {/* Authenticated routes (inside AppShell) */}
                       <Route element={
@@ -179,6 +182,8 @@ function App() {
                         <Route path="/meetings" element={<MeetingsListView />} />
                         <Route path="/meetings/:id" element={<MeetingDetailView />} />
                         <Route path="/meeting/:id" element={<InMeetingView />} />
+                        {/* The single-action Arlo screens */}
+                        <Route path="/arlo/:id" element={<ArloMeetingView />} />
                         <Route path="/search" element={<SearchResultsView />} />
                         <Route path="/settings" element={<SettingsView />} />
                         <Route path="/upcoming" element={<UpcomingMeetingsView />} />
