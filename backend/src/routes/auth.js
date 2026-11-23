@@ -10,6 +10,7 @@ const {
   ACCESS_TOKEN_TTL_MS,
 } = require('../services/zoomAppContext');
 const { requireAuth, devAuthBypass } = require('../middleware/auth');
+const { displayNameFrom } = require('../lib/displayName');
 const config = require('../config');
 const deauthorized = require('../lib/deauthorized');
 const oauthState = require('../services/oauthState');
@@ -171,7 +172,8 @@ router.get('/callback', async (req, res) => {
     deauthorized.clear(zoomUser.id);
     const user = userStore.upsert(zoomUser.id, {
       email: zoomUser.email,
-      displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
+      // '' when Zoom gave no name (the token-payload fallback has none): never a blank
+      displayName: displayNameFrom(zoomUser),
       avatarUrl: zoomUser.pic_url,
     });
 
@@ -337,7 +339,8 @@ router.post('/callback', async (req, res) => {
     deauthorized.clear(zoomUser.id);
     const user = userStore.upsert(zoomUser.id, {
       email: zoomUser.email,
-      displayName: `${zoomUser.first_name} ${zoomUser.last_name}`,
+      // '' when Zoom gave no name (the token-payload fallback has none): never a blank
+      displayName: displayNameFrom(zoomUser),
       avatarUrl: zoomUser.pic_url,
     });
 

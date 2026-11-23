@@ -3,6 +3,8 @@ import { useMeeting } from './MeetingContext';
 import { useAuth } from './AuthContext';
 import { cleanNotes } from '../lib/notesText';
 import { readMeetingMessage } from '../lib/meetingMessage';
+import { usableName } from '../lib/ownerName';
+import { useZoomSdk } from './ZoomSdkContext';
 
 /**
  * What this panel knows about Arlo in the current meeting: is it here, what is
@@ -33,6 +35,11 @@ import { readMeetingMessage } from '../lib/meetingMessage';
  *   the state, the notes and the way back to them are dropped. An owner is
  *   always signed in: without a session the role is never 'owner'.
  *
+ * - `ownerName` is null when the server has no name for the owner (a blank
+ *   counts as none). An owner's panel then tells the server this person's Zoom
+ *   screen name, once per meeting; the server shows it only when the account
+ *   has no name of its own, and deletes it with the meeting.
+ *
  * Nothing here is logged: state, notes, questions and answers are meeting content.
  */
 const ArloContext = createContext();
@@ -40,7 +47,8 @@ const ArloContext = createContext();
 const ROLES = new Set(['owner', 'participant']);
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 const MAX_QUESTION_CHARS = 500;
-const MAX_NAME_CHARS = 200;
+// The longest display name the server takes from a panel
+const MAX_SUPPLIED_NAME_CHARS = 100;
 const MAX_ANSWER_CHARS = 4000;
 // After a stream started: how long to wait for the server to say whose it is
 const STATE_AFTER_START_MS = 3000;
@@ -72,9 +80,7 @@ function parseState(data) {
     // Absent from a server that does not tell the streams apart yet: false
     myStreamPaused: data.myStreamPaused === true,
     role: data.role,
-    ownerName: typeof data.ownerName === 'string' && data.ownerName.length > 0
-      ? data.ownerName.slice(0, MAX_NAME_CHARS)
-      : null,
+    ownerName: usableName(data.ownerName),
     whoCanAsk: WHO_CAN_ASK.has(data.whoCanAsk) ? data.whoCanAsk : 'owner',
   };
 }
@@ -92,6 +98,7 @@ export function ArloProvider({ children }) {
   // Over for this panel: Zoom said the meeting ended, or this person left it
   const meetingOver = meetingEnded === true || leftMeeting === true;
   const { isAuthenticated, user } = useAuth();
+  const { userContext } = useZoomSdk();
   // Who is signed in; null when nobody is
   const identity = isAuthenticated ? String(user?.id ?? '') : null;
   const signedInRef = useRef(isAuthenticated);
@@ -251,6 +258,24 @@ export function ArloProvider({ children }) {
       .finally(() => { if (!cancelled) setNotesAnswered(true); });
     return () => { cancelled = true; };
   }, [role, serverMeetingId, accessVerified, applyNotes]);
+
+  // The server has no name for the owner, and this person is one: their Zoom
+  // screen name is offered, once per meeting. A nicety: the answer is not read
+  // (the server tells every panel over the socket) and a failure is silent.
+  const screenName = usableName(userContext?.screenName, MAX_SUPPLIED_NAME_CHARS);
+  const nameless = state.loaded && state.ownerName === null;
+  const nameSentForRef = useRef(null);
+  useEffect(() => {
+    if (role !== 'owner' || !nameless || !screenName || !serverMeetingId || !accessVerified) return;
+    if (nameSentForRef.current === serverMeetingId) return;
+    nameSentForRef.current = serverMeetingId;
+    fetch(arloUrl(serverMeetingId, 'settings'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ displayName: screenName }),
+    }).catch(() => {});
+  }, [role, nameless, screenName, serverMeetingId, accessVerified]);
 
   const setWhoCanAsk = useCallback(async (value) => {
     const id = serverMeetingIdRef.current;

@@ -170,7 +170,10 @@ export function mockFetch(routes = {}, { signedIn = true, serverMeetingId = MEET
     '/api/auth/meeting-access': async () => json({ verified: true, isGuest: !signedIn, meetingId: await verifiedMeetingId() }),
     // Arlo's routes: not in the meeting, nobody's notes, until a test says otherwise
     [arloPath('state', serverMeetingId)]: () => json({ ...ARLO_ABSENT }),
-    [`PUT ${arloPath('settings', serverMeetingId)}`]: ({ body }) => json({ ...ARLO_ABSENT, role: 'owner', whoCanAsk: body?.whoCanAsk }),
+    // The caller's state, as the server answers it: an owner the server has a name for
+    [`PUT ${arloPath('settings', serverMeetingId)}`]: ({ body }) => json({
+      ...ARLO_ABSENT, role: 'owner', ownerName: 'Ana', whoCanAsk: body?.whoCanAsk,
+    }),
     [arloPath('notes', serverMeetingId)]: () => json({ notes: null }),
     [`POST ${arloPath('ask', serverMeetingId)}`]: () => json({ answer: 'Arlo answers from the transcript.' }),
     ...routes,

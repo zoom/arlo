@@ -9,7 +9,12 @@
  *   setNotes(meetingId, notes)        -> stored copy | null
  *   getNotes(meetingId)               -> { summary, decisions, actionItems, updatedAt, throughSeqNo } | null
  *   setMeta(meetingId, patch)         -> stored meta | null
- *   getMeta(meetingId)                -> { ownerUserId, ownerName, whoCanAsk } (defaults: null, null, 'owner')
+ *   setMeta(meetingId, { ownerNameFor: { userId, name } })
+ *                                     -> the same; keeps the display name one owner's panel supplied
+ *                                        for this meeting (name null removes it), at most 20 per meeting
+ *   getMeta(meetingId)                -> { ownerUserId, ownerName, whoCanAsk, ownerNames }
+ *                                        (defaults: null, null, 'owner', an empty Map);
+ *                                        ownerNames is a Map of Arlo user id -> supplied name, a copy
  *   has(meetingId)                    -> boolean
  *   deleteMeeting(meetingId)          -> boolean
  *   sweep()                           -> number of meetings deleted

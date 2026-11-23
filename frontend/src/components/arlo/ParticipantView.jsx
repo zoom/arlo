@@ -2,21 +2,22 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import Button from '../ui/Button';
 import AskArlo from './AskArlo';
+import { ownerWording } from '../../lib/ownerName';
 
 /**
  * What someone who did not bring Arlo in sees: that Arlo is here and for whom,
  * the meeting record, and a private ask when the owner allows it. Never the notes,
  * and no controls: the stream belongs to the person who brought Arlo in.
  * `paused` is about the meeting (every live stream is paused): wording only.
+ * `ownerName` can be missing or blank: the sentences then say it without a
+ * name (lib/ownerName.js).
  */
 export default function ParticipantView({
   present, paused = false, ownerName, whoCanAsk, guest, canBringIn = false, meetingEnded, showRecord, recordPath,
   onSignIn, signingIn, signInError,
 }) {
-  const heading = !present
-    ? 'Arlo isn\'t in this meeting'
-    : (ownerName ? `${ownerName} brought Arlo into this meeting` : 'Arlo is in this meeting');
-  const forWhom = ownerName || 'the person who brought it in';
+  const wording = ownerWording(ownerName);
+  const heading = present ? wording.heading : 'Arlo isn\'t in this meeting';
 
   return (
     <div className="arlo-screen">
@@ -24,9 +25,7 @@ export default function ParticipantView({
         <h1 className="arlo-title" tabIndex={-1} data-arlo-focus>{heading}</h1>
         {present && paused && <p className="arlo-muted" role="status">Arlo is paused</p>}
         {present ? (
-          <p className="arlo-muted">
-            Arlo reads Zoom&apos;s live transcript to take notes for {forWhom}. Nothing is stored after the meeting ends.
-          </p>
+          <p className="arlo-muted">{wording.body}</p>
         ) : (
           <p className="arlo-muted">
             {meetingEnded ? 'Nothing is stored after the meeting ends.' : 'The host decides whether Arlo joins.'}
@@ -47,7 +46,7 @@ export default function ParticipantView({
           </div>
         )}
         {present && !guest && whoCanAsk !== 'anyone' && (
-          <p className="arlo-muted">Only {forWhom} can ask Arlo in this meeting.</p>
+          <p className="arlo-muted">{wording.askLine}</p>
         )}
       </div>
       {present && !guest && whoCanAsk === 'anyone' && <AskArlo />}

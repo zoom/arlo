@@ -25,6 +25,9 @@ const MAX_SUMMARY_CHARS = 1500;
 const MAX_NOTE_LINE_CHARS = 300;
 const MAX_DECISIONS = 20;
 const MAX_ACTION_ITEMS = 30;
+// Names the owners' own panels supplied (see setMeta `ownerNameFor`): one per
+// owner, and a meeting has at most 20 streams
+const MAX_OWNER_NAMES = 20;
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 
 const MAX_SEQ_NO = 2 ** 31;
@@ -43,7 +46,11 @@ const isText = (value) => typeof value === 'string' && value.length > 0;
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
-const defaultMeta = () => ({ ownerUserId: null, ownerName: null, whoCanAsk: 'owner' });
+const defaultMeta = () => ({
+  ownerUserId: null, ownerName: null, whoCanAsk: 'owner', ownerNames: new Map(),
+});
+/** A copy to hand out: the Map inside is copied too. */
+const copyMeta = (meta) => ({ ...meta, ownerNames: new Map(meta.ownerNames) });
 const copyNotes = (notes) => ({
   ...notes,
   decisions: [...notes.decisions],
@@ -161,6 +168,11 @@ function createMemoryMeetingStore(options = {}) {
    * Change facts about the meeting. Only the known keys are read; a key with a
    * value that is not allowed is left as it was. Returns the stored meta, or
    * null for a meeting not held (same reason as setNotes).
+   *
+   * `ownerNameFor: { userId, name }` keeps the display name one owner's panel
+   * supplied for this meeting (`name: null` removes it). They are read from
+   * `ownerNames`, a Map of Arlo user id -> name with at most 20 entries: when
+   * it is full, a name for someone not in it is not taken.
    */
   function setMeta(meetingId, patch) {
     const entry = meetings.get(meetingId);
@@ -177,11 +189,21 @@ function createMemoryMeetingStore(options = {}) {
       if (hasOwn(patch, 'whoCanAsk') && WHO_CAN_ASK.has(patch.whoCanAsk)) {
         meta.whoCanAsk = patch.whoCanAsk;
       }
+      if (hasOwn(patch, 'ownerNameFor') && isPlainObject(patch.ownerNameFor)) {
+        const { userId, name } = patch.ownerNameFor;
+        const cleaned = typeof name === 'string' ? bounded(name.trim(), MAX_NAME_CHARS).trim() : '';
+        if (isMeetingId(userId)) {
+          if (name === null) meta.ownerNames.delete(userId);
+          else if (cleaned.length > 0 && (meta.ownerNames.has(userId) || meta.ownerNames.size < MAX_OWNER_NAMES)) {
+            meta.ownerNames.set(userId, cleaned);
+          }
+        }
+      }
     }
-    return { ...entry.meta };
+    return copyMeta(entry.meta);
   }
 
-  const getMeta = (meetingId) => ({ ...(meetings.get(meetingId)?.meta || defaultMeta()) });
+  const getMeta = (meetingId) => copyMeta(meetings.get(meetingId)?.meta || defaultMeta());
 
   const listSegments = (meetingId) => (meetings.get(meetingId)?.segments || []).map((s) => ({ ...s }));
   const listEvents = (meetingId) => (meetings.get(meetingId)?.events || []).map((e) => ({ ...e }));

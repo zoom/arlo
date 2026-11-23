@@ -3,7 +3,7 @@
  * /api/meetings/by-zoom-id/:zoomMeetingId/arlo
  *
  *   GET  /state     what this panel is told: is Arlo here, and what is this person to it
- *   PUT  /settings  { whoCanAsk: 'owner' | 'anyone' }, owners only
+ *   PUT  /settings  { whoCanAsk?: 'owner' | 'anyone', displayName?: string }, owners only
  *   GET  /notes     the live notes, owners only
  *   POST /ask       { question }: an answer from the stored transcript, private to the asker
  *
@@ -34,6 +34,10 @@ const router = express.Router({ mergeParams: true });
 
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 const MAX_QUESTION_CHARS = 500;
+const MAX_DISPLAY_NAME_CHARS = 100;
+// Control characters (C0, DEL, C1): never part of a name shown to a meeting
+const CONTROL_CHARS = /\p{Cc}/u;
+const SETTINGS_FIELDS = ['whoCanAsk', 'displayName'];
 const MAX_TRANSCRIPT_CHARS = 12000;
 const MAX_ANSWER_CHARS = 4000;
 const RATE_LIMITED_MESSAGE = 'The free AI models are rate limited right now. Try again in a minute.';
@@ -43,6 +47,21 @@ const isPlainObject = (value) => value !== null && typeof value === 'object' && 
 const hasExactly = (body, keys) => isPlainObject(body)
   && Object.keys(body).length === keys.length
   && keys.every((key) => Object.prototype.hasOwnProperty.call(body, key));
+/** A JSON object with at least one of `keys` and nothing else. */
+const hasOnlySomeOf = (body, keys) => isPlainObject(body)
+  && Object.keys(body).length > 0
+  && Object.keys(body).every((key) => keys.includes(key));
+
+/**
+ * The display name a panel supplies, trimmed, or null when it is not one:
+ * a string of 1 to 100 characters after trimming, without control characters.
+ */
+function readDisplayName(value) {
+  if (typeof value !== 'string' || value.length > MAX_DISPLAY_NAME_CHARS * 4) return null;
+  const name = value.trim();
+  if (name.length === 0 || name.length > MAX_DISPLAY_NAME_CHARS || CONTROL_CHARS.test(name)) return null;
+  return name;
+}
 
 // Meeting content, and who is what in a meeting, must not outlive the meeting
 // in a browser or proxy cache. First, so refusals are not cached either.
@@ -73,8 +92,12 @@ router.get('/state', optionalAuth, requireMeetingAccess, (req, res) => {
 
 /**
  * PUT /settings
- * Change who may ask Arlo. Answers the caller's new state; every panel of the
- * meeting is told over its socket.
+ * { whoCanAsk?, displayName? }: at least one, nothing else.
+ * `whoCanAsk` changes who may ask Arlo. `displayName` is the caller's own name
+ * for this meeting (their panel sends their Zoom screen name): it is shown as
+ * the owner's name only when their account has no name, and is deleted with
+ * the meeting. Answers the caller's new state; every panel of the meeting is
+ * told over its socket when something changed. A name is never logged.
  */
 router.put('/settings', requireAuth, requireMeetingAccess, requireJson, (req, res) => {
   const meetingId = req.params.zoomMeetingId;
@@ -82,15 +105,41 @@ router.put('/settings', requireAuth, requireMeetingAccess, requireJson, (req, re
   if (!presence.isOwner(meetingId, req.user.id)) {
     return forbidden(res, 'Only the person who brought Arlo in can change this.');
   }
-  if (!hasExactly(req.body, ['whoCanAsk']) || typeof req.body.whoCanAsk !== 'string' || !WHO_CAN_ASK.has(req.body.whoCanAsk)) {
+  // Everything is validated before anything is changed
+  if (!hasOnlySomeOf(req.body, SETTINGS_FIELDS)) {
+    return invalid(res, 'Send whoCanAsk, displayName, or both, and nothing else');
+  }
+  const hasOwn = (key) => Object.prototype.hasOwnProperty.call(req.body, key);
+  const whoCanAsk = hasOwn('whoCanAsk') ? req.body.whoCanAsk : undefined;
+  if (whoCanAsk !== undefined && (typeof whoCanAsk !== 'string' || !WHO_CAN_ASK.has(whoCanAsk))) {
     return invalid(res, 'whoCanAsk must be "owner" or "anyone"');
   }
-  if (!presence.setWhoCanAsk(meetingId, req.user.id, req.body.whoCanAsk)) {
-    // The meeting's data went between the two checks
-    return forbidden(res, 'Only the person who brought Arlo in can change this.');
+  const displayName = hasOwn('displayName') ? readDisplayName(req.body.displayName) : undefined;
+  if (displayName === null) {
+    return invalid(res, `displayName must be 1 to ${MAX_DISPLAY_NAME_CHARS} characters, without control characters`);
   }
-  console.log('Arlo setting changed: who can ask');
-  broadcastArloState(meetingId);
+
+  let changed = false;
+  if (whoCanAsk !== undefined) {
+    if (!presence.setWhoCanAsk(meetingId, req.user.id, whoCanAsk)) {
+      // The meeting's data went between the two checks
+      return forbidden(res, 'Only the person who brought Arlo in can change this.');
+    }
+    console.log('Arlo setting changed: who can ask');
+    changed = true;
+  }
+  if (displayName !== undefined) {
+    const outcome = presence.setDisplayName(meetingId, req.user.id, displayName);
+    if (outcome === 'refused') {
+      return forbidden(res, 'Only the person who brought Arlo in can change this.');
+    }
+    if (outcome === 'stored') {
+      // That it happened, never the name
+      console.log('Arlo setting changed: an owner\'s panel supplied their display name');
+      changed = true;
+    }
+  }
+  if (changed) broadcastArloState(meetingId);
   return res.json(presence.stateFor(meetingId, req.user.id));
 });
 

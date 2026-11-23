@@ -14,6 +14,7 @@
  *   sessionRestore this encrypted blob; useless without a matching sessionToken
  */
 const config = require('../config');
+const { cleanName } = require('../lib/displayName');
 const { encryptToken, decryptToken } = require('./auth');
 const { userStore, tokenStore } = require('../lib/memoryStore');
 
@@ -38,7 +39,7 @@ function sealSession({ user, refreshToken, scopes }) {
     iat: Date.now(),
     uid: user.id,
     zid: user.zoomUserId,
-    name: user.displayName || '',
+    name: cleanName(user.displayName),
     email: user.email || '',
     avatar: user.avatarUrl || null,
     scopes: Array.isArray(scopes) ? scopes.slice(0, 50) : [],
@@ -90,7 +91,8 @@ function restoreIfMissing(req, session) {
     id: payload.uid,
     zoomUserId: payload.zid,
     email: typeof payload.email === 'string' ? payload.email.slice(0, 320) : '',
-    displayName: typeof payload.name === 'string' ? payload.name.slice(0, 200) : '',
+    // Trimmed: a cookie from before names were trimmed can hold a blank
+    displayName: cleanName(payload.name),
     avatarUrl: typeof payload.avatar === 'string' ? payload.avatar.slice(0, 2000) : null,
   });
   if (isString(payload.rt, 4000)) {

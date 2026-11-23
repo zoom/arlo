@@ -348,6 +348,112 @@ describe('participant', () => {
     await openArlo({ sdk: attendee(), state: { present: true, role: 'participant', ownerName: null } });
     expect(await screen.findByRole('heading', { name: 'Arlo is in this meeting' })).toBeInTheDocument();
   });
+
+  test.each([['null', null], ['an empty string', ''], ['a single space', ' '], ['only spaces', '   ']])(
+    'an owner name that is %s leaves no gap in any sentence',
+    async (label, ownerName) => {
+      await openArlo({ sdk: attendee(), state: { present: true, role: 'participant', ownerName } });
+      expect(await screen.findByRole('heading', { name: 'Arlo is in this meeting' })).toBeInTheDocument();
+      expect(screen.getByText('Arlo reads Zoom\'s live transcript to take notes for the person who brought it in. Nothing is stored after the meeting ends.')).toBeInTheDocument();
+      expect(screen.getByText('Only the person who brought Arlo in can ask in this meeting.')).toBeInTheDocument();
+      expect(screen.queryByText(/brought Arlo into this meeting/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/notes for \./)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Only\s+can ask/)).not.toBeInTheDocument();
+    },
+  );
+
+  test('the name arriving later takes its place in every sentence, and going away again leaves none', async () => {
+    await openArlo({ sdk: attendee(), state: { present: true, role: 'participant', ownerName: ' ' } });
+    await screen.findByRole('heading', { name: 'Arlo is in this meeting' });
+
+    await send(serverMessage.arloState({ ...ANA_BROUGHT_ARLO, ownerName: ' Ana ' }));
+    expect(await screen.findByRole('heading', { name: 'Ana brought Arlo into this meeting' })).toBeInTheDocument();
+    expect(screen.getByText('Arlo reads Zoom\'s live transcript to take notes for Ana. Nothing is stored after the meeting ends.')).toBeInTheDocument();
+    expect(screen.getByText('Only Ana can ask Arlo in this meeting.')).toBeInTheDocument();
+
+    await send(serverMessage.arloState({ ...ANA_BROUGHT_ARLO, ownerName: null }));
+    expect(await screen.findByRole('heading', { name: 'Arlo is in this meeting' })).toBeInTheDocument();
+    expect(screen.getByText('Only the person who brought Arlo in can ask in this meeting.')).toBeInTheDocument();
+  });
+
+  test('a guest reads the same sentence without a name', async () => {
+    await openArlo({ sdk: attendee(), guest: true, state: { present: true, role: 'participant', ownerName: ' ' } });
+    expect(await screen.findByRole('heading', { name: 'Arlo is in this meeting' })).toBeInTheDocument();
+    expect(screen.getByText(/to take notes for the person who brought it in\./)).toBeInTheDocument();
+  });
+
+  test('a participant\'s panel never sends a name', async () => {
+    const { fetchMock } = await openArlo({ sdk: attendee(), state: { present: true, role: 'participant', ownerName: null } });
+    await screen.findByRole('heading', { name: 'Arlo is in this meeting' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(callsTo(fetchMock, arloPath('settings'))).toHaveLength(0);
+  });
+});
+
+describe('the owner\'s panel supplies their Zoom screen name when the server has no name', () => {
+  const NAMELESS_OWNER = { present: true, role: 'owner', ownerName: null };
+  const nameCalls = (fetchMock) => callsTo(fetchMock, arloPath('settings'))
+    .map(([, init]) => JSON.parse(init.body))
+    .filter((body) => 'displayName' in body);
+
+  test('once per meeting, with the screen name and nothing else', async () => {
+    const { fetchMock } = await openArlo({ sdk: createZoomSdk({ screenName: '  Ana from Zoom ' }), state: NAMELESS_OWNER });
+    await waitFor(() => expect(nameCalls(fetchMock)).toHaveLength(1));
+    expect(nameCalls(fetchMock)[0]).toEqual({ displayName: 'Ana from Zoom' });
+    const [, init] = callsTo(fetchMock, arloPath('settings'))[0];
+    expect(init.method).toBe('PUT');
+    expect(init.credentials).toBe('include');
+
+    // told again that there is no name (the server's own broadcast): not sent again
+    await send(serverMessage.arloState(NAMELESS_OWNER));
+    await send(serverMessage.arloState({ ...NAMELESS_OWNER, ownerName: 'Ana from Zoom' }));
+    await send(serverMessage.arloState(NAMELESS_OWNER));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(nameCalls(fetchMock)).toHaveLength(1);
+  });
+
+  test('the answer to it does not change what the panel shows; the server\'s broadcast does', async () => {
+    // The default settings answer says "Arlo is not here": it must not be applied
+    await openArlo({ state: NAMELESS_OWNER });
+    await send(serverMessage.status('rtms_started'));
+    expect(await screen.findByText('Arlo is in the meeting')).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByText('Arlo is in the meeting')).toBeInTheDocument();
+  });
+
+  test('not when the server already has a name, not without a screen name, and a long one is cut to 100', async () => {
+    const named = await openArlo({ state: OWNER });
+    await screen.findByText('Arlo is in the meeting');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(nameCalls(named.fetchMock)).toHaveLength(0);
+    named.unmount();
+    resetHarness();
+
+    const blank = await openArlo({ sdk: createZoomSdk({ screenName: '   ' }), state: NAMELESS_OWNER });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(nameCalls(blank.fetchMock)).toHaveLength(0);
+    blank.unmount();
+    resetHarness();
+
+    const long = await openArlo({ sdk: createZoomSdk({ screenName: 'x'.repeat(250) }), state: NAMELESS_OWNER });
+    await waitFor(() => expect(nameCalls(long.fetchMock)).toHaveLength(1));
+    expect(nameCalls(long.fetchMock)[0].displayName).toHaveLength(100);
+  });
+
+  test('a refusal or a network failure is silent', async () => {
+    const sdk = createZoomSdk();
+    const { fetchMock } = await openArlo({
+      sdk,
+      state: NAMELESS_OWNER,
+      routes: { [`PUT ${arloPath('settings')}`]: () => json({ error: 'Invalid request' }, 400) },
+    });
+    await send(serverMessage.status('rtms_started'));
+    await waitFor(() => expect(nameCalls(fetchMock)).toHaveLength(1));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(sdk.showNotification).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'warning' }));
+    expect(screen.getByText('Arlo is in the meeting')).toBeInTheDocument();
+  });
 });
 
 describe('guest', () => {

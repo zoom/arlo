@@ -10,10 +10,17 @@
  * stream stops, so their notes survive a stop and restart, until the meeting's
  * data is deleted: from then on the meeting has no owner.
  *
- * The one setting per meeting, who may ask Arlo, lives in the meeting store
- * with the transcript and is deleted with it. Nothing here is logged.
+ * The owner's name the panels show is the account's own display name. An
+ * account can have none (sign-in without the Zoom scope that gives names):
+ * then it is the name that owner's own panel supplied for this meeting (their
+ * Zoom screen name), and null when there is neither. Never a blank.
+ *
+ * What is kept per meeting, who may ask Arlo and those supplied names, lives
+ * in the meeting store with the transcript and is deleted with it. Nothing
+ * here is logged.
  */
-const MAX_NAME_CHARS = 200;
+const { cleanName } = require('../lib/displayName');
+
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 
 const isUserId = (value) => typeof value === 'string' && value.length > 0;
@@ -28,10 +35,8 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
       return null;
     }
     if (user === null || typeof user !== 'object' || !isUserId(user.id)) return null;
-    const name = typeof user.displayName === 'string' && user.displayName.length > 0
-      ? user.displayName.slice(0, MAX_NAME_CHARS)
-      : null;
-    return { id: user.id, name };
+    // A name of spaces only is no name
+    return { id: user.id, name: cleanName(user.displayName) || null };
   }
 
   /**
@@ -45,7 +50,13 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
       const user = arloUser(zoomUserId);
       if (user && !found.has(user.id)) found.set(user.id, user);
     }
-    return [...found.values()];
+    // The account's own name, otherwise the one their panel supplied
+    const supplied = store.getMeta(meetingId).ownerNames;
+    return [...found.values()].map((owner) => ({
+      id: owner.id,
+      name: owner.name ?? (cleanName(supplied.get(owner.id)) || null),
+      hasAccountName: owner.name !== null,
+    }));
   }
 
   const ownerUserIds = (meetingId) => owners(meetingId).map((owner) => owner.id);
@@ -96,7 +107,26 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
     return store.setMeta(meetingId, { whoCanAsk: value }) !== null;
   }
 
-  return { stateFor, setWhoCanAsk, isOwner, ownerUserIds, liveStreamOperator };
+  /**
+   * Keep the display name an owner's panel supplied for this meeting. The
+   * caller validates what a name may be; here it must be a non-blank string.
+   * 'refused' for anyone who is not an owner of this meeting or for something
+   * that is not a name; 'unchanged' when nothing was kept (the account has a
+   * name of its own, which wins, or this name is held already, or the
+   * meeting holds as many as it takes); 'stored' when it is the owner's name now.
+   */
+  function setDisplayName(meetingId, userId, value) {
+    const name = cleanName(value);
+    if (name.length === 0 || !isUserId(userId)) return 'refused';
+    const owner = owners(meetingId).find((one) => one.id === userId);
+    if (!owner) return 'refused';
+    if (owner.hasAccountName || owner.name === name) return 'unchanged';
+    const meta = store.setMeta(meetingId, { ownerNameFor: { userId, name } });
+    if (meta === null) return 'refused';
+    return meta.ownerNames.get(userId) === name ? 'stored' : 'unchanged';
+  }
+
+  return { stateFor, setWhoCanAsk, setDisplayName, isOwner, ownerUserIds, liveStreamOperator };
 }
 
 let instance = null;
