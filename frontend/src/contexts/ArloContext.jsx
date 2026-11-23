@@ -25,6 +25,14 @@ import { readMeetingMessage } from '../lib/meetingMessage';
  * - While the owner's notes are held, the meeting's transcript and timeline are
  *   held with them (MeetingContext), so the meeting record still opens.
  *
+ * - `paused` is about the meeting (true only when every live stream in it is
+ *   paused); `myStreamPaused` is about this person's own stream. Several people
+ *   can each run a stream in one meeting.
+ * - What is held belongs to the signed-in person: when they stop being signed
+ *   in (sign-out, session loss, deauthorization) or someone else is signed in,
+ *   the state, the notes and the way back to them are dropped. An owner is
+ *   always signed in: without a session the role is never 'owner'.
+ *
  * Nothing here is logged: state, notes, questions and answers are meeting content.
  */
 const ArloContext = createContext();
@@ -39,7 +47,7 @@ const STATE_AFTER_START_MS = 3000;
 
 // `present` and `role` are null until the server answered: "not known" is not "not here"
 const NOT_LOADED = Object.freeze({
-  loaded: false, present: null, paused: false, role: null, ownerName: null, whoCanAsk: 'owner',
+  loaded: false, present: null, paused: false, myStreamPaused: false, role: null, ownerName: null, whoCanAsk: 'owner',
 });
 
 const ASK_MESSAGES = {
@@ -61,6 +69,8 @@ function parseState(data) {
   return {
     present: data.present,
     paused: data.paused === true,
+    // Absent from a server that does not tell the streams apart yet: false
+    myStreamPaused: data.myStreamPaused === true,
     role: data.role,
     ownerName: typeof data.ownerName === 'string' && data.ownerName.length > 0
       ? data.ownerName.slice(0, MAX_NAME_CHARS)
@@ -81,7 +91,11 @@ export function ArloProvider({ children }) {
   const serverMeetingId = meetingId ? verifiedMeetingId : null;
   // Over for this panel: Zoom said the meeting ended, or this person left it
   const meetingOver = meetingEnded === true || leftMeeting === true;
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+  // Who is signed in; null when nobody is
+  const identity = isAuthenticated ? String(user?.id ?? '') : null;
+  const signedInRef = useRef(isAuthenticated);
+  signedInRef.current = isAuthenticated;
   const accessVerified = meetingAccess?.status === 'verified';
 
   const [state, setState] = useState(NOT_LOADED);
@@ -117,6 +131,22 @@ export function ArloProvider({ children }) {
     setAwaitingState(false);
   }, [meetingId]);
 
+  // The person signed out, lost the session, was deauthorized, or someone else
+  // is signed in: nothing held for the person before may show any more. With
+  // no notes held, MeetingContext drops the kept transcript and timeline too.
+  const identityRef = useRef(identity);
+  useEffect(() => {
+    const previous = identityRef.current;
+    identityRef.current = identity;
+    if (previous === null || previous === identity) return;
+    stateRef.current = NOT_LOADED;
+    setState(NOT_LOADED);
+    setEverPresent(false);
+    setNotes(null);
+    setNotesAnswered(false);
+    setAwaitingState(false);
+  }, [identity]);
+
   useEffect(() => {
     if (!awaitingState) return undefined;
     const timer = setTimeout(() => setAwaitingState(false), STATE_AFTER_START_MS);
@@ -128,13 +158,18 @@ export function ArloProvider({ children }) {
   }, [meetingOver]);
 
   const applyState = useCallback((data) => {
-    const next = parseState(data);
-    if (!next) return;
+    const parsed = parseState(data);
+    if (!parsed) return;
+    // Only a signed-in person owns a stream. A socket opened before the session
+    // ended can still be told "owner": that is no longer this panel's role.
+    const next = signedInRef.current || parsed.role !== 'owner'
+      ? parsed
+      : { ...parsed, role: 'participant', myStreamPaused: false };
     const prev = stateRef.current;
     // After the meeting ended the server has nothing left to say about it:
     // Arlo is gone, and who this person was to it stays as it was.
     const merged = endedRef.current && prev.loaded
-      ? { ...prev, present: false, paused: false }
+      ? { ...prev, present: false, paused: false, myStreamPaused: false }
       : { loaded: true, ...next };
     stateRef.current = merged;
     setState(merged);
@@ -144,7 +179,7 @@ export function ArloProvider({ children }) {
   // Newer notes win; notes for someone who is not an owner are not kept
   const applyNotes = useCallback((value) => {
     const clean = cleanNotes(value);
-    if (!clean || stateRef.current.role !== 'owner') return;
+    if (!clean || stateRef.current.role !== 'owner' || !signedInRef.current) return;
     setNotes((prev) => (
       prev && prev.throughSeqNo !== null && clean.throughSeqNo !== null && prev.throughSeqNo > clean.throughSeqNo
         ? prev
@@ -153,7 +188,7 @@ export function ArloProvider({ children }) {
   }, []);
 
   // The state, once the server lets this panel ask. Again when the socket is
-  // replaced (a reconnect) and when the person signs in (their role can change).
+  // replaced (a reconnect) and when who is signed in changes (their role can change).
   useEffect(() => {
     if (!serverMeetingId || !accessVerified) return undefined;
     let cancelled = false;
@@ -162,7 +197,7 @@ export function ArloProvider({ children }) {
       .then((data) => { if (!cancelled && data) applyState(data); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [serverMeetingId, accessVerified, isAuthenticated, ws, applyState]);
+  }, [serverMeetingId, accessVerified, identity, ws, applyState]);
 
   useEffect(() => {
     if (!ws || !serverMeetingId) return undefined;
@@ -286,6 +321,7 @@ export function ArloProvider({ children }) {
     loaded: shown.loaded,
     present: shown.present,
     paused: shown.paused,
+    myStreamPaused: shown.myStreamPaused,
     role: shown.role,
     ownerName: shown.ownerName,
     whoCanAsk: shown.whoCanAsk,

@@ -245,6 +245,37 @@ describe('after the meeting, the notes are one tap away from everywhere', () => 
   });
 });
 
+describe('after the meeting, the session ends', () => {
+  test('the notes are gone from every screen, a guest route included, and so is the way back to them', async () => {
+    let sessionValid = true;
+    const { sdk } = await openAsOwnerWithNotes({
+      routes: {
+        '/api/auth/me': () => (sessionValid
+          ? json({ user: { id: 'user-1', displayName: 'Ana' } })
+          : json({ error: 'Not authenticated' }, 401)),
+        '/api/highlights': () => (sessionValid ? json({}) : json({ error: 'Unauthorized' }, 401)),
+      },
+    });
+    await leaveMeeting(sdk);
+    await screen.findByRole('button', { name: 'Copy notes' });
+
+    // The session is lost (expiry, sign-out elsewhere, deauthorization): the next API call is refused
+    sessionValid = false;
+    await act(async () => { await fetch('/api/highlights', { credentials: 'include' }); });
+    await waitFor(() => expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument());
+
+    await act(async () => { window.location.hash = `#/guest-meeting/${ID}`; });
+    await act(async () => {});
+    expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy notes' })).not.toBeInTheDocument();
+
+    await act(async () => { window.location.hash = `#/guest-meeting/${ID}/record`; });
+    await act(async () => {});
+    expect(screen.queryByText('Said in the first meeting.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Back to your notes' })).not.toBeInTheDocument();
+  });
+});
+
 describe('the socket reconnects', () => {
   const accessPath = '/api/auth/meeting-access';
   const accessCalls = (fetchMock) => fetchMock.mock.calls.filter(([url]) => String(url).startsWith(accessPath));

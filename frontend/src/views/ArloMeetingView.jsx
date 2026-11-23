@@ -230,6 +230,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           notes={arlo.notes}
           present={arlo.present === true}
           paused={arlo.paused}
+          myStreamPaused={arlo.myStreamPaused}
           canControl={canControl}
           recordPath={recordPath}
           whoCanAsk={arlo.whoCanAsk}
@@ -254,6 +255,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
       content = (
         <ParticipantView
           present={present}
+          paused={arlo.paused}
           ownerName={arlo.ownerName}
           whoCanAsk={arlo.whoCanAsk}
           guest={guest}

@@ -21,14 +21,20 @@ const CONFIRM_MS = 5000;
  * A request first (it is not a state, and says so), then the confirmed stream
  * phase; what the server says about Arlo otherwise.
  */
-function arloStatus({ phase, present, paused, waitingOnHost }) {
+function arloStatus({ phase, present, paused, myStreamPaused, canControl, waitingOnHost }) {
   if (phase === 'requested') return waitingOnHost ? 'asking' : 'returning';
   if (phase === 'starting') return 'returning';
   if (phase === 'interrupted') return 'reconnecting';
+  // Several people can each run a stream in one meeting. An owner's line is
+  // about their OWN stream (`myStreamPaused`), because Resume acts on it:
+  // another owner's pause, or the meeting-level `paused`, must not offer it.
+  // Someone who controls nothing reads the meeting-level `paused`, for the
+  // wording only.
   // The server and this panel can disagree for a while (a pause this client
   // was never told about, or one the server has not reported yet): paused
   // when either says so, so Resume is always within reach.
-  if (phase === 'paused' || (paused && (present || phase === 'active'))) return 'paused';
+  const pausedOnServer = canControl ? myStreamPaused : paused;
+  if (phase === 'paused' || (pausedOnServer && (present || phase === 'active'))) return 'paused';
   if (phase === 'active' || present) return 'live';
   return 'left';
 }
@@ -38,8 +44,11 @@ function arloStatus({ phase, present, paused, waitingOnHost }) {
  * are for an owner only (lib/arloScreen.js canControlArlo): they act on the
  * caller's own stream. Each action is a request: the label
  * changes when Zoom confirms it.
+ *
+ * `paused`: every live stream in the meeting is paused. `myStreamPaused`: this
+ * person's own stream is.
  */
-export default function StatusLine({ present, paused, canControl }) {
+export default function StatusLine({ present, paused, myStreamPaused = false, canControl }) {
   const {
     rtmsPhase, rtmsActive, rtmsPaused, rtmsLoading, rtmsError, rtmsWaitingLong,
     startRTMS, stopRTMS, pauseRTMS, resumeRTMS,
@@ -49,7 +58,9 @@ export default function StatusLine({ present, paused, canControl }) {
 
   // The host's own request needs nobody's permission
   const waitingOnHost = userContext?.role !== 'host';
-  const status = arloStatus({ phase: rtmsPhase, present, paused, waitingOnHost });
+  const status = arloStatus({
+    phase: rtmsPhase, present, paused, myStreamPaused, canControl, waitingOnHost,
+  });
   const inMeeting = IN_MEETING.has(status);
   // Why a control failed or the stream ended, in this screen's words
   const { message } = getTransportView({
@@ -90,7 +101,7 @@ export default function StatusLine({ present, paused, canControl }) {
               <Button variant="ghost" size="sm" onClick={() => pauseRTMS()} disabled={rtmsLoading}>Pause</Button>
             )}
             {status === 'paused' && (
-              <Button variant="ghost" size="sm" onClick={() => resumeRTMS({ pausedOnServer: paused })} disabled={rtmsLoading}>Resume</Button>
+              <Button variant="ghost" size="sm" onClick={() => resumeRTMS({ pausedOnServer: myStreamPaused })} disabled={rtmsLoading}>Resume</Button>
             )}
             {inMeeting && (
               <Button

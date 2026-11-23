@@ -900,7 +900,25 @@ export function MeetingProvider({ children }) {
   useEffect(() => { startRTMSRef.current = startRTMS; }, [startRTMS]);
 
   // Auto-start RTMS when authenticated and in a meeting (conditional on user preference)
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
+
+  // A transcript and timeline kept after the meeting (with the owner's notes)
+  // belong to the person who was signed in. When they stop being signed in
+  // (sign-out, session loss, deauthorization) or someone else is, they go.
+  // A meeting still running keeps its live transcript: everyone in it sees that.
+  const identity = isAuthenticated ? String(user?.id ?? '') : null;
+  const identityRef = useRef(identity);
+  const meetingEndedRef = useRef(meetingEnded);
+  meetingEndedRef.current = meetingEnded;
+  useEffect(() => {
+    const previous = identityRef.current;
+    identityRef.current = identity;
+    if (previous === null || previous === identity) return;
+    if (meetingIdRef.current && !meetingEndedRef.current) return;
+    setRecordRetained(false);
+    setSegments([]);
+    setParticipantEvents([]);
+  }, [identity]);
   useEffect(() => {
     if (autoStartAttemptedRef.current || !isAuthenticated || !meetingId || rtmsActive || rtmsLoading) return;
     // Off unless the deployment turns it on (AUTO_START_RTMS) and the user has not turned it off

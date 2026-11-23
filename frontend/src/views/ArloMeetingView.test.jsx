@@ -730,9 +730,9 @@ describe('focus', () => {
 });
 
 describe('paused, according to the server or to this panel', () => {
-  test('the server says paused while this panel still thinks Arlo is live: "Arlo is paused" and Resume', async () => {
+  test('the server says this owner\'s stream is paused while this panel still thinks Arlo is live: "Arlo is paused" and Resume', async () => {
     const { sdk } = await openAsOwner();
-    await send(serverMessage.arloState({ ...OWNER, paused: true }));
+    await send(serverMessage.arloState({ ...OWNER, paused: true, myStreamPaused: true }));
 
     expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
@@ -747,6 +747,56 @@ describe('paused, according to the server or to this panel', () => {
     expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Resume' }));
     expect(sdk.resumeRTMS).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('several people each run a stream: whose pause it is', () => {
+  test('an owner whose own stream is paused sees "Arlo is paused" and Resume, though the meeting is not paused', async () => {
+    const { sdk } = await openAsOwner();
+    await send(serverMessage.arloState({ ...OWNER, paused: false, myStreamPaused: true }));
+
+    expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(sdk.resumeRTMS).toHaveBeenCalledTimes(1);
+  });
+
+  test('an owner whose stream runs while another owner paused theirs sees Arlo running, with Pause and no Resume', async () => {
+    await openAsOwner();
+    await send(serverMessage.arloState({ ...OWNER, paused: false, myStreamPaused: false }));
+
+    expect(screen.getByText('Arlo is in the meeting')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Arlo is paused')).not.toBeInTheDocument();
+  });
+
+  test('the meeting-level pause alone never gives an owner Resume: only their own stream does', async () => {
+    const { sdk } = await openAsOwner();
+    await send(serverMessage.arloState({ ...OWNER, paused: true, myStreamPaused: false }));
+
+    expect(screen.getByText('Arlo is in the meeting')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(sdk.resumeRTMS).not.toHaveBeenCalled();
+  });
+
+  test('a participant reads "Arlo is paused" only while the whole meeting is paused, and never gets Resume', async () => {
+    await openArlo({ sdk: attendee(), state: ANA_BROUGHT_ARLO });
+    await send(serverMessage.status('rtms_started'));
+    await screen.findByRole('heading', { name: 'Ana brought Arlo into this meeting' });
+    expect(screen.queryByText('Arlo is paused')).not.toBeInTheDocument();
+
+    // One of several streams paused: the meeting is not
+    await send(serverMessage.arloState({ ...ANA_BROUGHT_ARLO, paused: false }));
+    expect(screen.queryByText('Arlo is paused')).not.toBeInTheDocument();
+
+    await send(serverMessage.arloState({ ...ANA_BROUGHT_ARLO, paused: true }));
+    expect(await screen.findByText('Arlo is paused')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+
+    await send(serverMessage.arloState({ ...ANA_BROUGHT_ARLO, paused: false }));
+    await waitFor(() => expect(screen.queryByText('Arlo is paused')).not.toBeInTheDocument());
   });
 });
 

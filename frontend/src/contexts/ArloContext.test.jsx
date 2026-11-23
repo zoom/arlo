@@ -2,10 +2,10 @@ import React, { useEffect } from 'react';
 import { render, waitFor, act } from '@testing-library/react';
 import { vi } from 'vitest';
 import {
-  createZoomSdk, FakeWebSocket, json, mockFetch, resetHarness, serverMessage, arloPath, ARLO_ABSENT,
+  createZoomSdk, FakeWebSocket, json, mockFetch, resetHarness, serverMessage, arloPath, ARLO_ABSENT, MEETING,
 } from '../test/harness';
 import { ZoomSdkProvider } from './ZoomSdkContext';
-import { AuthProvider } from './AuthContext';
+import { AuthProvider, useAuth } from './AuthContext';
 import { ServerSettingsProvider } from './ServerSettingsContext';
 import { MeetingProvider, useMeeting } from './MeetingContext';
 import { ArloProvider, useArlo } from './ArloContext';
@@ -24,9 +24,11 @@ const OWNER = { present: true, role: 'owner', ownerName: 'Ana' };
 
 let arlo;
 let meeting;
+let auth;
 function Probe() {
   meeting = useMeeting();
   arlo = useArlo();
+  auth = useAuth();
   const { ws, meetingId, connectWebSocket } = meeting;
   useEffect(() => {
     if (!ws && meetingId) connectWebSocket(meetingId);
@@ -273,5 +275,107 @@ describe('setWhoCanAsk', () => {
     await act(async () => { ok = await arlo.setWhoCanAsk('anyone'); });
     expect(ok).toBe(false);
     expect(arlo.whoCanAsk).toBe('owner');
+  });
+});
+
+describe('myStreamPaused', () => {
+  test('is the server\'s word about this person\'s own stream, apart from the meeting\'s `paused`', async () => {
+    await asOwner();
+    expect(arlo).toMatchObject({ paused: false, myStreamPaused: false });
+    await send(serverMessage.arloState({ ...OWNER, paused: false, myStreamPaused: true }));
+    expect(arlo).toMatchObject({ paused: false, myStreamPaused: true });
+    await send(serverMessage.arloState({ ...OWNER, paused: true, myStreamPaused: true }));
+    expect(arlo).toMatchObject({ paused: true, myStreamPaused: true });
+    await send(serverMessage.arloState({ ...OWNER, paused: false, myStreamPaused: false }));
+    expect(arlo).toMatchObject({ paused: false, myStreamPaused: false });
+  });
+
+  test('is false when the server does not send it, or sends something that is not a boolean', async () => {
+    await asOwner();
+    const withoutIt = { present: true, paused: true, role: 'owner', ownerName: 'Ana', whoCanAsk: 'owner' };
+    await send({ type: 'arlo.state', data: { meetingId: MEETING, ...withoutIt } });
+    expect(arlo).toMatchObject({ paused: true, myStreamPaused: false });
+    await send({ type: 'arlo.state', data: { meetingId: MEETING, ...withoutIt, myStreamPaused: 'yes' } });
+    expect(arlo.myStreamPaused).toBe(false);
+  });
+});
+
+describe('the person stops being signed in', () => {
+  const leaveMeeting = () => act(async () => {
+    window.zoomSdk.emit('onRunningContextChange', { runningContext: 'inMainClient' });
+  });
+
+  /** An owner who left the meeting: the notes, the transcript and the way back to them are held. */
+  async function holdingNotes(routes = {}) {
+    const fetchMock = await open({
+      [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...OWNER }),
+      [arloPath('notes')]: () => json({ notes: NOTES }),
+      ...routes,
+    });
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(1, 'Said while Arlo was here.'));
+    await send(serverMessage.timelineEvent({ id: 'e1', eventType: 'joined', participantName: 'Bo', timestamp: 1000 }));
+    await leaveMeeting();
+    await waitFor(() => expect(arlo.afterNotesMeetingId).toBe(MEETING));
+    expect(arlo.notes).toEqual(NOTES);
+    expect(meeting.segments).toHaveLength(1);
+    expect(meeting.participantEvents).toHaveLength(1);
+    return fetchMock;
+  }
+
+  const expectNothingHeld = () => waitFor(() => {
+    expect(arlo.notes).toBeNull();
+    expect(arlo.role).toBeNull();
+    expect(arlo.afterNotesMeetingId).toBeNull();
+    expect(meeting.segments).toHaveLength(0);
+    expect(meeting.participantEvents).toHaveLength(0);
+  });
+
+  test('signing out clears the held notes, the kept transcript and the way back to them', async () => {
+    await holdingNotes();
+    await act(async () => { auth.logout(); });
+    await expectNothingHeld();
+  });
+
+  test('a lost session clears them too', async () => {
+    let sessionValid = true;
+    await holdingNotes({
+      '/api/auth/me': () => (sessionValid
+        ? json({ user: { id: 'user-1', displayName: 'Ana' } })
+        : json({ error: 'Not authenticated' }, 401)),
+      '/api/highlights': () => (sessionValid ? json({}) : json({ error: 'Unauthorized' }, 401)),
+    });
+    // The session ends (expiry, deauthorization): the next API call is refused
+    sessionValid = false;
+    await act(async () => { await fetch('/api/highlights', { credentials: 'include' }); });
+    await waitFor(() => expect(auth.isAuthenticated).toBe(false));
+    await expectNothingHeld();
+  });
+
+  test('another person signed in: nothing of the first person\'s is shown to them', async () => {
+    await holdingNotes();
+    await act(async () => { auth.login({ id: 'user-2', displayName: 'Ben' }); });
+    await expectNothingHeld();
+  });
+
+  test('the same person confirmed again keeps everything', async () => {
+    await holdingNotes();
+    await act(async () => { await auth.checkAuth(); });
+    await act(async () => { auth.login({ id: 'user-1', displayName: 'Ana' }); });
+    expect(arlo.notes).toEqual(NOTES);
+    expect(arlo.afterNotesMeetingId).toBe(MEETING);
+    expect(meeting.segments).toHaveLength(1);
+  });
+
+  test('in a live meeting, notes pushed to a panel whose session ended are not kept', async () => {
+    await asOwner();
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await act(async () => { auth.logout(); });
+    await waitFor(() => expect(arlo.notes).toBeNull());
+    // The socket was opened as the owner and may still be sent the owner's messages
+    await send(serverMessage.arloState(OWNER));
+    await send(serverMessage.notes({ ...NOTES, summary: 'Sent after the session ended.', throughSeqNo: 30 }));
+    expect(arlo.notes).toBeNull();
   });
 });

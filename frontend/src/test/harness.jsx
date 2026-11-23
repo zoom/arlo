@@ -16,9 +16,13 @@ export const MEETING = 'MEETING-1==';
  */
 export const arloPath = (name, meetingId = MEETING) => `/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/arlo/${name}`;
 
-/** What the server says about Arlo before anyone brought it in. */
+/**
+ * What the server says about Arlo before anyone brought it in. `paused` is
+ * about the meeting (true only when every live stream is paused);
+ * `myStreamPaused` is about the own stream of the person it is sent to.
+ */
 export const ARLO_ABSENT = Object.freeze({
-  present: false, paused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner',
+  present: false, paused: false, myStreamPaused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner',
 });
 
 /** Fake `window.zoomSdk`. `sdk.emit(event, payload)` fires an SDK event. */
@@ -194,6 +198,8 @@ export { json };
 export const serverMessagesFor = (ofMeeting) => ({
   status: (status, extra = {}) => ({ type: 'meeting.status', data: { meetingId: ofMeeting, status, ...extra } }),
   requestStatus: (status) => ({ type: 'rtms.request_status', data: { meetingId: ofMeeting, status } }),
+  // `state` may set `paused` (the meeting) and `myStreamPaused` (the receiver's
+  // own stream); both are false unless given
   arloState: (state = {}, meetingId = ofMeeting) => ({
     type: 'arlo.state', data: { meetingId, ...ARLO_ABSENT, ...state },
   }),
