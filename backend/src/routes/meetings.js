@@ -72,6 +72,8 @@ router.get('/by-zoom-id/:zoomMeetingId', requireMeetingAccess, async (req, res) 
  * meeting's data has been flushed.
  */
 router.get('/by-zoom-id/:zoomMeetingId/transcript', requireMeetingAccess, async (req, res) => {
+  // Meeting content must not outlive the meeting in a browser or proxy cache
+  res.set('Cache-Control', 'no-store');
   return res.json({
     segments: getMeetingStore().listSegments(req.params.zoomMeetingId),
     meetingDbId: null,
@@ -84,6 +86,8 @@ router.get('/by-zoom-id/:zoomMeetingId/transcript', requireMeetingAccess, async 
  * This meeting's timeline so far (joins, leaves, transcription started/stopped).
  */
 router.get('/by-zoom-id/:zoomMeetingId/participant-events', requireMeetingAccess, async (req, res) => {
+  // Meeting content must not outlive the meeting in a browser or proxy cache
+  res.set('Cache-Control', 'no-store');
   return res.json({
     events: getMeetingStore().listEvents(req.params.zoomMeetingId),
     demoMode: config.demoMode,

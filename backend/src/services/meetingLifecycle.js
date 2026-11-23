@@ -82,7 +82,11 @@ function createMeetingLifecycle({
     if (state && state.panels > 0) state.running = false;
     else meetings.delete(meetingId);
     const hadData = store.deleteMeeting(meetingId);
-    rememberFlushed(meetingId);
+    // Lines still in flight are refused for a while, but only when there was
+    // something to flush or the meeting is over. An idle flush of nothing (a
+    // panel opened and closed before anyone spoke) must not silence a stream
+    // that is in fact live.
+    if (hadData || reason === 'meeting_ended') rememberFlushed(meetingId);
     try {
       onFlush(reason, hadData);
     } catch {

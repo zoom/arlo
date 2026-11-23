@@ -112,15 +112,107 @@ test('"meeting ended" is only believed together with a stop', async () => {
   assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
 });
 
-test('a browser cannot make the server flush a meeting', async () => {
+test('a browser cannot make the server flush a meeting, signed in or not', async () => {
+  const { generateToken } = require('../src/services/auth');
+  const signedIn = { cookie: `sessionToken=${generateToken({ userId: 'u1', zoomUserId: 'z1' })}` };
   const meeting = 'REPLAY-H==';
   const cookie = await cookieFor(meeting);
   await status(meeting, { status: 'rtms_started' });
   await say(meeting, 1, 'Still here.');
+  const post = (body, headers) => h.postJson(`${srv.base}/api/rtms/status`, { meetingId: meeting, ...body }, headers);
 
-  const res = await h.postJson(`${srv.base}/api/rtms/status`, { meetingId: meeting, status: 'rtms_stopped', meetingEnded: true });
-  assert.equal(res.status, 401);
+  assert.equal((await post({ status: 'rtms_stopped', meetingEnded: true })).status, 401);
+  assert.equal((await post({ status: 'rtms_stopped', meetingEnded: true }, signedIn)).status, 403);
+  // pause is a status a browser may report; "meeting ended" riding on it is ignored
+  assert.equal((await post({ status: 'rtms_paused', meetingEnded: true }, signedIn)).status, 200);
+  assert.equal((await post({ status: 'rtms_resumed', meetingEnded: true }, signedIn)).status, 200);
+  await h.wait(400);
+
+  const kept = (await history(meeting, 'transcript', cookie)).body.segments;
+  assert.deepEqual(kept.map((s) => s.text), ['Still here.']);
+  // and the browser's report added nothing to what is stored
+  const stored = (await history(meeting, 'participant-events', cookie)).body.events;
+  assert.deepEqual(stored.map((e) => e.eventType), ['transcription_started']);
+});
+
+test('history is never cached by the browser or a proxy', async () => {
+  const meeting = 'REPLAY-L==';
+  const cookie = await cookieFor(meeting);
+  for (const path of ['transcript', 'participant-events']) {
+    const res = await fetch(`${srv.base}/api/meetings/by-zoom-id/${encodeURIComponent(meeting)}/${path}`, { headers: { cookie } });
+    assert.equal(res.headers.get('cache-control'), 'no-store', path);
+  }
+});
+
+test('Zoom\'s "stopped, meeting ended" webhook flushes even when the rtms service cannot be reached', async () => {
+  // RTMS_SERVICE_URL points at a closed port in this file, so forwarding fails
+  const meeting = 'REPLAY-M==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'The rtms service is being restarted.');
+
+  const res = await h.postWebhook(srv.base, {
+    event: 'meeting.rtms_stopped', event_ts: Date.now(),
+    payload: { meeting_uuid: meeting, rtms_stream_id: 'stream-1', stop_reason: 6 },
+  });
+  await h.wait(150);
+  ws.socket.close();
+
+  assert.equal(res.status, 200);
+  assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
+  const statuses = ws.messages.filter((m) => m.type === 'meeting.status').map((m) => m.data.status);
+  assert.equal(statuses.at(-1), 'rtms_stopped');
+});
+
+test('a stop webhook that is not "meeting ended" keeps the data while a panel is connected', async () => {
+  const meeting = 'REPLAY-N==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'The host stopped the stream.');
+  await h.postWebhook(srv.base, {
+    event: 'meeting.rtms_stopped', event_ts: Date.now(),
+    payload: { meeting_uuid: meeting, rtms_stream_id: 'stream-1', stop_reason: 1 },
+  });
+  await h.wait(400);
   assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+  ws.socket.close();
+});
+
+test('a panel that unsubscribes and subscribes again still counts as connected', async () => {
+  const meeting = 'REPLAY-O==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'Still watched.');
+  ws.socket.send(JSON.stringify({ type: 'unsubscribe' }));
+  await h.wait(50);
+  ws.socket.send(JSON.stringify({ type: 'subscribe', payload: { meetingId: meeting } }));
+  await h.wait(100);
+
+  await status(meeting, { status: 'rtms_stopped' });
+  await h.wait(500);
+  assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+  ws.socket.close();
+});
+
+test('two panels: one closing keeps the data, the last one closing flushes it', async () => {
+  const meeting = 'REPLAY-P==';
+  const cookie = await cookieFor(meeting);
+  const first = await openPanel(meeting, cookie);
+  const second = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'Two people are watching.');
+  await status(meeting, { status: 'rtms_stopped' });
+
+  first.socket.close();
+  await h.wait(500);
+  assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+
+  second.socket.close();
+  await h.wait(600);
+  assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
 });
 
 test('lines for a meeting the server was never told about are kept, then flushed after a stop with no panel', async () => {

@@ -237,6 +237,7 @@ async function handleWebSocketMessage(ws, data) {
           connections.set(meetingId, new Set());
         }
         connections.get(meetingId).add(ws);
+        reportPanels(meetingId); // counted again after an unsubscribe
         ws.send(JSON.stringify({
           type: 'subscribed',
           data: { meetingId },

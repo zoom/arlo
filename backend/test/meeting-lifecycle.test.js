@@ -176,6 +176,19 @@ test('a line still in flight after an idle flush is not kept either, but a real 
   assert.deepEqual(store.listSegments('M1').map((s) => s.text), ['new stream']);
 });
 
+test('an idle flush of nothing does not silence a stream that is live', () => {
+  // The server restarted mid-meeting: no "started" was heard. A panel opens and
+  // closes during a silence, then someone speaks.
+  const { store, lifecycle, fireAll, flushed, speak } = setup();
+  lifecycle.panelsChanged('M1', 1);
+  lifecycle.panelsChanged('M1', 0);
+  fireAll();
+  assert.deepEqual(flushed, [{ reason: 'idle', hadData: false }]);
+
+  assert.notEqual(speak('M1', 'someone speaks'), null);
+  assert.equal(store.listSegments('M1').length, 1);
+});
+
 test('a late line after a stop, with a panel still open, is kept and does not mark the stream as running', () => {
   const { store, lifecycle, pending, speak } = setup();
   lifecycle.panelsChanged('M1', 1);

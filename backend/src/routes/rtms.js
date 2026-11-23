@@ -37,6 +37,9 @@ const { requireInternal, isInternalRequest, INTERNAL_KEY_HEADER, getInternalKey 
 const { getMeetingStore } = require('../storage');
 const { getMeetingLifecycle } = require('../services/meetingLifecycle');
 
+// RTMS stop reason 6: the stream ended because the meeting did
+const RTMS_STOP_MEETING_ENDED = 6;
+
 /**
  * Keep a timeline event for the meeting, then send the stored copy (it has the
  * id). Nothing is kept or sent for a meeting that was flushed a moment ago.
@@ -224,11 +227,19 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       console.error(`Failed to forward webhook to RTMS service:`, error.message);
       // Nobody is left to report the interruption, so tell the meeting from here:
       // the panel shows "Reconnecting…" instead of a silent stall.
-      if (event === 'meeting.rtms_interrupted') {
-        const meetingUuid = payload?.meeting_uuid;
-        if (typeof meetingUuid === 'string' && meetingUuid.length > 0 && meetingUuid.length <= 256) {
-          broadcastMeetingStatus(meetingUuid, 'rtms_interrupted');
-        }
+      const meetingUuid = payload?.meeting_uuid;
+      const validUuid = typeof meetingUuid === 'string' && meetingUuid.length > 0 && meetingUuid.length <= 256;
+      if (event === 'meeting.rtms_interrupted' && validUuid) {
+        broadcastMeetingStatus(meetingUuid, 'rtms_interrupted');
+      }
+      // A stop the rtms service never hears about would never be reported back,
+      // so the meeting's data would stay in memory after the meeting. Zoom's
+      // signed webhook is enough to act on: tell the panels and the lifecycle.
+      if (event === 'meeting.rtms_stopped' && validUuid) {
+        broadcastMeetingStatus(meetingUuid, 'rtms_stopped');
+        getMeetingLifecycle().streamStatus(meetingUuid, 'rtms_stopped', {
+          meetingEnded: payload.stop_reason === RTMS_STOP_MEETING_ENDED,
+        });
       }
     }
   }
