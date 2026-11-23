@@ -27,6 +27,7 @@ const {
   broadcastTranscriptSegment,
   broadcastParticipantEvent,
   broadcastMeetingStatus,
+  broadcastArloState,
   broadcastRtmsRequestStatus,
   disconnectUser,
   crossRegisterUser,
@@ -274,11 +275,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       // signed webhook is enough to act on: tell the panels and the lifecycle,
       // once the meeting's last stream has stopped.
       if (event === 'meeting.rtms_stopped' && validUuid && streamEnded(meetingUuid, streamId)) {
-        broadcastMeetingStatus(meetingUuid, 'rtms_stopped');
-        getMeetingLifecycle().streamStatus(meetingUuid, 'rtms_stopped', {
-          meetingEnded: payload.stop_reason === RTMS_STOP_MEETING_ENDED,
-        });
+        const meetingEnded = payload.stop_reason === RTMS_STOP_MEETING_ENDED;
+        broadcastMeetingStatus(meetingUuid, 'rtms_stopped', { meetingEnded });
+        getMeetingLifecycle().streamStatus(meetingUuid, 'rtms_stopped', { meetingEnded });
       }
+      if (validUuid) broadcastArloState(meetingUuid);
     }
   }
 
@@ -386,6 +387,9 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   }
 
   if (quiet) {
+    // The meeting's status is unchanged, but a stream starting or stopping can
+    // change what one person is to Arlo (they brought it in too)
+    broadcastArloState(meetingId);
     return res.status(200).json({ received: true, broadcast: 0 });
   }
 
@@ -394,7 +398,7 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   // ended because of a connection problem, so the panel can offer a restart.
   const clientStatus = status === 'rtms_reconnected' ? 'rtms_started' : status;
   const endedByFault = req.isInternal && status === 'rtms_stopped' && fault === true;
-  const sentCount = broadcastMeetingStatus(meetingId, clientStatus, { fault: endedByFault });
+  const sentCount = broadcastMeetingStatus(meetingId, clientStatus, { fault: endedByFault, meetingEnded: meetingIsOver });
   console.log(`Broadcast status to ${sentCount} clients`);
 
   // Broadcast transcription lifecycle event for timeline
@@ -416,6 +420,10 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   }
 
   if (meetingIsOver) lifecycle.streamStatus(meetingId, status, { meetingEnded: true });
+
+  // Each panel learns what it is to Arlo now. Last, so it is the state after
+  // the change: after a meeting ended that is "not here, and nobody's notes".
+  broadcastArloState(meetingId);
 
   res.status(200).json({ received: true, broadcast: sentCount });
 });

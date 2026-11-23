@@ -3,6 +3,7 @@ const url = require('url');
 const { verifySessionToken } = require('./auth');
 const { verifyMeetingAccessToken } = require('./zoomAppContext');
 const { getMeetingLifecycle } = require('./meetingLifecycle');
+const { getArloPresence } = require('./arloPresence');
 
 /** Read a cookie from the upgrade request, if present. */
 function getCookie(req, name) {
@@ -185,6 +186,8 @@ function initWebSocketServer(server) {
         timestamp: new Date().toISOString(),
       },
     }));
+    // Whether Arlo is in the meeting and what this person is to it
+    sendArloState(ws, meetingId);
   });
 
   // Heartbeat interval (every 30 seconds)
@@ -254,6 +257,7 @@ async function handleWebSocketMessage(ws, data) {
             data: { meetingId, status: streamStatus, timestamp: new Date().toISOString() },
           }));
         }
+        sendArloState(ws, meetingId);
       }
       break;
 
@@ -360,6 +364,58 @@ function broadcastToMeeting(meetingId, message) {
 }
 
 /**
+ * Send each socket of a meeting its own message: `buildMessage(ws)` returns the
+ * message for that socket, or null for none. For anything that differs per
+ * person (ws.userId is the signed-in Arlo user, or null). A socket that cannot
+ * be built for or sent to does not stop the others. Returns how many were sent.
+ */
+function sendToMeetingSockets(meetingId, buildMessage) {
+  const clients = connections.get(meetingId);
+  if (!clients || typeof buildMessage !== 'function') return 0;
+  let sentCount = 0;
+  clients.forEach((ws) => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const message = buildMessage(ws);
+      if (message === null || message === undefined) return;
+      ws.send(JSON.stringify(message));
+      sentCount += 1;
+    } catch (err) {
+      console.error('WebSocket send error:', err.message);
+    }
+  });
+  return sentCount;
+}
+
+/**
+ * What one panel is told about Arlo in its meeting: whether Arlo is there, and
+ * whether this person brought it in (services/arloPresence.js). The message
+ * differs per person, so it is never sent with broadcastToMeeting().
+ */
+const arloStateMessage = (ws, meetingId) => ({
+  type: 'arlo.state',
+  data: { meetingId, ...getArloPresence().stateFor(meetingId, ws.userId) },
+});
+
+/** Tell one socket, when it connects or subscribes. */
+function sendArloState(ws, meetingId) {
+  try {
+    ws.send(JSON.stringify(arloStateMessage(ws, meetingId)));
+  } catch (err) {
+    console.error('WebSocket send error:', err.message);
+  }
+}
+
+/**
+ * Tell every panel of a meeting, after a stream started or stopped (someone's
+ * role may have changed even when the meeting's status did not) or the
+ * meeting's setting changed.
+ */
+function broadcastArloState(meetingId) {
+  return sendToMeetingSockets(meetingId, (ws) => arloStateMessage(ws, meetingId));
+}
+
+/**
  * Broadcast message to all connections for a user
  */
 function broadcastToUser(userId, message) {
@@ -428,7 +484,7 @@ function broadcastAiSuggestion(meetingId, suggestion) {
 /**
  * Broadcast meeting status change
  */
-function broadcastMeetingStatus(meetingId, status, { fault = false } = {}) {
+function broadcastMeetingStatus(meetingId, status, { fault = false, meetingEnded = false } = {}) {
   rememberStreamStatus(meetingId, status);
   return broadcastToMeeting(meetingId, {
     type: 'meeting.status',
@@ -437,6 +493,8 @@ function broadcastMeetingStatus(meetingId, status, { fault = false } = {}) {
       status,
       // The stream ended because of a connection problem, not because someone stopped it
       ...(fault === true && { fault: true }),
+      // The stream stopped because the meeting is over: its data is deleted now
+      ...(meetingEnded === true && { meetingEnded: true }),
       timestamp: new Date().toISOString(),
     },
   });
@@ -571,6 +629,9 @@ module.exports = {
   broadcastParticipantEvent,
   broadcastAiSuggestion,
   broadcastMeetingStatus,
+  broadcastArloState,
+  sendToMeetingSockets,
+  currentStreamStatus,
   broadcastRtmsRequestStatus,
   disconnectUser,
   crossRegisterUser,
