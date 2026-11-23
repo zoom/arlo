@@ -911,13 +911,11 @@ test('a session update about another stream on the same connection reports nothi
   await tick();
   sent.status.length = 0;
 
+  // the SDK announces the joined stream's own session first: its ids are the webhook's ids
+  clients[0].handlers.sessionUpdate(1, { sessionId: 'mine', streamId: 'stream-1' });
   // a second person's session shows up on the first person's connection
   clients[0].handlers.sessionUpdate(3, { sessionId: 'other', streamId: 'stream-OTHER', isPaused: true });
   clients[0].handlers.sessionUpdate(4, { sessionId: 'other', streamId: 'stream-OTHER', isPaused: false });
-  // an update that names no stream, or names one in an unexpected form, is not known to be about this one
-  clients[0].handlers.sessionUpdate(3, { sessionId: 'other' });
-  clients[0].handlers.sessionUpdate(3, { streamId: 42 });
-  clients[0].handlers.sessionUpdate(3, { streamId: ['stream-1'] });
   await tick();
   assert.deepEqual(sent.status, []);
 
@@ -1102,4 +1100,21 @@ test('the tag a session update is logged with is salted: stable in this process,
   const plain = (value) => crypto.createHash('sha256').update(value).digest('hex').slice(0, 6);
   assert.notEqual(tags[0].session, plain('SESSION-SECRET-2'));
   assert.notEqual(tags[0].stream, plain('stream-OTHER'));
+});
+
+test('until the SDK has named the joined stream once, a pause is taken to be this stream\'s whatever id it carries', async () => {
+  // A pause made with Zoom's own controls was seen working before ids were compared:
+  // an id that merely looks different must not make Arlo miss it.
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  await tick();
+  sent.status.length = 0;
+
+  clients[0].handlers.sessionUpdate(3, { sessionId: 's', streamId: 'SOME-OTHER-FORM' });
+  await tick();
+  assert.deepEqual(statuses(sent), ['rtms_paused']);
+  clients[0].handlers.sessionUpdate(4, { sessionId: 's' }); // names no stream at all
+  await tick();
+  assert.deepEqual(statuses(sent), ['rtms_paused', 'rtms_resumed']);
 });

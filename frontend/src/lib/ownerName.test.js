@@ -17,7 +17,6 @@ describe('usableName', () => {
     'Hangul jungseong filler U+1160': '\u1160',
     'halfwidth Hangul filler U+FFA0': '\uffa0',
     'right-to-left override U+202E': '\u202e',
-    'zero-width joiner U+200D': '\u200d',
     'line separator U+2028': '\u2028',
     'paragraph separator U+2029': '\u2029',
     'private use U+E000': '\ue000',

@@ -82,12 +82,18 @@ const LOG_TAG_SALT = crypto.randomBytes(16);
  * Whether a session update is about the stream this connection joined. A
  * connection also hears of other sessions and streams (a second person starting
  * Arlo in the same meeting shows up on the first person's connection). An
- * update without session info (the older SDK form) can only be about the
- * joined stream; one with info is only when it names that stream.
+ * update is taken to be about another stream only when it names a stream id
+ * that differs from the joined one AND this connection has already shown that
+ * the SDK's stream ids are the same ids as the webhook's (an earlier update
+ * named the joined stream). Until then every update counts as ours: a pause
+ * made with Zoom's own controls was seen working that way in a real meeting,
+ * and that must not be lost to an id that merely looks different.
  */
-function isAboutJoinedStream(info, joinedStreamId) {
+function isAboutJoinedStream(info, joinedStreamId, idsComparable) {
   if (!info || typeof info !== 'object') return true;
-  return typeof info.streamId === 'string' && info.streamId === joinedStreamId;
+  if (typeof info.streamId !== 'string' || info.streamId.length === 0) return true;
+  if (info.streamId === joinedStreamId) return true;
+  return !idsComparable;
 }
 
 /**
@@ -469,9 +475,12 @@ function createSessionManager({
     // and change nothing here.
     client.onSessionUpdate((op, info) => {
       log.log('Session update:', typeof op === 'number' ? op : 'unexpected form', describeSessionInfo(info, streamId));
-      if (!isCurrent() || session.state !== 'streaming') return;
+      if (!isCurrent()) return;
+      // Any update that names the joined stream proves the SDK's ids can be compared
+      if (info && typeof info === 'object' && info.streamId === streamId) session.sdkNamesJoinedStream = true;
+      if (session.state !== 'streaming') return;
       if (op !== SESSION_EVENT_PAUSE && op !== SESSION_EVENT_RESUME) return;
-      if (!isAboutJoinedStream(info, streamId)) {
+      if (!isAboutJoinedStream(info, streamId, session.sdkNamesJoinedStream === true)) {
         log.log('Session update is not about the joined stream: nothing reported');
         return;
       }

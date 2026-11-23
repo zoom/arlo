@@ -15,10 +15,11 @@ const MAX_NAME_CHARS = 200;
 //   Co, Cn, Cs  private-use and unassigned characters, lone surrogates
 //   Zl, Zp  line and paragraph separators
 //   the Hangul fillers, which are letters by category and show as a blank
-// A name with one of them is refused, not cleaned up. This also refuses the
-// zero-width joiners some scripts and emoji sequences use: a missing name
-// (the sentence is then said without one) is the lesser harm.
-const NOT_IN_A_NAME = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u3164\u115F\u1160\uFFA0]/u;
+// A name with one of them is refused, not cleaned up. Two format characters
+// are allowed, because real names need them: the zero-width non-joiner and
+// joiner (U+200C, U+200D) that Persian and Indic scripts and emoji sequences
+// use. They cannot make a name blank: a letter or digit is required as well.
+const NOT_IN_A_NAME = /(?![\u200C\u200D])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u3164\u115F\u1160\uFFA0]/u;
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 
 /**

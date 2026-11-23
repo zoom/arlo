@@ -13,7 +13,8 @@ const MAX_NAME_CHARS = 200;
 // Hangul fillers (letters by category, shown as a blank), and at least one
 // letter or digit. A name that fails reads as no name: it would show as a gap,
 // or turn the sentence around it.
-const NOT_IN_A_NAME = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u3164\u115F\u1160\uFFA0]/u;
+// The zero-width non-joiner and joiner are allowed: Persian and Indic names and emoji sequences use them
+const NOT_IN_A_NAME = /(?![\u200C\u200D])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u3164\u115F\u1160\uFFA0]/u;
 const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 const isShowable = (name) => LETTER_OR_DIGIT.test(name) && !NOT_IN_A_NAME.test(name);
 

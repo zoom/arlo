@@ -54,7 +54,6 @@ const INVISIBLE = {
   'Hangul jungseong filler U+1160': '\u1160',
   'halfwidth Hangul filler U+FFA0': '\uffa0',
   'right-to-left override U+202E': '\u202e',
-  'zero-width joiner U+200D': '\u200d',
   'word joiner U+2060': '\u2060',
   'byte order mark U+FEFF': '\ufeff',
   'line separator U+2028': '\u2028',
@@ -318,4 +317,12 @@ test('a supplied name goes when the meeting\'s data is flushed', async () => {
   assert.equal(getMeetingStore().getMeta(meeting).ownerNames.size, 0);
   // and nothing can be supplied for a meeting that is gone
   assert.equal((await put(meeting, ana, pass, { displayName: 'Ana from Zoom' })).status, 403);
+});
+
+test('names that need a joiner are kept, and a joiner alone is still no name', () => {
+  const { showableName } = require('../src/lib/displayName');
+  assert.equal(showableName('می\u200cخواهم'), 'می\u200cخواهم'); // Persian, zero-width non-joiner
+  assert.equal(showableName('Ana \u{1F469}\u200D\u{1F4BB}'), 'Ana \u{1F469}\u200D\u{1F4BB}'); // emoji sequence beside letters
+  assert.equal(showableName('\u200d'), '');
+  assert.equal(showableName('\u200c\u200d'), '');
 });
