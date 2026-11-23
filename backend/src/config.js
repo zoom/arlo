@@ -218,9 +218,17 @@ module.exports = {
   demoMode: process.env.DEMO_MODE === 'true',
   // How long a meeting's in-memory data is kept after its stream has stopped
   // and the last Arlo panel has disconnected (milliseconds). Default 2 minutes.
+  // Whole milliseconds only, 100 to 3600000. Anything else ("2m", "120s", "0")
+  // is refused with a warning and the default is used: a mistyped value must
+  // not shrink the grace period to almost nothing.
   meetingFlushGraceMs: (() => {
-    const value = Number.parseInt(process.env.MEETING_FLUSH_GRACE_MS || '', 10);
-    return Number.isInteger(value) && value >= 0 && value <= 60 * 60 * 1000 ? value : 2 * 60 * 1000;
+    const DEFAULT_MS = 2 * 60 * 1000;
+    const raw = process.env.MEETING_FLUSH_GRACE_MS;
+    if (raw === undefined || raw === '') return DEFAULT_MS;
+    const value = /^\d{1,7}$/.test(raw) ? Number(raw) : NaN;
+    if (Number.isInteger(value) && value >= 100 && value <= 60 * 60 * 1000) return value;
+    console.warn('MEETING_FLUSH_GRACE_MS must be whole milliseconds between 100 and 3600000; using the default of 120000.');
+    return DEFAULT_MS;
   })(),
 
   // Ask Zoom to start transcription as soon as someone opens Arlo in a meeting.

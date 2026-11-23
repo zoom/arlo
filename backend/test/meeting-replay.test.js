@@ -84,3 +84,54 @@ test('a segment that cannot be stored is refused, not broadcast', async () => {
   const res = await h.postJson(`${srv.base}/api/rtms/broadcast`, { meetingId: 'REPLAY-E==', segment: { seqNo: 1 } }, internal);
   assert.equal(res.status, 400);
 });
+
+test('the meeting ending deletes its transcript and timeline, and a line still in flight is not kept', async () => {
+  const meeting = 'REPLAY-F==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'Said during the meeting.');
+  assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+
+  await status(meeting, { status: 'rtms_stopped', meetingEnded: true });
+  assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
+  assert.deepEqual((await history(meeting, 'participant-events', cookie)).body.events, []);
+
+  const straggler = await say(meeting, 2, 'Arrived after the end.');
+  assert.equal(straggler.status, 200);
+  assert.equal(straggler.body.stored, false);
+  assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
+});
+
+test('"meeting ended" is only believed together with a stop', async () => {
+  const meeting = 'REPLAY-I==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'Still running.');
+  await status(meeting, { status: 'rtms_paused', meetingEnded: true });
+  await status(meeting, { status: 'rtms_started', meetingEnded: true });
+  assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+});
+
+test('a browser cannot make the server flush a meeting', async () => {
+  const meeting = 'REPLAY-H==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started' });
+  await say(meeting, 1, 'Still here.');
+
+  const res = await h.postJson(`${srv.base}/api/rtms/status`, { meetingId: meeting, status: 'rtms_stopped', meetingEnded: true });
+  assert.equal(res.status, 401);
+  assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+});
+
+test('lines for a meeting the server was never told about are kept, then flushed after a stop with no panel', async () => {
+  // e.g. the backend restarted mid-meeting and missed "started"
+  const meeting = 'REPLAY-J==';
+  const cookie = await cookieFor(meeting);
+  await say(meeting, 1, 'The backend restarted and missed the start.');
+  await h.wait(400); // longer than the 200ms grace period: the stream counts as running
+  assert.equal((await history(meeting, 'transcript', cookie)).body.segments.length, 1);
+
+  await status(meeting, { status: 'rtms_stopped' });
+  await h.wait(600);
+  assert.deepEqual((await history(meeting, 'transcript', cookie)).body.segments, []);
+});

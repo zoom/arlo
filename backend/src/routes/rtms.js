@@ -35,9 +35,14 @@ const {
 const { requireAuth } = require('../middleware/auth');
 const { requireInternal, isInternalRequest, INTERNAL_KEY_HEADER, getInternalKey } = require('../lib/internalAuth');
 const { getMeetingStore } = require('../storage');
+const { getMeetingLifecycle } = require('../services/meetingLifecycle');
 
-/** Keep a timeline event for the meeting, then send the stored copy (it has the id). */
+/**
+ * Keep a timeline event for the meeting, then send the stored copy (it has the
+ * id). Nothing is kept or sent for a meeting that was flushed a moment ago.
+ */
 function recordParticipantEvent(meetingId, event) {
+  if (!getMeetingLifecycle().dataReceived(meetingId)) return 0;
   const stored = getMeetingStore().appendEvent(meetingId, event);
   return stored ? broadcastParticipantEvent(meetingId, stored) : 0;
 }
@@ -257,7 +262,7 @@ function authorizeStatusUpdate(req, res, next) {
 }
 
 router.post('/status', authorizeStatusUpdate, async (req, res) => {
-  const { meetingId, status, operatorId, fault } = req.body || {};
+  const { meetingId, status, operatorId, fault, meetingEnded } = req.body || {};
 
   if (typeof meetingId !== 'string' || meetingId.length === 0 || meetingId.length > 200) {
     return res.status(400).json({ error: 'Invalid meetingId' });
@@ -268,6 +273,13 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
   }
 
   console.log(`RTMS Status Update: ${status}`);
+
+  // The meeting's data lifecycle (services/meetingLifecycle.js) follows the rtms
+  // service's reports only: a browser cannot start a flush or hold data back.
+  // "The meeting ended" is applied last, after the meeting has been told.
+  const lifecycle = getMeetingLifecycle();
+  const meetingIsOver = req.isInternal && status === 'rtms_stopped' && meetingEnded === true;
+  if (req.isInternal && !meetingIsOver) lifecycle.streamStatus(meetingId, status);
 
   // Cross-register user for WebSocket if we have an operator ID (internal only)
   if (req.isInternal && status === 'rtms_started' && operatorId) {
@@ -314,6 +326,8 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
     else broadcastParticipantEvent(meetingId, event);
   }
 
+  if (meetingIsOver) lifecycle.streamStatus(meetingId, status, { meetingEnded: true });
+
   res.status(200).json({ received: true, broadcast: sentCount });
 });
 
@@ -328,6 +342,13 @@ router.post('/broadcast', requireInternal, async (req, res) => {
     return res.status(400).json({ error: 'Invalid broadcast payload' });
   }
 
+  if (typeof segment.text !== 'string' || segment.text.length === 0) {
+    return res.status(400).json({ error: 'Invalid segment' });
+  }
+  // A line still in flight for a meeting whose data was just flushed is dropped
+  if (!getMeetingLifecycle().dataReceived(meetingId)) {
+    return res.status(200).json({ received: true, stored: false, broadcast: 0 });
+  }
   const stored = getMeetingStore().appendSegment(meetingId, segment);
   if (!stored) {
     return res.status(400).json({ error: 'Invalid segment' });

@@ -10,8 +10,11 @@
  *     means nobody is there to read the data), or
  *   - the store's age limit passes (sweep), in case no signal ever arrives.
  *
- * This module only knows two facts per meeting: is the stream running, and
- * how many panels are connected. It never reads or logs meeting content.
+ * Per meeting this module knows three things: whether the stream is running
+ * (told by the rtms service, or implied by a transcript line arriving when
+ * nothing was told, e.g. after this server restarted mid-meeting), how many
+ * panels are connected, and whether the meeting was flushed a moment ago (so a
+ * line still in flight is not kept). It never reads or logs meeting content.
  */
 const config = require('../config');
 const { getMeetingStore } = require('../storage');
@@ -21,6 +24,9 @@ const isMeetingId = (value) => typeof value === 'string' && value.length > 0 && 
 
 const RUNNING = new Set(['rtms_started', 'rtms_reconnected']);
 const NOT_RUNNING = new Set(['rtms_stopped', 'rtms_failed']);
+// After a flush, lines for that meeting are refused for this long
+const FLUSHED_MEMORY_MS = 10 * 60 * 1000;
+const MAX_FLUSHED_REMEMBERED = 5000;
 
 const defaultSchedule = (fn, ms) => {
   const timer = setTimeout(fn, ms);
@@ -33,35 +39,66 @@ function createMeetingLifecycle({
   schedule = defaultSchedule,
   graceMs = 2 * 60 * 1000,
   onFlush = () => {},
+  now = Date.now,
 }) {
+  const grace = Number.isFinite(graceMs) && graceMs >= 0 ? graceMs : 2 * 60 * 1000;
+  // running: true | false as told by the rtms service, null = never told
   const meetings = new Map(); // meetingId -> { running, panels, cancel }
+  const flushedAt = new Map(); // meetingId -> when it was flushed
 
   function stateFor(meetingId) {
     let state = meetings.get(meetingId);
     if (!state) {
-      state = { running: false, panels: 0, cancel: null };
+      state = { running: null, panels: 0, cancel: null };
       meetings.set(meetingId, state);
     }
     return state;
   }
 
+  function rememberFlushed(meetingId) {
+    flushedAt.delete(meetingId);
+    if (flushedAt.size >= MAX_FLUSHED_REMEMBERED) flushedAt.delete(flushedAt.keys().next().value);
+    flushedAt.set(meetingId, now());
+  }
+
+  function wasJustFlushed(meetingId) {
+    const at = flushedAt.get(meetingId);
+    if (at === undefined) return false;
+    if (now() - at > FLUSHED_MEMORY_MS) {
+      flushedAt.delete(meetingId);
+      return false;
+    }
+    return true;
+  }
+
   function flush(meetingId, reason) {
     const state = meetings.get(meetingId);
-    if (state?.cancel) state.cancel();
-    meetings.delete(meetingId);
+    if (state?.cancel) {
+      state.cancel();
+      state.cancel = null;
+    }
+    // Panels that are still connected stay counted: the WebSocket server only
+    // reports changes, so forgetting them here would make a later stop look idle.
+    if (state && state.panels > 0) state.running = false;
+    else meetings.delete(meetingId);
     const hadData = store.deleteMeeting(meetingId);
-    onFlush(reason, hadData);
+    rememberFlushed(meetingId);
+    try {
+      onFlush(reason, hadData);
+    } catch {
+      // Reporting a flush must never undo it or crash a timer
+    }
   }
 
   function reconsider(meetingId) {
     const state = meetings.get(meetingId);
     if (!state) return;
-    const idle = !state.running && state.panels === 0;
+    const idle = state.running !== true && state.panels === 0;
     if (idle && !state.cancel) {
       state.cancel = schedule(() => {
         state.cancel = null;
         if (meetings.get(meetingId) === state) flush(meetingId, 'idle');
-      }, graceMs);
+      }, grace);
     } else if (!idle && state.cancel) {
       state.cancel();
       state.cancel = null;
@@ -71,13 +108,18 @@ function createMeetingLifecycle({
   /** A stream status from the rtms service. `meetingEnded` = Zoom said the meeting is over. */
   function streamStatus(meetingId, status, { meetingEnded = false } = {}) {
     if (!isMeetingId(meetingId)) return;
-    if (meetingEnded === true) {
+    if (meetingEnded === true && status === 'rtms_stopped') {
       flush(meetingId, 'meeting_ended');
       return;
     }
-    const state = stateFor(meetingId);
-    if (RUNNING.has(status)) state.running = true;
-    else if (NOT_RUNNING.has(status)) state.running = false;
+    if (RUNNING.has(status)) {
+      flushedAt.delete(meetingId); // a real stream again: its lines are wanted
+      stateFor(meetingId).running = true;
+    } else if (NOT_RUNNING.has(status)) {
+      stateFor(meetingId).running = false;
+    } else if (!meetings.has(meetingId)) {
+      return; // pause, interruption or an unknown word about a meeting not tracked: nothing to do
+    }
     reconsider(meetingId);
   }
 
@@ -89,18 +131,40 @@ function createMeetingLifecycle({
     reconsider(meetingId);
   }
 
-  /** Age-limit backstop. Returns how many meetings the store deleted. */
+  /**
+   * A transcript line or timeline event is about to be kept. Returns false when
+   * it must not be: the meeting was flushed a moment ago, so this is a line
+   * that was still in flight. Otherwise the meeting is tracked from here on, so
+   * data can never sit in the store without something deciding when it goes.
+   */
+  function dataReceived(meetingId) {
+    if (!isMeetingId(meetingId)) return false;
+    if (wasJustFlushed(meetingId)) return false;
+    const state = stateFor(meetingId);
+    // Lines are arriving and nobody said the stream stopped: it is running.
+    // (This server may have restarted mid-meeting and missed "started".)
+    if (state.running === null) state.running = true;
+    reconsider(meetingId);
+    return true;
+  }
+
+  /** Age-limit backstop and housekeeping. Returns how many meetings the store deleted. */
   function sweep() {
     const deleted = store.sweep();
     for (const [meetingId, state] of meetings) {
-      if (!state.running && state.panels === 0 && !state.cancel && !store.has(meetingId)) {
+      // Nothing held and nobody connected: nothing left to decide about
+      if (state.panels === 0 && !store.has(meetingId)) {
+        if (state.cancel) state.cancel();
         meetings.delete(meetingId);
       }
+    }
+    for (const [meetingId, at] of flushedAt) {
+      if (now() - at > FLUSHED_MEMORY_MS) flushedAt.delete(meetingId);
     }
     return deleted;
   }
 
-  return { streamStatus, panelsChanged, sweep, tracked: () => meetings.size };
+  return { streamStatus, panelsChanged, dataReceived, sweep, tracked: () => meetings.size };
 }
 
 let instance = null;
