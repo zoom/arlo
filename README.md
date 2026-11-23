@@ -100,7 +100,7 @@ Arlo shows one screen at a time. Which one depends on whether Arlo is in the mee
 | **Bring Arlo into this meeting** | The host or a co-host, signed in to Arlo | Choose who can ask Arlo ("Only I can ask" or "Anyone can ask"), then one button. Nothing is requested from Zoom before the click. |
 | **Ask the host to bring Arlo in** | Other signed-in users | One button. Zoom asks the host; the screen waits for the answer. |
 | **Live notes** | Each person using Arlo (they started it for themselves) | A summary, decisions and action items, rewritten about every 45 seconds while people talk. A status line with Pause, Resume and Remove Arlo while your own Arlo runs; if yours has stopped and someone else's still runs, the notes continue and the line offers "Bring Arlo back". An "Ask Arlo" input; the answer comes from the transcript and only you see it. **Post notes to chat** puts the current notes into the Zoom meeting chat for everyone, after you confirm. |
-| **Participant view** | Everyone else, including people not signed in | Who brought Arlo in and what Arlo does. No notes. "Ask Arlo" appears when the owner chose "Anyone can ask" and you are signed in; otherwise it says "Only people using Arlo can ask in this meeting." Signed-in people also get **Use Arlo yourself**: it starts Arlo for them too (the host may have to allow it), and they then get the notes and can ask. |
+| **Participant view** | Everyone else, including people not signed in | Who brought Arlo in and what Arlo does. No notes. "Ask Arlo" appears when the owner chose "Anyone can ask" and you are signed in; otherwise it says "Only people using Arlo can ask in this meeting." With `ALLOW_OWN_ARLO_STREAM=true` (off by default), signed-in people also get **Use Arlo yourself**: it starts Arlo for them too (the host may have to allow it), and they then get the notes and can ask. |
 | **Meeting record** | Everyone in the meeting | What was said and what happened since Arlo joined, in time order. A toggle shows only Arlo's own actions. |
 | **After the meeting** | Each person who used Arlo | The notes stay on screen with a "Copy notes" button. In demo mode they are not stored anywhere else. |
 
@@ -108,6 +108,7 @@ How it works:
 
 - **Who gets the notes.** Each Arlo user who runs a transcript stream of their own in the meeting gets the notes. Everyone else gets the participant view. Pause, Resume and Remove Arlo are shown only to those users, because they act on the user's own stream. A host stops someone else's stream with Zoom's own controls.
 - **Several streams, one transcript.** Several users can each run a stream in the same meeting. The server stores one transcript: a line from any of the streams is stored, unless the same line (same speaker, same words, close in time) was just stored from another stream. No stream is preferred, so a stream that stops, falls behind or goes silent loses nothing. Pause is per stream: the meeting shows as paused only when every running stream is paused.
+- **Known gap: several people using Arlo at once.** Arlo learns of a stream, and of whose it is, from Zoom's `meeting.rtms_started` webhook. In a test with two users of the app in one meeting (2026-11-23), the second person's start produced no second webhook, only a session-added event on the first person's RTMS connection, which does not say whose session it is. So by default one person runs Arlo in a meeting and everyone else gets the participant view; the "Use Arlo yourself" action is behind `ALLOW_OWN_ARLO_STREAM=true` until that changes.
 - **When the meeting ends.** The server deletes the transcript, the notes and the record of who brought Arlo in. A panel that is still open keeps showing the notes it already has.
 - **The earlier dashboard** (tabs, vertical cards, suggestions) is still in the app. While in a meeting, open Settings and choose **Classic dashboard**.
 
@@ -390,7 +391,7 @@ Wait for all services to start:
 5. Talk for a minute: the notes appear (Summary, Decisions, Action items)
 6. Type a question into **Ask Arlo**
 7. Open **Meeting record** to see the transcript and what Arlo did
-8. Open Arlo from a second account in the same meeting to see the participant view; click **Use Arlo yourself** there to run Arlo for that account too
+8. Open Arlo from a second account in the same meeting to see the participant view
 
 ---
 

@@ -1079,6 +1079,16 @@ describe('use Arlo yourself (someone else already brought Arlo in)', () => {
   }
   const onParticipantView = (container) => container.querySelector('[data-screen]').getAttribute('data-screen') === 'participant';
 
+  test('the action is not offered when the deployment has it off (the default)', async () => {
+    const { sdk } = await openBesideAna({
+      routes: { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: false } }) },
+    });
+    expect(screen.getByText('Only people using Arlo can ask in this meeting.')).toBeInTheDocument();
+    expect(useButton()).not.toBeInTheDocument();
+    expect(screen.queryByText(/Starts Arlo for you too/)).not.toBeInTheDocument();
+    expect(sdk.startRTMS).not.toHaveBeenCalled();
+  });
+
   test('one secondary action under the content, and nothing is requested before the click', async () => {
     const { sdk } = await openBesideAna();
     const button = await screen.findByRole('button', { name: USE });

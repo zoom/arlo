@@ -15,6 +15,7 @@ const defaultFeatures = {
   autoOpen: false,
   aiChat: false,
   autoStart: false,
+  ownStream: false,
 };
 
 export function ServerSettingsProvider({ children }) {
@@ -58,6 +59,8 @@ export function ServerSettingsProvider({ children }) {
     showUpcomingMeetings: settings.features?.upcomingMeetings ?? false,
     // The deployment allows Arlo to request transcription when it is opened
     autoStartAvailable: settings.features?.autoStart === true,
+    // The deployment offers "Use Arlo yourself" (a second stream in one meeting)
+    ownStreamAvailable: settings.features?.ownStream === true,
   }), [settings]);
 
   return (

@@ -166,7 +166,8 @@ export function mockFetch(routes = {}, { signedIn = true, serverMeetingId = MEET
       : json({ error: 'Not authenticated' }, 401)),
     // Tests run with the deployment's auto-start flag ON unless a test overrides
     // this route, so `renderInMeeting({ autoStart })` alone decides the behaviour.
-    '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true } }),
+    // The same goes for "Use Arlo yourself" (ownStream), which a deployment has off by default.
+    '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true } }),
     '/api/auth/meeting-access': async () => json({ verified: true, isGuest: !signedIn, meetingId: await verifiedMeetingId() }),
     // Arlo's routes: not in the meeting, nobody's notes, until a test says otherwise
     [arloPath('state', serverMeetingId)]: () => json({ ...ARLO_ABSENT }),

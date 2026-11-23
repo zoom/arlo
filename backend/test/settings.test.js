@@ -17,6 +17,11 @@ test('automatic start is off unless the deployment turns it on', async () => {
   assert.equal(body.features.autoStart, false);
 });
 
+test('a second person starting their own Arlo is not offered unless the deployment turns it on', async () => {
+  const body = await (await fetch(`${srv.base}/api/auth/settings`)).json();
+  assert.equal(body.features.ownStream, false);
+});
+
 test('the privacy notice says what is held and when it is deleted', async () => {
   const body = await (await fetch(`${srv.base}/api/auth/settings`)).json();
   assert.match(body.privacyNotice, /in memory while the meeting is running/);

@@ -49,7 +49,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   const arlo = useArlo();
   const { isAuthenticated } = useAuth();
   const { meetingContext, userContext, isTestMode, runningContext } = useZoomSdk();
-  const { demoMode } = useServerSettings();
+  const { demoMode, ownStreamAvailable } = useServerSettings();
   const { authorize, isAuthorizing, error: signInError } = useZoomAuth();
   const secondsLeft = useSecondsLeft(rtmsRequestExpiresAt);
 
@@ -280,7 +280,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           onSignIn={signIn}
           signingIn={isAuthorizing}
           signInError={signInError ? 'Could not sign in. Try again.' : null}
-          ownStart={ownStart}
+          ownStart={ownStreamAvailable ? ownStart : null}
           onUseArlo={() => startRTMS(false)}
           useArloDisabled={rtmsLoading}
         />

@@ -249,6 +249,14 @@ module.exports = {
   // Off by default: nothing is requested from the host until a person clicks.
   autoStartRtms: process.env.AUTO_START_RTMS === 'true',
 
+  // Offer "Use Arlo yourself" to a person in a meeting where someone else
+  // already runs Arlo (a second RTMS stream in the same meeting). Off by
+  // default: on 2026-11-23 Zoom sent no meeting.rtms_started webhook for the
+  // second person's start, so the server never learned of it and their panel
+  // waited without end. The server side (several streams, one transcript) is
+  // built and stays; this only hides the button.
+  ownStream: process.env.ALLOW_OWN_ARLO_STREAM === 'true',
+
   // Security
   sessionSecret: process.env.SESSION_SECRET,
   encryptionKey: encryptionKey,
