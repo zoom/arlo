@@ -1,0 +1,99 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useMeeting } from '../contexts/MeetingContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useZoomSdk } from '../contexts/ZoomSdkContext';
+import MeetingAccessNotice from '../components/MeetingAccessNotice';
+import LoadingSpinner from '../components/ui/LoadingSpinner';
+import TranscriptTimeline, { buildTimeline } from '../components/meeting/TranscriptTimeline';
+// The timeline's own styles (transcript lines and events) live with the classic view
+import './InMeetingView.css';
+import './ArloMeetingView.css';
+import './MeetingRecordView.css';
+
+// The name the server gives to what Arlo's own stream connection did
+const ARLO = 'Arlo';
+const NO_SEGMENTS = [];
+
+/**
+ * The meeting record: what was said and what happened since Arlo joined, in
+ * time order. Open to everyone in the meeting: the owner, participants and
+ * guests. One toggle narrows it to what Arlo itself did.
+ */
+export default function MeetingRecordView({ isGuestMode = false }) {
+  const { id: routeId } = useParams();
+  const navigate = useNavigate();
+  const {
+    ws, meetingId, meetingAccess, meetingEnded, connectWebSocket, segments, participantEvents,
+  } = useMeeting();
+  const { isAuthenticated } = useAuth();
+  const { isTestMode, runningContext } = useZoomSdk();
+  const [onlyArlo, setOnlyArlo] = useState(false);
+
+  const shownSegments = onlyArlo ? NO_SEGMENTS : segments;
+  const shownEvents = useMemo(
+    () => (onlyArlo ? participantEvents.filter((event) => event.participantName === ARLO) : participantEvents),
+    [onlyArlo, participantEvents],
+  );
+  const hasAnything = useMemo(() => buildTimeline(segments, participantEvents).length > 0, [segments, participantEvents]);
+  const hasShown = useMemo(() => buildTimeline(shownSegments, shownEvents).length > 0, [shownSegments, shownEvents]);
+
+  // Out of a meeting there is no record to read
+  const outsideMeeting = !isGuestMode && !isTestMode && runningContext !== null && runningContext !== 'inMeeting';
+  const nothingToShow = outsideMeeting && !hasAnything;
+  useEffect(() => {
+    if (nothingToShow) navigate('/home', { replace: true });
+  }, [nothingToShow, navigate]);
+
+  // The meeting socket, when the panel was opened (or reloaded) on this screen
+  useEffect(() => {
+    if (ws || !meetingId) return;
+    if (isGuestMode || isAuthenticated) connectWebSocket(meetingId);
+  }, [isGuestMode, isAuthenticated, ws, meetingId, connectWebSocket]);
+
+  const backPath = `${isGuestMode ? '/guest-meeting' : '/meeting'}/${encodeURIComponent(meetingId || routeId || '')}`;
+
+  if (nothingToShow) return null;
+
+  let content;
+  if (meetingAccess.status !== 'verified' && !hasAnything) {
+    content = meetingAccess.status === 'idle' ? (
+      <div className="arlo-center"><LoadingSpinner size={24} /></div>
+    ) : (
+      <MeetingAccessNotice
+        access={meetingAccess}
+        isGuestMode={isGuestMode}
+        onRetry={() => connectWebSocket(meetingId)}
+      />
+    );
+  } else {
+    let empty = 'Nothing has been said since Arlo joined.';
+    if (onlyArlo) empty = 'Arlo has not done anything yet.';
+    else if (meetingEnded) empty = 'The meeting has ended. Its record is not stored.';
+    content = (
+      <>
+        <label className="record-toggle">
+          <input type="checkbox" checked={onlyArlo} onChange={(e) => setOnlyArlo(e.target.checked)} />
+          <span>Only Arlo&apos;s actions</span>
+        </label>
+        {hasShown ? (
+          <div className="record-list">
+            <TranscriptTimeline segments={shownSegments} participantEvents={shownEvents} />
+          </div>
+        ) : (
+          <p className="arlo-muted record-empty">{empty}</p>
+        )}
+      </>
+    );
+  }
+
+  return (
+    <div className="arlo-view record-view">
+      <div className="arlo-screen">
+        <Link className="record-back" to={backPath}>Back</Link>
+        <h1 className="arlo-title">Meeting record</h1>
+        {content}
+      </div>
+    </div>
+  );
+}

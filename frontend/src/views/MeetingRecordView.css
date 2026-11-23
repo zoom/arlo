@@ -1,0 +1,52 @@
+/* The meeting record. Existing tokens only (index.css); layout from ArloMeetingView.css. */
+
+.record-back {
+  align-self: flex-start;
+  color: var(--accent);
+  font-size: 0.875rem;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+
+.record-back::before {
+  content: '‹ ';
+}
+
+.record-back:hover {
+  text-decoration: underline;
+}
+
+.record-toggle {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.record-toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.record-list {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.record-list .transcript-viewport {
+  min-height: 0;
+}
+
+.record-empty {
+  padding: 24px 0;
+}

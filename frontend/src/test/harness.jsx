@@ -178,6 +178,7 @@ export const serverMessage = {
     type: 'arlo.state', data: { meetingId, ...ARLO_ABSENT, ...state },
   }),
   notes: (notes, meetingId = MEETING) => ({ type: 'notes.updated', data: { meetingId, notes } }),
+  timelineEvent: (event) => ({ type: 'participant.event', data: { meetingId: MEETING, event } }),
   segment: (seqNo, text, extra = {}) => ({
     type: 'transcript.segment',
     data: {
@@ -191,10 +192,12 @@ export const serverMessage = {
 
 /**
  * Render the real app inside a (fake) Zoom meeting, on the in-meeting route
- * (`arlo: true` for the Arlo screens).
+ * (`arlo: true` for the Arlo screens; `page: 'record'` for the meeting record).
  * Auto-start is off unless asked for, so each test decides when a start happens.
  */
-export function renderInMeeting({ sdk = createZoomSdk(), autoStart = false, guest = false, arlo = false } = {}) {
+export function renderInMeeting({
+  sdk = createZoomSdk(), autoStart = false, guest = false, arlo = false, page = null,
+} = {}) {
   window.zoomSdk = sdk;
   FakeWebSocket.instances = [];
   vi.stubGlobal('WebSocket', FakeWebSocket);
@@ -202,7 +205,7 @@ export function renderInMeeting({ sdk = createZoomSdk(), autoStart = false, gues
   localStorage.setItem('arlo-auto-start', autoStart ? 'true' : 'false');
   // `arlo: true` opens the single-action Arlo screens instead of the dashboard
   const route = arlo ? (guest ? 'guest-arlo' : 'arlo') : (guest ? 'guest-meeting' : 'meeting');
-  window.location.hash = `#/${route}/${encodeURIComponent(MEETING)}`;
+  window.location.hash = `#/${route}/${encodeURIComponent(MEETING)}${page ? `/${page}` : ''}`;
   return { sdk, ...render(<App />) };
 }
 
