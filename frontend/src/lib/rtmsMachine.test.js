@@ -567,3 +567,89 @@ describe('a pause or resume Zoom does not confirm, when the server already says 
     expect(rtmsReducer(failedStop, { type: 'SERVER_PAUSE', paused: true })).toBe(failedStop);
   });
 });
+
+describe('a start of one\'s own while another person\'s stream runs', () => {
+  const others = run([status('started')]); // someone else's stream, confirmed by the server
+  const own = { type: 'REQUEST', action: 'start', alongside: true };
+  const ownLive = { type: 'OWN_STREAM_LIVE' };
+  const asked = run([own, accepted('start')], others);
+
+  test('is a request like any other: not a running stream of one\'s own', () => {
+    expect(asked.phase).toBe('requested');
+    expect(asked.pending).toBe('start');
+    expect(isRtmsActive(asked)).toBe(false);
+  });
+
+  test('the other stream\'s lines and statuses do not confirm it', () => {
+    for (const event of [{ type: 'TRANSCRIPT' }, status('started'), status('resumed'), status('paused'), status('interrupted')]) {
+      expect(rtmsReducer(asked, event)).toBe(asked);
+    }
+    const starting = rtmsReducer(asked, status('started', 'sdk'));
+    expect(starting.phase).toBe('starting');
+    expect(rtmsReducer(starting, { type: 'TRANSCRIPT' })).toBe(starting);
+    expect(rtmsReducer(starting, status('started'))).toBe(starting);
+  });
+
+  test('the server saying this person\'s own stream is live confirms it', () => {
+    expect(rtmsReducer(asked, ownLive)).toEqual({ phase: 'active', pending: null, error: null, waitingLong: false });
+    const starting = rtmsReducer(asked, status('started', 'sdk'));
+    expect(rtmsReducer(starting, ownLive)).toEqual({ phase: 'active', pending: null, error: null, waitingLong: false });
+  });
+
+  test('a long wait, and asking again, stay a request of one\'s own', () => {
+    const long = rtmsReducer(asked, { type: 'TIMEOUT' });
+    expect(long.waitingLong).toBe(true);
+    expect(rtmsReducer(long, { type: 'TRANSCRIPT' })).toBe(long);
+    const again = rtmsReducer(long, request('start'));
+    expect(again.phase).toBe('requested');
+    expect(rtmsReducer(again, { type: 'TRANSCRIPT' })).toBe(again);
+  });
+
+  test.each([
+    ['declined (the Zoom client reports stopped)', status('stopped', 'sdk'), 'denied'],
+    ['declined by the host (webhook)', { type: 'REQUEST_STATUS', status: 3 }, 'denied'],
+    ['expired', { type: 'EXPIRE' }, 'expired'],
+    ['refused by Zoom', failed('start', '10301', 'RTMS is not enabled'), 'failed'],
+  ])('%s: the reason stays when the other stream\'s next line shows Arlo is still here', (name, event, phase) => {
+    const ended = rtmsReducer(asked, event);
+    expect(ended.phase).toBe(phase);
+    expect(ended.error).not.toBeNull();
+    for (const others of [{ type: 'TRANSCRIPT' }, status('started')]) {
+      const after = rtmsReducer(ended, others);
+      expect(after.phase).toBe('active');
+      expect(after.pending).toBeNull();
+      expect(after.error).toEqual(ended.error);
+      // and further lines leave it there
+      expect(rtmsReducer(after, { type: 'TRANSCRIPT' })).toBe(after);
+    }
+  });
+
+  test('a stall keeps its reason too', () => {
+    const stalled = run([status('started', 'sdk'), { type: 'STALL' }], asked);
+    expect(stalled.phase).toBe('stalled');
+    expect(rtmsReducer(stalled, { type: 'TRANSCRIPT' }).error).toEqual(stalled.error);
+  });
+
+  test('a new request clears the reason; one that is not beside another stream is confirmed by a line as before', () => {
+    const ended = rtmsReducer(asked, { type: 'EXPIRE' });
+    const again = rtmsReducer(ended, own);
+    expect(again.error).toBeNull();
+    expect(rtmsReducer(again, { type: 'TRANSCRIPT' })).toBe(again);
+    const alone = rtmsReducer(ended, request('start'));
+    expect(rtmsReducer(alone, { type: 'TRANSCRIPT' }).phase).toBe('active');
+  });
+
+  test('the server\'s word about one\'s own stream changes nothing without such a request', () => {
+    for (const state of [initialRtmsState, others, run([request('start')])]) {
+      expect(rtmsReducer(state, ownLive)).toBe(state);
+    }
+  });
+
+  test('if every stream stops while it starts, it is stopped; a reset forgets it', () => {
+    const starting = rtmsReducer(asked, status('started', 'sdk'));
+    const stopped = rtmsReducer(starting, status('stopped'));
+    expect(stopped.phase).toBe('stopped');
+    expect(rtmsReducer(stopped, { type: 'TRANSCRIPT' }).error).toBeNull();
+    expect(rtmsReducer(asked, { type: 'RESET' })).toEqual(initialRtmsState);
+  });
+});

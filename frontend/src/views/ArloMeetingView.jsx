@@ -231,6 +231,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           present={arlo.present === true}
           paused={arlo.paused}
           myStreamPaused={arlo.myStreamPaused}
+          myStreamLive={arlo.myStreamLive}
           canControl={canControl}
           recordPath={recordPath}
           whoCanAsk={arlo.whoCanAsk}
@@ -252,6 +253,19 @@ export default function ArloMeetingView({ isGuestMode = false }) {
       // The stream is confirmed for this panel, or the server says Arlo is here
       const present = !meetingEnded
         && (arlo.present === true || rtmsPhase === 'active' || rtmsPhase === 'paused' || rtmsPhase === 'interrupted');
+      // "Use Arlo yourself": this person's own request, shown where they clicked.
+      // The host's own request needs nobody's permission.
+      const ownProgress = rtmsPhase === 'requested'
+        ? (zoomRole === 'host' ? 'starting' : 'asking')
+        : (rtmsPhase === 'starting' ? 'starting' : null);
+      const ownStart = {
+        progress: ownProgress,
+        secondsLeft,
+        hint: ownProgress === 'asking' ? transport.hint : null,
+        // Zoom does not say when the host allows Arlo: after a while they may ask again
+        mayAskAgain: ownProgress === 'asking' && transport.actions.includes('start'),
+        message: transport.message,
+      };
       content = (
         <ParticipantView
           present={present}
@@ -266,6 +280,9 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           onSignIn={signIn}
           signingIn={isAuthorizing}
           signInError={signInError ? 'Could not sign in. Try again.' : null}
+          ownStart={ownStart}
+          onUseArlo={() => startRTMS(false)}
+          useArloDisabled={rtmsLoading}
         />
       );
       break;

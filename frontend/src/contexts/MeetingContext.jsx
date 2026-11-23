@@ -168,6 +168,11 @@ export function MeetingProvider({ children }) {
   const ownPauseOnServerRef = useRef(null);
   // The same, as state, for what is rendered from it (Zoom's indicator)
   const [ownPauseOnServer, setOwnPauseOnServer] = useState(null);
+  // The server says Arlo is in the meeting and no stream of this person's own
+  // runs: it is here through someone else's. A start asked for then is this
+  // person's own, beside that stream (see lib/rtmsMachine.js `alongside`).
+  // From `arlo.state` on the socket; false until the server says so.
+  const besideAnotherStreamRef = useRef(false);
   const stoppedStreamWasOursRef = useRef(false);
   const faultRestartsRef = useRef(0);
   const isGuestRef = useRef(isGuest);
@@ -400,6 +405,7 @@ export function MeetingProvider({ children }) {
     // A new socket (another meeting, or a reconnect): the server says it again
     ownPauseOnServerRef.current = null;
     setOwnPauseOnServer(null);
+    besideAnotherStreamRef.current = false;
     // A retry still waiting would replace the socket about to be opened
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -457,7 +463,9 @@ export function MeetingProvider({ children }) {
           dispatchRtms({ type: 'TRANSCRIPT' });
           // Tell the meeting chat once, on the first real transcript line, and only
           // from the client that started transcription (not from every open panel).
-          if (startedHereRef.current && !startNoticeSentRef.current) {
+          // Not while this person's own start still waits beside someone else's
+          // stream: this line came through that one.
+          if (startedHereRef.current && !startNoticeSentRef.current && rtmsRef.current.alongside !== true) {
             startNoticeSentRef.current = true;
             sendChatNoticeRef.current('start');
           }
@@ -482,6 +490,17 @@ export function MeetingProvider({ children }) {
           setOwnPauseOnServer(ownPauseOnServerRef.current);
           if (ownPauseOnServerRef.current !== null) {
             dispatchRtms({ type: 'SERVER_PAUSE', paused: ownPauseOnServerRef.current });
+          }
+          // Whose stream runs. An owner's `myStreamLive` is false while Arlo is
+          // here only through another person's stream; a participant has none.
+          // A server that does not send it: an owner's stream is taken to run.
+          if (data.present === true && (data.role === 'owner' || data.role === 'participant')) {
+            const ownStreamLive = data.role === 'owner' && data.myStreamLive !== false;
+            besideAnotherStreamRef.current = !ownStreamLive;
+            // Confirms a start this person asked for beside someone else's stream
+            if (ownStreamLive) dispatchRtms({ type: 'OWN_STREAM_LIVE' });
+          } else {
+            besideAnotherStreamRef.current = false;
           }
           break;
         case 'participant.event': {
@@ -797,7 +816,7 @@ export function MeetingProvider({ children }) {
 
   const requestRtms = useCallback(async (action, options) => {
     localActionRef.current = action;
-    dispatchRtms({ type: 'REQUEST', action });
+    dispatchRtms({ type: 'REQUEST', action, alongside: action === 'start' && besideAnotherStreamRef.current });
     try {
       const apiName = `${action}RTMS`;
       if (options) {
@@ -827,8 +846,15 @@ export function MeetingProvider({ children }) {
   }, [zoomSdk, rtmsStatusSupported]);
 
   const startRTMS = useCallback(async (isAutoStart = false) => {
-    // Also allowed while a request is waiting on the host (see canStartRtms)
-    if (!zoomSdk || !canStartRtms(rtmsRef.current)) return;
+    // Also allowed while a request is waiting on the host (see canStartRtms),
+    // and, on a person's own click, while Arlo is in the meeting through
+    // someone else's stream only: several people can each run one.
+    const current = rtmsRef.current;
+    const ownBesideAnother = !isAutoStart && !isGuestRef.current && besideAnotherStreamRef.current
+      && isRtmsActive(current) && current.pending === null;
+    if (!zoomSdk || !(canStartRtms(current) || ownBesideAnother)) return;
+    // Their own click is the attempt: no automatic start follows a request that fails
+    if (ownBesideAnother) autoStartAttemptedRef.current = true;
 
     const startingKey = `rtms-starting-${meetingId}`;
     const alreadyStarting = sessionStorage.getItem(startingKey);

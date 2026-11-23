@@ -14,7 +14,6 @@ describe('ownerWording', () => {
     expect(ownerWording('Ana')).toEqual({
       heading: 'Ana brought Arlo into this meeting',
       body: 'Arlo reads Zoom\'s live transcript to take notes for Ana. Nothing is stored after the meeting ends.',
-      askLine: 'Only Ana can ask Arlo in this meeting.',
     });
   });
 
@@ -22,7 +21,6 @@ describe('ownerWording', () => {
     const plain = {
       heading: 'Arlo is in this meeting',
       body: 'Arlo reads Zoom\'s live transcript to take notes for the person who brought it in. Nothing is stored after the meeting ends.',
-      askLine: 'Only the person who brought Arlo in can ask in this meeting.',
     };
     for (const none of [null, undefined, '', ' ', '   ']) {
       expect(ownerWording(none)).toEqual(plain);

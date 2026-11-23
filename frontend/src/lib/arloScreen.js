@@ -20,7 +20,13 @@
  * An owner's screen is the notes. Once they have had it (Arlo was here for
  * them, or they hold notes) a request, a start, a reconnect or a fault stop
  * does not take it away: the status line says what is happening. 'waiting' is
- * for someone who has not had the notes screen in this meeting.
+ * for someone who has not had the notes screen in this meeting, while Arlo is
+ * not in it yet.
+ *
+ * Several people can each run Arlo in one meeting. Someone who asks for a
+ * stream of their own while Arlo is already here through another person's
+ * stays where they are (the participant view shows the request inline) until
+ * the server says they are an owner too.
  */
 
 // A stream that exists. 'interrupted' is the machine's name for reconnecting.
@@ -42,7 +48,8 @@ export function getArloScreen({
 
   // The server sends the stream's start before it says whose stream it is:
   // the person who asked does not see the participant view for a moment.
-  if (awaitingRole && !owner) return 'waiting';
+  // Not when Arlo was here already: they asked from the screen they are on.
+  if (awaitingRole && !owner && present !== true) return 'waiting';
 
   if (present === true || PRESENT_PHASES.has(phase)) {
     // The stream can be confirmed before the server said who this person is

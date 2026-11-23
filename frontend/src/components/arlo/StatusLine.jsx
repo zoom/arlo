@@ -11,9 +11,14 @@ const LABELS = {
   returning: 'Bringing Arlo back…',
   asking: 'Waiting for the host to allow Arlo…',
   left: 'Arlo has left',
+  // Here through another person's stream; this owner's own has stopped
+  others: 'Arlo is in the meeting',
 };
+const OTHERS_LINE = 'Your own Arlo has stopped. Notes continue from another person\'s.';
 // A stream that exists: the only statuses with Pause, Resume or Remove
 const IN_MEETING = new Set(['live', 'paused', 'reconnecting']);
+// This panel's phases of a stream that runs
+const RUNNING_PHASES = new Set(['active', 'paused', 'interrupted']);
 // How long "Remove Arlo?" waits for the second click
 const CONFIRM_MS = 5000;
 
@@ -21,9 +26,13 @@ const CONFIRM_MS = 5000;
  * A request first (it is not a state, and says so), then the confirmed stream
  * phase; what the server says about Arlo otherwise.
  */
-function arloStatus({ phase, present, paused, myStreamPaused, canControl, waitingOnHost }) {
+function arloStatus({ phase, present, paused, myStreamPaused, ownLive, canControl, waitingOnHost }) {
   if (phase === 'requested') return waitingOnHost ? 'asking' : 'returning';
   if (phase === 'starting') return 'returning';
+  // An owner whose own stream has stopped while another person's keeps Arlo in
+  // the meeting: nothing here is theirs to pause or remove. Whatever that
+  // other stream does (a pause, a reconnect), their one action is the same.
+  if (canControl && present && !ownLive) return 'others';
   if (phase === 'interrupted') return 'reconnecting';
   // Several people can each run a stream in one meeting. An owner's line is
   // about their OWN stream (`myStreamPaused`), because Resume acts on it:
@@ -46,9 +55,13 @@ function arloStatus({ phase, present, paused, myStreamPaused, canControl, waitin
  * changes when Zoom confirms it.
  *
  * `paused`: every live stream in the meeting is paused. `myStreamPaused`: this
- * person's own stream is.
+ * person's own stream is. `myStreamLive`: the server's word on whether this
+ * person's own stream runs; when it did not say (null), this panel's phase
+ * decides. Pause, Resume and Remove are for a stream of one's own that runs.
  */
-export default function StatusLine({ present, paused, myStreamPaused = false, canControl }) {
+export default function StatusLine({
+  present, paused, myStreamPaused = false, myStreamLive = null, canControl,
+}) {
   const {
     rtmsPhase, rtmsActive, rtmsPaused, rtmsLoading, rtmsError, rtmsWaitingLong,
     startRTMS, stopRTMS, pauseRTMS, resumeRTMS,
@@ -58,8 +71,9 @@ export default function StatusLine({ present, paused, myStreamPaused = false, ca
 
   // The host's own request needs nobody's permission
   const waitingOnHost = userContext?.role !== 'host';
+  const ownLive = typeof myStreamLive === 'boolean' ? myStreamLive : RUNNING_PHASES.has(rtmsPhase);
   const status = arloStatus({
-    phase: rtmsPhase, present, paused, myStreamPaused, canControl, waitingOnHost,
+    phase: rtmsPhase, present, paused, myStreamPaused, ownLive, canControl, waitingOnHost,
   });
   const inMeeting = IN_MEETING.has(status);
   // Why a control failed or the stream ended, in this screen's words
@@ -117,7 +131,7 @@ export default function StatusLine({ present, paused, myStreamPaused = false, ca
             {mayAskAgain && (
               <Button variant="outline" size="sm" onClick={() => startRTMS(false)}>Try again</Button>
             )}
-            {status === 'left' && (
+            {(status === 'left' || status === 'others') && (
               <Button variant="outline" size="sm" onClick={() => startRTMS(false)} disabled={rtmsLoading}>
                 Bring Arlo back
               </Button>
@@ -125,6 +139,7 @@ export default function StatusLine({ present, paused, myStreamPaused = false, ca
           </div>
         )}
       </div>
+      {canControl && status === 'others' && <p className="arlo-muted arlo-status-note">{OTHERS_LINE}</p>}
       {message && <p className="arlo-error" role="alert">{message}</p>}
     </section>
   );

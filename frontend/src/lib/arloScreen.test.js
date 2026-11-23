@@ -41,6 +41,15 @@ describe('getArloScreen', () => {
     ['own start confirmed, role not re-sent yet', { phase: 'active', zoomRole: 'host', awaitingRole: true }, 'waiting'],
     ['own start confirmed, already the owner', { phase: 'active', arloRole: 'owner', awaitingRole: true }, 'notes'],
     ['ended wins over waiting for the role', { meetingEnded: true, phase: 'active', awaitingRole: true }, 'participant'],
+    // 3c. Arlo is here through someone else, and this person asked for a stream of their own
+    ['own start requested while Arlo is present, participant', { present: true, phase: 'requested' }, 'participant'],
+    ['own start starting while Arlo is present, participant', { present: true, phase: 'starting' }, 'participant'],
+    ['own start requested while Arlo is present, host who is not the owner', { present: true, phase: 'requested', zoomRole: 'host' }, 'participant'],
+    ['own start while Arlo is present, the role not re-sent yet', { present: true, phase: 'requested', awaitingRole: true }, 'participant'],
+    ['own start confirmed while Arlo was present, the role not re-sent yet', { present: true, phase: 'active', awaitingRole: true }, 'participant'],
+    ['own start requested while Arlo is present, now the owner', { present: true, phase: 'requested', arloRole: 'owner' }, 'notes'],
+    ['own start failed while Arlo is present, participant', { present: true, phase: 'denied' }, 'participant'],
+    ['an owner bringing their own Arlo back while another person\'s runs', { present: true, phase: 'requested', arloRole: 'owner', hasNotes: true, everPresent: true }, 'notes'],
     // 4. Arlo has left, the owner keeps the notes
     ['left, owner with notes', { arloRole: 'owner', hasNotes: true, everPresent: true, phase: 'stopped' }, 'notes'],
     ['left, owner without notes, host', { arloRole: 'owner', everPresent: true, zoomRole: 'host', phase: 'stopped' }, 'bring-in'],

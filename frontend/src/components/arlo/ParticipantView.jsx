@@ -1,20 +1,62 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import Button from '../ui/Button';
+import LoadingSpinner from '../ui/LoadingSpinner';
 import AskArlo from './AskArlo';
 import { ownerWording } from '../../lib/ownerName';
+
+const ONLY_USERS_ASK = 'Only people using Arlo can ask in this meeting.';
+
+/**
+ * "Use Arlo yourself": the one secondary action of a signed-in participant.
+ * Several people can each run Arlo in a meeting; this starts theirs, on the
+ * click only. While the request is unresolved its progress shows here, in
+ * place of the button, and the screen stays. `ownStart`:
+ *   progress   'asking' (waiting on the host) | 'starting' | null
+ *   secondsLeft, hint, mayAskAgain   for a request waiting on the host
+ *   message    why the last request did not bring Arlo in, or null
+ */
+function UseArloYourself({ ownStart, onUseArlo, disabled }) {
+  const { progress, secondsLeft, hint, mayAskAgain, message } = ownStart;
+  return (
+    <div className="arlo-use-yourself">
+      {progress ? (
+        <>
+          <p className="arlo-waiting" role="status" aria-live="polite">
+            <span className="arlo-waiting-spinner" aria-hidden="true"><LoadingSpinner size={16} /></span>
+            <span>
+              {progress === 'asking'
+                ? `Waiting for the host to allow Arlo…${secondsLeft !== null && secondsLeft !== undefined ? ` ${secondsLeft}s` : ''}`
+                : 'Bringing Arlo in…'}
+            </span>
+          </p>
+          {hint && <p className="arlo-muted">{hint}</p>}
+          {mayAskAgain && <Button variant="outline" size="sm" onClick={onUseArlo}>Try again</Button>}
+        </>
+      ) : (
+        <>
+          <Button variant="outline" onClick={onUseArlo} disabled={disabled}>Use Arlo yourself</Button>
+          <p className="arlo-muted">Starts Arlo for you too. You get the notes and can ask.</p>
+        </>
+      )}
+      {message && <p className="arlo-error" role="alert">{message}</p>}
+    </div>
+  );
+}
 
 /**
  * What someone who did not bring Arlo in sees: that Arlo is here and for whom,
  * the meeting record, and a private ask when the owner allows it. Never the notes,
- * and no controls: the stream belongs to the person who brought Arlo in.
+ * and no controls: a stream belongs to the person who started it. A signed-in
+ * participant can start one of their own ("Use Arlo yourself") and gets the
+ * notes screen once the server says they are an owner too.
  * `paused` is about the meeting (every live stream is paused): wording only.
  * `ownerName` can be missing or blank: the sentences then say it without a
  * name (lib/ownerName.js).
  */
 export default function ParticipantView({
   present, paused = false, ownerName, whoCanAsk, guest, canBringIn = false, meetingEnded, showRecord, recordPath,
-  onSignIn, signingIn, signInError,
+  onSignIn, signingIn, signInError, ownStart = null, onUseArlo, useArloDisabled = false,
 }) {
   const wording = ownerWording(ownerName);
   const heading = present ? wording.heading : 'Arlo isn\'t in this meeting';
@@ -32,6 +74,7 @@ export default function ParticipantView({
           </p>
         )}
         {showRecord && <Link className="arlo-link" to={recordPath}>Meeting record</Link>}
+        {present && whoCanAsk !== 'anyone' && <p className="arlo-muted">{ONLY_USERS_ASK}</p>}
         {present && guest && (
           <div className="arlo-sign-in">
             <Button onClick={onSignIn} disabled={signingIn}>Sign in to ask Arlo</Button>
@@ -45,8 +88,8 @@ export default function ParticipantView({
             {signInError && <p className="arlo-error" role="alert">{signInError}</p>}
           </div>
         )}
-        {present && !guest && whoCanAsk !== 'anyone' && (
-          <p className="arlo-muted">{wording.askLine}</p>
+        {present && !guest && !meetingEnded && ownStart && (
+          <UseArloYourself ownStart={ownStart} onUseArlo={onUseArlo} disabled={useArloDisabled} />
         )}
       </div>
       {present && !guest && whoCanAsk === 'anyone' && <AskArlo />}

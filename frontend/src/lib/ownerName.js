@@ -14,19 +14,17 @@ export function usableName(value, max = MAX_NAME_CHARS) {
   return name.length > 0 ? name : null;
 }
 
-/** What a participant reads about whose Arlo this is: { heading, body, askLine }. */
+/** What a participant reads about whose Arlo this is: { heading, body }. */
 export function ownerWording(ownerName) {
   const name = usableName(ownerName);
   if (name === null) {
     return {
       heading: 'Arlo is in this meeting',
       body: 'Arlo reads Zoom\'s live transcript to take notes for the person who brought it in. Nothing is stored after the meeting ends.',
-      askLine: 'Only the person who brought Arlo in can ask in this meeting.',
     };
   }
   return {
     heading: `${name} brought Arlo into this meeting`,
     body: `Arlo reads Zoom's live transcript to take notes for ${name}. Nothing is stored after the meeting ends.`,
-    askLine: `Only ${name} can ask Arlo in this meeting.`,
   };
 }

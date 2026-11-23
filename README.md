@@ -99,10 +99,10 @@ Arlo shows one screen at a time. Which one depends on whether Arlo is in the mee
 |--------|-------------|--------------|
 | **Bring Arlo into this meeting** | The host or a co-host, signed in to Arlo | Choose who can ask Arlo ("Only I can ask" or "Anyone can ask"), then one button. Nothing is requested from Zoom before the click. |
 | **Ask the host to bring Arlo in** | Other signed-in users | One button. Zoom asks the host; the screen waits for the answer. |
-| **Live notes** | The person who brought Arlo in | A summary, decisions and action items, rewritten about every 45 seconds while people talk. A status line with Pause, Resume and Remove Arlo. An "Ask Arlo" input; the answer comes from the transcript and only you see it. |
-| **Participant view** | Everyone else, including people not signed in | Who brought Arlo in and what Arlo does. No notes. "Ask Arlo" appears when the owner chose "Anyone can ask" and you are signed in. |
+| **Live notes** | Each person using Arlo (they started it for themselves) | A summary, decisions and action items, rewritten about every 45 seconds while people talk. A status line with Pause, Resume and Remove Arlo while your own Arlo runs; if yours has stopped and someone else's still runs, the notes continue and the line offers "Bring Arlo back". An "Ask Arlo" input; the answer comes from the transcript and only you see it. |
+| **Participant view** | Everyone else, including people not signed in | Who brought Arlo in and what Arlo does. No notes. "Ask Arlo" appears when the owner chose "Anyone can ask" and you are signed in; otherwise it says "Only people using Arlo can ask in this meeting." Signed-in people also get **Use Arlo yourself**: it starts Arlo for them too (the host may have to allow it), and they then get the notes and can ask. |
 | **Meeting record** | Everyone in the meeting | What was said and what happened since Arlo joined, in time order. A toggle shows only Arlo's own actions. |
-| **After the meeting** | The person who brought Arlo in | The notes stay on screen with a "Copy notes" button. In demo mode they are not stored anywhere else. |
+| **After the meeting** | Each person who used Arlo | The notes stay on screen with a "Copy notes" button. In demo mode they are not stored anywhere else. |
 
 How it works:
 
@@ -390,7 +390,7 @@ Wait for all services to start:
 5. Talk for a minute: the notes appear (Summary, Decisions, Action items)
 6. Type a question into **Ask Arlo**
 7. Open **Meeting record** to see the transcript and what Arlo did
-8. Open Arlo from a second account in the same meeting to see the participant view
+8. Open Arlo from a second account in the same meeting to see the participant view; click **Use Arlo yourself** there to run Arlo for that account too
 
 ---
 

@@ -30,6 +30,9 @@ import { useZoomSdk } from './ZoomSdkContext';
  * - `paused` is about the meeting (true only when every live stream in it is
  *   paused); `myStreamPaused` is about this person's own stream. Several people
  *   can each run a stream in one meeting.
+ * - `myStreamLive` is the server's word on whether a stream of this person's
+ *   own runs right now (owners only): false while Arlo is in the meeting only
+ *   through another person's stream, null when the server did not say.
  * - What is held belongs to the signed-in person: when they stop being signed
  *   in (sign-out, session loss, deauthorization) or someone else is signed in,
  *   the state, the notes and the way back to them are dropped. An owner is
@@ -55,7 +58,7 @@ const STATE_AFTER_START_MS = 3000;
 
 // `present` and `role` are null until the server answered: "not known" is not "not here"
 const NOT_LOADED = Object.freeze({
-  loaded: false, present: null, paused: false, myStreamPaused: false, role: null, ownerName: null, whoCanAsk: 'owner',
+  loaded: false, present: null, paused: false, myStreamPaused: false, myStreamLive: null, role: null, ownerName: null, whoCanAsk: 'owner',
 });
 
 const ASK_MESSAGES = {
@@ -79,6 +82,8 @@ function parseState(data) {
     paused: data.paused === true,
     // Absent from a server that does not tell the streams apart yet: false
     myStreamPaused: data.myStreamPaused === true,
+    // Owners only. null: the server did not say (a participant, or an older server)
+    myStreamLive: data.role === 'owner' && typeof data.myStreamLive === 'boolean' ? data.myStreamLive : null,
     role: data.role,
     ownerName: usableName(data.ownerName),
     whoCanAsk: WHO_CAN_ASK.has(data.whoCanAsk) ? data.whoCanAsk : 'owner',
@@ -171,12 +176,12 @@ export function ArloProvider({ children }) {
     // ended can still be told "owner": that is no longer this panel's role.
     const next = signedInRef.current || parsed.role !== 'owner'
       ? parsed
-      : { ...parsed, role: 'participant', myStreamPaused: false };
+      : { ...parsed, role: 'participant', myStreamPaused: false, myStreamLive: null };
     const prev = stateRef.current;
     // After the meeting ended the server has nothing left to say about it:
     // Arlo is gone, and who this person was to it stays as it was.
     const merged = endedRef.current && prev.loaded
-      ? { ...prev, present: false, paused: false, myStreamPaused: false }
+      ? { ...prev, present: false, paused: false, myStreamPaused: false, myStreamLive: prev.myStreamLive === null ? null : false }
       : { loaded: true, ...next };
     stateRef.current = merged;
     setState(merged);
@@ -347,6 +352,7 @@ export function ArloProvider({ children }) {
     present: shown.present,
     paused: shown.paused,
     myStreamPaused: shown.myStreamPaused,
+    myStreamLive: shown.myStreamLive,
     role: shown.role,
     ownerName: shown.ownerName,
     whoCanAsk: shown.whoCanAsk,

@@ -426,3 +426,23 @@ describe('the person stops being signed in', () => {
     expect(meeting.segments).toHaveLength(1);
   });
 });
+
+describe('myStreamLive', () => {
+  test('is the server\'s word about whether this owner\'s own stream runs; null when it did not say', async () => {
+    await asOwner();
+    await send(serverMessage.arloState({ ...OWNER, myStreamLive: true }));
+    expect(arlo.myStreamLive).toBe(true);
+    await send(serverMessage.arloState({ ...OWNER, myStreamLive: false }));
+    expect(arlo).toMatchObject({ present: true, role: 'owner', myStreamLive: false });
+    await send(serverMessage.arloState({ ...OWNER }));
+    expect(arlo.myStreamLive).toBeNull();
+    await send(serverMessage.arloState({ ...OWNER, myStreamLive: 'yes' }));
+    expect(arlo.myStreamLive).toBeNull();
+  });
+
+  test('is never kept for a participant', async () => {
+    await asOwner();
+    await send(serverMessage.arloState({ present: true, role: 'participant', ownerName: 'Ana', myStreamLive: true }));
+    expect(arlo.myStreamLive).toBeNull();
+  });
+});

@@ -10,12 +10,18 @@ import WhoCanAsk from './WhoCanAsk';
  * input. The status line says where Arlo is, also while it is on its way back.
  */
 export default function LiveNotes({
-  notes, present, paused, myStreamPaused, canControl, recordPath, whoCanAsk, onWhoCanAskChange,
+  notes, present, paused, myStreamPaused, myStreamLive, canControl, recordPath, whoCanAsk, onWhoCanAskChange,
 }) {
   return (
     <div className="arlo-screen">
       <h1 className="arlo-sr-only" tabIndex={-1} data-arlo-focus>Your notes</h1>
-      <StatusLine present={present} paused={paused} myStreamPaused={myStreamPaused} canControl={canControl} />
+      <StatusLine
+        present={present}
+        paused={paused}
+        myStreamPaused={myStreamPaused}
+        myStreamLive={myStreamLive}
+        canControl={canControl}
+      />
       <div className="arlo-scroll">
         <NotesDocument notes={notes} listening={present} />
       </div>

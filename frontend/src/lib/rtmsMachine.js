@@ -30,6 +30,15 @@
  * carry the server's word about this user's own stream (true, false, or
  * null/absent when it has not said).
  *
+ * Several people can each run a stream in one meeting, and this machine also
+ * follows a stream that is someone else's (its statuses and lines reach every
+ * panel). A start asked for while another person's stream runs is marked
+ * `alongside`: that stream's lines and statuses do not confirm it. Only the
+ * server saying that this person's own stream is live does (OWN_STREAM_LIVE,
+ * from `arlo.state`). When such a request ends without a stream, the reason
+ * stays in `error` after the other stream's next line shows Arlo is still in
+ * the meeting, until the person asks again.
+ *
  * `pending` is the request this client is waiting on ('start' | 'stop' |
  * 'pause' | 'resume'), `error` is { action, code, message } for the UI.
  */
@@ -138,12 +147,45 @@ function onStatus(state, status, source, fault) {
   }
 }
 
+// A start of one's own beside another person's stream: waiting, or ended without a stream
+const OWN_START_WAITING = new Set(['requested', 'starting']);
+const OWN_START_ENDED = new Set(['denied', 'failed', 'expired', 'stalled']);
+// What the server reports about a stream that runs: here, the other person's
+const RUNNING_STATUSES = new Set(['started', 'resumed', 'paused', 'interrupted']);
+
+/** `alongside` states: what another person's stream and the server's word about one's own do. */
+function besideAnotherStream(state, event) {
+  const waiting = OWN_START_WAITING.has(state.phase);
+  if (event.type === 'OWN_STREAM_LIVE') return settled('active');
+  const fromOtherStream = event.type === 'TRANSCRIPT'
+    || (event.type === 'STATUS' && event.source !== 'sdk' && RUNNING_STATUSES.has(event.status));
+  if (!fromOtherStream) return null;
+  // Not this person's stream: the request goes on waiting
+  if (waiting) return state;
+  // Arlo is still in the meeting through the other stream; why their own did not start stays
+  const phase = event.status === 'paused' || event.status === 'interrupted' ? event.status : 'active';
+  return settled(phase, state.error);
+}
+
 export function rtmsReducer(state, event) {
+  if (event.type === 'REQUEST' && event.action === 'start') {
+    // Asking again while such a request waits is still that request
+    const alongside = event.alongside === true || (state.alongside === true && OWN_START_WAITING.has(state.phase));
+    return { phase: 'requested', pending: 'start', error: null, waitingLong: false, ...(alongside && { alongside }) };
+  }
+  if (state.alongside !== true) return event.type === 'OWN_STREAM_LIVE' ? state : reduce(state, event);
+
+  const beside = besideAnotherStream(state, event);
+  if (beside) return beside;
+  const next = reduce(state, event);
+  // The mark stays while the request waits and once it ended without a stream
+  const keeps = next !== state && (OWN_START_WAITING.has(next.phase) || OWN_START_ENDED.has(next.phase));
+  return keeps && next.alongside !== true ? { ...next, alongside: true } : next;
+}
+
+function reduce(state, event) {
   switch (event.type) {
     case 'REQUEST':
-      if (event.action === 'start') {
-        return { phase: 'requested', pending: 'start', error: null, waitingLong: false };
-      }
       return { ...state, pending: event.action, error: null };
 
     case 'REQUEST_ACCEPTED': {
