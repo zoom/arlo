@@ -873,3 +873,25 @@ test('a session update is only taken from the current client of a stream that is
   assert.equal(statuses(sent).at(-1), 'rtms_stopped');
   assert.equal(statuses(sent).filter((s) => s === 'rtms_resumed').length, 0);
 });
+
+test('a session update is logged with what it is about, and never with an id', async () => {
+  const lines = [];
+  const clients = [];
+  const manager = createSessionManager({
+    createClient: () => { const c = new FakeClient(); clients.push(c); return c; },
+    backend: { status: async () => {}, segment: async () => {}, participantEvents: async () => {} },
+    defer: (fn) => fn(),
+    schedule: () => () => {},
+    log: { log: (...args) => lines.push(args.join(' ')), warn() {}, error() {} },
+  });
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  clients[0].handlers.sessionUpdate(1, { sessionId: 'SESSION-SECRET-2', streamId: 'stream-OTHER', isActive: true, isPaused: false });
+  const line = lines.find((l) => l.startsWith('Session update: 1'));
+  assert.ok(line, 'the update is logged');
+  assert.match(line, /same stream as joined: false/);
+  assert.match(line, /session #[0-9a-f]{6}/);
+  assert.ok(!line.includes('SESSION-SECRET-2') && !line.includes('stream-OTHER') && !line.includes('MEETING-1'));
+  clients[0].handlers.sessionUpdate(1);
+  assert.ok(lines.some((l) => l.includes('(no session info)')));
+});

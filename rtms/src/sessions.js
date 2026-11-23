@@ -27,6 +27,7 @@
  * said, their name, or a meeting or stream id is ever written to the logs.
  */
 
+const crypto = require('node:crypto');
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_ID_CHARS = 256;
 const MAX_URL_CHARS = 2048;
@@ -67,6 +68,21 @@ const MEETING_ENDED = 6;
 // SESSION_EVENT_STOP 2). Defined here because this module never imports the SDK.
 const SESSION_EVENT_PAUSE = 3;
 const SESSION_EVENT_RESUME = 4;
+
+/**
+ * What a session update is about, for the log, without any id: whether it names
+ * the stream this connection joined, and a short tag that tells two sessions
+ * apart (a second person starting Arlo in the same meeting shows up as another
+ * session on the first person's connection, with no webhook of its own).
+ */
+function describeSessionInfo(info, joinedStreamId) {
+  if (!info || typeof info !== 'object') return '(no session info)';
+  const tag = (value) => (typeof value === 'string' && value.length > 0
+    ? crypto.createHash('sha256').update(value).digest('hex').slice(0, 6)
+    : 'none');
+  const flag = (value) => (typeof value === 'boolean' ? value : 'n/a');
+  return `(session #${tag(info.sessionId)}, stream #${tag(info.streamId)}, same stream as joined: ${info.streamId === joinedStreamId}, active: ${flag(info.isActive)}, paused: ${flag(info.isPaused)})`;
+}
 
 const defaultSchedule = (fn, ms) => {
   const timer = setTimeout(fn, ms);
@@ -378,8 +394,8 @@ function createSessionManager({
     // Someone paused or resumed this stream, with Arlo's button or with Zoom's
     // own controls ("Apps that access meeting content"). Zoom sends no webhook
     // for it: this is the only place it is heard of.
-    client.onSessionUpdate((op) => {
-      log.log('Session update:', typeof op === 'number' ? op : 'unexpected form');
+    client.onSessionUpdate((op, info) => {
+      log.log('Session update:', typeof op === 'number' ? op : 'unexpected form', describeSessionInfo(info, streamId));
       if (!isCurrent() || session.state !== 'streaming') return;
       if (op === SESSION_EVENT_PAUSE) reportFor(session, 'rtms_paused');
       else if (op === SESSION_EVENT_RESUME) reportFor(session, 'rtms_resumed');
