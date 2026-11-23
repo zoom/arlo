@@ -822,6 +822,117 @@ test('a line from a paused stream shows it is running, once the lines that were 
   assert.equal(quick.streams.pauseState(M).meeting, false);
 });
 
+// --- a pause Zoom confirmed (the rtms service's report) -------------------------
+
+test('lines within 15 seconds of a confirmed pause do not clear it; a line after that does', () => {
+  const { streams, after } = started(['A']);
+  streams.setPaused(M, { streamId: 'A' }, true, { confirmed: true });
+  // lines said before the pause, still on their way: well past the 3s of a browser's pause
+  after(4);
+  streams.keepsLine(M, 'A', { line: lineNo(1) });
+  after(10.999);
+  streams.keepsLine(M, 'A', { line: lineNo(2) });
+  assert.equal(streams.pauseState(M).meeting, true);
+  // Zoom delivers nothing on a paused stream: 15 seconds on, a line means the resume was lost
+  after(0.001);
+  assert.equal(streams.keepsLine(M, 'A', { line: lineNo(3) }), true);
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 0, operators: [] });
+  // and it is an ordinary running stream again: a new pause report marks it
+  streams.setPaused(M, { streamId: 'A' }, true, { confirmed: true });
+  assert.equal(streams.pauseState(M).meeting, true);
+});
+
+test('only lines from the paused stream itself clear its confirmed pause, and a participant event never does', () => {
+  const { streams, after } = started(['A', 'B']);
+  streams.setPaused(M, { streamId: 'A' }, true, { confirmed: true });
+  after(60);
+  streams.keepsLine(M, 'B', { line: lineNo(1) });
+  streams.keepsEvent(M, 'A', { event: { eventType: 'joined', participantId: '1' } });
+  assert.deepEqual(streams.pauseState(M), { meeting: false, streams: 1, operators: ['op-A'] });
+  // a copy of a line shows it as well as a first delivery
+  assert.equal(streams.keepsLine(M, 'A', { line: lineNo(1) }), false);
+  assert.equal(streams.pauseState(M).streams, 0);
+});
+
+test('how long a confirmed pause stands against lines is an option of its own', () => {
+  const { streams, after } = started(['A'], { confirmedPauseStaleMs: 30_000, pauseSettleMs: 500 });
+  streams.setPaused(M, { streamId: 'A' }, true, { confirmed: true });
+  after(29);
+  streams.keepsLine(M, 'A', { line: lineNo(1) });
+  assert.equal(streams.pauseState(M).meeting, true);
+  after(1);
+  streams.keepsLine(M, 'A', { line: lineNo(2) });
+  assert.equal(streams.pauseState(M).meeting, false);
+});
+
+test('a confirmed pause and a real resume are as before', () => {
+  const { streams, after } = started(['A']);
+  streams.setPaused(M, { streamId: 'A' }, true, { confirmed: true });
+  after(5);
+  streams.setPaused(M, { streamId: 'A' }, false, { confirmed: true });
+  assert.equal(streams.pauseState(M).meeting, false);
+  after(60);
+  streams.keepsLine(M, 'A', { line: lineNo(1) });
+  assert.equal(streams.pauseState(M).meeting, false);
+});
+
+test('a panel\'s report of a pause Zoom confirmed leaves it confirmed, and counted from when Zoom said so', () => {
+  const { streams, after } = started(['A']);
+  streams.setPaused(M, { streamId: 'A' }, true, { confirmed: true });
+  after(10);
+  // the owner's panel reports the same pause: not a browser's pause now
+  assert.equal(streams.setPaused(M, { operatorId: 'op-A' }, true), true);
+  after(4);
+  streams.keepsLine(M, 'A', { line: lineNo(1) });
+  assert.equal(streams.pauseState(M).meeting, true, 'a line 4s after the panel\'s report does not clear a confirmed pause');
+  // 15s after Zoom's word, not after the panel's
+  after(1);
+  streams.keepsLine(M, 'A', { line: lineNo(2) });
+  assert.equal(streams.pauseState(M).meeting, false);
+});
+
+test('the service confirming a pause a panel reported makes it confirmed, from then', () => {
+  const { streams, after } = started(['A']);
+  streams.setPaused(M, { operatorId: 'op-A' }, true);
+  after(2);
+  streams.setPaused(M, { streamId: 'A' }, true, { confirmed: true });
+  after(5);
+  streams.keepsLine(M, 'A', { line: lineNo(1) });
+  assert.equal(streams.pauseState(M).meeting, true);
+});
+
+test('the owner\'s own resume report ends a pause Zoom confirmed', () => {
+  const { streams, after } = started(['A', 'B']);
+  streams.setPaused(M, { streamId: 'A' }, true, { confirmed: true });
+  // another owner's report is about their own stream, not this one
+  streams.setPaused(M, { operatorId: 'op-B' }, false);
+  assert.deepEqual(streams.pauseState(M).operators, ['op-A']);
+  streams.setPaused(M, { operatorId: 'op-A' }, false);
+  assert.equal(streams.pauseState(M).streams, 0);
+  // and a pause reported after that is a browser's again: a line 3s on clears it
+  streams.setPaused(M, { operatorId: 'op-A' }, true);
+  after(3);
+  streams.keepsLine(M, 'A', { line: lineNo(1) });
+  assert.equal(streams.pauseState(M).streams, 0);
+});
+
+test('whether the stored timeline says "paused" is forgotten when nothing runs', () => {
+  const { streams } = started(['A', 'B']);
+  assert.equal(streams.pauseKept(M), false);
+  assert.equal(streams.pauseKept(M, true), true);
+  // one stream stopping while another runs changes nothing about it
+  streams.streamStopped(M, 'A');
+  assert.equal(streams.pauseKept(M), true);
+  streams.streamStopped(M, 'B');
+  assert.equal(streams.pauseKept(M), false);
+
+  streams.streamStarted(M, { streamId: 'C', operatorId: 'op-C' });
+  streams.pauseKept(M, true);
+  streams.stopAll(M);
+  assert.equal(streams.pauseKept(M), false);
+  assert.equal(streams.pauseKept('UNKNOWN=='), false);
+});
+
 test('only a running stream can be paused, and only the one named', () => {
   const { streams } = started(['A', 'B']);
   streams.streamStopped(M, 'B');

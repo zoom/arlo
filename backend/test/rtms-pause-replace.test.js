@@ -536,7 +536,7 @@ test('a browser\'s pause or resume report never reaches the meeting lifecycle; t
 
 const count = (ws, type) => ofType(ws, type).length;
 
-test('a native pause of the only stream pauses the meeting, lines do not clear it, the service\'s resume does', async () => {
+test('a native pause of the only stream pauses the meeting, lines soon after do not clear it, the service\'s resume does', async () => {
   const meeting = 'NATIVE-1==';
   const owner = await openPanel(meeting, ana());
   const guest = await openPanel(meeting, null);
@@ -550,7 +550,7 @@ test('a native pause of the only stream pauses the meeting, lines do not clear i
 
   // Zoom said it is paused: a line arriving later does not say otherwise
   await later(4000, () => say(meeting, 's1', 'still on its way'));
-  await later(60_000, () => say(meeting, 's1', 'and another'));
+  await later(14_000, () => say(meeting, 's1', 'and another'));
   await h.wait(100);
   assert.deepEqual(told(guest), ['rtms_started', 'rtms_paused']);
   assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [true, true]);
@@ -562,6 +562,42 @@ test('a native pause of the only stream pauses the meeting, lines do not clear i
   assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [false, false]);
   assert.deepEqual(await timeline(meeting), ['transcription_started', 'transcription_paused', 'transcription_resumed']);
   assert.deepEqual(await texts(meeting), ['still on its way', 'and another']);
+});
+
+test('a native pause whose resume was lost: a line 15 seconds on shows the stream is running, and the panels are told once', async () => {
+  const meeting = 'NATIVE-1B==';
+  const owner = await openPanel(meeting, ana());
+  const guest = await openPanel(meeting, null);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+  await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+  await later(5000, () => say(meeting, 's1', 'said before the pause'));
+  await h.wait(100);
+  assert.deepEqual(told(guest), ['rtms_started', 'rtms_paused']);
+  const before = [count(guest, 'arlo.state'), count(owner, 'arlo.state')];
+
+  // the resume report never arrived, and lines keep coming
+  await later(16_000, () => say(meeting, 's1', 'first after the lost resume'));
+  await later(17_000, () => say(meeting, 's1', 'second'));
+  await later(18_000, () => say(meeting, 's1', 'third'));
+  await h.wait(100);
+  for (const ws of [owner, guest]) ws.socket.close();
+  assert.deepEqual(told(guest), ['rtms_started', 'rtms_paused', 'rtms_resumed']);
+  assert.deepEqual(told(owner), ['rtms_started', 'rtms_paused', 'rtms_resumed']);
+  assert.deepEqual([state(owner).paused, state(owner).myStreamPaused], [false, false]);
+  assert.equal(state(guest).paused, false);
+  // one state for each panel, not one per line
+  assert.deepEqual([count(guest, 'arlo.state'), count(owner, 'arlo.state')], before.map((n) => n + 1));
+  // it is in the stored timeline, once, and every line was stored
+  assert.deepEqual(await timeline(meeting), ['transcription_started', 'transcription_paused', 'transcription_resumed']);
+  assert.deepEqual(await texts(meeting), ['said before the pause', 'first after the lost resume', 'second', 'third']);
+
+  // the resume report turning up late changes nothing more
+  const late = await openPanel(meeting, null);
+  await status(meeting, { status: 'rtms_resumed', streamId: 's1' });
+  await h.wait(100);
+  late.socket.close();
+  assert.deepEqual(told(late).filter((s) => s === 'rtms_resumed'), []);
+  assert.deepEqual(await timeline(meeting), ['transcription_started', 'transcription_paused', 'transcription_resumed']);
 });
 
 test('two streams, one paused natively: the meeting is not paused, only that owner\'s stream is', async () => {

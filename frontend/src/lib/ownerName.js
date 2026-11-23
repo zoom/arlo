@@ -7,11 +7,27 @@
  */
 const MAX_NAME_CHARS = 200;
 
-/** The name trimmed and bounded, or null when there is none (not a string, or blank). */
+// The server's rule (backend/src/lib/displayName.js), applied to a name from
+// any source: no control, format (zero-width, soft hyphen, direction override),
+// private-use or unassigned characters, no line or paragraph separators, no
+// Hangul fillers (letters by category, shown as a blank), and at least one
+// letter or digit. A name that fails reads as no name: it would show as a gap,
+// or turn the sentence around it.
+const NOT_IN_A_NAME = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}\u3164\u115F\u1160\uFFA0]/u;
+const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
+const isShowable = (name) => LETTER_OR_DIGIT.test(name) && !NOT_IN_A_NAME.test(name);
+
+/**
+ * The name NFC-normalized, trimmed and bounded, or null when there is none:
+ * not a string, blank, or not showable (see above).
+ */
 export function usableName(value, max = MAX_NAME_CHARS) {
   if (typeof value !== 'string') return null;
-  const name = value.trim().slice(0, max).trim();
-  return name.length > 0 ? name : null;
+  const whole = value.normalize('NFC').trim();
+  if (!isShowable(whole)) return null;
+  // The cut must not leave half an emoji (a lone surrogate) at the end
+  const name = whole.slice(0, max).replace(/[\uD800-\uDBFF]$/, '').trim();
+  return isShowable(name) ? name : null;
 }
 
 /** What a participant reads about whose Arlo this is: { heading, body }. */

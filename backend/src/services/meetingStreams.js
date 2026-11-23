@@ -45,9 +45,12 @@
  * stream runs and every running stream is paused. Two kinds of report:
  *   - the rtms service's, which is Zoom's own word from the stream's session
  *     (also for a pause made with Zoom's controls, not Arlo's). That mark is
- *     confirmed: only a resume report or the stream stopping removes it, not
- *     a line. After a rejoin it is no longer confirmed, because a resume
- *     during the gap would not have been heard.
+ *     confirmed: a resume report or the stream stopping removes it, and the
+ *     few lines still on their way do not. But Zoom delivers nothing on a
+ *     paused stream, so a line from it 15 seconds or more after the mark was
+ *     made means the resume report was lost: that line removes it too. After
+ *     a rejoin it is no longer confirmed, because a resume during the gap
+ *     would not have been heard.
  *   - a panel's, about its user's own stream. That mark also goes when a line
  *     arrives from the stream (it is running after all).
  * Both reports of one pause, in either order, are one mark.
@@ -88,6 +91,10 @@ const DEFAULTS = Object.freeze({
   // Lines said just before a pause are still on their way when the pause is
   // reported: only a line this long after it shows the stream is running
   pauseSettleMs: 3 * 1000,
+  // The same for a pause Zoom itself confirmed (the rtms service's report):
+  // Zoom delivers nothing on a paused stream, so a line from it this long
+  // after the pause was recorded means the resume report was lost
+  confirmedPauseStaleMs: 15 * 1000,
   // How long the outcome of a stream that replaces a user's old one is waited
   // for (Zoom keeps a stream it announced open for about a minute)
   replacementWaitMs: 90 * 1000,
@@ -454,10 +461,16 @@ function createMeetingStreams(options = {}) {
   function keepsLine(meetingId, streamId, details) {
     const heard = heardFrom(meetingId, streamId, details);
     if (heard === null) return false;
-    // A line, also a copy, shows that a stream marked paused is running,
-    // unless Zoom itself said it is paused: then only a resume report counts
+    // A line, also a copy, shows that a stream marked paused is running, once
+    // the lines that were on their way when it was paused are through. When
+    // Zoom itself said it is paused that takes much longer to believe: only a
+    // line that cannot be a leftover says the resume report was lost.
     const { pausedAt = null, pauseConfirmed = false } = heard.stream ?? {};
-    if (pausedAt !== null && !pauseConfirmed && now() - pausedAt >= limits.pauseSettleMs) heard.stream.pausedAt = null;
+    const believedAfterMs = pauseConfirmed ? limits.confirmedPauseStaleMs : limits.pauseSettleMs;
+    if (pausedAt !== null && now() - pausedAt >= believedAfterMs) {
+      heard.stream.pausedAt = null;
+      heard.stream.pauseConfirmed = false;
+    }
     return firstDelivery(heard, 'lines', lineIdentity(details?.line), lineRules);
   }
 
@@ -474,8 +487,8 @@ function createMeetingStreams(options = {}) {
    * Mark a running stream paused or resumed. `who` names it: `{ operatorId }`
    * is the running stream of that user, `{ streamId }` that stream (without an
    * id: the meeting's one unnamed stream). `confirmed: true` for Zoom's own
-   * word (the rtms service's report), which a line does not undo; a pause
-   * already confirmed stays so when a panel reports it too.
+   * word (the rtms service's report), which a line soon after does not undo;
+   * a pause already confirmed stays so when a panel reports it too.
    * Returns whether a stream was marked.
    */
   function setPaused(meetingId, who, paused, { confirmed = false } = {}) {

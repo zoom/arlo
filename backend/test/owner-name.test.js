@@ -45,6 +45,47 @@ test('cleanName trims, bounds, and gives an empty string for anything that is no
   assert.equal(cleanName('x'.repeat(500)).length, 200);
 });
 
+// Characters that show as nothing, or change how the text around them reads
+const INVISIBLE = {
+  'zero-width space U+200B': '\u200b',
+  'soft hyphen U+00AD': '\u00ad',
+  'Hangul filler U+3164': '\u3164',
+  'Hangul choseong filler U+115F': '\u115f',
+  'Hangul jungseong filler U+1160': '\u1160',
+  'halfwidth Hangul filler U+FFA0': '\uffa0',
+  'right-to-left override U+202E': '\u202e',
+  'zero-width joiner U+200D': '\u200d',
+  'word joiner U+2060': '\u2060',
+  'byte order mark U+FEFF': '\ufeff',
+  'line separator U+2028': '\u2028',
+  'paragraph separator U+2029': '\u2029',
+  'private use U+E000': '\ue000',
+  'private use U+F0000': '\u{f0000}',
+  'unassigned U+0378': '\u0378',
+  'noncharacter U+FFFF': '\uffff',
+  'lone surrogate': '\ud83d',
+  'control U+0007': '\u0007',
+};
+const ORDINARY_NAMES = [
+  'Ana Ruiz', 'José Ángel Müller', 'Zoë O\'Brien-Smith', 'Nguyễn Thị Minh', '山田 太郎', '王小明', '김민준',
+  'محمد علي', 'Дмитрий', 'Ελένη', 'Ana 🎉', '🚀 Ben', 'R2', '7', 'Dr. A.',
+];
+
+test('an account name with invisible or unassigned characters, or without a letter or digit, is no name', () => {
+  for (const [label, char] of Object.entries(INVISIBLE)) {
+    assert.equal(cleanName(char.repeat(3)), '', `only ${label}`);
+    assert.equal(cleanName(`An${char}a`), '', `${label} inside a name`);
+    assert.equal(displayNameFrom({ first_name: `An${char}a`, last_name: '' }), '', `${label} in a first name`);
+    assert.equal(displayNameFrom({ display_name: `An${char}a` }), '', `${label} in a display name`);
+  }
+  for (const noLetter of ['...', '🎉', '— —', '!!', '\u0301']) assert.equal(cleanName(noLetter), '', JSON.stringify(noLetter));
+  for (const name of ORDINARY_NAMES) assert.equal(cleanName(`  ${name} `), name.normalize('NFC'), name);
+  // compared and kept in one form: a letter and its combining accent are the one letter
+  assert.equal(cleanName('Jose\u0301'), 'José');
+  // a good first name is not lost to a bad last name
+  assert.equal(displayNameFrom({ first_name: 'Ana', last_name: '\u200b' }), 'Ana');
+});
+
 test('a blank name in a restore cookie comes back as an empty string, a real one as it was', async () => {
   for (const [zoomUserId, stored, expected] of [['zoom-name-blank', ' ', ''], ['zoom-name-real', 'Ana Ruiz', 'Ana Ruiz']]) {
     const user = userStore.upsert(zoomUserId, { email: 'a@example.test', displayName: stored, avatarUrl: null });
@@ -226,6 +267,26 @@ test('only an owner may supply a name, and only a sane one', async () => {
   }
   assert.equal(getMeetingStore().getMeta(meeting).ownerNames.size, 0);
   assert.equal(getMeetingStore().getMeta(meeting).whoCanAsk, 'owner');
+
+  // nothing that shows as a blank, hides, or turns the sentence around
+  for (const [label, char] of Object.entries(INVISIBLE)) {
+    for (const displayName of [char, char.repeat(4), `An${char}a`, `${char}Ana${char}Ruiz`]) {
+      assert.equal((await put(meeting, ana, pass, { displayName })).status, 400, `${label}: ${JSON.stringify(displayName)}`);
+    }
+  }
+  // a name has a letter or a digit in it
+  for (const displayName of ['...', '🎉🎉', '-', '\u0301\u0301']) {
+    assert.equal((await put(meeting, ana, pass, { displayName })).status, 400, JSON.stringify(displayName));
+  }
+  assert.equal(getMeetingStore().getMeta(meeting).ownerNames.size, 0);
+  for (const displayName of ORDINARY_NAMES) {
+    const res = await put(meeting, ana, pass, { displayName });
+    assert.equal(res.status, 200, displayName);
+    assert.equal(res.body.ownerName, displayName.normalize('NFC'));
+  }
+  // kept in one form (NFC), and counted in that form
+  assert.equal((await put(meeting, ana, pass, { displayName: 'Jose\u0301' })).body.ownerName, 'José');
+  assert.equal((await put(meeting, ana, pass, { displayName: 'e\u0301'.repeat(100) })).status, 200);
 
   // 100 characters after trimming is the most
   assert.equal((await put(meeting, ana, pass, { displayName: ` ${'x'.repeat(100)} ` })).status, 200);

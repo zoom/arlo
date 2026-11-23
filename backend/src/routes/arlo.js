@@ -27,6 +27,7 @@ const { getMeetingStore } = require('../storage');
 const { getArloPresence } = require('../services/arloPresence');
 const { broadcastArloState } = require('../services/websocket');
 const { newestLines } = require('../lib/transcriptLines');
+const { showableName } = require('../lib/displayName');
 // Through the module object, so tests can replace the model call
 const openrouter = require('../services/openrouter');
 
@@ -35,8 +36,6 @@ const router = express.Router({ mergeParams: true });
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 const MAX_QUESTION_CHARS = 500;
 const MAX_DISPLAY_NAME_CHARS = 100;
-// Control characters (C0, DEL, C1): never part of a name shown to a meeting
-const CONTROL_CHARS = /\p{Cc}/u;
 const SETTINGS_FIELDS = ['whoCanAsk', 'displayName'];
 const MAX_TRANSCRIPT_CHARS = 12000;
 const MAX_ANSWER_CHARS = 4000;
@@ -53,13 +52,16 @@ const hasOnlySomeOf = (body, keys) => isPlainObject(body)
   && Object.keys(body).every((key) => keys.includes(key));
 
 /**
- * The display name a panel supplies, trimmed, or null when it is not one:
- * a string of 1 to 100 characters after trimming, without control characters.
+ * The display name a panel supplies, NFC-normalized and trimmed, or null when
+ * it is not one: a string of 1 to 100 characters after that, with a letter or
+ * a digit in it, and without control, invisible, private-use or unassigned
+ * characters (see lib/displayName.js: a name made of those shows as a blank,
+ * and a direction override turns the sentence around it).
  */
 function readDisplayName(value) {
   if (typeof value !== 'string' || value.length > MAX_DISPLAY_NAME_CHARS * 4) return null;
-  const name = value.trim();
-  if (name.length === 0 || name.length > MAX_DISPLAY_NAME_CHARS || CONTROL_CHARS.test(name)) return null;
+  const name = showableName(value);
+  if (name.length === 0 || name.length > MAX_DISPLAY_NAME_CHARS) return null;
   return name;
 }
 
@@ -116,7 +118,7 @@ router.put('/settings', requireAuth, requireMeetingAccess, requireJson, (req, re
   }
   const displayName = hasOwn('displayName') ? readDisplayName(req.body.displayName) : undefined;
   if (displayName === null) {
-    return invalid(res, `displayName must be 1 to ${MAX_DISPLAY_NAME_CHARS} characters, without control characters`);
+    return invalid(res, `displayName must be 1 to ${MAX_DISPLAY_NAME_CHARS} characters with a letter or digit, without control or invisible characters`);
   }
 
   let changed = false;
