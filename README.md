@@ -49,11 +49,11 @@ Arlo is an **open-source reference implementation** that demonstrates the power 
 
 ### Demo Mode (No Database)
 
-This version of Arlo runs in **secure demo mode**, with no database. A meeting's transcript is held **in memory only while that meeting runs** and is deleted when it ends:
+This version of Arlo runs in **secure demo mode**, with no database. A meeting's transcript and notes are held **in memory only while that meeting runs** and are deleted when it ends:
 
-- **Live transcription** and AI features work fully during active meetings
+- **Live transcription**, live notes and AI features work fully during active meetings
 - **Catch-up for late joiners:** someone who opens Arlo mid-meeting, or reconnects, sees what was said so far
-- **Nothing between meetings:** when a meeting ends its transcript is deleted, so nothing from one meeting (or one customer demo) is available in the next
+- **Nothing between meetings:** when a meeting ends its transcript and notes are deleted, so nothing from one meeting (or one customer demo) is available in the next
 - **Nothing on disk:** no database and no files; a server restart also clears everything
 - **No database setup:** configure Zoom credentials and go
 
@@ -91,7 +91,31 @@ See the [Architecture docs](./docs/ARCHITECTURE.md) for database schema recommen
 
 ---
 
+## What You See in a Meeting
+
+Arlo shows one screen at a time. Which one depends on whether Arlo is in the meeting and on who you are.
+
+| Screen | Who sees it | What it does |
+|--------|-------------|--------------|
+| **Bring Arlo into this meeting** | The host or a co-host, signed in to Arlo | Choose who can ask Arlo ("Only I can ask" or "Anyone can ask"), then one button. Nothing is requested from Zoom before the click. |
+| **Ask the host to bring Arlo in** | Other signed-in users | One button. Zoom asks the host; the screen waits for the answer. |
+| **Live notes** | The person who brought Arlo in | A summary, decisions and action items, rewritten about every 45 seconds while people talk. A status line with Pause, Resume and Remove Arlo. An "Ask Arlo" input; the answer comes from the transcript and only you see it. |
+| **Participant view** | Everyone else, including people not signed in | Who brought Arlo in and what Arlo does. No notes. "Ask Arlo" appears when the owner chose "Anyone can ask" and you are signed in. |
+| **Meeting record** | Everyone in the meeting | What was said and what happened since Arlo joined, in time order. A toggle shows only Arlo's own actions. |
+| **After the meeting** | The person who brought Arlo in | The notes stay on screen with a "Copy notes" button. In demo mode they are not stored anywhere else. |
+
+How it works:
+
+- **Who gets the notes.** Each Arlo user who runs a transcript stream of their own in the meeting gets the notes. Everyone else gets the participant view. Pause, Resume and Remove Arlo are shown only to those users, because they act on the user's own stream. A host stops someone else's stream with Zoom's own controls.
+- **Several streams, one transcript.** Several users can each run a stream in the same meeting. The server stores one transcript: it takes the lines from the original host's stream when there is one, otherwise from the stream that started first. If that stream goes silent for 30 seconds while another one delivers, the other one takes over.
+- **When the meeting ends.** The server deletes the transcript, the notes and the record of who brought Arlo in. A panel that is still open keeps showing the notes it already has.
+- **The earlier dashboard** (tabs, vertical cards, suggestions) is still in the app. While in a meeting, open Settings and choose **Classic dashboard**.
+
+---
+
 ## Features
+
+> The table lists everything in the code base. The in-meeting panels it mentions (voice command responses, vertical cards, suggestions, drag-and-drop layout) are on the classic dashboard. Search, history, highlights and export need a database and are off in demo mode.
 
 | Feature | Description |
 |---------|-------------|
@@ -152,6 +176,12 @@ Access settings via the gear icon in the app. Available options:
 | Setting | Description |
 |---------|-------------|
 | **Show sample data** | Display example data to demonstrate features. Turn off to only see real meeting data. |
+
+### Classic dashboard
+
+| Setting | Description |
+|---------|-------------|
+| **Classic dashboard** | Shown only while in a meeting. Opens the earlier dashboard, kept while the new screens are tried. |
 
 ### Chat Notifications
 
@@ -271,6 +301,10 @@ PUBLIC_URL=https://your-name.ngrok-free.app
 # Generate secrets (run these commands, paste the output)
 SESSION_SECRET=            # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 TOKEN_ENCRYPTION_KEY=      # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+
+# Optional: live notes
+NOTES_MODEL=               # Model that writes the notes; one of OPENROUTER_MODELS, otherwise DEFAULT_MODEL
+NOTES_INTERVAL_MS=45000    # How often the notes are rewritten while people talk (15000 to 600000)
 ```
 
 ---
@@ -352,12 +386,11 @@ Wait for all services to start:
 1. Start or join a Zoom meeting
 2. Click **Apps** in the toolbar
 3. Find and open your app
-4. Click **"Start Arlo"** to begin transcription
-5. Watch live transcripts appear in the **Transcript** tab
-6. Switch to **Arlo Assist** to try AI features:
-   - Generate meeting summaries
-   - Extract action items
-   - Ask questions about your meeting
+4. As the host, click **"Bring Arlo into this meeting"**
+5. Talk for a minute: the notes appear (Summary, Decisions, Action items)
+6. Type a question into **Ask Arlo**
+7. Open **Meeting record** to see the transcript and what Arlo did
+8. Open Arlo from a second account in the same meeting to see the participant view
 
 ---
 

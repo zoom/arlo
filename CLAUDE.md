@@ -6,13 +6,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Arlo Meeting Assistant** is an open-source Zoom Apps reference implementation demonstrating how to build intelligent meeting assistants that capture real-time transcripts using RTMS (Real-Time Media Streams) — **without requiring a meeting bot**. The app runs natively inside Zoom meetings and provides AI-powered summaries, action items, and real-time AI suggestions.
 
-**IMPORTANT - Demo Mode:** This version runs in **secure demo mode** with **no database**. A meeting's transcript and timeline are held **in memory only while that meeting runs** and are deleted when it ends. Nothing is written to disk and nothing carries from one meeting to the next.
+**IMPORTANT - Demo Mode:** This version runs in **secure demo mode** with **no database**. A meeting's transcript, timeline and notes are held **in memory only while that meeting runs** and are deleted when it ends. Nothing is written to disk and nothing carries from one meeting to the next.
 
 ## Demo Mode Features
 
 ### Available in Demo Mode:
 - **Live transcription** — Real-time via WebSocket; held in memory for the meeting so late or reconnecting panels can catch up
-- **Real-time AI suggestions** — During active meetings
+- **Live notes** — Summary, decisions and action items, written from the stored transcript on a timer and shown only to the people who brought Arlo in
+- **Ask Arlo** — A typed question, answered from the stored transcript, private to the asker
+- **Meeting record** — What was said and what happened since Arlo joined, for everyone in the meeting
+- **Real-time AI suggestions** — During active meetings (classic dashboard)
 - **Live AI summary generation** — From current transcript
 - **SOAP notes extraction** — For healthcare use cases
 - **Sentiment analysis** — Real-time customer sentiment
@@ -74,7 +77,7 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
 
 1. **In-Meeting Zoom App** (`frontend/`) — React 18 + Base UI + Zoom Apps SDK
    - Runs embedded in Zoom client during meetings
-   - Live transcript display, AI suggestions
+   - One screen at a time (see "Arlo screens"): bring Arlo in, live notes, participant view, meeting record, after the meeting
    - Start/stop RTMS via `zoomSdk.callZoomApi('startRTMS')`
 
 2. **Backend API** (`backend/`) — Node.js/Express (NO DATABASE)
@@ -82,6 +85,7 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
    - In-memory token storage (cleared on restart)
    - WebSocket server for live transcript broadcast
    - AI orchestration via OpenRouter (free models, no API key required)
+   - Knows who brought Arlo in, writes the live notes from the stored transcript, and sends them only to those people
 
 3. **RTMS Service** (`rtms/`) — @zoom/rtms v1.0.2
    - Webhook handlers for `meeting.rtms_started` / `meeting.rtms_stopped`
@@ -93,6 +97,7 @@ ngrok http 3000 --domain=yourname-arlo.ngrok-free.app  # Static domain (recommen
 Zoom RTMS WebSocket → RTMS Service → Backend (kept in memory for the meeting, then broadcast)
     → WebSocket broadcast → Frontend (live transcript display, < 1s end-to-end)
 Panel opens late or reconnects → GET /api/meetings/by-zoom-id/{id}/transcript → what was said so far
+Stored lines → notes engine (timer) → notes in the meeting store → `notes.updated` to the owners' sockets only
 ```
 
 **SECURITY:** Meeting data lives in memory only (`backend/src/storage/`) and is never written to disk. `backend/src/services/meetingLifecycle.js` deletes a meeting's data when:
@@ -100,7 +105,45 @@ Panel opens late or reconnects → GET /api/meetings/by-zoom-id/{id}/transcript 
 - the stream is stopped and no Arlo panel has been connected for `MEETING_FLUSH_GRACE_MS` (default 2 minutes), or
 - it is older than 12 hours.
 
-A stop, pause, reconnect or restart inside one meeting keeps the data. A server restart clears everything. A transcript line that arrives within ten minutes after a meeting's data was flushed is dropped, not kept.
+The notes, the "who can ask" setting, what is known about the meeting's streams (and so who its owners are) and the notes engine's timer go in the same flush. A stop, pause, reconnect or restart inside one meeting keeps the data. A server restart clears everything. A transcript line that arrives within ten minutes after a meeting's data was flushed is dropped, not kept.
+
+### Arlo screens
+
+`frontend/src/lib/arloScreen.js` picks one screen from confirmed state (a request is not a state). `views/ArloMeetingView.jsx` renders it; there are no tabs.
+
+| Screen | Who sees it | What it shows |
+|---|---|---|
+| Bring Arlo in | Signed-in host or co-host, Arlo not in the meeting | "Who can ask Arlo" (only I / anyone) and one button. Nothing is requested before the click |
+| Ask the host | Other signed-in users, Arlo not in the meeting | One button that asks the host through Zoom |
+| Waiting | Whoever clicked | "Waiting for the host to allow Arlo…" or "Bringing Arlo in…" |
+| Live notes | An owner, while Arlo is or was in the meeting | Status line with Pause / Resume / Remove Arlo / Bring Arlo back, the notes, Ask Arlo, link to the meeting record |
+| Participant | Everyone else, guests included | Who brought Arlo in, the meeting record link, Ask Arlo when the owner chose "anyone" (signed-in users only). Never the notes, and no controls |
+| After the meeting | An owner with notes | The notes, "Copy notes", the demo-mode line |
+| Meeting record | Everyone in the meeting (`/meeting/:id/record`, `/guest-meeting/:id/record`) | Transcript and timeline in time order; a toggle for "Only Arlo's actions" |
+
+- An **owner** is an Arlo user who ran a stream of their own in the meeting. The server decides this from the stream's `operator_id` and the Zoom user id from Arlo's sign-in (`backend/src/services/arloPresence.js`). Someone stays an owner after their stream stops, until the meeting's data is flushed. If no operator is signed in to Arlo, nobody is an owner.
+- The controls are for owners only, also when a host or co-host is not an owner: the Apps SDK's pause and stop act on the caller's own stream. A host stops other people's streams with Zoom's own controls.
+- Frontend routes: `/meeting/:id` and `/guest-meeting/:id` → `ArloMeetingView`; `…/record` → `MeetingRecordView`; `/meeting/:id/classic` → the earlier dashboard (`InMeetingView`), linked from Settings only while in a meeting.
+- Home in demo mode shows the name, "Demo mode: meetings and notes are not stored." and how to bring Arlo in (inside a meeting: a link back to it). The header's search button is hidden while the search feature is off.
+
+### Several streams in one meeting
+
+Several Zoom users can each run a stream in the same meeting, each with its own stream id under the same meeting UUID. The server stores one transcript per meeting (`backend/src/services/meetingStreams.js`):
+
+- The source is a live stream of the meeting's original host (`is_original_host` on the webhook) when there is one, otherwise the live stream that started first. Lines and timeline events from the other streams are dropped.
+- The source stays the source while it runs. It is chosen again when it stops or when the original host's stream starts.
+- A source can die without a stop report. When a line arrives from another live stream and the source has delivered nothing for 30 seconds, that stream becomes the source. Silence alone changes nothing. If the old source's copy of the line follows within 5 seconds, it is dropped as a duplicate and the old source has the role back.
+- Each stream's operator is remembered, also after the stream stopped, until the meeting is flushed. Every operator who is signed in to Arlo is an owner and gets the notes.
+
+### Live notes
+
+`backend/src/services/notesEngine.js` writes one notes document per meeting (summary, decisions, action items) from the stored transcript:
+
+- Nothing runs for a meeting without an owner.
+- The first run happens when 5 lines are stored or one interval after the first line, whichever is first. After that at most one run per `NOTES_INTERVAL_MS`, and only when there are new lines.
+- Each run gives the model (`NOTES_MODEL`) the notes so far and the new lines. The answer is treated as untrusted input and rebuilt from the known fields.
+- A failed run keeps the old notes and is tried again after the interval (two minutes when the models are rate limited).
+- The notes live in the meeting store and are sent as `notes.updated` only to sockets of owners whose verified meeting is this one.
 
 ### Stream failover and reconnection
 
@@ -142,15 +185,21 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `lib/memoryStore.js` — In-memory user and token storage (NO DATABASE)
 - `storage/` — The meeting store (transcript segments and timeline per meeting). One in-memory implementation; a database implementation plugs in behind the same interface
 - `services/meetingLifecycle.js` — When a meeting's in-memory data is flushed
-- `routes/` — 9 route modules: auth, meetings, ai, home, rtms, search, highlights, zoom-meetings, preferences
+- `services/meetingStreams.js` — The streams of each meeting, which one the transcript is taken from, and who ran one
+- `services/arloPresence.js` — Who brought Arlo in (the owners), the "who can ask" setting, and what each panel is told
+- `services/notesEngine.js` — When the live notes are written again, and validation of the model's answer
+- `routes/arlo.js` — Arlo's routes for one meeting (state, settings, notes, ask)
+- `routes/` — auth, meetings, arlo, ai, home, rtms, search, highlights, zoom-meetings, preferences, tokens
 - `services/` — auth (token/PKCE/encryption), openrouter (LLM), websocket (broadcast)
 - `middleware/auth.js` — `requireAuth` and `optionalAuth` session middleware
 
 ### Frontend (`frontend/src/`)
-- `App.jsx` — HashRouter, route definitions, provider hierarchy: Theme → ZoomSdk → Auth → Meeting → Toast
+- `App.jsx` — HashRouter, route definitions, provider hierarchy: Theme → ZoomSdk → Auth → Meeting → Arlo → Toast
 - `index.css` — Design tokens, typography (Source Serif 4 + Inter), light/dark theme variables
-- `views/` — 14 views (Auth, Home, MeetingsList, MeetingDetail, InMeeting, SearchResults, Settings, etc.)
-- `contexts/` — AuthContext (session), ZoomSdkContext (SDK init), MeetingContext (active meeting + WS), ServerSettingsContext (demo mode flags)
+- `views/` — ArloMeetingView (the in-meeting screens), MeetingRecordView, InMeetingView (the classic dashboard), Auth, Home, Settings, and the views that need stored meetings (MeetingsList, MeetingDetail, SearchResults, Upcoming)
+- `components/arlo/` — The Arlo screens' parts: BringArloIn, AskHost, LiveNotes, NotesDocument, StatusLine, AskArlo, ParticipantView, AfterMeeting
+- `lib/arloScreen.js` — Which screen to show, and who may control Arlo (owners only). `lib/notesText.js` — notes as plain text. `lib/copyText.js` — copy with a fallback for webviews without the clipboard API
+- `contexts/` — AuthContext (session), ZoomSdkContext (SDK init), MeetingContext (active meeting + WS, `meetingEnded`), ArloContext (Arlo's state, notes, ask, settings), ServerSettingsContext (demo mode flags)
 - `hooks/useZoomAuth.js` — In-client OAuth PKCE flow hook
 - `lib/dynamicIndicator.js` + `hooks/useDynamicIndicator.js` — Zoom's Dynamic Indicator (status text in Zoom's meeting window, seen by everyone). Basic version: text only, set by the panel that started the stream, only while transcription is confirmed (`rtmsPhase === 'active'`); "Arlo is thinking…" while a voice command runs. Silent when the client or the Marketplace config lacks `setDynamicIndicator` / `removeDynamicIndicator`
 - `components/AppShell.jsx` — Persistent header + `<Outlet />`
@@ -205,6 +254,14 @@ Arlo can act as a test proxy for Zoom's RTMS REST API. A script authenticates wi
 - `POST /api/rtms/start` — `{ meetingId, action: start|stop|pause|resume }` → Zoom `PATCH /v2/live_meetings/{meetingId}/rtms_app/status` with the user's Zoom token (session or `rtms:control`). 202 = Zoom accepted the request, not "stream started"; a refusal returns Zoom's status, code and message. Needs the Zoom scope `meeting:update:participant_rtms_app_status`
 - `GET /api/rtms/events?since=<ISO>` — Timeline for the caller's own meetings: REST requests, Zoom webhooks (`meeting.rtms_*`, `rtms.request_status` with its meaning), Arlo's stream join result (session or `rtms:read`)
 
+### Arlo in one meeting
+All under `/api/meetings/by-zoom-id/:zoomMeetingId/arlo`. Every route needs the `meetingAccess` cookie for exactly this meeting; being signed in does not replace it. Who is an owner is decided on the server. Responses are `Cache-Control: no-store`.
+- `GET /state` — `{ present, paused, role: 'owner' | 'participant', ownerName, whoCanAsk }`. Open to guests in the meeting (a guest is a participant)
+- `PUT /settings` — `{ whoCanAsk: 'owner' | 'anyone' }`, owners only. Every panel of the meeting is told over its socket
+- `GET /notes` — `{ notes: { summary, decisions, actionItems, updatedAt, throughSeqNo } | null }`, owners only
+- `POST /ask` — `{ question }` (1 to 500 characters) → `{ answer }`, from the stored transcript, private to the asker. For an owner, and for other signed-in people in the meeting when the setting is `anyone`. Shares the AI rate limit. Takes no transcript and no model from the client; questions and answers are not stored or logged
+- `GET /api/meetings/by-zoom-id/:id/transcript` and `/participant-events` — what the server holds so far (catch-up and the meeting record)
+
 ### Meetings (Demo Mode - Returns empty/disabled responses)
 - `GET /api/meetings` — Returns empty list with demo mode message
 - `GET /api/meetings/:id` — Returns demo mode response
@@ -232,8 +289,15 @@ Connection: ws://host/ws?meeting_id={uuid}   (cookies authenticate; the server b
 Client → Server: { type: 'subscribe', meetingId: 'uuid' }
 Server → Client: { type: 'transcript.segment', data: { meetingId, segment: {...} } }
 Server → Client: { type: 'ai.suggestion', data: { meetingId, suggestion: {...} } }
-Server → Client: { type: 'meeting.status', data: { meetingId, status: '...' } }
+Server → Client: { type: 'meeting.status', data: { meetingId, status: '...', fault?: true, meetingEnded?: true } }
+Server → Client: { type: 'arlo.state', data: { meetingId, present, paused, role, ownerName, whoCanAsk } }
+Server → Client: { type: 'notes.updated', data: { meetingId, notes } }
+Server → Client: { type: 'participant.event', data: { meetingId, event: {...} } }
 ```
+
+- `meetingEnded: true` on a stop means the meeting is over and its data is deleted now. The panel keeps the notes it already has (the "after the meeting" screen).
+- `arlo.state` differs per person (`role`). It is sent when a socket connects or subscribes, when a stream starts or stops, and when the setting changes.
+- `notes.updated` goes only to owners' sockets whose verified meeting is this one. A guest's socket never gets it.
 
 ## Environment Variables
 
@@ -253,6 +317,8 @@ FALLBACK_MODEL=nvidia/nemotron-3.5-lightning:free
 LOG_LEVEL=info                  # 'debug' adds request shapes (field names, sizes). No level logs transcript text, names, ids or tokens
 DEMO_MODE=true                  # Always true in this version
 AUTO_START_RTMS=false           # true = request transcription as soon as someone opens Arlo. Off by default: a person clicks first
+NOTES_MODEL=...                 # Optional. The model that writes the live notes and answers Ask Arlo. Must be one of OPENROUTER_MODELS; otherwise DEFAULT_MODEL is used
+NOTES_INTERVAL_MS=45000         # Whole milliseconds, 15000 to 600000. How often the live notes are written again while new lines arrive (each run is a model call)
 MEETING_FLUSH_GRACE_MS=120000   # Whole milliseconds, 100 to 3600000. How long a meeting's in-memory data is kept after its stream stopped and the last panel disconnected
 ```
 
@@ -283,7 +349,8 @@ This demo mode version prioritizes security by never storing customer data:
 
 - **No database** — All data exists in memory only
 - **Tokens in memory** — OAuth tokens stored encrypted in memory, cleared on restart
-- **No persistent storage** — A meeting's transcript is held in memory while the meeting runs and deleted when it ends; nothing is saved to disk
+- **No persistent storage** — A meeting's transcript, notes and owners are held in memory while the meeting runs and deleted when it ends; nothing is saved to disk
+- **Notes are private to owners** — sent only to the sockets of the people who brought Arlo in; participants and guests never receive them
 - **Session cookies** — httpOnly, secure, SameSite=lax. Three kinds that cannot stand in for each other: `sessionToken` (who you are), `meetingAccess` (which meeting you are in), `sessionRestore` (encrypted, rebuilds a session after a restart)
 - **HMAC verification** — All Zoom webhooks verified with timing-safe comparisons
 - **Rate limiting** — Global, auth, and AI endpoint limits via `express-rate-limit`
