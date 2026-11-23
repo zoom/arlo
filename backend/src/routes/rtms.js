@@ -39,6 +39,7 @@ const { requireInternal, isInternalRequest, INTERNAL_KEY_HEADER, getInternalKey 
 const { getMeetingStore } = require('../storage');
 const { getMeetingLifecycle } = require('../services/meetingLifecycle');
 const { getMeetingStreams } = require('../services/meetingStreams');
+const { getNotesEngine } = require('../services/notesEngine');
 
 // RTMS stop reason 6: the stream ended because the meeting did
 const RTMS_STOP_MEETING_ENDED = 6;
@@ -492,6 +493,8 @@ router.post('/broadcast', requireInternal, async (req, res) => {
   }
   const sentCount = broadcastTranscriptSegment(meetingId, stored);
   logger.debug(`Transcript segment kept and sent to ${sentCount} client(s)`);
+  // The live notes are written from the stored lines, on the engine's own clock
+  getNotesEngine().segmentStored(meetingId);
 
   res.status(200).json({ received: true, broadcast: sentCount });
 });

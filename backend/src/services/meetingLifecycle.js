@@ -217,8 +217,14 @@ function getMeetingLifecycle() {
       graceMs: config.meetingFlushGraceMs,
       // Reason and whether anything was held: never a meeting id
       onFlush: (reason, hadData) => console.log(`Meeting data flushed (${reason}${hadData ? '' : ', nothing held'})`),
-      // What is known about the meeting's streams (who ran one) goes with its data
-      onForget: (meetingId) => getMeetingStreams().forget(meetingId),
+      // What is known about the meeting's streams (who ran one) and the notes
+      // engine's state for it go with its data
+      onForget: (meetingId) => {
+        getMeetingStreams().forget(meetingId);
+        // Required here: the notes engine's neighbours require this module
+        // eslint-disable-next-line global-require
+        require('./notesEngine').getNotesEngine().forget(meetingId);
+      },
     });
     setInterval(() => {
       const deleted = instance.sweep();

@@ -416,6 +416,24 @@ function broadcastArloState(meetingId) {
 }
 
 /**
+ * Send a meeting's notes to the people who brought Arlo in, and to nobody
+ * else: only the sockets whose signed-in user is one of `ownerUserIds` and
+ * whose verified meeting access names this meeting. A guest's socket (no user)
+ * never matches. Nor does an owner's panel in another meeting, which
+ * crossRegisterUser() lists under this meeting too: notes are shown only
+ * where the person was verified to be.
+ */
+function sendNotesUpdated(meetingId, ownerUserIds, notes) {
+  const owners = new Set((Array.isArray(ownerUserIds) ? ownerUserIds : []).filter((id) => typeof id === 'string' && id.length > 0));
+  if (owners.size === 0) return 0;
+  return sendToMeetingSockets(meetingId, (ws) => (
+    owners.has(ws.userId) && ws.allowedMeetingId === meetingId
+      ? { type: 'notes.updated', data: { meetingId, notes } }
+      : null
+  ));
+}
+
+/**
  * Broadcast message to all connections for a user
  */
 function broadcastToUser(userId, message) {
@@ -631,6 +649,7 @@ module.exports = {
   broadcastMeetingStatus,
   broadcastArloState,
   sendToMeetingSockets,
+  sendNotesUpdated,
   currentStreamStatus,
   broadcastRtmsRequestStatus,
   disconnectUser,

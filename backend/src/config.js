@@ -231,6 +231,20 @@ module.exports = {
     return DEFAULT_MS;
   })(),
 
+  // How often the live notes are written again while new lines arrive
+  // (milliseconds). Whole milliseconds only, 15000 to 600000; anything else
+  // ("45s", "5") is refused with a warning and the default is used. Each run
+  // is a model call, so a mistyped value must not turn into one call per line.
+  notesIntervalMs: (() => {
+    const DEFAULT_MS = 45000;
+    const raw = process.env.NOTES_INTERVAL_MS;
+    if (raw === undefined || raw === '') return DEFAULT_MS;
+    const value = /^\d{1,6}$/.test(raw) ? Number(raw) : NaN;
+    if (Number.isInteger(value) && value >= 15000 && value <= 600000) return value;
+    console.warn('NOTES_INTERVAL_MS must be whole milliseconds between 15000 and 600000; using the default of 45000.');
+    return DEFAULT_MS;
+  })(),
+
   // Ask Zoom to start transcription as soon as someone opens Arlo in a meeting.
   // Off by default: nothing is requested from the host until a person clicks.
   autoStartRtms: process.env.AUTO_START_RTMS === 'true',
@@ -249,6 +263,8 @@ module.exports = {
   fallbackModel: fallbackOpenRouterModel,
   fallbackModels: allowedOpenRouterModels.filter((model) => model !== defaultOpenRouterModel),
   allowedOpenRouterModels,
+  // The model that writes the live notes: one of the allowed models, else the default
+  notesModel: allowedModelOrDefault(process.env.NOTES_MODEL, defaultOpenRouterModel),
 
   // Feature Flags
   extractionEnabled: process.env.EXTRACTION_ENABLED === 'true',
