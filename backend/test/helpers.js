@@ -13,8 +13,24 @@ const rnd = () => crypto.randomBytes(32).toString('hex');
 const TEST_CLIENT_SECRET = `test-client-secret-${rnd()}`;
 const TEST_WEBHOOK_TOKEN = `test-webhook-token-${rnd()}`;
 
+/**
+ * The server prints a lot to stdout. Under `node --test` each test file is a
+ * child process that reports results to the runner over that same stdout, and
+ * application output mixed into it intermittently corrupted the report
+ * ("Unable to deserialize cloned data"), failing a whole file at random.
+ * Tests therefore run with stdout logging off; warnings and errors (stderr)
+ * still show. Set ARLO_TEST_LOGS=1 to see everything when debugging a test.
+ */
+function quietStdout() {
+  if (process.env.ARLO_TEST_LOGS === '1') return;
+  console.log = () => {};
+  console.info = () => {};
+  console.debug = () => {};
+}
+
 /** Set test env. Must run before anything requires src/config. */
 function setTestEnv(extra = {}) {
+  quietStdout();
   Object.assign(process.env, {
     ZOOM_CLIENT_ID: 'test-client-id',
     ZOOM_CLIENT_SECRET: TEST_CLIENT_SECRET,

@@ -1,194 +1,97 @@
-const axios = require('axios');
-const prisma = require('../lib/prisma');
-const { decryptToken, encryptToken } = require('./auth');
+/**
+ * Calls to Zoom's REST API on behalf of a signed-in user.
+ *
+ * Tokens live encrypted in memory (lib/memoryStore). An access token that has
+ * expired, or that was dropped when a session was restored after a restart,
+ * is refreshed first; Zoom rotates the refresh token on every use, so both are
+ * stored again. Neither a token nor a response body is ever logged.
+ */
 const config = require('../config');
+const { tokenStore } = require('../lib/memoryStore');
+const { encryptToken, decryptToken } = require('./auth');
 
-// Per-user refresh lock to prevent concurrent refresh race conditions
-const refreshLocks = new Map();
+const REFRESH_MARGIN_MS = 5 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 10000;
 
-async function withRefreshLock(userId, fn) {
-  if (refreshLocks.has(userId)) {
-    // Another refresh is in flight — wait for it to complete
-    return refreshLocks.get(userId);
+class ZoomApiError extends Error {
+  constructor(message, { status = null, code = 'zoom_api_error' } = {}) {
+    super(message);
+    this.name = 'ZoomApiError';
+    this.status = status;
+    this.code = code;
   }
-  const promise = fn().finally(() => {
-    refreshLocks.delete(userId);
-  });
-  refreshLocks.set(userId, promise);
-  return promise;
 }
 
-/**
- * Get a valid access token for the user, refreshing if needed.
- */
+// One refresh at a time per user: a second refresh with the same (already
+// rotated) refresh token would fail and sign the user out.
+const refreshing = new Map(); // userId -> Promise<string>
+
+async function refreshAccessToken(userId, stored) {
+  if (!stored.refreshToken) {
+    throw new ZoomApiError('No refresh token for this user', { code: 'no_token' });
+  }
+  const basic = Buffer.from(`${config.zoomClientId}:${config.zoomClientSecret}`).toString('base64');
+  const response = await fetch(`${config.zoomOAuthUrl}/token`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: decryptToken(stored.refreshToken),
+    }).toString(),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    throw new ZoomApiError(`Token refresh failed (${response.status})`, { status: response.status, code: 'refresh_failed' });
+  }
+  const data = await response.json();
+  if (typeof data.access_token !== 'string' || typeof data.refresh_token !== 'string') {
+    throw new ZoomApiError('Token refresh returned no tokens', { code: 'refresh_failed' });
+  }
+  const expiresIn = Number.isFinite(data.expires_in) ? data.expires_in : 3600;
+  tokenStore.update(userId, {
+    accessToken: encryptToken(data.access_token),
+    refreshToken: encryptToken(data.refresh_token),
+    expiresAt: new Date(Date.now() + expiresIn * 1000),
+    scopes: typeof data.scope === 'string' ? data.scope.split(' ') : stored.scopes,
+  });
+  return data.access_token;
+}
+
+/** A usable access token for the user, refreshed if needed. */
 async function getAccessToken(userId) {
-  const userToken = await prisma.userToken.findFirst({
-    where: { userId },
-    orderBy: { createdAt: 'desc' },
+  const stored = tokenStore.get(userId);
+  if (!stored) {
+    throw new ZoomApiError('No Zoom tokens for this user', { code: 'no_token' });
+  }
+  const fresh = stored.accessToken
+    && new Date(stored.expiresAt).getTime() - Date.now() > REFRESH_MARGIN_MS;
+  if (fresh) return decryptToken(stored.accessToken);
+
+  if (!refreshing.has(userId)) {
+    refreshing.set(userId, refreshAccessToken(userId, stored).finally(() => refreshing.delete(userId)));
+  }
+  return refreshing.get(userId);
+}
+
+/** POST JSON to Zoom's REST API as the user. Returns the parsed response body. */
+async function zoomPost(userId, path, body = {}) {
+  const accessToken = await getAccessToken(userId);
+  const response = await fetch(`${config.zoomApiUrl}${path}`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-
-  if (!userToken) {
-    throw new Error('No token found for user');
+  if (!response.ok) {
+    throw new ZoomApiError(`Zoom API ${path} answered ${response.status}`, { status: response.status });
   }
-
-  const needsRefresh = new Date(userToken.expiresAt).getTime() - Date.now() < 5 * 60 * 1000;
-
-  if (!needsRefresh) {
-    return decryptToken(userToken.accessToken);
-  }
-
-  // Use refresh lock to prevent concurrent refreshes
-  return withRefreshLock(userId, async () => {
-    // Re-check after acquiring lock (another call may have already refreshed)
-    const latestToken = await prisma.userToken.findFirst({
-      where: { userId },
-      orderBy: { createdAt: 'desc' },
-    });
-    if (latestToken && new Date(latestToken.expiresAt).getTime() - Date.now() >= 5 * 60 * 1000) {
-      return decryptToken(latestToken.accessToken);
-    }
-
-    const tokenToRefresh = latestToken || userToken;
-    const refreshToken = decryptToken(tokenToRefresh.refreshToken);
-    const tokenResponse = await axios.post(
-      `${config.zoomOAuthUrl}/token`,
-      new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: refreshToken,
-      }),
-      {
-        headers: {
-          Authorization: `Basic ${Buffer.from(`${config.zoomClientId}:${config.zoomClientSecret}`).toString('base64')}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
-
-    const { access_token, refresh_token: newRefreshToken, expires_in, scope } = tokenResponse.data;
-    const expiresAt = new Date(Date.now() + expires_in * 1000);
-
-    await prisma.userToken.update({
-      where: { id: tokenToRefresh.id },
-      data: {
-        accessToken: encryptToken(access_token),
-        refreshToken: encryptToken(newRefreshToken),
-        expiresAt,
-        scopes: scope.split(' '),
-      },
-    });
-
-    return access_token;
-  });
+  return response.json();
 }
 
-/**
- * Authenticated GET to Zoom REST API. Retries once on 401.
- */
-async function zoomGet(userId, path, params = {}) {
-  async function attempt(token) {
-    return axios.get(`${config.zoomApiUrl}${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      params,
-    });
-  }
-
-  let token = await getAccessToken(userId);
-  try {
-    const res = await attempt(token);
-    return res.data;
-  } catch (err) {
-    if (err.response?.status === 401) {
-      // Force refresh and retry
-      token = await getAccessToken(userId);
-      const res = await attempt(token);
-      return res.data;
-    }
-    throw err;
-  }
-}
-
-/**
- * Authenticated POST to Zoom REST API. Retries once on 401.
- */
-async function zoomPost(userId, path, data = {}) {
-  async function attempt(token) {
-    return axios.post(`${config.zoomApiUrl}${path}`, data, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-  }
-
-  let token = await getAccessToken(userId);
-  try {
-    const res = await attempt(token);
-    console.log(`[zoomApi] POST ${path} → ${res.status}`);
-    return res.data;
-  } catch (err) {
-    if (err.response?.status === 401) {
-      token = await getAccessToken(userId);
-      const res = await attempt(token);
-      console.log(`[zoomApi] POST ${path} → ${res.status} (retry)`);
-      return res.data;
-    }
-    console.error(`[zoomApi] POST ${path} failed: ${err.response?.status || err.message}`);
-    throw err;
-  }
-}
-
-/**
- * Authenticated DELETE to Zoom REST API. Retries once on 401.
- */
-async function zoomDelete(userId, path) {
-  async function attempt(token) {
-    return axios.delete(`${config.zoomApiUrl}${path}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-  }
-
-  let token = await getAccessToken(userId);
-  try {
-    const res = await attempt(token);
-    return res.data;
-  } catch (err) {
-    if (err.response?.status === 401) {
-      token = await getAccessToken(userId);
-      const res = await attempt(token);
-      return res.data;
-    }
-    throw err;
-  }
-}
-
-/**
- * Authenticated PATCH to Zoom REST API. Retries once on 401.
- */
-async function zoomPatch(userId, path, data = {}) {
-  async function attempt(token) {
-    return axios.patch(`${config.zoomApiUrl}${path}`, data, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-  }
-
-  let token = await getAccessToken(userId);
-  try {
-    const res = await attempt(token);
-    console.log(`[zoomApi] PATCH ${path} → ${res.status}`);
-    return res.data;
-  } catch (err) {
-    if (err.response?.status === 401) {
-      token = await getAccessToken(userId);
-      const res = await attempt(token);
-      console.log(`[zoomApi] PATCH ${path} → ${res.status} (retry)`);
-      return res.data;
-    }
-    console.error(`[zoomApi] PATCH ${path} failed: ${err.response?.status || err.message}`);
-    throw err;
-  }
-}
-
-module.exports = { getAccessToken, zoomGet, zoomPost, zoomDelete, zoomPatch };
+module.exports = { getAccessToken, zoomPost, ZoomApiError };

@@ -11,6 +11,7 @@ const {
 const { requireAuth, devAuthBypass } = require('../middleware/auth');
 const config = require('../config');
 const deauthorized = require('../lib/deauthorized');
+const { createDeeplink } = require('../services/deeplink');
 const { setRestoreCookie, clearRestoreCookie } = require('../services/sessionRestore');
 
 const router = express.Router();
@@ -561,6 +562,27 @@ router.post('/logout', async (req, res) => {
     }
     res.status(500).json({ error: 'Failed to logout' });
   }
+});
+
+/**
+ * POST /api/auth/deeplink
+ * A link that opens the Zoom client straight into Arlo, for the signed-in user.
+ * Generated on demand; never cached or logged. See services/deeplink.js.
+ */
+router.post('/deeplink', requireAuth, async (req, res) => {
+  const before = tokenStore.get(req.user.id)?.refreshToken;
+  const result = await createDeeplink(req.user.id);
+
+  // Zoom rotates the refresh token when it is used. Keep the restore cookie
+  // current, or a later server restart would bring back a dead token.
+  const after = tokenStore.get(req.user.id);
+  const user = userStore.findById(req.user.id);
+  if (user && after?.refreshToken && after.refreshToken !== before) {
+    setRestoreCookie(res, { user, refreshToken: decryptToken(after.refreshToken), scopes: after.scopes });
+  }
+
+  res.set('Cache-Control', 'no-store');
+  res.json(result);
 });
 
 /**
