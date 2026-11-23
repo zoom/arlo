@@ -610,7 +610,8 @@ export function MeetingProvider({ children }) {
       const data = await response.json();
 
       if (!response.ok) {
-        const errorMsg = data.message || data.error || `Failed to ${action} RTMS via API`;
+        // Zoom's own reason when it refused the request (data.zoom), else Arlo's
+        const errorMsg = data.zoom?.message || data.message || data.error || `Failed to ${action} RTMS via API`;
         setApiActionError(errorMsg);
         return { success: false, error: errorMsg, code: data.code };
       }

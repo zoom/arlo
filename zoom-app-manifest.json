@@ -41,6 +41,10 @@
             {
                 "scope": "user:read:user",
                 "optional": true
+            },
+            {
+                "scope": "meeting:update:participant_rtms_app_status",
+                "optional": true
             }
         ],
         "scope_description": "Arlo runs inside your meetings and receives the live transcript via RTMS. It reads meeting details and your upcoming meetings list, and can optionally register itself to auto-open in a meeting (and remove that registration). It optionally reads your profile to show your name."

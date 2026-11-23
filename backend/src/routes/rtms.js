@@ -20,6 +20,8 @@ const logger = require('../lib/logger');
 const { userStore } = require('../lib/memoryStore');
 const deauthorized = require('../lib/deauthorized');
 const apiTokens = require('../lib/apiTokens');
+const rtmsEvents = require('../lib/rtmsEvents');
+const { zoomCall } = require('../services/zoomApi');
 const { sessionOrToken } = require('../middleware/apiToken');
 const {
   broadcastTranscriptSegment,
@@ -145,6 +147,11 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
 
   console.log(`RTMS Webhook: ${event} (signature verified)`);
 
+  // Timeline for RTMS workflow testing (GET /api/rtms/events)
+  if (typeof event === 'string' && (event.startsWith('meeting.rtms_') || event.startsWith('rtms.'))) {
+    rtmsEvents.recordWebhook(event, payload);
+  }
+
   // The user removed the app from their Zoom account. Delete what the server
   // holds for them and end their session. (Set the Marketplace
   // "Deauthorization Notification Endpoint URL" to this webhook URL.)
@@ -153,6 +160,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
     const forThisApp = payload?.client_id === config.zoomClientId;
     if (forThisApp && typeof zoomUserId === 'string' && zoomUserId.length > 0 && zoomUserId.length <= 200) {
       deauthorized.mark(zoomUserId);
+      rtmsEvents.forgetUser(zoomUserId);
       const user = userStore.findByZoomId(zoomUserId);
       if (user) {
         disconnectUser(user.id);
@@ -271,6 +279,12 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
     }
   }
 
+  // Timeline: what Arlo's own connection to the stream did
+  const ARLO_EVENTS = { rtms_started: 'arlo.stream_joined', rtms_failed: 'arlo.join_failed', media_interrupted: 'arlo.media_interrupted' };
+  if (req.isInternal && ARLO_EVENTS[status]) {
+    rtmsEvents.record({ event: ARLO_EVENTS[status], meetingUuid: meetingId });
+  }
+
   // Broadcast status change to WebSocket clients
   const sentCount = broadcastMeetingStatus(meetingId, status);
   console.log(`Broadcast status to ${sentCount} clients`);
@@ -356,24 +370,97 @@ if (process.env.ENABLE_DEBUG_ROUTES === 'true') {
  * Start or stop RTMS via Zoom REST API
  * Note: This still works in demo mode as it calls Zoom's API directly
  */
-router.post('/start', sessionOrToken('rtms:control'), async (req, res) => {
-  const { meetingId, meetingNumber, action = 'start' } = req.body;
+const REST_ACTIONS = new Set(['start', 'stop', 'pause', 'resume']);
+// Numeric meeting IDs and meeting UUIDs (base64): nothing that could alter the path
+const MEETING_ID_PATTERN = /^[A-Za-z0-9+/=_-]{1,200}$/;
 
-  // In demo mode, we can't make Zoom API calls because we don't have stored tokens
-  return res.json({
-    demoMode: true,
-    message: 'RTMS control via REST API is not available in demo mode. Use the Zoom SDK start/stop methods in the client instead.',
-    available: false,
+/** Zoom requires a meeting UUID to be double URL-encoded when it contains '/'. */
+function encodeMeetingId(id) {
+  const once = encodeURIComponent(id);
+  return id.includes('/') ? encodeURIComponent(once) : once;
+}
+
+router.post('/start', sessionOrToken('rtms:control'), async (req, res) => {
+  const { meetingId, meetingNumber, action = 'start' } = req.body || {};
+  // Zoom's live-meeting endpoint takes the numeric meeting ID; prefer it over the UUID
+  const target = [meetingNumber, meetingId]
+    .map((value) => (typeof value === 'number' ? String(value) : value))
+    .find((value) => typeof value === 'string' && value.length > 0);
+
+  if (!REST_ACTIONS.has(action)) {
+    return res.status(400).json({ error: 'Invalid request', message: 'action must be start, stop, pause or resume' });
+  }
+  if (typeof target !== 'string' || !MEETING_ID_PATTERN.test(target)) {
+    return res.status(400).json({ error: 'Invalid request', message: 'meetingId must be a Zoom meeting ID or UUID' });
+  }
+
+  let result;
+  try {
+    // PATCH /v2/live_meetings/{meetingId}/rtms_app/status
+    // (scope: meeting:update:participant_rtms_app_status)
+    result = await zoomCall(req.user.id, 'PATCH', `/live_meetings/${encodeMeetingId(target)}/rtms_app/status`, {
+      action,
+      settings: { client_id: config.zoomClientId },
+    });
+  } catch (error) {
+    if (error.code === 'no_token' || error.code === 'refresh_failed') {
+      return res.status(409).json({
+        error: 'no_zoom_token',
+        message: 'Arlo has no usable Zoom token for you. Sign in to Arlo again, then retry.',
+      });
+    }
+    console.error('REST RTMS control failed:', error.code || error.message);
+    return res.status(502).json({ error: 'zoom_unreachable', message: 'Zoom did not answer.' });
+  }
+
+  const zoom = {
+    status: result.status,
+    ...(result.body?.code !== undefined && { code: result.body.code }),
+    ...(typeof result.body?.message === 'string' && { message: result.body.message.slice(0, 500) }),
+  };
+  rtmsEvents.record({
+    event: 'rest.request',
+    zoomUserId: req.user.zoomUserId,
+    detail: {
+      action,
+      meetingId: target,
+      accepted: result.ok,
+      zoomStatus: result.status,
+      ...(zoom.code !== undefined && { zoomCode: zoom.code }),
+      ...(zoom.message && { zoomMessage: zoom.message }),
+    },
   });
+  console.log(`REST RTMS ${action}: Zoom answered ${result.status}`);
+
+  if (result.ok) {
+    return res.status(202).json({
+      accepted: true,
+      action,
+      note: 'Zoom accepted the request. That does not mean the stream started: the host may still have to approve it. Watch GET /api/rtms/events.',
+    });
+  }
+  // Zoom's own refusal is passed on with its status, except 401: to this API's
+  // callers 401 means "your Arlo credential is bad", which it is not.
+  const status = result.status >= 400 && result.status < 500 && result.status !== 401 ? result.status : 502;
+  return res.status(status).json({ accepted: false, action, zoom });
 });
 
 /**
  * GET /api/rtms/events
- * Timeline of RTMS events for the caller's own meetings (filled in below).
+ * Timeline of RTMS events for the caller's own meetings: REST requests made
+ * through this proxy, Zoom's webhooks, and Arlo's own stream connection.
+ * Optional ?since=<ISO time> returns only later entries. See lib/rtmsEvents.js.
  */
 router.get('/events', sessionOrToken('rtms:read'), (req, res) => {
+  let since = 0;
+  if (req.query.since !== undefined) {
+    since = typeof req.query.since === 'string' ? Date.parse(req.query.since) : NaN;
+    if (Number.isNaN(since)) {
+      return res.status(400).json({ error: 'Invalid request', message: 'since must be an ISO 8601 time' });
+    }
+  }
   res.set('Cache-Control', 'no-store');
-  res.json({ events: [] });
+  return res.json({ events: rtmsEvents.list(req.user.zoomUserId, { since }) });
 });
 
 module.exports = router;

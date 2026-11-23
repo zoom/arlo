@@ -173,6 +173,13 @@ import { Tabs } from '@base-ui/react/tabs';
 - `GET /api/auth/settings` — Get server settings and feature flags
 - `POST /api/auth/logout` — Clear session
 
+### API tokens and RTMS REST testing
+Arlo can act as a test proxy for Zoom's RTMS REST API. A script authenticates with a short-lived API token (`Authorization: Bearer arlo_…`) instead of a browser session.
+- `POST /api/tokens` — Create a token (browser session only). Body `{ scopes: ["rtms:control","rtms:read"], name?, ttlMinutes? }`. The token is returned once; only its hash is kept, in memory. Default lifetime 1 hour, max 24; max 5 per user
+- `GET /api/tokens` / `DELETE /api/tokens/:id` — List / revoke (browser session only)
+- `POST /api/rtms/start` — `{ meetingId, action: start|stop|pause|resume }` → Zoom `PATCH /v2/live_meetings/{meetingId}/rtms_app/status` with the user's Zoom token (session or `rtms:control`). 202 = Zoom accepted the request, not "stream started"; a refusal returns Zoom's status, code and message. Needs the Zoom scope `meeting:update:participant_rtms_app_status`
+- `GET /api/rtms/events?since=<ISO>` — Timeline for the caller's own meetings: REST requests, Zoom webhooks (`meeting.rtms_*`, `rtms.request_status` with its meaning), Arlo's stream join result (session or `rtms:read`)
+
 ### Meetings (Demo Mode - Returns empty/disabled responses)
 - `GET /api/meetings` — Returns empty list with demo mode message
 - `GET /api/meetings/:id` — Returns demo mode response

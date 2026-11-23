@@ -76,22 +76,44 @@ async function getAccessToken(userId) {
   return refreshing.get(userId);
 }
 
-/** POST JSON to Zoom's REST API as the user. Returns the parsed response body. */
-async function zoomPost(userId, path, body = {}) {
+/**
+ * Call Zoom's REST API as the user. Returns { ok, status, body } for any
+ * answer from Zoom, including refusals (body is the parsed JSON, or null).
+ * Throws ZoomApiError only when no usable token or no answer could be had.
+ */
+async function zoomCall(userId, method, path, body) {
   const accessToken = await getAccessToken(userId);
-  const response = await fetch(`${config.zoomApiUrl}${path}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-  });
-  if (!response.ok) {
-    throw new ZoomApiError(`Zoom API ${path} answered ${response.status}`, { status: response.status });
+  let response;
+  try {
+    response = await fetch(`${config.zoomApiUrl}${path}`, {
+      method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(body !== undefined && { 'Content-Type': 'application/json' }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    throw new ZoomApiError(`Zoom API ${path} did not answer`, { code: 'network_error' });
   }
-  return response.json();
+  const text = await response.text();
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
+  }
+  return { ok: response.ok, status: response.status, body: parsed };
 }
 
-module.exports = { getAccessToken, zoomPost, ZoomApiError };
+/** POST JSON to Zoom's REST API as the user. Returns the parsed response body. */
+async function zoomPost(userId, path, body = {}) {
+  const result = await zoomCall(userId, 'POST', path, body);
+  if (!result.ok) {
+    throw new ZoomApiError(`Zoom API ${path} answered ${result.status}`, { status: result.status });
+  }
+  return result.body;
+}
+
+module.exports = { getAccessToken, zoomCall, zoomPost, ZoomApiError };
