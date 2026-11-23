@@ -34,6 +34,20 @@ test('a spoken question is answered from the live transcript', async () => {
   expect(sent.transcript).toContain('Ana: The launch moves to Friday');
 });
 
+test('a line of another meeting never runs a command here', async () => {
+  const asked = [];
+  await liveMeeting({
+    'POST /api/ai/ask-live': ({ body }) => { asked.push(body.question); return json({ answer: 'The review is on Tuesday.' }); },
+  });
+  const line = serverMessage.segment(2, 'Hey Arlo, who owns the budget?', { tStartMs: 9000 });
+  await send({ ...line, data: { ...line.data, meetingId: 'OTHER-MEETING==' } });
+  // A question asked in this meeting is answered: the listener is on
+  await send(serverMessage.segment(3, 'Hey Arlo, what day is the review?', { tStartMs: 12000 }));
+
+  expect(await screen.findByText('The review is on Tuesday.')).toBeInTheDocument();
+  expect(asked).toEqual(['What day is the review?']);
+});
+
 test('"summarize" asks for a summary of the live transcript', async () => {
   let sent;
   await liveMeeting({

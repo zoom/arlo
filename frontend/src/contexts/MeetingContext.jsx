@@ -17,6 +17,7 @@ import {
   canStartRtms,
 } from '../lib/rtmsMachine';
 import { addSegment, mergeHistory } from '../lib/transcript';
+import { readMeetingMessage } from '../lib/meetingMessage';
 import { indicatorText } from '../lib/dynamicIndicator';
 import { useDynamicIndicator } from '../hooks/useDynamicIndicator';
 
@@ -91,6 +92,23 @@ export function MeetingProvider({ children }) {
   // reconnect keeps the screen, see lib/meetingAccess.js). transient: the
   // check got no verdict (network, 5xx, 429) and is tried again.
   const [meetingAccess, setMeetingAccess] = useState(NO_ACCESS);
+  // The meeting id the server verified for this panel: the one inside the
+  // `meetingAccess` token, returned by POST /api/auth/meeting-access. The
+  // server stamps every socket message with it and serves the meeting's routes
+  // under it. It is normally equal to the id read from the Zoom SDK
+  // (`meetingId` below), but that one has fallbacks (down to the numeric
+  // meeting id) and the two are never compared by the server. So everything
+  // asked of the server and everything accepted from it goes by this id; the
+  // SDK's id only says which meeting the panel is in (and is in the address).
+  // null until access is verified, and again once the meeting is left.
+  const [verifiedMeetingId, setVerifiedMeetingId] = useState(null);
+  const verifiedMeetingIdRef = useRef(null);
+  const applyVerifiedMeetingId = useCallback((id) => {
+    verifiedMeetingIdRef.current = id;
+    setVerifiedMeetingId(id);
+  }, []);
+  // The SDK id / server id pair already reported as different (reported once)
+  const reportedMismatchRef = useRef(null);
 
   // Zoom reported that the meeting itself ended (not just the stream). Kept
   // until another meeting is opened, so the after-meeting screen can stay.
@@ -165,6 +183,7 @@ export function MeetingProvider({ children }) {
           setParticipantEvents([]);
           setViewers(null);
           setMeetingAccess(NO_ACCESS);
+          applyVerifiedMeetingId(null);
           setWs((prev) => {
             if (prev && prev.readyState !== WebSocket.CLOSED) {
               prev.onclose = null;
@@ -206,8 +225,10 @@ export function MeetingProvider({ children }) {
         }
         return null;
       });
+      // Out of the meeting, nothing more is asked of the server about it
+      applyVerifiedMeetingId(null);
     }
-  }, [meetingId]);
+  }, [meetingId, applyVerifiedMeetingId]);
 
   // Out of the meeting, its transcript and timeline are dropped, unless the
   // owner's notes are still on screen: then they go when the notes go.
@@ -292,6 +313,24 @@ export function MeetingProvider({ children }) {
         refused(data.error || 'Could not verify your meeting.');
         return false;
       }
+      // The id the server verified. A server that does not name one (older
+      // than this field) is followed by the id the SDK gave, as before.
+      const sdkMeetingId = meetingIdRef.current || null;
+      const serverMeetingId = typeof data.meetingId === 'string' && data.meetingId.length > 0
+        ? data.meetingId
+        : sdkMeetingId;
+      if (sdkMeetingId && serverMeetingId !== sdkMeetingId) {
+        const pair = `${sdkMeetingId}\n${serverMeetingId}`;
+        if (reportedMismatchRef.current !== pair) {
+          reportedMismatchRef.current = pair;
+          // No ids: only that it happened, and whether the SDK fell back to the number
+          console.warn(
+            'The meeting id from the Zoom SDK differs from the one the server verified; using the server\'s.',
+            { sdkIdIsNumeric: /^\d+$/.test(sdkMeetingId) },
+          );
+        }
+      }
+      applyVerifiedMeetingId(serverMeetingId);
       setMeetingAccess({ ...NO_ACCESS, status: 'verified', isGuest: !!data.isGuest, everVerified: true });
       return true;
     } catch (error) {
@@ -299,8 +338,11 @@ export function MeetingProvider({ children }) {
       refused('Could not read your Zoom meeting context.');
       return false;
     }
-  }, []);
+  }, [applyVerifiedMeetingId]);
 
+  // `meetingId` here is the server-verified id. The only caller is
+  // connectWebSocket, after verifyMeetingAccess succeeded: no socket exists
+  // before access is verified, so no message is applied before then either.
   const openSocket = useCallback((meetingId) => {
     // A retry still waiting would replace the socket about to be opened
     if (reconnectTimerRef.current) {
@@ -337,24 +379,21 @@ export function MeetingProvider({ children }) {
     };
 
     socket.onmessage = (event) => {
-      let message;
-      try {
-        message = JSON.parse(event.data);
-      } catch {
-        return;
-      }
-      // The one place that decides whether a message is for this panel. The
-      // server can deliver another meeting's messages here (it registers an
-      // owner's sockets under their other meeting too), so everything about a
-      // meeting is dropped unless it names this socket's meeting.
+      // Whether a message is for this panel is decided by one helper
+      // (lib/meetingMessage.js), used by every socket listener. The server can
+      // deliver another meeting's messages here (it registers an owner's
+      // sockets under their other meeting too), so everything about a meeting
+      // is dropped unless it names the meeting the server verified for this
+      // socket (not the id the Zoom SDK reported: the two can differ).
       // Every message the server sends about a meeting carries data.meetingId
       // (backend/src/services/websocket.js): connected, subscribed,
       // unsubscribed, meeting.presence, meeting.status, transcript.segment,
       // participant.event, ai.suggestion, rtms.request_status, arlo.state and
       // notes.updated. Only `error` and `pong` carry none: they are about the
       // connection, have no `data`, and nothing here acts on them.
-      const data = message?.data;
-      if (!data || data.meetingId !== meetingId) return;
+      const message = readMeetingMessage(event, meetingId);
+      if (!message) return;
+      const data = message.data;
 
       switch (message.type) {
         case 'transcript.segment':
@@ -448,10 +487,13 @@ export function MeetingProvider({ children }) {
     if (connectingRef.current) return null; // a verify+connect is already in flight
     connectingRef.current = true;
 
+    // The socket is opened here and nowhere else, and only once the server
+    // has verified access: with the id it verified, which is the one it stamps
+    // on every message (`meetingId` is the caller's, from the SDK or the address).
     verifyMeetingAccess()
       .then((ok) => {
         if (ok) {
-          openSocket(meetingId);
+          openSocket(verifiedMeetingIdRef.current || meetingId);
           return;
         }
         // No answer at all: keep trying, so the panel comes back by itself when
@@ -591,7 +633,7 @@ export function MeetingProvider({ children }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ meetingId: meetingIdRef.current, status }),
+      body: JSON.stringify({ meetingId: verifiedMeetingIdRef.current || meetingIdRef.current, status }),
     }).catch(() => {});
   }, []);
 
@@ -814,7 +856,7 @@ export function MeetingProvider({ children }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ meetingId, meetingNumber, action }),
+        body: JSON.stringify({ meetingId: verifiedMeetingIdRef.current || meetingId, meetingNumber, action }),
       });
 
       const data = await response.json();
@@ -874,7 +916,7 @@ export function MeetingProvider({ children }) {
   const accessVerified = meetingAccess.status === 'verified';
   useEffect(() => {
     // The server only answers meeting-scoped routes after access is verified
-    if (statusCheckRef.current || !isAuthenticated || !meetingId || rtmsActive || !accessVerified) return;
+    if (statusCheckRef.current || !isAuthenticated || !meetingId || !verifiedMeetingId || rtmsActive || !accessVerified) return;
     statusCheckRef.current = true;
 
     let cancelled = false;
@@ -882,7 +924,7 @@ export function MeetingProvider({ children }) {
     const maxAttempts = 3;
 
     const checkStatus = () => {
-      fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}`, {
+      fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(verifiedMeetingId)}`, {
         credentials: 'include',
       })
         .then(res => res.ok ? res.json() : null)
@@ -905,7 +947,7 @@ export function MeetingProvider({ children }) {
 
     checkStatus();
     return () => { cancelled = true; };
-  }, [isAuthenticated, meetingId, rtmsActive, accessVerified]);
+  }, [isAuthenticated, meetingId, verifiedMeetingId, rtmsActive, accessVerified]);
 
   // What the server holds for this meeting so far: the transcript and timeline
   // from before this panel opened, or from while its connection was down.
@@ -913,9 +955,9 @@ export function MeetingProvider({ children }) {
   // the server confirms the subscription (only then is every new line sent
   // live, so that load closes the gap). Merging drops what is already here.
   useEffect(() => {
-    if (!meetingId || !accessVerified) return undefined;
+    if (!meetingId || !verifiedMeetingId || !accessVerified) return undefined;
     let cancelled = false;
-    const load = (path) => fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/${path}`, {
+    const load = (path) => fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(verifiedMeetingId)}/${path}`, {
       credentials: 'include',
     }).then((res) => (res.ok ? res.json() : null)).catch(() => null);
 
@@ -931,19 +973,19 @@ export function MeetingProvider({ children }) {
       });
     });
     return () => { cancelled = true; };
-  }, [meetingId, accessVerified, ws, subscribedCount]);
+  }, [meetingId, verifiedMeetingId, accessVerified, ws, subscribedCount]);
 
   // Send Zoom meeting topic to backend to replace generic "Meeting M/D/YYYY" title
   // Wait for rtmsActive so the meeting record exists in the DB before patching
   useEffect(() => {
     const topic = meetingContext?.meetingTopic;
     const meetingNumber = meetingContext?.meetingID;
-    if (!rtmsActive || !meetingId || !topic || titleSentRef.current || titleUserRenamedRef.current) return;
+    if (!rtmsActive || !meetingId || !verifiedMeetingId || !topic || titleSentRef.current || titleUserRenamedRef.current) return;
     titleSentRef.current = true;
 
     let attempts = 0;
     const sendTitle = () => {
-      fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/topic`, {
+      fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(verifiedMeetingId)}/topic`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -957,7 +999,7 @@ export function MeetingProvider({ children }) {
       }).catch(() => {});
     };
     sendTitle();
-  }, [rtmsActive, meetingId, meetingContext?.meetingTopic, meetingContext?.meetingID]);
+  }, [rtmsActive, meetingId, verifiedMeetingId, meetingContext?.meetingTopic, meetingContext?.meetingID]);
 
   const setTitleUserRenamed = useCallback(() => {
     titleUserRenamedRef.current = true;
@@ -982,6 +1024,7 @@ export function MeetingProvider({ children }) {
     rtmsRequestExpiresAt,
     ws,
     meetingId,
+    verifiedMeetingId,
     startAskedHere,
     lastMeetingId,
     switchingMeeting,
@@ -1007,7 +1050,7 @@ export function MeetingProvider({ children }) {
     setWs,
     setTitleUserRenamed,
     reportVoiceState,
-  }), [reportVoiceState, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, startAskedHere, lastMeetingId, switchingMeeting, leftMeeting, shownMeetingEnded, viewers, shownSegments, shownParticipantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [reportVoiceState, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, verifiedMeetingId, startAskedHere, lastMeetingId, switchingMeeting, leftMeeting, shownMeetingEnded, viewers, shownSegments, shownParticipantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

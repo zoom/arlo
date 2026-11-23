@@ -7,6 +7,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { useToast } from '../contexts/ToastContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import { processTranscriptForCommand, getHelpText, COMMANDS } from '../utils/voiceCommands';
+import { readMeetingMessage } from '../lib/meetingMessage';
 
 // Cooldown to prevent duplicate command triggers (ms)
 const COMMAND_COOLDOWN = 5000;
@@ -18,6 +19,7 @@ const recentCommands = new Map();
  * Hook to enable voice commands in the meeting view
  * @param {object} options - Configuration options
  * @param {WebSocket} options.ws - WebSocket connection
+ * @param {string} options.meetingId - The server-verified meeting id: only its transcript lines can run a command
  * @param {function} options.onSummarize - Callback for summarize command
  * @param {function} options.onActionItems - Callback for action items command
  * @param {function} options.onHighlight - Callback for highlight command
@@ -30,6 +32,7 @@ const recentCommands = new Map();
  */
 export function useVoiceCommands({
   ws,
+  meetingId,
   onSummarize,
   onActionItems,
   onHighlight,
@@ -262,26 +265,21 @@ export function useVoiceCommands({
    * Listen to WebSocket messages for transcript segments
    */
   useEffect(() => {
-    if (!ws || !enabled) return;
+    if (!ws || !enabled || !meetingId) return;
 
     const handleMessage = (event) => {
-      try {
-        const message = JSON.parse(event.data);
-
-        if (message.type === 'transcript.segment') {
-          const segment = message.data?.segment;
-          if (segment) {
-            processSegment(segment);
-          }
-        }
-      } catch (error) {
-        // Ignore parse errors
+      // Another meeting's line must never run a command here (lib/meetingMessage.js)
+      const message = readMeetingMessage(event, meetingId);
+      if (message?.type !== 'transcript.segment') return;
+      const segment = message.data.segment;
+      if (segment) {
+        processSegment(segment);
       }
     };
 
     ws.addEventListener('message', handleMessage);
     return () => ws.removeEventListener('message', handleMessage);
-  }, [ws, enabled, processSegment]);
+  }, [ws, enabled, meetingId, processSegment]);
 
   // Clear responses
   const clearResponses = useCallback(() => {

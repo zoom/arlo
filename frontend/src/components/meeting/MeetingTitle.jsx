@@ -15,7 +15,9 @@ const FALLBACK_TITLE = 'Live Meeting';
  * live transcript. Guests see it read-only.
  */
 export default function MeetingTitle({ canEdit = false }) {
-  const { meetingId, segments, setTitleUserRenamed } = useMeeting();
+  const { meetingId: sdkMeetingId, verifiedMeetingId, segments, setTitleUserRenamed } = useMeeting();
+  // The server knows the meeting by the id it verified
+  const meetingId = verifiedMeetingId || sdkMeetingId;
   const { meetingContext } = useZoomSdk();
   const { addToast } = useToast();
   const [isEditing, setIsEditing] = useState(false);

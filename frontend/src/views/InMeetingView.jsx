@@ -17,6 +17,7 @@ import MeetingTitle from '../components/meeting/MeetingTitle';
 import ShareMenu from '../components/meeting/ShareMenu';
 import TranscriptTimeline from '../components/meeting/TranscriptTimeline';
 import { getTransportView } from '../lib/transportView';
+import { readMeetingMessage } from '../lib/meetingMessage';
 import useMeetingVoiceHandlers from '../hooks/useMeetingVoiceHandlers';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import ArloResponsePanel from '../components/ArloResponsePanel';
@@ -73,7 +74,7 @@ import './InMeetingView.css';
 export default function InMeetingView({ isGuestMode = false }) {
   const { id: routeId } = useParams(); // Get meeting ID from route for guest mode
   const navigate = useNavigate();
-  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsPhase, meetingId, connectWebSocket, viewers, meetingAccess, setWs, reportVoiceState } = useMeeting();
+  const { ws, segments, participantEvents, rtmsActive, rtmsPaused, rtmsPhase, meetingId, verifiedMeetingId, connectWebSocket, viewers, meetingAccess, setWs, reportVoiceState } = useMeeting();
   const { isAuthenticated } = useAuth();
   const { zoomSdk, meetingContext, isTestMode, runningContext } = useZoomSdk();
   const { authorize } = useZoomAuth();
@@ -183,6 +184,8 @@ export default function InMeetingView({ isGuestMode = false }) {
   // Connect WebSocket when authenticated and meeting is available (or for guests)
   // For guests, get meetingId from route params
   const effectiveMeetingId = isGuestMode ? (routeId ? decodeURIComponent(routeId) : null) : meetingId;
+  // What is sent to the server about this meeting names the id the server verified
+  const dataMeetingId = verifiedMeetingId || effectiveMeetingId;
   useEffect(() => {
     if (ws) return; // Already connected
     if (!effectiveMeetingId) return; // No meeting ID yet
@@ -205,16 +208,17 @@ export default function InMeetingView({ isGuestMode = false }) {
 
   // AI suggestions pushed by the server
   useEffect(() => {
-    if (!ws) return undefined;
+    if (!ws || !verifiedMeetingId) return undefined;
     const handleMessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.type === 'ai.suggestion') {
+      // Only this meeting's suggestions (lib/meetingMessage.js)
+      const message = readMeetingMessage(event, verifiedMeetingId);
+      if (message?.type === 'ai.suggestion' && message.data.suggestion) {
         setSuggestions((prev) => [...prev, message.data.suggestion].slice(-3));
       }
     };
     ws.addEventListener('message', handleMessage);
     return () => ws.removeEventListener('message', handleMessage);
-  }, [ws]);
+  }, [ws, verifiedMeetingId]);
 
   // Scroll detection
   const handleScroll = useCallback(() => {
@@ -242,13 +246,14 @@ export default function InMeetingView({ isGuestMode = false }) {
 
   // What each voice command does (see hooks/useMeetingVoiceHandlers.js)
   const voiceHandlers = useMeetingVoiceHandlers({
-    segments, meetingId: effectiveMeetingId, zoomSdk, addToast, setActiveTab, transcriptRef,
+    segments, meetingId: dataMeetingId, zoomSdk, addToast, setActiveTab, transcriptRef,
   });
 
   // Initialize voice commands hook
   // eslint-disable-next-line no-unused-vars
   const { lastCommand, isProcessing: voiceProcessing, responses: voiceResponses, clearResponses } = useVoiceCommands({
     ws,
+    meetingId: verifiedMeetingId,
     ...voiceHandlers,
     enabled: voiceCommandsEnabled && rtmsActive,
   });

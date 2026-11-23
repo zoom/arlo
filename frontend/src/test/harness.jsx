@@ -9,8 +9,12 @@ import App from '../App';
 
 export const MEETING = 'MEETING-1==';
 
-/** Arlo's routes for the test meeting: arloPath('state' | 'settings' | 'notes' | 'ask'). */
-export const arloPath = (name) => `/api/meetings/by-zoom-id/${encodeURIComponent(MEETING)}/arlo/${name}`;
+/**
+ * Arlo's routes for the test meeting: arloPath('state' | 'settings' | 'notes' | 'ask').
+ * `meetingId`: the id the server knows the meeting by, when a test makes it
+ * differ from the one the Zoom SDK reports (see mockFetch `serverMeetingId`).
+ */
+export const arloPath = (name, meetingId = MEETING) => `/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/arlo/${name}`;
 
 /** What the server says about Arlo before anyone brought it in. */
 export const ARLO_ABSENT = Object.freeze({
@@ -26,6 +30,9 @@ export function createZoomSdk({
   startRTMS = async () => ({ message: 'Success' }),
   runningContext = 'inMeeting',
   userContextFails = false, // outside a meeting Zoom may not answer getUserContext
+  // The meeting id the SDK reports. The server may know the meeting by another
+  // id (mockFetch `serverMeetingId`): the SDK path has fallbacks.
+  meetingUUID = MEETING,
 } = {}) {
   const listeners = new Map();
   const on = (event) => (handler) => {
@@ -40,7 +47,7 @@ export function createZoomSdk({
       if (userContextFails) throw new Error('getUserContext is not available in this context');
       return { status, role, screenName };
     }),
-    getMeetingUUID: vi.fn(async () => ({ meetingUUID: MEETING })),
+    getMeetingUUID: vi.fn(async () => ({ meetingUUID })),
     getMeetingContext: vi.fn(async () => ({ meetingTopic: 'Planning', meetingID: '123456' })),
     getAppContext: vi.fn(async () => ({ context: 'signed-app-context' })),
     getRTMSStatus: vi.fn(async () => ({ rtmsStatus: sdk.rtmsStatus })),
@@ -134,8 +141,21 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), {
 /**
  * Route fetch by "METHOD /path" or "/path" prefix. Unlisted API calls answer
  * 200 {} the way the demo-mode stubs do. Returns the mock to inspect calls.
+ *
+ * `serverMeetingId`: the meeting id inside the verified app context, which the
+ * meeting-access check returns and Arlo's routes are served under. Give
+ * createZoomSdk another `meetingUUID` (and send messages from
+ * `serverMessagesFor(serverMeetingId)`) to make the SDK and the server disagree.
  */
-export function mockFetch(routes = {}, { signedIn = true } = {}) {
+export function mockFetch(routes = {}, { signedIn = true, serverMeetingId = MEETING } = {}) {
+  // The app context is signed by Zoom for the meeting the client is in: the
+  // access check answers with that meeting, unless the test makes the two
+  // differ. Read without calling the mock, so its call count stays the app's.
+  const sdkMeetingId = async () => {
+    const answer = await window.zoomSdk?.getMeetingUUID?.getMockImplementation?.()?.();
+    return answer?.meetingUUID || MEETING;
+  };
+  const verifiedMeetingId = async () => (serverMeetingId === MEETING ? sdkMeetingId() : serverMeetingId);
   const table = {
     '/api/auth/me': () => (signedIn
       ? json({ user: { id: 'user-1', displayName: 'Ana' } })
@@ -143,12 +163,12 @@ export function mockFetch(routes = {}, { signedIn = true } = {}) {
     // Tests run with the deployment's auto-start flag ON unless a test overrides
     // this route, so `renderInMeeting({ autoStart })` alone decides the behaviour.
     '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true } }),
-    '/api/auth/meeting-access': () => json({ verified: true, isGuest: !signedIn, meetingId: MEETING }),
+    '/api/auth/meeting-access': async () => json({ verified: true, isGuest: !signedIn, meetingId: await verifiedMeetingId() }),
     // Arlo's routes: not in the meeting, nobody's notes, until a test says otherwise
-    [arloPath('state')]: () => json({ ...ARLO_ABSENT }),
-    [`PUT ${arloPath('settings')}`]: ({ body }) => json({ ...ARLO_ABSENT, role: 'owner', whoCanAsk: body?.whoCanAsk }),
-    [arloPath('notes')]: () => json({ notes: null }),
-    [`POST ${arloPath('ask')}`]: () => json({ answer: 'Arlo answers from the transcript.' }),
+    [arloPath('state', serverMeetingId)]: () => json({ ...ARLO_ABSENT }),
+    [`PUT ${arloPath('settings', serverMeetingId)}`]: ({ body }) => json({ ...ARLO_ABSENT, role: 'owner', whoCanAsk: body?.whoCanAsk }),
+    [arloPath('notes', serverMeetingId)]: () => json({ notes: null }),
+    [`POST ${arloPath('ask', serverMeetingId)}`]: () => json({ answer: 'Arlo answers from the transcript.' }),
     ...routes,
   };
   const fetchMock = vi.fn(async (input, init = {}) => {
@@ -170,34 +190,39 @@ export function mockFetch(routes = {}, { signedIn = true } = {}) {
 
 export { json };
 
-/** Messages the server sends, in the shapes the backend uses. */
-export const serverMessage = {
-  status: (status, extra = {}) => ({ type: 'meeting.status', data: { meetingId: MEETING, status, ...extra } }),
-  requestStatus: (status) => ({ type: 'rtms.request_status', data: { meetingId: MEETING, status } }),
-  arloState: (state = {}, meetingId = MEETING) => ({
+/** Messages the server sends about one meeting, in the shapes the backend uses. */
+export const serverMessagesFor = (ofMeeting) => ({
+  status: (status, extra = {}) => ({ type: 'meeting.status', data: { meetingId: ofMeeting, status, ...extra } }),
+  requestStatus: (status) => ({ type: 'rtms.request_status', data: { meetingId: ofMeeting, status } }),
+  arloState: (state = {}, meetingId = ofMeeting) => ({
     type: 'arlo.state', data: { meetingId, ...ARLO_ABSENT, ...state },
   }),
-  notes: (notes, meetingId = MEETING) => ({ type: 'notes.updated', data: { meetingId, notes } }),
-  timelineEvent: (event) => ({ type: 'participant.event', data: { meetingId: MEETING, event } }),
+  notes: (notes, meetingId = ofMeeting) => ({ type: 'notes.updated', data: { meetingId, notes } }),
+  timelineEvent: (event) => ({ type: 'participant.event', data: { meetingId: ofMeeting, event } }),
+  suggestion: (suggestion) => ({ type: 'ai.suggestion', data: { meetingId: ofMeeting, suggestion } }),
   segment: (seqNo, text, extra = {}) => ({
     type: 'transcript.segment',
     data: {
-      meetingId: MEETING,
+      meetingId: ofMeeting,
       segment: {
         seqNo, text, speakerId: '1', speakerLabel: 'Ana', tStartMs: 1000 * seqNo, tEndMs: 1000 * seqNo, ...extra,
       },
     },
   }),
-};
+});
+
+/** The server's messages about the test meeting. */
+export const serverMessage = serverMessagesFor(MEETING);
 
 /**
  * Render the real app inside a (fake) Zoom meeting, on the in-meeting route:
  * the single-action Arlo screens. `page: 'record'` opens the meeting record,
  * `page: 'classic'` the earlier dashboard.
  * Auto-start is off unless asked for, so each test decides when a start happens.
+ * `routeMeetingId`: the meeting id in the address (the one the SDK reports).
  */
 export function renderInMeeting({
-  sdk = createZoomSdk(), autoStart = false, guest = false, page = null,
+  sdk = createZoomSdk(), autoStart = false, guest = false, page = null, routeMeetingId = MEETING,
 } = {}) {
   window.zoomSdk = sdk;
   FakeWebSocket.instances = [];
@@ -205,7 +230,7 @@ export function renderInMeeting({
   localStorage.setItem('arlo-vertical', 'notes');
   localStorage.setItem('arlo-auto-start', autoStart ? 'true' : 'false');
   const route = guest ? 'guest-meeting' : 'meeting';
-  window.location.hash = `#/${route}/${encodeURIComponent(MEETING)}${page ? `/${page}` : ''}`;
+  window.location.hash = `#/${route}/${encodeURIComponent(routeMeetingId)}${page ? `/${page}` : ''}`;
   return { sdk, ...render(<App />) };
 }
 

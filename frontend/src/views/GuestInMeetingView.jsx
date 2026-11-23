@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { ScrollArea } from '@base-ui/react';
 import { Sparkles, ChevronDown, ArrowDown, X, Lock, LogIn, LogOut, Mic, MicOff, Pause, Play, Eye, Clock } from 'lucide-react';
 import { useMeeting } from '../contexts/MeetingContext';
+import { readMeetingMessage } from '../lib/meetingMessage';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import OwlIcon from '../components/OwlIcon';
 import Card from '../components/ui/Card';
@@ -44,7 +45,9 @@ function InlineEventLabel({ eventType, name }) {
 export default function GuestInMeetingView() {
   const { id } = useParams();
   const { zoomSdk, meetingContext, userContextStatus, isTestMode } = useZoomSdk();
-  const { ws, connectWebSocket, rtmsActive, viewers, segments, participantEvents, meetingAccess } = useMeeting();
+  const {
+    ws, connectWebSocket, rtmsActive, viewers, segments, participantEvents, meetingAccess, verifiedMeetingId,
+  } = useMeeting();
 
   // Meeting ID: prefer SDK context, fall back to URL param
   const meetingId = meetingContext?.meetingUUID || id;
@@ -59,9 +62,10 @@ export default function GuestInMeetingView() {
   // Fetch meeting details (title, summary) from backend
   const accessVerified = meetingAccess?.status === 'verified';
   useEffect(() => {
-    // The server only answers once this guest is verified to be in the meeting
-    if (!meetingId || !accessVerified) return;
-    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}`, { credentials: 'include' })
+    // The server only answers once this guest is verified to be in the meeting,
+    // and under the meeting id it verified
+    if (!verifiedMeetingId || !accessVerified) return;
+    fetch(`/api/meetings/by-zoom-id/${encodeURIComponent(verifiedMeetingId)}`, { credentials: 'include' })
       .then(res => res.ok ? res.json() : null)
       .then(data => {
         if (data?.meeting) {
@@ -73,7 +77,7 @@ export default function GuestInMeetingView() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [meetingId, accessVerified]);
+  }, [verifiedMeetingId, accessVerified]);
 
   // No details to wait for when this guest could not be verified
   useEffect(() => {
@@ -98,18 +102,19 @@ export default function GuestInMeetingView() {
 
   // The stream stopping ends the guest's live view
   useEffect(() => {
-    if (!ws) return undefined;
+    if (!ws || !verifiedMeetingId) return undefined;
 
     const handleMessage = (event) => {
-      const message = JSON.parse(event.data);
-      if (message.type === 'meeting.status' && message.data.status === 'rtms_stopped') {
+      // Another meeting's stream stopping ends nothing here (lib/meetingMessage.js)
+      const message = readMeetingMessage(event, verifiedMeetingId);
+      if (message?.type === 'meeting.status' && message.data.status === 'rtms_stopped') {
         setMeetingEnded(true);
       }
     };
 
     ws.addEventListener('message', handleMessage);
     return () => ws.removeEventListener('message', handleMessage);
-  }, [ws]);
+  }, [ws, verifiedMeetingId]);
 
   // Scroll detection
   const handleScroll = useCallback(() => {
