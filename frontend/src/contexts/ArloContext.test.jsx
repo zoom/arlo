@@ -378,4 +378,51 @@ describe('the person stops being signed in', () => {
     await send(serverMessage.notes({ ...NOTES, summary: 'Sent after the session ended.', throughSeqNo: 30 }));
     expect(arlo.notes).toBeNull();
   });
+
+  test('in a live meeting, a panel whose session ended is never an owner, whatever its old socket is told', async () => {
+    const fetchMock = await asOwner();
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await act(async () => { auth.logout(); });
+    await waitFor(() => expect(auth.isAuthenticated).toBe(false));
+    const notesAsked = callsTo(fetchMock, arloPath('notes')).length;
+
+    await send(serverMessage.arloState({ ...OWNER, myStreamPaused: true }));
+    // Arlo is here, and this person is a participant: no stream of theirs, no notes
+    expect(arlo).toMatchObject({ loaded: true, present: true, role: 'participant', myStreamPaused: false, ownerName: 'Ana' });
+    await send(serverMessage.notes({ ...NOTES, summary: 'Sent after the session ended.', throughSeqNo: 30 }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    expect(arlo.role).toBe('participant');
+    expect(arlo.notes).toBeNull();
+    expect(callsTo(fetchMock, arloPath('notes'))).toHaveLength(notesAsked);
+  });
+
+  test('in a meeting that ended but was not left, signing out drops the kept transcript and timeline', async () => {
+    await asOwner();
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(1, 'Said while Arlo was here.'));
+    await send(serverMessage.timelineEvent({ id: 'e1', eventType: 'joined', participantName: 'Bo', timestamp: 1000 }));
+    await send(serverMessage.status('rtms_stopped', { meetingEnded: true }));
+    // Still in the Zoom meeting: only the identity change can drop what is kept
+    expect(meeting.meetingId).toBe(MEETING);
+    expect(meeting.meetingEnded).toBe(true);
+    expect(meeting.segments).toHaveLength(1);
+    expect(meeting.participantEvents).toHaveLength(1);
+
+    await act(async () => { auth.logout(); });
+    await waitFor(() => {
+      expect(arlo.notes).toBeNull();
+      expect(meeting.segments).toHaveLength(0);
+      expect(meeting.participantEvents).toHaveLength(0);
+    });
+  });
+
+  test('in a meeting that is still running, signing out keeps the live transcript: everyone in it sees that', async () => {
+    await asOwner();
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(1, 'Said while Arlo was here.'));
+    await act(async () => { auth.logout(); });
+    await waitFor(() => expect(arlo.notes).toBeNull());
+    expect(meeting.segments).toHaveLength(1);
+  });
 });

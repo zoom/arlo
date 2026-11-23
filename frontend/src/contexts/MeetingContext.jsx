@@ -101,11 +101,18 @@ export function MeetingProvider({ children }) {
   // asked of the server and everything accepted from it goes by this id; the
   // SDK's id only says which meeting the panel is in (and is in the address).
   // null until access is verified, and again once the meeting is left.
-  const [verifiedMeetingId, setVerifiedMeetingId] = useState(null);
-  const verifiedMeetingIdRef = useRef(null);
-  const applyVerifiedMeetingId = useCallback((id) => {
-    verifiedMeetingIdRef.current = id;
-    setVerifiedMeetingId(id);
+  //
+  // It is held with the meeting the panel was in when it was verified
+  // (`forMeeting`, the SDK's id; null when the SDK had not reported one yet,
+  // which the first id reported then fills in). In any other meeting it reads
+  // as null from the very render in which the SDK's id changes: nothing can be
+  // asked of the server, or accepted from it, under the previous meeting's id.
+  const [verified, setVerified] = useState(null); // { id, forMeeting } | null
+  const verifiedRef = useRef(null);
+  const applyVerifiedMeetingId = useCallback((id, forMeeting = null) => {
+    const next = id ? { id, forMeeting: forMeeting || null } : null;
+    verifiedRef.current = next;
+    setVerified(next);
   }, []);
   // The SDK id / server id pair already reported as different (reported once)
   const reportedMismatchRef = useRef(null);
@@ -164,6 +171,15 @@ export function MeetingProvider({ children }) {
   const meetingId = meetingContext?.meetingUUID;
   const meetingIdRef = useRef(meetingId);
   meetingIdRef.current = meetingId;
+  const verifiedFor = (held, sdkMeetingId) => (
+    held && (held.forMeeting === null || held.forMeeting === sdkMeetingId) ? held.id : null
+  );
+  const verifiedMeetingId = verifiedFor(verified, meetingId);
+  /** The verified id for the meeting the panel is in right now (for callbacks). */
+  const readVerifiedMeetingId = useCallback(() => {
+    const held = verifiedRef.current;
+    return held && (held.forMeeting === null || held.forMeeting === meetingIdRef.current) ? held.id : null;
+  }, []);
 
   if (rtmsActive) {
     hasBeenActiveRef.current = true;
@@ -184,6 +200,11 @@ export function MeetingProvider({ children }) {
           setViewers(null);
           setMeetingAccess(NO_ACCESS);
           applyVerifiedMeetingId(null);
+          // A reconnect that was waiting belongs to the previous meeting
+          if (reconnectTimerRef.current) {
+            clearTimeout(reconnectTimerRef.current);
+            reconnectTimerRef.current = null;
+          }
           setWs((prev) => {
             if (prev && prev.readyState !== WebSocket.CLOSED) {
               prev.onclose = null;
@@ -191,6 +212,9 @@ export function MeetingProvider({ children }) {
             }
             return null;
           });
+        } else if (verifiedRef.current && verifiedRef.current.forMeeting === null) {
+          // Verified before the SDK reported its meeting id: this is that meeting
+          applyVerifiedMeetingId(verifiedRef.current.id, meetingId);
         }
       }
       lastMeetingIdRef.current = meetingId;
@@ -275,12 +299,23 @@ export function MeetingProvider({ children }) {
   // true when the last access check got no verdict: the request failed to
   // reach the server, or the server answered 5xx / 429
   const accessCheckFailedToRunRef = useRef(false);
-  const verifyMeetingAccess = useCallback(async () => {
+  /**
+   * One access check. Answers 'verified', 'refused' or 'stale'.
+   *
+   * Every check remembers the meeting it was started for. When it answers and
+   * the panel is in another meeting by then (or in none), the answer is about
+   * a meeting the panel has left: it is 'stale' and dropped whole. No verified
+   * id, no access state, and so no socket and no fetch for that meeting.
+   */
+  const checkMeetingAccess = useCallback(async () => {
     const sdk = zoomSdkRef.current;
     if (!sdk || typeof sdk.getAppContext !== 'function') {
       setMeetingAccess({ ...NO_ACCESS, status: 'unavailable', reason: 'Open Arlo inside a Zoom meeting to see the live transcript.' });
-      return false;
+      return 'refused';
     }
+    const startedFor = meetingIdRef.current || null;
+    // Before the SDK reported a meeting id there is no meeting to have left
+    const isStale = () => startedFor !== null && (meetingIdRef.current || null) !== startedFor;
     setMeetingAccess((prev) => ({ ...prev, status: 'verifying', reason: null, transient: false }));
     accessCheckFailedToRunRef.current = false;
     // A refusal: `transient` when it is not a verdict on this user (tried again)
@@ -289,6 +324,14 @@ export function MeetingProvider({ children }) {
       setMeetingAccess((prev) => ({
         ...NO_ACCESS, status: 'denied', reason, everVerified: prev.everVerified, transient,
       }));
+    };
+    const dropped = () => {
+      accessCheckFailedToRunRef.current = false;
+      // Out of any meeting nothing follows this check: it is no longer "verifying"
+      if (!meetingIdRef.current) {
+        setMeetingAccess((prev) => (prev.status === 'verifying' ? { ...NO_ACCESS, everVerified: prev.everVerified } : prev));
+      }
+      return 'stale';
     };
     try {
       const { context } = await sdk.getAppContext();
@@ -306,12 +349,13 @@ export function MeetingProvider({ children }) {
         throw networkError;
       }
       const data = await res.json().catch(() => ({}));
+      if (isStale()) return dropped();
       // A gateway error or rate limit while the server restarts is not a
       // verdict on this user either. A 4xx refusal is, and is not retried.
       if (res.status >= 500 || res.status === 429) accessCheckFailedToRunRef.current = true;
       if (!res.ok) {
         refused(data.error || 'Could not verify your meeting.');
-        return false;
+        return 'refused';
       }
       // The id the server verified. A server that does not name one (older
       // than this field) is followed by the id the SDK gave, as before.
@@ -330,15 +374,17 @@ export function MeetingProvider({ children }) {
           );
         }
       }
-      applyVerifiedMeetingId(serverMeetingId);
+      applyVerifiedMeetingId(serverMeetingId, sdkMeetingId);
       setMeetingAccess({ ...NO_ACCESS, status: 'verified', isGuest: !!data.isGuest, everVerified: true });
-      return true;
+      return 'verified';
     } catch (error) {
+      if (isStale()) return dropped();
       console.error('Meeting access verification failed:', error);
       refused('Could not read your Zoom meeting context.');
-      return false;
+      return 'refused';
     }
   }, [applyVerifiedMeetingId]);
+  const verifyMeetingAccess = useCallback(async () => (await checkMeetingAccess()) === 'verified', [checkMeetingAccess]);
 
   // `meetingId` here is the server-verified id. The only caller is
   // connectWebSocket, after verifyMeetingAccess succeeded: no socket exists
@@ -490,10 +536,15 @@ export function MeetingProvider({ children }) {
     // The socket is opened here and nowhere else, and only once the server
     // has verified access: with the id it verified, which is the one it stamps
     // on every message (`meetingId` is the caller's, from the SDK or the address).
-    verifyMeetingAccess()
-      .then((ok) => {
-        if (ok) {
-          openSocket(verifiedMeetingIdRef.current || meetingId);
+    let stale = false;
+    checkMeetingAccess()
+      .then((outcome) => {
+        if (outcome === 'stale') {
+          stale = true;
+          return;
+        }
+        if (outcome === 'verified') {
+          openSocket(readVerifiedMeetingId() || meetingId);
           return;
         }
         // No answer at all: keep trying, so the panel comes back by itself when
@@ -507,9 +558,14 @@ export function MeetingProvider({ children }) {
       })
       .finally(() => {
         connectingRef.current = false;
+        // The check was for a meeting the panel has left. A connect asked for
+        // the meeting it is in now was turned away above while that check was
+        // in flight: it is made now, with a check of its own.
+        const current = meetingIdRef.current;
+        if (stale && current && shouldReconnectRef.current) connectWebSocketRef.current(current);
       });
     return null;
-  }, [verifyMeetingAccess, openSocket]);
+  }, [checkMeetingAccess, openSocket, readVerifiedMeetingId]);
 
   // Reconnect timers call through a ref so they always use the latest callback.
   const connectWebSocketRef = useRef(connectWebSocket);
@@ -633,9 +689,9 @@ export function MeetingProvider({ children }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({ meetingId: verifiedMeetingIdRef.current || meetingIdRef.current, status }),
+      body: JSON.stringify({ meetingId: readVerifiedMeetingId() || meetingIdRef.current, status }),
     }).catch(() => {});
-  }, []);
+  }, [readVerifiedMeetingId]);
 
   // Side effects run when a state is CONFIRMED, never when a request is sent.
   const prevPhaseRef = useRef(rtms.phase);
@@ -734,6 +790,7 @@ export function MeetingProvider({ children }) {
       // Accepted is not confirmed. Without status events on this client the
       // accepted pause/resume/stop is the best signal there is.
       dispatchRtms({ type: 'REQUEST_ACCEPTED', action, confirmsState: !rtmsStatusSupported });
+      return true;
     } catch (error) {
       console.error(`${action}RTMS failed:`, error?.code, error?.message);
       localActionRef.current = null;
@@ -741,6 +798,7 @@ export function MeetingProvider({ children }) {
         alreadyRunningRef.current = true; // already running: no "started" toast
       }
       dispatchRtms({ type: 'REQUEST_FAILED', action, code: error?.code, message: error?.message });
+      return false;
     }
   }, [zoomSdk, rtmsStatusSupported]);
 
@@ -831,12 +889,21 @@ export function MeetingProvider({ children }) {
 
   // `pausedOnServer`: the server reports a pause this client was not told
   // about; the stream is this user's, so Zoom is asked to resume it all the same.
+  // The server learns of a resume from this panel's report, which is normally
+  // sent when the phase goes from paused to active (see the effect above). Here
+  // the phase is active all along, so the report is sent once Zoom accepted the
+  // resume: without it the server would keep the stream marked paused until
+  // its next line.
   const resumeRTMS = useCallback(async ({ pausedOnServer = false } = {}) => {
     const current = rtmsRef.current;
-    const paused = current.phase === 'paused' || (pausedOnServer === true && current.phase === 'active');
-    if (!zoomSdk || isRtmsBusy(current) || !paused) return;
-    await requestRtms('resume');
-  }, [zoomSdk, requestRtms]);
+    const onServerOnly = pausedOnServer === true && current.phase === 'active';
+    if (!zoomSdk || isRtmsBusy(current) || !(current.phase === 'paused' || onServerOnly)) return;
+    const accepted = await requestRtms('resume');
+    if (!onServerOnly || !accepted) return;
+    // No phase change will clear it
+    if (localActionRef.current === 'resume') localActionRef.current = null;
+    postTimelineStatus('rtms_resumed');
+  }, [zoomSdk, requestRtms, postTimelineStatus]);
 
   // Start/Stop RTMS via backend REST API (calls Zoom's participant REST API)
   const [apiActionLoading, setApiActionLoading] = useState(false);
@@ -856,7 +923,7 @@ export function MeetingProvider({ children }) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ meetingId: verifiedMeetingIdRef.current || meetingId, meetingNumber, action }),
+        body: JSON.stringify({ meetingId: readVerifiedMeetingId() || meetingId, meetingNumber, action }),
       });
 
       const data = await response.json();
@@ -888,7 +955,7 @@ export function MeetingProvider({ children }) {
     } finally {
       setApiActionLoading(false);
     }
-  }, [apiActionLoading, meetingId, meetingContext]);
+  }, [apiActionLoading, meetingId, meetingContext, readVerifiedMeetingId]);
 
   // Convenience wrappers
   const startRTMSViaAPI = useCallback(() => rtmsViaAPI('start'), [rtmsViaAPI]);

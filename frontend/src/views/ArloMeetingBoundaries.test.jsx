@@ -1,7 +1,7 @@
 import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage,
+  createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, renderClassic, resetHarness, serverMessage,
   arloPath, ARLO_ABSENT, MEETING,
 } from '../test/harness';
 
@@ -98,6 +98,45 @@ describe('messages for another meeting', () => {
 
     await send(serverMessage.segment(3, 'Said here, later.'));
     expect(await screen.findByText('Said here, later.')).toBeInTheDocument();
+  });
+});
+
+describe('messages for another meeting, on the earlier screens', () => {
+  test('the guest transcript screen: another meeting\'s stream stopping does not end this one', async () => {
+    mockFetch({}, { signedIn: false });
+    renderInMeeting({ guest: true });
+    await socketOpen();
+    await act(async () => { window.location.hash = `#/guest/${ID}`; });
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(1, 'Said in this meeting.'));
+    expect(await screen.findByText('Said in this meeting.')).toBeInTheDocument();
+    expect(screen.getByText('Live')).toBeInTheDocument();
+
+    await send(forMeeting(serverMessage.status('rtms_stopped'), OTHER));
+    expect(screen.getByText('Live')).toBeInTheDocument();
+    expect(screen.queryByText('Install Arlo to access this anytime')).not.toBeInTheDocument();
+
+    // This meeting's own stop still ends the live view
+    await send(serverMessage.status('rtms_stopped'));
+    expect(await screen.findByText('Install Arlo to access this anytime')).toBeInTheDocument();
+    expect(screen.queryByText('Live')).not.toBeInTheDocument();
+  });
+
+  test('the classic screen: another meeting\'s suggestion is not shown', async () => {
+    mockFetch();
+    renderClassic();
+    await screen.findByText('Transcription not started');
+    await socketOpen();
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(1, 'Said in this meeting.'));
+    await screen.findByText('Said in this meeting.');
+
+    await send(forMeeting(serverMessage.suggestion({ text: 'Suggested for another meeting.' }), OTHER));
+    expect(screen.queryByText('Suggested for another meeting.')).not.toBeInTheDocument();
+
+    await send(serverMessage.suggestion({ text: 'Suggested for this meeting.' }));
+    expect(await screen.findByText('Suggested for this meeting.')).toBeInTheDocument();
+    expect(screen.queryByText('Suggested for another meeting.')).not.toBeInTheDocument();
   });
 });
 
