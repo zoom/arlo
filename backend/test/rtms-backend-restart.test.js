@@ -110,9 +110,9 @@ test('with two streams learned from their lines, one stopping is not a meeting s
   const s1 = { streamId: 's1', operatorId: ana.zoomUserId };
   const s2 = { streamId: 's2', operatorId: ben.zoomUserId };
   await say(meeting, s1, 'one');
-  assert.equal((await say(meeting, s2, 'not from the stored stream')).body.stored, false);
+  assert.equal((await say(meeting, s2, 'one')).body.stored, false); // the other stream's copy
   await h.wait(50);
-  // both are owners, though only one stream's lines are stored
+  // both are owners
   assert.equal(ofType(panel, 'arlo.state').at(-1).role, 'owner');
   assert.deepEqual(getMeetingStreams().operators(meeting), [ana.zoomUserId, ben.zoomUserId]);
 
@@ -131,18 +131,18 @@ test('with two streams learned from their lines, one stopping is not a meeting s
   assert.deepEqual(await texts(meeting), ['one', 'two']);
 });
 
-test('the original host\'s stream, learned from its lines, is the one stored', async () => {
+test('the original host\'s stream, learned from its lines, is the primary one', async () => {
   const meeting = 'RESTART-D==';
   await say(meeting, { streamId: 's1', operatorId: 'op-1' }, 'before the host stream was heard');
   const host = { streamId: 's2', operatorId: 'op-host', originalHost: true };
   await say(meeting, host, 'from the host stream');
-  assert.equal(getMeetingStreams().isSource(meeting, 's2'), true);
-  assert.equal(getMeetingStreams().sourceOperator(meeting), 'op-host');
+  assert.equal(getMeetingStreams().isPrimary(meeting, 's2'), true);
+  assert.equal(getMeetingStreams().primaryOperator(meeting), 'op-host');
   // only the boolean counts
   const other = 'RESTART-D2==';
   await say(other, { streamId: 's1' }, 'x');
   await say(other, { streamId: 's2', originalHost: 'true' }, 'y');
-  assert.equal(getMeetingStreams().isSource(other, 's1'), true);
+  assert.equal(getMeetingStreams().isPrimary(other, 's1'), true);
 });
 
 test('a late line from a stream that stopped does not make the meeting run again', async () => {

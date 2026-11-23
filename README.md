@@ -107,7 +107,7 @@ Arlo shows one screen at a time. Which one depends on whether Arlo is in the mee
 How it works:
 
 - **Who gets the notes.** Each Arlo user who runs a transcript stream of their own in the meeting gets the notes. Everyone else gets the participant view. Pause, Resume and Remove Arlo are shown only to those users, because they act on the user's own stream. A host stops someone else's stream with Zoom's own controls.
-- **Several streams, one transcript.** Several users can each run a stream in the same meeting. The server stores one transcript: it takes the lines from the original host's stream when there is one, otherwise from the stream that started first. If that stream goes silent for 30 seconds while another one delivers, the other one takes over.
+- **Several streams, one transcript.** Several users can each run a stream in the same meeting. The server stores one transcript: a line from any of the streams is stored, unless the same line (same speaker, same words, close in time) was just stored from another stream. No stream is preferred, so a stream that stops, falls behind or goes silent loses nothing.
 - **When the meeting ends.** The server deletes the transcript, the notes and the record of who brought Arlo in. A panel that is still open keeps showing the notes it already has.
 - **The earlier dashboard** (tabs, vertical cards, suggestions) is still in the app. While in a meeting, open Settings and choose **Classic dashboard**.
 

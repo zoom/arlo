@@ -95,8 +95,9 @@ test('a line that is dropped does not reach the engine', async () => {
   const ana = person('zoom-notes-ana', 'Ana Ruiz');
   await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana.zoomUserId });
   await status(meeting, { status: 'rtms_started', streamId: 's2' });
-  await say(meeting, 's1', 'kept');
-  for (let i = 1; i <= 8; i += 1) await say(meeting, 's2', `the other stream ${i}`); // not the stored stream
+  for (let i = 1; i <= 4; i += 1) await say(meeting, 's1', `kept ${i}`);
+  // the other stream's copies of the same lines: stored already, so dropped
+  for (let i = 1; i <= 4; i += 1) assert.equal((await say(meeting, 's2', `kept ${i}`)).body.stored, false);
   await h.postJson(`${srv.base}/api/rtms/broadcast`, { meetingId: meeting, streamId: 's1', segment: { text: '' } }, internal); // refused
   await h.wait(100);
   assert.equal(modelCalls.length, 0);

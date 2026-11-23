@@ -35,7 +35,7 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
   }
 
   /**
-   * The meeting's owners, the operator of the stored stream first. Empty once
+   * The meeting's owners, the operator of the primary stream first. Empty once
    * the meeting's data is gone, whatever is still known about its streams.
    */
   function owners(meetingId) {
@@ -60,7 +60,7 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
   function stateFor(meetingId, userId) {
     const status = streamStatus(meetingId) || null;
     const list = owners(meetingId);
-    // operators() lists the stored stream's operator first, so the first owner
+    // operators() lists the primary stream's operator first, so the first owner
     // is that person when they are an Arlo user, and the next owner otherwise
     return {
       present: status !== null,

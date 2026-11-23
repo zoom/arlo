@@ -1,46 +1,56 @@
-// Several Zoom users can each run a stream in one meeting. This is the record
-// of those streams and the choice of the one whose lines are stored.
+// Several Zoom users can each run a stream in one meeting, and every stream
+// carries the same speech. This is the record of those streams and the rule
+// that stores each line once, whichever streams delivered it.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createMeetingStreams } = require('../src/services/meetingStreams');
 
 function setup(options) {
   const warnings = [];
-  const streams = createMeetingStreams({ log: { warn: (line) => warnings.push(line) }, ...options });
-  return { streams, warnings };
+  const clock = { now: 1_000_000 };
+  const streams = createMeetingStreams({
+    log: { warn: (line) => warnings.push(line) }, now: () => clock.now, ...options,
+  });
+  const after = (seconds) => { clock.now += seconds * 1000; };
+  return { streams, warnings, clock, after };
 }
 const M = 'MEETING-1==';
+const line = (text, tStartMs = 1000, speakerId = '7') => ({ speakerId, tStartMs, text });
 
-test('the first stream is the source', () => {
+// --- the streams of a meeting ------------------------------------------------
+
+test('the first stream is the primary one', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
 
-  assert.equal(streams.isSource(M, 's1'), true);
-  assert.equal(streams.isSource(M, 's2'), false);
-  assert.equal(streams.sourceOperator(M), 'op-1');
+  assert.equal(streams.isPrimary(M, 's1'), true);
+  assert.equal(streams.isPrimary(M, 's2'), false);
+  assert.equal(streams.primaryOperator(M), 'op-1');
   assert.equal(streams.anyLive(M), true);
+  assert.equal(streams.isLive(M, 's2'), true);
 });
 
 test('nothing is known about a meeting no stream was reported for', () => {
   const { streams } = setup();
-  assert.equal(streams.isSource(M, 's1'), false);
+  assert.equal(streams.isPrimary(M, 's1'), false);
+  assert.equal(streams.isLive(M, 's1'), false);
   assert.equal(streams.anyLive(M), false);
   assert.deepEqual(streams.operators(M), []);
-  assert.equal(streams.sourceOperator(M), null);
+  assert.equal(streams.primaryOperator(M), null);
   assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: false });
   assert.equal(streams.size(), 0);
 });
 
-test('an original-host stream that starts later becomes the source', () => {
+test('an original-host stream that starts later becomes the primary one', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-host', originalHost: true });
   streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3' });
 
-  assert.equal(streams.isSource(M, 's2'), true);
-  assert.equal(streams.isSource(M, 's1'), false);
-  assert.equal(streams.sourceOperator(M), 'op-host');
+  assert.equal(streams.isPrimary(M, 's2'), true);
+  assert.equal(streams.isPrimary(M, 's1'), false);
+  assert.equal(streams.primaryOperator(M), 'op-host');
 });
 
 test('only the boolean true marks the original host', () => {
@@ -48,65 +58,67 @@ test('only the boolean true marks the original host', () => {
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2', originalHost: 'true' });
   streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3', originalHost: 1 });
-  assert.equal(streams.isSource(M, 's1'), true);
+  assert.equal(streams.isPrimary(M, 's1'), true);
 });
 
-test('the source stopping hands over to the next live stream, in the order they started', () => {
+test('when the primary stream stops, the live stream that started first is the primary one', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
   streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3' });
 
   assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: true });
-  assert.equal(streams.isSource(M, 's2'), true);
-  assert.equal(streams.isSource(M, 's1'), false);
+  assert.equal(streams.isPrimary(M, 's2'), true);
+  assert.equal(streams.isPrimary(M, 's1'), false);
+  assert.equal(streams.isLive(M, 's1'), false);
   assert.deepEqual(streams.streamStopped(M, 's2'), { anyLive: true });
-  assert.equal(streams.isSource(M, 's3'), true);
+  assert.equal(streams.isPrimary(M, 's3'), true);
 });
 
-test('a stream that is not the source stopping changes nothing', () => {
+test('another stream stopping does not change the primary one', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
   assert.deepEqual(streams.streamStopped(M, 's2'), { anyLive: true });
-  assert.equal(streams.isSource(M, 's1'), true);
+  assert.equal(streams.isPrimary(M, 's1'), true);
 });
 
-test('when the original host\'s stream stops, the stream that started first takes over', () => {
+test('when the original host\'s stream stops, the stream that started first is the primary one', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
   streams.streamStarted(M, { streamId: 's3', operatorId: 'op-host', originalHost: true });
   streams.streamStopped(M, 's3');
-  assert.equal(streams.isSource(M, 's1'), true);
+  assert.equal(streams.isPrimary(M, 's1'), true);
 });
 
-test('the source does not change while it runs, whoever else starts', () => {
+test('the primary stream does not change while it runs, whoever else starts', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-host', originalHost: true });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2', originalHost: true }); // cannot be, but must not flip
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-host', originalHost: true }); // reported again after a rejoin
-  assert.equal(streams.isSource(M, 's1'), true);
+  assert.equal(streams.isPrimary(M, 's1'), true);
 });
 
-test('after the last stream stopped nothing is live, and its late lines still belong to it', () => {
+test('after the last stream stopped nothing is live; it stays the primary one until another starts', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
   streams.streamStopped(M, 's2');
   assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: false });
   assert.equal(streams.anyLive(M), false);
-  assert.equal(streams.acceptsDataFrom(M, 's1'), true);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
-  assert.equal(streams.anyLive(M), false); // a late line does not bring a stopped stream back
+  assert.equal(streams.primaryOperator(M), 'op-1');
 
-  // the next stream to start is the source, not the stopped one
+  // lines of a stopped stream can still be on their way: they are stored
+  assert.equal(streams.keepsLine(M, 's1', { line: line('late from s1') }), true);
+  assert.equal(streams.keepsLine(M, 's2', { line: line('late from s2') }), true);
+  assert.equal(streams.anyLive(M), false); // and do not bring a stopped stream back
+
   streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3' });
-  assert.equal(streams.isSource(M, 's3'), true);
-  assert.equal(streams.acceptsDataFrom(M, 's1'), false);
+  assert.equal(streams.isPrimary(M, 's3'), true);
 });
 
-test('operators lists everyone whose stream was seen, the source\'s first, each once', () => {
+test('operators lists everyone whose stream was seen, the primary stream\'s first, each once', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
@@ -118,7 +130,7 @@ test('operators lists everyone whose stream was seen, the source\'s first, each 
   streams.streamStopped(M, 's4');
   streams.streamStopped(M, 's1');
   assert.deepEqual(streams.operators(M), ['op-2', 'op-1', 'op-host']);
-  assert.equal(streams.sourceOperator(M), 'op-2');
+  assert.equal(streams.primaryOperator(M), 'op-2');
 });
 
 test('the same user starting again replaces their old stream, as the rtms service does', () => {
@@ -127,18 +139,29 @@ test('the same user starting again replaces their old stream, as the rtms servic
   streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
   streams.streamStarted(M, { streamId: 's3', operatorId: 'op-1' });
 
-  assert.equal(streams.isSource(M, 's2'), true); // s1 is gone, s2 started before s3
+  assert.equal(streams.isPrimary(M, 's2'), true); // s1 is over, s2 started before s3
+  assert.equal(streams.isLive(M, 's1'), false);
   assert.deepEqual(streams.operators(M), ['op-2', 'op-1']);
   streams.streamStopped(M, 's2');
   assert.deepEqual(streams.streamStopped(M, 's3'), { anyLive: false }); // s1 does not count as live
 });
 
+test('a user who keeps restarting does not fill the meeting with old streams', () => {
+  const { streams, warnings } = setup();
+  for (let i = 1; i <= 60; i += 1) streams.streamStarted(M, { streamId: `s${i}`, operatorId: 'op-1' });
+  assert.equal(streams.isLive(M, 's60'), true);
+  assert.equal(streams.isLive(M, 's59'), false);
+  assert.equal(warnings.length, 0);
+  assert.equal(streams.keepsLine(M, 's60', { line: line('still stored') }), true);
+});
+
 test('a report without a stream id is the only stream of its meeting', () => {
   const { streams } = setup();
   streams.streamStarted(M, { operatorId: 'op-1' });
-  assert.equal(streams.isSource(M, undefined), true);
-  assert.equal(streams.acceptsDataFrom(M, undefined), true);
-  assert.equal(streams.sourceOperator(M), 'op-1');
+  assert.equal(streams.isPrimary(M, undefined), true);
+  assert.equal(streams.keepsLine(M, undefined, { line: line('one') }), true);
+  assert.equal(streams.keepsLine(M, undefined, { line: line('one') }), true); // said again
+  assert.equal(streams.primaryOperator(M), 'op-1');
   assert.deepEqual(streams.streamStopped(M, undefined), { anyLive: false });
 });
 
@@ -150,19 +173,28 @@ test('a stop without a stream id stops every stream of the meeting', () => {
   assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
 });
 
-test('a stream first heard of through its lines counts as started (this server restarted mid-meeting)', () => {
+test('a stream first heard of through its data counts as started (this server restarted mid-meeting)', () => {
   const { streams } = setup();
-  assert.equal(streams.acceptsDataFrom(M, 's1'), true);
+  assert.equal(streams.keepsLine(M, 's1', { line: line('one') }), true);
   assert.equal(streams.anyLive(M), true);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), false); // a second one is not the source
-  assert.equal(streams.isSource(M, 's1'), true);
+  assert.equal(streams.isPrimary(M, 's1'), true);
+  // whose stream it is comes with its data
+  assert.equal(streams.keepsEvent(M, 's2', {
+    event: { eventType: 'joined', participantId: '12' }, operatorId: 'op-host', originalHost: true,
+  }), true);
+  assert.equal(streams.isLive(M, 's2'), true);
+  assert.equal(streams.isPrimary(M, 's2'), true);
+  assert.equal(streams.primaryOperator(M), 'op-host');
 
-  // its start report arrives late and fills in whose stream it is
-  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
-  assert.equal(streams.sourceOperator(M), 'op-1');
-  // the original host's does too, and takes over
-  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-host', originalHost: true });
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
+  // a stream known without an operator gets it from its next line or its late start report
+  assert.equal(streams.keepsLine(M, 's1', { line: line('two', 2000), operatorId: 'op-1' }), true);
+  assert.deepEqual(streams.operators(M), ['op-host', 'op-1']);
+  streams.streamStarted(M, { streamId: 's3' });
+  streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3' });
+  assert.deepEqual(streams.operators(M), ['op-host', 'op-1', 'op-3']);
+  // data never replaces another stream of the same user: only a start report does
+  assert.equal(streams.keepsLine(M, 's4', { line: line('three', 3000), operatorId: 'op-1' }), true);
+  assert.equal(streams.isLive(M, 's1'), true);
 });
 
 test('at most 20 streams are kept per meeting; more are ignored with one warning', () => {
@@ -170,8 +202,9 @@ test('at most 20 streams are kept per meeting; more are ignored with one warning
   for (let i = 1; i <= 25; i += 1) streams.streamStarted(M, { streamId: `s${i}`, operatorId: `op-${i}` });
 
   assert.equal(streams.operators(M).length, 20);
-  assert.equal(streams.isSource(M, 's21'), false);
-  assert.equal(streams.acceptsDataFrom(M, 's26'), false);
+  assert.equal(streams.isLive(M, 's21'), false);
+  assert.equal(streams.keepsLine(M, 's26', { line: line('x') }), false);
+  assert.equal(streams.keepsEvent(M, 's26', { event: { eventType: 'joined', participantId: '1' } }), false);
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].includes('op-'), false);
 
@@ -185,28 +218,17 @@ test('ids that are not sane strings are refused', () => {
   for (const bad of [42, '', null, {}, 'x'.repeat(257)]) {
     streams.streamStarted(bad, { streamId: 's1', operatorId: 'op-1' });
     streams.streamStarted(M, { streamId: bad === null ? 7 : bad, operatorId: 'op-1' });
+    assert.equal(streams.keepsLine(bad, 's1', { line: line('x') }), false);
   }
   assert.equal(streams.size(), 0);
 
   streams.streamStarted(M, { streamId: 's1', operatorId: 42 });
   streams.streamStarted(M, { streamId: 's2', operatorId: 'x'.repeat(257) });
   assert.deepEqual(streams.operators(M), []);
-  assert.equal(streams.isSource(M, 's1'), true);
-  assert.equal(streams.acceptsDataFrom(M, 42), false);
+  assert.equal(streams.isPrimary(M, 's1'), true);
+  assert.equal(streams.keepsLine(M, 42, { line: line('x') }), false);
+  assert.equal(streams.keepsEvent(M, 42, { event: { eventType: 'joined', participantId: '1' } }), false);
   assert.deepEqual(streams.streamStopped(M, 42), { anyLive: true }); // a bad id stops nothing
-});
-
-test('forget removes everything known about a meeting, and only that meeting', () => {
-  const { streams } = setup();
-  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
-  streams.streamStarted('MEETING-2==', { streamId: 's9', operatorId: 'op-9' });
-  streams.forget(M);
-
-  assert.deepEqual(streams.operators(M), []);
-  assert.equal(streams.isSource(M, 's1'), false);
-  assert.equal(streams.anyLive(M), false);
-  assert.equal(streams.isSource('MEETING-2==', 's9'), true);
-  assert.equal(streams.size(), 1);
 });
 
 test('past the meeting limit the meeting heard from longest ago is dropped', () => {
@@ -225,24 +247,26 @@ test('when the only stream known was reported without its id, a report that name
   // Zoom's own webhooks always name the stream
   const { streams } = setup();
   streams.streamStarted(M, { operatorId: 'op-1' });
-  assert.equal(streams.isSource(M, 's1'), true);
-  assert.equal(streams.acceptsDataFrom(M, 's1'), true);
+  assert.equal(streams.isPrimary(M, 's1'), true);
+  assert.equal(streams.keepsLine(M, undefined, { line: line('one') }), true);
+  assert.equal(streams.keepsLine(M, 's1', { line: line('one') }), true); // the same stream said it again
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   assert.deepEqual(streams.operators(M), ['op-1']);
   assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: false });
 });
 
-test('a report without a stream id in a meeting whose streams are known by id is taken as the stored one', () => {
+test('a report without a stream id in a meeting whose streams are known by id adds no stream', () => {
   const { streams } = setup();
   streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
   streams.streamStarted(M, {});
-  assert.equal(streams.isSource(M, undefined), true);
-  assert.equal(streams.acceptsDataFrom(M, undefined), true);
-  assert.equal(streams.isSource(M, 's1'), true); // and nothing was added or replaced
+  assert.equal(streams.isPrimary(M, undefined), true);
+  assert.equal(streams.isPrimary(M, 's1'), true); // and nothing was added or replaced
+  // its lines are one more unnamed stream's: stored unless s1 delivered them already
+  assert.equal(streams.keepsLine(M, 's1', { line: line('one') }), true);
+  assert.equal(streams.keepsLine(M, undefined, { line: line('one') }), false);
+  assert.equal(streams.keepsLine(M, undefined, { line: line('two', 2000) }), true);
   assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: false });
 });
-
-// --- the meeting ended: every stream is over -------------------------------
 
 test('stopAll marks every stream of the meeting stopped and keeps who ran them', () => {
   const { streams } = setup();
@@ -261,445 +285,302 @@ test('stopAll marks every stream of the meeting stopped and keeps who ran them',
   assert.equal(streams.size(), 2);
 });
 
-// --- a source that went silent without a stop report ------------------------
-
-function timed(options) {
-  const clock = { now: 1_000_000 };
-  const { streams, warnings } = setup({ now: () => clock.now, ...options });
-  const after = (seconds) => { clock.now += seconds * 1000; };
-  return { streams, warnings, clock, after };
-}
-
-test('a line from another live stream takes over when the source has delivered nothing for 30 seconds', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
-  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
-  assert.equal(streams.acceptsDataFrom(M, 's1'), true);
-
-  after(29);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), false); // not yet
-  after(1);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true); // its line is kept
-  assert.equal(streams.isSource(M, 's2'), true);
-  assert.equal(streams.isSource(M, 's1'), false);
-  assert.equal(streams.sourceOperator(M), 'op-2');
-  assert.deepEqual(streams.operators(M), ['op-2', 'op-1']);
-  assert.equal(streams.anyLive(M), true);
-});
-
-test('the source is not switched while it keeps delivering', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1' });
-  streams.streamStarted(M, { streamId: 's2' });
-  for (let i = 0; i < 10; i += 1) {
-    after(20);
-    assert.equal(streams.acceptsDataFrom(M, 's1'), true);
-    assert.equal(streams.acceptsDataFrom(M, 's2'), false);
-  }
-  assert.equal(streams.isSource(M, 's1'), true);
-});
-
-test('silence in the meeting switches nothing: only a line from another stream can', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1' });
-  streams.streamStarted(M, { streamId: 's2' });
-  streams.acceptsDataFrom(M, 's1');
-  after(600); // nobody spoke for ten minutes
-  assert.equal(streams.isSource(M, 's1'), true);
-  streams.streamStarted(M, { streamId: 's3' }); // nor does a stream starting
-  assert.equal(streams.isSource(M, 's1'), true);
-  assert.equal(streams.acceptsDataFrom(M, 's1'), true);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
-});
-
-test('a source that never delivered counts as silent from when it became the source', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1' });
-  after(10);
-  streams.streamStarted(M, { streamId: 's2' });
-  after(19);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
-  after(1);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
-});
-
-test('a stream that took over is given 30 seconds of its own before it can be replaced', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1' });
-  streams.streamStarted(M, { streamId: 's2' });
-  streams.streamStarted(M, { streamId: 's3' });
-  after(30);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
-  after(29);
-  assert.equal(streams.acceptsDataFrom(M, 's3'), false);
-  after(1);
-  assert.equal(streams.acceptsDataFrom(M, 's3'), true);
-});
-
-test('a silent original-host stream loses the source role, and gets it back only by the same rule', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 'host', operatorId: 'op-host', originalHost: true });
-  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
-  streams.acceptsDataFrom(M, 'host');
-  after(31);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
-
-  // it does not come back because it is the original host: not when another
-  // stream starts, not when it reports itself running, not when it delivers
-  // while the current source is delivering too
-  after(60);
-  streams.acceptsDataFrom(M, 's2');
-  streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3' });
-  streams.streamStarted(M, { streamId: 'host', operatorId: 'op-host', originalHost: true });
-  assert.equal(streams.isSource(M, 's2'), true);
-  assert.equal(streams.acceptsDataFrom(M, 'host'), false);
-  after(20);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
-  assert.equal(streams.acceptsDataFrom(M, 'host'), false);
-
-  // the current source goes silent: the host's line takes over, like anyone's
-  after(30);
-  assert.equal(streams.acceptsDataFrom(M, 'host'), true);
-  assert.equal(streams.isSource(M, 'host'), true);
-  // and from then on it is the preferred stream again
-  streams.streamStopped(M, 's3');
-  streams.streamStarted(M, { streamId: 's3', operatorId: 'op-3' });
-  assert.equal(streams.isSource(M, 'host'), true);
-});
-
-test('an original-host stream that stopped and started again is preferred again', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 'host', originalHost: true });
-  streams.streamStarted(M, { streamId: 's2' });
-  after(30);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
-  streams.streamStopped(M, 'host');
-  streams.streamStarted(M, { streamId: 'host', originalHost: true });
-  assert.equal(streams.isSource(M, 'host'), true);
-});
-
-test('when the source stops, a stream that lost the role through silence is chosen last', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1' });
-  streams.streamStarted(M, { streamId: 's2' });
-  streams.streamStarted(M, { streamId: 's3' });
-  after(30);
-  streams.acceptsDataFrom(M, 's2'); // s1 went silent
-  after(10);
-  streams.streamStopped(M, 's2');
-  assert.equal(streams.isSource(M, 's3'), true);
-  streams.streamStopped(M, 's3');
-  assert.equal(streams.isSource(M, 's1'), true); // the only one left
-});
-
-test('after a pause in the talk, the stream whose copy arrives first does not keep the role from a source that is alive', () => {
-  // Every stream carries the same speech. After 30 quiet seconds the first
-  // line of the next sentence can arrive from another stream a moment before
-  // the source's copy. That is not a dead source.
-  const { streams, clock, after } = timed();
-  streams.streamStarted(M, { streamId: 'host', operatorId: 'op-host', originalHost: true });
-  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
-  streams.acceptsDataFrom(M, 'host');
-  after(45);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true); // kept: one copy of the line
-  clock.now += 80;
-  assert.equal(streams.acceptsDataFrom(M, 'host'), false); // the same line again: dropped
-  assert.equal(streams.isSource(M, 'host'), true); // and the source is who it was
-  assert.equal(streams.sourceOperator(M), 'op-host');
-  after(1);
-  assert.equal(streams.acceptsDataFrom(M, 'host'), true);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
-});
-
-test('a displaced source that delivers only later does not get the role back for that', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1' });
-  streams.streamStarted(M, { streamId: 's2' });
-  after(30);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
-  after(6); // past the 5 seconds in which a copy of the same line would arrive
-  assert.equal(streams.acceptsDataFrom(M, 's1'), false);
-  assert.equal(streams.isSource(M, 's2'), true);
-});
-
-test('a stopped stream never takes over, however silent the source is', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1' });
-  streams.streamStarted(M, { streamId: 's2' });
-  streams.streamStopped(M, 's2');
-  after(120);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
-  assert.equal(streams.isSource(M, 's1'), true);
-  // nor a stream past the limit, nor a bad id
-  assert.equal(streams.acceptsDataFrom(M, 42), false);
-});
-
-test('the silence limit can be set', () => {
-  const { streams, after } = timed({ sourceSilentMs: 5000 });
-  streams.streamStarted(M, { streamId: 's1' });
-  streams.streamStarted(M, { streamId: 's2' });
-  after(4);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), false);
-  after(1);
-  assert.equal(streams.acceptsDataFrom(M, 's2'), true);
-});
-
-// --- around a change of source: decide by content, never lose a line ---------
+// --- every line is stored once, whichever streams delivered it ---------------
 
 // Every stream carries the same speech: line n is the same speaker, time and
 // words on each of them
-const lineNo = (n) => ({ speakerId: '7', tStartMs: 50_000 + n * 1000, text: `line ${n}` });
-/** Feed lines as [streamId, n] pairs; returns the numbers of the lines kept, in order. */
+const lineNo = (n) => line(`line ${n}`, 50_000 + n * 1000);
+/** Feed lines as [streamId, n] pairs; returns the numbers of the lines stored, in order. */
 function replay(streams, sequence, stored = []) {
   for (const [streamId, n] of sequence) {
-    if (streams.acceptsDataFrom(M, streamId, { line: lineNo(n) })) stored.push(n);
+    if (streams.keepsLine(M, streamId, { line: lineNo(n) })) stored.push(n);
   }
   return stored;
 }
-/** Streams A (the source) and B, A silent for 35 seconds after line 0. */
-function silentSource() {
-  const t = timed();
-  t.streams.streamStarted(M, { streamId: 'A', operatorId: 'op-a' });
-  t.streams.streamStarted(M, { streamId: 'B', operatorId: 'op-b' });
-  t.stored = replay(t.streams, [['A', 0]]);
-  t.after(35);
+const sorted = (numbers) => [...numbers].sort((a, b) => a - b);
+function started(ids, options) {
+  const t = setup(options);
+  for (const id of ids) t.streams.streamStarted(M, { streamId: id, operatorId: `op-${id}` });
   return t;
 }
 
-test('after a silence switch, the old source\'s next line arriving first is kept, and the other copy dropped', () => {
-  const { streams, stored, after } = silentSource();
-  replay(streams, [['B', 1]], stored);
-  assert.equal(streams.isSource(M, 'B'), true);
-  after(3);
-  replay(streams, [['A', 2], ['B', 2]], stored);
-  assert.deepEqual(stored, [0, 1, 2]);
-  assert.equal(streams.isSource(M, 'A'), true); // it delivered within the revert time
-});
-
-test('after a silence switch, two lines from the new source followed by the old source\'s copies are stored once each', () => {
-  const { streams, stored } = silentSource();
-  replay(streams, [['B', 1], ['B', 2], ['A', 1], ['A', 2]], stored);
-  assert.deepEqual(stored, [0, 1, 2]);
-});
-
-test('after a silence switch, copies interleaved in any order are stored once each', () => {
-  for (const order of [
-    [['B', 1], ['A', 1], ['B', 2], ['A', 2], ['A', 3], ['B', 3]],
-    [['B', 1], ['A', 1], ['A', 2], ['B', 2], ['B', 3], ['A', 3]],
-    [['B', 1], ['B', 2], ['A', 1], ['B', 3], ['A', 2], ['A', 3]],
-    [['B', 1], ['A', 2], ['A', 1], ['B', 3], ['B', 2], ['A', 3]],
-  ]) {
-    const { streams, stored } = silentSource();
-    replay(streams, order, stored);
-    assert.deepEqual([...stored].sort(), [0, 1, 2, 3], JSON.stringify(order));
-    assert.equal(stored.length, 4, JSON.stringify(order));
-  }
-});
-
-test('when the source stops, its copy of a line still in flight is kept, though the other stream\'s copy was dropped', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 'A' });
-  streams.streamStarted(M, { streamId: 'B' });
-  const stored = replay(streams, [['A', 1], ['B', 1], ['B', 2]]); // B's copies: A is the source
-  assert.deepEqual(stored, [1]);
-  streams.streamStopped(M, 'A');
-  assert.equal(streams.isSource(M, 'B'), true);
-  after(1);
-  replay(streams, [['A', 2], ['B', 3], ['A', 3]], stored);
+test('two streams in step: each line is stored once', () => {
+  const { streams } = started(['A', 'B']);
+  const stored = replay(streams, [['A', 1], ['B', 1], ['B', 2], ['A', 2], ['A', 3], ['B', 3]]);
   assert.deepEqual(stored, [1, 2, 3]);
-  assert.equal(streams.anyLive(M), true);
-  assert.equal(streams.isSource(M, 'B'), true); // a stopped stream's late lines do not bring it back
-
-  // only for a moment: later lines from the stopped stream are not kept
-  after(10);
-  assert.deepEqual(replay(streams, [['A', 4]]), []);
-  assert.deepEqual(replay(streams, [['B', 4]]), [4]);
 });
 
-test('when the source stops after its copy was stored, the next source\'s copy of that line is dropped', () => {
-  const { streams } = timed();
-  streams.streamStarted(M, { streamId: 'A' });
-  streams.streamStarted(M, { streamId: 'B' });
-  const stored = replay(streams, [['A', 1]]);
-  streams.streamStopped(M, 'A');
-  replay(streams, [['B', 1], ['B', 2], ['A', 2]], stored);
-  assert.deepEqual(stored, [1, 2]);
-});
-
-test('when the original host\'s stream takes over, the old source\'s lines in flight are kept once', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1' });
-  const stored = replay(streams, [['s1', 1]]);
-  streams.streamStarted(M, { streamId: 'host', originalHost: true });
-  replay(streams, [['s1', 2], ['host', 2], ['host', 3], ['s1', 3]], stored);
-  assert.deepEqual(stored, [1, 2, 3]);
-  after(10);
-  replay(streams, [['s1', 4], ['host', 4]], stored);
+test('a stream two lines ahead of the other: nothing lost, nothing twice', () => {
+  const { streams } = started(['A', 'B']);
+  const stored = replay(streams, [
+    ['B', 1], ['B', 2], ['A', 1], ['B', 3], ['A', 2], ['B', 4], ['A', 3], ['A', 4],
+  ]);
   assert.deepEqual(stored, [1, 2, 3, 4]);
-  assert.equal(streams.isSource(M, 'host'), true);
 });
 
-test('the time around a change of source in which both streams are heard can be set', () => {
-  const { streams, after } = timed({ changeWindowMs: 2000 });
-  streams.streamStarted(M, { streamId: 'A' });
-  streams.streamStarted(M, { streamId: 'B' });
-  streams.streamStopped(M, 'A');
-  after(1);
-  assert.deepEqual(replay(streams, [['A', 1]]), [1]);
-  after(1);
-  assert.deepEqual(replay(streams, [['A', 2]]), []);
-});
-
-test('two streams delivering the same lines in steady state store one copy of each', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 'A' });
-  streams.streamStarted(M, { streamId: 'B' });
-  const stored = [];
-  for (let n = 1; n <= 6; n += 1) {
-    after(4);
-    replay(streams, n % 2 ? [['A', n], ['B', n]] : [['B', n], ['A', n]], stored);
-  }
+test('a stream three lines behind the other: nothing lost, nothing twice', () => {
+  const { streams, after } = started(['A', 'B']);
+  const stored = replay(streams, [['A', 1], ['A', 2], ['A', 3], ['A', 4]]);
+  after(8); // B's copies arrive seconds later
+  replay(streams, [['B', 1], ['A', 5], ['B', 2], ['A', 6], ['B', 3], ['B', 4], ['B', 5], ['B', 6]], stored);
   assert.deepEqual(stored, [1, 2, 3, 4, 5, 6]);
-  assert.equal(streams.isSource(M, 'A'), true);
 });
 
-test('the same line twice from the source itself is stored once', () => {
-  const { streams } = timed();
-  streams.streamStarted(M, { streamId: 'A' });
-  assert.deepEqual(replay(streams, [['A', 1], ['A', 1], ['A', 2]]), [1, 2]);
+test('a stream stops while the other is ahead, and its remaining copies never arrive', () => {
+  const { streams } = started(['A', 'B']);
+  const stored = replay(streams, [['A', 1], ['B', 1], ['B', 2], ['B', 3]]);
+  streams.streamStopped(M, 'A'); // A never delivers 2 and 3
+  replay(streams, [['B', 4], ['B', 5]], stored);
+  assert.deepEqual(stored, [1, 2, 3, 4, 5]);
 });
 
-test('the same speaker saying the same words again later is stored', () => {
-  const { streams } = timed();
-  streams.streamStarted(M, { streamId: 'A' });
-  const said = (tStartMs, speakerId = '7') => streams.acceptsDataFrom(M, 'A', { line: { speakerId, tStartMs, text: 'Yes.' } });
-  assert.equal(said(1000), true);
-  assert.equal(said(1000), false);
-  assert.equal(said(4000), true);
-  assert.equal(said(4000, '8'), true); // someone else, at the same moment
-});
-
-test('a line without a usable timestamp is never taken for a duplicate', () => {
-  const { streams } = timed();
-  streams.streamStarted(M, { streamId: 'A' });
-  for (const tStartMs of [undefined, null, '1000', NaN]) {
-    assert.equal(streams.acceptsDataFrom(M, 'A', { line: { speakerId: '7', tStartMs, text: 'Yes.' } }), true);
-    assert.equal(streams.acceptsDataFrom(M, 'A', { line: { speakerId: '7', tStartMs, text: 'Yes.' } }), true);
-  }
-  assert.equal(streams.acceptsDataFrom(M, 'A', { line: null }), true);
-});
-
-test('the memory of stored lines is bounded by count and by age', () => {
-  const { streams, after } = timed({ maxRecentLines: 3 });
-  streams.streamStarted(M, { streamId: 'A' });
-  assert.deepEqual(replay(streams, [['A', 1], ['A', 2], ['A', 3], ['A', 4]]), [1, 2, 3, 4]);
-  assert.deepEqual(replay(streams, [['A', 4], ['A', 3]]), []); // still remembered
-  assert.deepEqual(replay(streams, [['A', 1]]), [1]); // the oldest was let go
-  after(121);
-  assert.deepEqual(replay(streams, [['A', 4]]), [4]); // two minutes on, nothing is remembered
-
-  const many = timed();
-  many.streams.streamStarted(M, { streamId: 'A' });
-  const all = Array.from({ length: 201 }, (unused, i) => ['A', i + 1]);
-  assert.equal(replay(many.streams, all).length, 201);
-  assert.deepEqual(replay(many.streams, [['A', 2]]), []);
-  assert.deepEqual(replay(many.streams, [['A', 1]]), [1]); // 200 are remembered, not 201
-});
-
-test('forget removes the memory of stored lines with the rest', () => {
-  const { streams } = timed();
-  streams.streamStarted(M, { streamId: 'A' });
-  streams.streamStarted('OTHER==', { streamId: 'A' });
-  assert.equal(streams.acceptsDataFrom(M, 'A', { line: lineNo(1) }), true);
-  assert.equal(streams.acceptsDataFrom('OTHER==', 'A', { line: lineNo(1) }), true); // per meeting
-  streams.forget(M);
-  assert.equal(streams.acceptsDataFrom(M, 'A', { line: lineNo(1) }), true);
-  assert.equal(streams.acceptsDataFrom('OTHER==', 'A', { line: lineNo(1) }), false);
-});
-
-test('timeline events from a stream that is not the source are dropped, also around a change of source', () => {
-  const { streams } = timed();
-  streams.streamStarted(M, { streamId: 'A' });
-  streams.streamStarted(M, { streamId: 'B' });
+test('a stopped stream\'s lines still on their way are stored, once', () => {
+  const { streams } = started(['A', 'B']);
+  const stored = replay(streams, [['A', 1], ['B', 1], ['A', 2]]);
   streams.streamStopped(M, 'A');
-  assert.equal(streams.acceptsDataFrom(M, 'A'), false); // no line: an event
-  assert.equal(streams.acceptsDataFrom(M, 'B'), true);
-  assert.equal(streams.acceptsDataFrom(M, 'A', { line: lineNo(1) }), true); // its lines are
+  replay(streams, [['A', 3], ['B', 2], ['B', 3], ['B', 4]], stored);
+  assert.deepEqual(stored, [1, 2, 3, 4]);
+  assert.equal(streams.isLive(M, 'A'), false);
 });
 
-// --- whose stream it is, learned from its data (this server restarted) -------
-
-test('a stream first heard of through its lines gets its operator and original-host flag from them', () => {
-  const { streams } = setup();
-  assert.equal(streams.acceptsDataFrom(M, 's1', { line: lineNo(1), operatorId: 'op-1' }), true);
-  assert.deepEqual(streams.operators(M), ['op-1']);
-  assert.equal(streams.sourceOperator(M), 'op-1');
-
-  // a second one is known too, though its lines are not the stored ones
-  assert.equal(streams.acceptsDataFrom(M, 's2', { line: lineNo(2), operatorId: 'op-2' }), false);
-  assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
-  assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: true });
-
-  // the original host's stream takes over, as it does when its start is reported
-  assert.equal(streams.acceptsDataFrom(M, 's3', { operatorId: 'op-host', originalHost: true }), true);
-  assert.equal(streams.isSource(M, 's3'), true);
-  assert.deepEqual(streams.operators(M), ['op-host', 'op-1', 'op-2']);
+test('a stream dies without a word and the other goes on for two minutes', () => {
+  const { streams, after } = started(['A', 'B']);
+  const stored = replay(streams, [['A', 1], ['B', 1], ['A', 2], ['B', 2]]);
+  for (let n = 3; n <= 26; n += 1) {
+    after(5);
+    replay(streams, [['B', n]], stored);
+  }
+  assert.deepEqual(stored, Array.from({ length: 26 }, (_, i) => i + 1));
 });
 
-test('data fills in an operator that was not known, and never changes one that was', () => {
-  const { streams } = setup();
-  streams.streamStarted(M, { streamId: 's1' });
-  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
-  streams.acceptsDataFrom(M, 's1', { line: lineNo(1), operatorId: 'op-1' });
-  streams.acceptsDataFrom(M, 's2', { line: lineNo(1), operatorId: 'op-other' });
-  assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
-
-  // values that are not sane are not used; only the boolean marks the original host
-  streams.acceptsDataFrom(M, 's4', { line: lineNo(2), operatorId: 42, originalHost: 'true' });
-  streams.acceptsDataFrom(M, 's5', { line: lineNo(2), operatorId: 'x'.repeat(257), originalHost: 1 });
-  assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
-  assert.equal(streams.isSource(M, 's1'), true);
+test('the original host\'s stream starts mid-meeting and delivers nothing for 40 seconds', () => {
+  const { streams, after } = started(['A']);
+  const stored = replay(streams, [['A', 1]]);
+  streams.streamStarted(M, { streamId: 'H', operatorId: 'op-host', originalHost: true });
+  assert.equal(streams.isPrimary(M, 'H'), true);
+  for (let n = 2; n <= 9; n += 1) {
+    after(5);
+    replay(streams, [['A', n]], stored);
+  }
+  // and when it does deliver, its copies are not stored again
+  replay(streams, [['H', 9], ['A', 10], ['H', 10]], stored);
+  assert.deepEqual(stored, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
 });
 
-test('a known stream learned to be the original host\'s from its data becomes the source', () => {
-  const { streams } = setup();
-  streams.acceptsDataFrom(M, 's1', { line: lineNo(1), operatorId: 'op-1' });
-  streams.acceptsDataFrom(M, 's2', { line: lineNo(1), operatorId: 'op-2' });
-  assert.equal(streams.isSource(M, 's1'), true);
-  assert.equal(streams.acceptsDataFrom(M, 's2', { line: lineNo(2), operatorId: 'op-2', originalHost: true }), true);
-  assert.equal(streams.isSource(M, 's2'), true);
+test('a stream that sends only participant events while another sends the lines', () => {
+  const { streams, after } = started(['A', 'B']);
+  const stored = [];
+  for (let n = 1; n <= 8; n += 1) {
+    after(6);
+    assert.equal(streams.keepsEvent(M, 'A', { event: { eventType: 'joined', participantId: String(n) } }), true);
+    replay(streams, [['B', n]], stored);
+  }
+  assert.deepEqual(stored, [1, 2, 3, 4, 5, 6, 7, 8]);
 });
 
-test('data from a stream never replaces another stream of the same user', () => {
-  const { streams } = setup();
-  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
-  streams.acceptsDataFrom(M, 's0', { line: lineNo(1), operatorId: 'op-1' }); // a line of an older stream of theirs
-  assert.equal(streams.isSource(M, 's1'), true);
-  assert.equal(streams.acceptsDataFrom(M, 's1', { line: lineNo(2) }), true);
+test('three streams: each line is stored once, whatever the order', () => {
+  const { streams } = started(['A', 'B', 'C']);
+  const stored = replay(streams, [
+    ['C', 1], ['A', 1], ['B', 1], ['B', 2], ['C', 2], ['C', 3], ['A', 2], ['B', 3], ['A', 3], ['A', 4], ['C', 4], ['B', 4],
+  ]);
+  assert.deepEqual(stored, [1, 2, 3, 4]);
 });
 
-test('a stream its user replaced counts as stopped: late lines do not bring it back', () => {
-  const { streams, after } = timed();
-  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
-  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-1' });
-  assert.equal(streams.isSource(M, 's2'), true);
-  // its lines still on their way are kept for a moment, like any stopped source's
-  assert.equal(streams.acceptsDataFrom(M, 's1', { line: lineNo(1), operatorId: 'op-1' }), true);
+test('the same words twice in a row by one speaker are two lines, and the other stream\'s two copies are dropped', () => {
+  const { streams } = started(['A', 'B']);
+  const kept = [
+    streams.keepsLine(M, 'A', { line: line('Yes.', 1000) }),
+    streams.keepsLine(M, 'A', { line: line('Yes.', 2500) }),
+    streams.keepsLine(M, 'B', { line: line('Yes.', 1000) }),
+    streams.keepsLine(M, 'B', { line: line('Yes.', 2500) }),
+  ];
+  assert.deepEqual(kept, [true, true, false, false]);
+  // also with the copies interleaved, and with nothing to tell them apart but the order
+  const next = [
+    streams.keepsLine(M, 'A', { line: line('No.', 9000) }),
+    streams.keepsLine(M, 'B', { line: line('No.', 9000) }),
+    streams.keepsLine(M, 'B', { line: line('No.', 9000) }),
+    streams.keepsLine(M, 'A', { line: line('No.', 9000) }),
+  ];
+  assert.deepEqual(next, [true, false, true, false]);
+});
+
+test('the same words from another speaker are another line', () => {
+  const { streams } = started(['A', 'B']);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('Yes.', 1000, '7') }), true);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('Yes.', 1000, '8') }), true);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('Yes.', 1000, '7') }), false);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('Yes.', 1000, '8') }), false);
+});
+
+test('copies whose timestamps differ by a few milliseconds are one line', () => {
+  const { streams } = started(['A', 'B']);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('Good morning.', 60_000) }), true);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('Good morning.', 60_003) }), false);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('And you?', 61_000) }), true);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('And you?', 60_997) }), false);
+});
+
+test('the same words more than 5 seconds apart on the streams\' clocks are two lines', () => {
+  const { streams } = started(['A', 'B']);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('Okay.', 60_000) }), true);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('Okay.', 65_000) }), false); // 5 seconds: still the same
+  assert.equal(streams.keepsLine(M, 'A', { line: line('Right.', 60_000) }), true);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('Right.', 65_001) }), true);
+});
+
+test('with no timestamps at all, copies that arrive close together are one line', () => {
+  const { streams, after } = started(['A', 'B']);
+  const bare = (text) => ({ speakerId: '7', text });
+  assert.equal(streams.keepsLine(M, 'A', { line: bare('one') }), true);
+  after(2);
+  assert.equal(streams.keepsLine(M, 'B', { line: bare('one') }), false);
+  assert.equal(streams.keepsLine(M, 'B', { line: bare('two') }), true);
+  after(10);
+  assert.equal(streams.keepsLine(M, 'A', { line: bare('two') }), false); // 10 seconds: still the same
+  // one copy with a timestamp and one without are compared by arrival too
+  assert.equal(streams.keepsLine(M, 'A', { line: line('three', 70_000) }), true);
+  assert.equal(streams.keepsLine(M, 'B', { line: { speakerId: '7', tStartMs: '70000', text: 'three' } }), false);
+});
+
+test('a copy that arrives 30 seconds late: recognised by its timestamp, stored again without one (never lost)', () => {
+  const { streams, after } = started(['A', 'B']);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('with a timestamp', 60_000) }), true);
+  assert.equal(streams.keepsLine(M, 'A', { line: { speakerId: '7', text: 'without one' } }), true);
+  after(30);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('with a timestamp', 60_000) }), false);
+  // nothing ties this copy to the first but the words: it is stored again, a duplicate
+  assert.equal(streams.keepsLine(M, 'B', { line: { speakerId: '7', text: 'without one' } }), true);
+});
+
+test('a copy that arrives after the 2 minutes the memory covers is stored again', () => {
+  const { streams, after } = started(['A', 'B']);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('one', 60_000) }), true);
+  after(119);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('one', 60_000) }), false);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('two', 61_000) }), true);
+  after(121);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('two', 61_000) }), true);
+});
+
+test('the memory of stored lines is bounded: 300 lines by default, and the limits can be set', () => {
+  const { streams } = started(['A', 'B']);
+  for (let n = 0; n <= 300; n += 1) assert.equal(streams.keepsLine(M, 'A', { line: lineNo(n) }), true);
+  assert.equal(streams.remembered(M).lines, 300);
+  assert.equal(streams.keepsLine(M, 'B', { line: lineNo(300) }), false);
+  assert.equal(streams.keepsLine(M, 'B', { line: lineNo(1) }), false);
+  assert.equal(streams.keepsLine(M, 'B', { line: lineNo(0) }), true); // the oldest fell out
+
+  const small = started(['A', 'B'], {
+    maxRecentLines: 2, recentLineMs: 20_000, sameLineStampMs: 100, sameLineArrivalMs: 1000,
+  });
+  replay(small.streams, [['A', 1], ['A', 2], ['A', 3]]);
+  assert.deepEqual(replay(small.streams, [['B', 3], ['B', 2], ['B', 1]]), [1]);
+  assert.equal(small.streams.keepsLine(M, 'A', { line: line('x', 1000) }), true);
+  assert.equal(small.streams.keepsLine(M, 'B', { line: line('x', 1101) }), true);
+  assert.equal(small.streams.keepsLine(M, 'A', { line: { speakerId: '7', text: 'y' } }), true);
+  small.after(2);
+  assert.equal(small.streams.keepsLine(M, 'B', { line: { speakerId: '7', text: 'y' } }), true);
+  small.after(20);
+  assert.equal(small.streams.keepsLine(M, 'B', { line: line('x', 1000) }), true);
+});
+
+test('a line that cannot be identified is stored, never taken for a duplicate', () => {
+  const { streams } = started(['A', 'B']);
+  for (const odd of [undefined, null, 'text', { speakerId: '7' }, { text: 42 }]) {
+    assert.equal(streams.keepsLine(M, 'A', { line: odd }), true);
+    assert.equal(streams.keepsLine(M, 'B', { line: odd }), true);
+  }
+  assert.equal(streams.keepsLine(M, 'A'), true);
+  // a missing speaker id is one speaker, and a number is the speaker it names
+  assert.equal(streams.keepsLine(M, 'A', { line: { text: 'no speaker', tStartMs: 1 } }), true);
+  assert.equal(streams.keepsLine(M, 'B', { line: { text: 'no speaker', tStartMs: 1, speakerId: null } }), false);
+  assert.equal(streams.keepsLine(M, 'A', { line: { text: 'a number', tStartMs: 1, speakerId: 7 } }), true);
+  assert.equal(streams.keepsLine(M, 'B', { line: { text: 'a number', tStartMs: 1, speakerId: '7' } }), false);
+  assert.equal(streams.keepsLine(M, 'B', { line: { text: 'a number', tStartMs: 1, speakerId: 8 } }), true);
+});
+
+// --- participant events arrive once per stream too ---------------------------
+
+const joined = (participantId, extra = {}) => ({ eventType: 'joined', participantId, participantName: `P${participantId}`, ...extra });
+
+test('a participant event is kept once, whichever streams reported it', () => {
+  const { streams, after } = started(['A', 'B', 'C']);
+  assert.equal(streams.keepsEvent(M, 'A', { event: joined('12') }), true);
+  after(1);
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('12', { timestamp: 5 }) }), false);
+  assert.equal(streams.keepsEvent(M, 'C', { event: joined('12') }), false);
+  // another person, and the same person leaving, are other events
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('13') }), true);
+  assert.equal(streams.keepsEvent(M, 'B', { event: { eventType: 'left', participantId: '12' } }), true);
+  assert.equal(streams.keepsEvent(M, 'A', { event: { eventType: 'left', participantId: '12' } }), false);
+});
+
+test('the same event again on one stream, or more than 10 seconds later on another, is a new event', () => {
+  const { streams, after } = started(['A', 'B']);
+  assert.equal(streams.keepsEvent(M, 'A', { event: joined('12') }), true);
+  assert.equal(streams.keepsEvent(M, 'A', { event: joined('12') }), true); // left and came back
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('12') }), false);
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('12') }), false);
   after(11);
-  assert.equal(streams.acceptsDataFrom(M, 's1', { line: lineNo(2), operatorId: 'op-1' }), false);
-  assert.deepEqual(streams.streamStopped(M, 's1'), { anyLive: true }); // the rtms service's report for it
-  assert.deepEqual(streams.streamStopped(M, 's2'), { anyLive: false });
-  assert.deepEqual(streams.operators(M), ['op-1']);
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('12') }), true);
 });
 
-test('a user who keeps starting new streams does not fill the meeting with old ones', () => {
-  const { streams, warnings } = setup();
-  streams.streamStarted(M, { streamId: 'other', operatorId: 'op-2' });
-  for (let i = 1; i <= 60; i += 1) streams.streamStarted(M, { streamId: `s${i}`, operatorId: 'op-1' });
-  assert.deepEqual(warnings, []);
-  streams.streamStarted(M, { streamId: 'third', operatorId: 'op-3' });
-  assert.deepEqual(streams.operators(M), ['op-2', 'op-1', 'op-3']);
-  streams.streamStopped(M, 'other');
-  streams.streamStopped(M, 'third');
-  assert.deepEqual(streams.streamStopped(M, 's60'), { anyLive: false });
+test('a second stream\'s roster of the people already there is the first stream\'s roster again', () => {
+  const { streams } = started(['A', 'B']);
+  const roster = ['1', '2', '3'].map((id) => ({ eventType: 'initial_roster', participantId: id, participantName: `P${id}` }));
+  assert.deepEqual(roster.map((event) => streams.keepsEvent(M, 'A', { event })), [true, true, true]);
+  assert.deepEqual(roster.map((event) => streams.keepsEvent(M, 'B', { event })), [false, false, false]);
+});
+
+test('without a participant id the name tells people apart', () => {
+  const { streams } = started(['A', 'B']);
+  const named = (participantName) => ({ eventType: 'joined', participantId: null, participantName });
+  assert.equal(streams.keepsEvent(M, 'A', { event: named('Ana') }), true);
+  assert.equal(streams.keepsEvent(M, 'B', { event: named('Ben') }), true);
+  assert.equal(streams.keepsEvent(M, 'B', { event: named('Ana') }), false);
+  // with an id, the name does not matter
+  assert.equal(streams.keepsEvent(M, 'A', { event: joined('12', { participantName: 'Cy' }) }), true);
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('12', { participantName: 'Cy R.' }) }), false);
+});
+
+test('an event that cannot be identified is kept, never taken for a duplicate', () => {
+  const { streams } = started(['A', 'B']);
+  for (const odd of [undefined, null, 'joined', {}, { eventType: 'joined' }, { participantId: '1' }, { eventType: 7, participantId: '1' }]) {
+    assert.equal(streams.keepsEvent(M, 'A', { event: odd }), true);
+    assert.equal(streams.keepsEvent(M, 'B', { event: odd }), true);
+  }
+});
+
+test('the memory of events is bounded', () => {
+  const { streams, after } = started(['A', 'B'], { maxRecentEvents: 3 });
+  for (const id of ['1', '2', '3', '4']) streams.keepsEvent(M, 'A', { event: joined(id) });
+  assert.equal(streams.remembered(M).events, 3);
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('4') }), false);
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('1') }), true); // the oldest fell out
+  after(11);
+  streams.keepsEvent(M, 'A', { event: joined('9') });
+  assert.equal(streams.remembered(M).events, 1); // what is too old to match goes
+});
+
+// --- forget ------------------------------------------------------------------
+
+test('forget removes everything known about a meeting, and only that meeting', () => {
+  const { streams } = started(['A', 'B']);
+  streams.streamStarted('MEETING-2==', { streamId: 's9', operatorId: 'op-9' });
+  streams.keepsLine(M, 'A', { line: lineNo(1) });
+  streams.keepsEvent(M, 'A', { event: joined('12') });
+  streams.keepsLine('MEETING-2==', 's9', { line: lineNo(1) });
+  streams.forget(M);
+
+  assert.deepEqual(streams.operators(M), []);
+  assert.equal(streams.isPrimary(M, 'A'), false);
+  assert.equal(streams.anyLive(M), false);
+  assert.equal(streams.remembered(M), null);
+  assert.equal(streams.isPrimary('MEETING-2==', 's9'), true);
+  assert.equal(streams.size(), 1);
+  // the memory of stored lines and events went too
+  assert.equal(streams.keepsLine(M, 'B', { line: lineNo(1) }), true);
+  assert.equal(streams.keepsEvent(M, 'B', { event: joined('12') }), true);
+  assert.equal(streams.keepsLine('MEETING-2==', 's8', { line: lineNo(1) }), false);
 });

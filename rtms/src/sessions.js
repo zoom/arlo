@@ -4,8 +4,8 @@
  * One session per stream (keyed by rtms_stream_id). A meeting can have several
  * streams at once: each Zoom user can run one of their own, with its own stream
  * id under the same meeting UUID. They are all kept, and every report to the
- * backend says which stream it is about; the backend decides whose lines are
- * stored. This module holds the
+ * backend says which stream it is about; the backend stores each line once,
+ * whichever streams deliver it. This module holds the
  * rules: when a stream counts as started, what happens when a join is refused,
  * how a stream ends, and what is forwarded to the backend. It never imports
  * the Zoom RTMS SDK: the client is injected, so the rules can be tested with a

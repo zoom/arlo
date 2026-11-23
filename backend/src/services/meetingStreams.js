@@ -1,42 +1,43 @@
 /**
- * The streams of each meeting, and which one the transcript is taken from.
+ * The streams of each meeting, and the rule that stores each line once.
  *
  * Several Zoom users can each run a stream in one meeting at the same time:
  * each has its own stream id under the same meeting UUID and carries the same
- * speech. The server keeps one transcript per meeting, so it stores the lines
- * of one stream, the source, and drops the others:
- *   - a live stream of the meeting's original host is the source; it can start
- *     before the host joins and keeps running after the host leaves,
- *   - otherwise the live stream that started first.
- * The source stays the source while it runs. It is chosen again when it stops
- * or when the original host's stream starts.
+ * speech. The server keeps one transcript per meeting. No stream is trusted
+ * over another: a line from any stream of the meeting is stored, unless the
+ * same line was stored a moment ago from another stream. Losing a line is
+ * worse than storing one twice, so a line is only dropped when it is known to
+ * be a copy.
  *
- * A stream can also die without any stop report reaching this server. So the
- * source is watched through its lines: when a line arrives from another live
- * stream and the source has delivered nothing for 30 seconds, that other
- * stream becomes the source and its line is kept. Silence alone changes
- * nothing (nobody speaking is normal); only another stream's line can. A
- * stream that lost the role this way, the original host's included, gets it
- * back by delivering again within 5 seconds (it was alive after all), by the
- * same rule, or by stopping and starting again.
+ * What a copy is. Per meeting, a short memory of the lines stored last (300
+ * lines or 2 minutes, whichever is less) holds for each: the speaker id, a
+ * hash of the text (the text is not held a second time), the line's start time
+ * if it has one, when it arrived, and which streams have delivered it. A line
+ * from stream S is a copy of a remembered line when
+ *   - the speaker and the words are the same,
+ *   - S has not delivered that remembered line already (the same words twice
+ *     on one stream were said twice), and
+ *   - they are close in time: start times within 5 seconds when both have
+ *     one, otherwise arrivals within 10 seconds.
+ * With several candidates the oldest is taken. A copy is dropped and S noted
+ * on the remembered line; anything else is stored and remembered. So a stream
+ * that is lines ahead or behind, stops, dies without a word or never delivers
+ * loses nothing. A copy that arrives outside those windows is stored again.
  *
- * Losing a line is worse than storing one twice, so around a change of source
- * nothing is assumed about which copy of a line is the duplicate:
- *   - while the source delivers normally, lines from the other streams are
- *     dropped unread (the cheap, steady state);
- *   - for 10 seconds after any change of source, lines from the previous
- *     source are accepted too, also when it has just been reported stopped:
- *     its lines can still be on their way;
- *   - every accepted line is checked against a short memory of the lines
- *     stored for the meeting (speaker id, start time and a hash of the text;
- *     the last 200 lines or 2 minutes, whichever is less). A line already
- *     there is a duplicate and is dropped, whichever stream sent it.
- * A change of role never drops a line by itself.
+ * Participant events (people joining and leaving) arrive once per stream too
+ * and are told apart the same way: same event type and participant (the id,
+ * or the name when there is no id), from a stream that has not reported it
+ * yet, within 10 seconds.
+ *
+ * One stream is the "primary" one: a live stream of the meeting's original
+ * host, otherwise the live stream that started first. It decides nothing about
+ * what is stored. It is the stream whose operator is named first (the owner
+ * name the panels show) and whose connection trouble is the meeting's.
  *
  * This module also remembers who ran a stream in the meeting (operator ids),
  * including streams that have stopped, until forget(). The meeting lifecycle
  * calls forget() when it flushes the meeting, so nothing here outlives the
- * meeting's data. Ids only: no meeting content is held or logged.
+ * meeting's data. Ids and hashes only: no meeting content is held or logged.
  */
 const crypto = require('node:crypto');
 
@@ -44,18 +45,16 @@ const MAX_ID_CHARS = 256;
 const DEFAULTS = Object.freeze({
   maxStreamsPerMeeting: 20,
   maxMeetings: 5000,
-  // The source is taken to be dead when another stream delivers a line and the
-  // source has delivered nothing for this long
-  sourceSilentMs: 30 * 1000,
-  // After such a switch, a line from the old source within this time shows it
-  // was alive after all (see acceptsDataFrom): it gets the role back
-  sourceRevertMs: 5 * 1000,
-  // After any change of source, the previous source's lines are accepted too
-  // for this long (duplicates are dropped by content)
-  changeWindowMs: 10 * 1000,
-  // The memory of stored lines used to tell a duplicate: this many, this long
-  maxRecentLines: 200,
+  // The memory of stored lines used to tell a copy: this many, this long
+  maxRecentLines: 300,
   recentLineMs: 2 * 60 * 1000,
+  // Two deliveries of the same words by the same speaker are one line when
+  // their start times are this close, or, without start times, their arrivals
+  sameLineStampMs: 5 * 1000,
+  sameLineArrivalMs: 10 * 1000,
+  // The same for participant events, which are compared by arrival only
+  maxRecentEvents: 1000,
+  sameEventArrivalMs: 10 * 1000,
 });
 // A report without a stream id (an rtms process from before streams were
 // told apart) is the only stream of its meeting: it gets this key.
@@ -69,22 +68,44 @@ const keyFor = (streamId) => {
   return isId(streamId) ? streamId : null;
 };
 
+const sha256 = (text) => crypto.createHash('sha256').update(text).digest('base64');
+/** An id as sent by the rtms service (a string; a number is taken as its digits). */
+const idText = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return typeof value === 'string' ? value.slice(0, MAX_ID_CHARS) : '';
+};
+
 /**
  * What identifies a transcript line across the streams that carry it: who
- * spoke, when the line started, and the words (as a hash, so the text is not
- * held a second time). Null for a line without a start time: the same words
- * from the same speaker cannot then be told from their being said again, so
- * such a line is never taken for a duplicate.
+ * spoke and the words (as a hash), and the start time when it has one. Null
+ * for something that is not a line: it is then never taken for a copy.
  */
-function lineKey(line) {
-  if (line === null || typeof line !== 'object') return null;
-  const { speakerId, tStartMs, text } = line;
-  if (typeof text !== 'string' || !Number.isFinite(tStartMs)) return null;
-  const speaker = typeof speakerId === 'string' ? speakerId.slice(0, MAX_ID_CHARS) : '';
-  return crypto.createHash('sha256')
-    .update(JSON.stringify([speaker, tStartMs]))
-    .update(text)
-    .digest('base64');
+function lineIdentity(line) {
+  if (line === null || typeof line !== 'object' || typeof line.text !== 'string') return null;
+  return {
+    who: idText(line.speakerId),
+    hash: sha256(line.text),
+    stamp: Number.isFinite(line.tStartMs) ? line.tStartMs : null,
+  };
+}
+
+/**
+ * The same for a participant event: what happened and to whom (the id, or the
+ * name when there is no id; hashed, so no name is held here). Null when the
+ * event names nobody or nothing.
+ */
+function eventIdentity(event) {
+  if (event === null || typeof event !== 'object') return null;
+  const { eventType, participantId, participantName } = event;
+  if (typeof eventType !== 'string' || eventType.length === 0) return null;
+  const id = idText(participantId);
+  const name = typeof participantName === 'string' ? participantName : '';
+  if (id.length === 0 && name.length === 0) return null;
+  return {
+    who: '',
+    hash: sha256(JSON.stringify([eventType.slice(0, MAX_ID_CHARS), id, id.length === 0 ? name : ''])),
+    stamp: null,
+  };
 }
 
 function createMeetingStreams(options = {}) {
@@ -93,18 +114,27 @@ function createMeetingStreams(options = {}) {
   for (const name of Object.keys(DEFAULTS)) {
     if (Number.isInteger(options[name]) && options[name] > 0) limits[name] = options[name];
   }
+  const lineRules = {
+    max: limits.maxRecentLines,
+    keepMs: limits.recentLineMs,
+    stampMs: limits.sameLineStampMs,
+    arrivalMs: limits.sameLineArrivalMs,
+  };
+  const eventRules = {
+    max: limits.maxRecentEvents,
+    // An event older than the window can match nothing: it is not kept longer
+    keepMs: limits.sameEventArrivalMs + 1,
+    stampMs: 0,
+    arrivalMs: limits.sameEventArrivalMs,
+  };
   // meetingId -> {
-  //   streams: Map(key -> { operatorId, originalHost, live, demoted, replaced }),
-  //   sourceKey,
-  //   sourceHeardAt: when the source last delivered, or became the source,
-  //   displaced: { key, at } the source replaced for silence a moment ago, or null,
-  //   handover: Map(key -> until) streams that were the source a moment ago:
-  //     their lines are accepted until that time,
-  //   recent: Map(line key -> when stored) the lines stored last, oldest first,
+  //   streams: Map(key -> { operatorId, originalHost, live, replaced }),
+  //   primaryKey: the primary stream, or the last one when none is live,
+  //   lines, events: what was stored last, oldest first, each
+  //     { who, hash, stamp, at, from: Set(stream keys that delivered it) },
   //   warned }
-  // The streams Map keeps the order in which the streams started. `demoted`
-  // marks a stream that lost the source role through silence, `replaced` one
-  // that ended because its user started a new one.
+  // The streams Map keeps the order in which the streams started. `replaced`
+  // marks a stream that ended because its user started a new one.
   const meetings = new Map();
 
   function stateFor(meetingId) {
@@ -116,13 +146,7 @@ function createMeetingStreams(options = {}) {
       // A backstop only: a meeting normally leaves through forget()
       if (meetings.size >= limits.maxMeetings) meetings.delete(meetings.keys().next().value);
       state = {
-        streams: new Map(),
-        sourceKey: null,
-        sourceHeardAt: now(),
-        displaced: null,
-        handover: new Map(),
-        recent: new Map(),
-        warned: false,
+        streams: new Map(), primaryKey: null, lines: [], events: [], warned: false,
       };
     }
     meetings.set(meetingId, state);
@@ -150,62 +174,14 @@ function createMeetingStreams(options = {}) {
   const liveKeys = (state) => [...state.streams].filter(([, stream]) => stream.live).map(([key]) => key);
 
   /**
-   * Make a stream the source. Its 30 seconds of silence are counted from now,
-   * and the stream it takes over from is still heard for a moment.
+   * Work out the primary stream again after a stream started, stopped or was
+   * learned. With nothing live, the last primary stream keeps the place, so
+   * the owner named first does not change when the meeting's streams stop.
    */
-  function setSource(state, key) {
-    const previous = state.sourceKey;
-    const at = now();
-    if (previous !== null && previous !== key && state.streams.has(previous)) {
-      state.handover.set(previous, at + limits.changeWindowMs);
-    }
-    state.handover.delete(key);
-    state.sourceKey = key;
-    state.sourceHeardAt = at;
-    state.displaced = null;
-  }
-
-  /** Whether this stream was the source a moment ago. */
-  function inHandover(state, key, at) {
-    const until = state.handover.get(key);
-    if (until === undefined) return false;
-    if (at < until) return true;
-    state.handover.delete(key);
-    return false;
-  }
-
-  /**
-   * Note a line that is about to be stored. False when it was stored a moment
-   * ago already: a duplicate. A line that cannot be identified is never one.
-   */
-  function isNewLine(state, key, at) {
-    if (key === null) return true;
-    const storedAt = state.recent.get(key);
-    if (storedAt !== undefined && at - storedAt < limits.recentLineMs) return false;
-    state.recent.delete(key);
-    state.recent.set(key, at);
-    for (const [oldKey, oldAt] of state.recent) {
-      if (state.recent.size <= limits.maxRecentLines && at - oldAt < limits.recentLineMs) break;
-      state.recent.delete(oldKey);
-    }
-    return true;
-  }
-
-  // The original host's stream is preferred, unless it lost the role through silence
-  const preferred = (stream) => stream.originalHost && !stream.demoted;
-
-  /** Keep the source while it runs; otherwise pick the next one. */
-  function chooseSource(state) {
+  function choosePrimary(state) {
     const live = liveKeys(state);
-    const hostKey = live.find((key) => preferred(state.streams.get(key)));
-    const current = state.streams.get(state.sourceKey);
-    if (current?.live && (preferred(current) || hostKey === undefined)) return;
-    // Nothing live: the stream that was the source keeps that place, so its
-    // last lines, still on their way, are kept
-    if (live.length === 0 && current) return;
-    // A stream that went silent is the last choice
-    const next = hostKey ?? live.find((key) => !state.streams.get(key).demoted) ?? live[0] ?? null;
-    if (next !== state.sourceKey) setSource(state, next);
+    if (live.length === 0) return;
+    state.primaryKey = live.find((key) => state.streams.get(key).originalHost) ?? live[0];
   }
 
   /** Add a stream to a meeting. Returns it, or null when the meeting is full. */
@@ -218,7 +194,7 @@ function createMeetingStreams(options = {}) {
       return null;
     }
     const stream = {
-      operatorId: null, originalHost: false, live: true, demoted: false, replaced: false,
+      operatorId: null, originalHost: false, live: true, replaced: false,
     };
     state.streams.set(key, stream);
     return stream;
@@ -241,9 +217,8 @@ function createMeetingStreams(options = {}) {
     if (operator) {
       for (const [otherKey, other] of state.streams) {
         if (otherKey === key || other.operatorId !== operator) continue;
-        if (other.replaced && otherKey !== state.sourceKey) {
+        if (other.replaced) {
           state.streams.delete(otherKey);
-          state.handover.delete(otherKey);
         } else {
           other.live = false;
           other.replaced = true;
@@ -256,7 +231,6 @@ function createMeetingStreams(options = {}) {
       // Stopped and started again: it takes its place after the streams running now
       state.streams.delete(key);
       state.streams.set(key, stream);
-      stream.demoted = false; // a new start: whatever silenced it before is over
     }
     if (!stream) stream = addStream(state, key);
     if (stream) {
@@ -265,7 +239,7 @@ function createMeetingStreams(options = {}) {
       if (operator) stream.operatorId = operator;
       if (originalHost === true) stream.originalHost = true;
     }
-    chooseSource(state);
+    choosePrimary(state);
   }
 
   /**
@@ -281,7 +255,7 @@ function createMeetingStreams(options = {}) {
     } else if (key !== null && state.streams.has(key)) {
       state.streams.get(key).live = false;
     }
-    chooseSource(state);
+    choosePrimary(state);
     return { anyLive: liveKeys(state).length > 0 };
   }
 
@@ -293,90 +267,94 @@ function createMeetingStreams(options = {}) {
     const state = meetings.get(meetingId);
     if (!state) return;
     for (const stream of state.streams.values()) stream.live = false;
-    state.displaced = null;
-    state.handover.clear();
   }
 
-  /** True for the one stream whose lines are stored. */
-  function isSource(meetingId, streamId) {
+  /**
+   * Note that data arrived from a stream. Returns the meeting's state and the
+   * key the stream's deliveries are noted under, or null when nothing from it
+   * can be taken (an id that is not sane, or a meeting that is full).
+   *
+   * A stream first heard of through its data counts as started: this server
+   * may have restarted mid-meeting and missed the report. The rtms service
+   * says with every line and event whose stream it is (`operatorId`,
+   * `originalHost`), so such a stream has its operator, and one known without
+   * an operator gets it. Data never replaces another stream of the same user:
+   * only a start report does. A stream known to have stopped is not brought
+   * back by a late line, but the line is still looked at: it was on its way.
+   */
+  function heardFrom(meetingId, streamId, details) {
+    if (!isId(meetingId) || keyFor(streamId) === null) return null;
+    const state = stateFor(meetingId);
+    const key = resolve(state, streamId);
+    // One more stream, unnamed: its deliveries are noted under the empty key
+    if (holdsUnnamed(state, key)) return { state, key };
+    const stream = state.streams.get(key) ?? addStream(state, key);
+    if (!stream) return null;
+    if (stream.operatorId === null && isId(details?.operatorId)) stream.operatorId = details.operatorId;
+    if (details?.originalHost === true) stream.originalHost = true;
+    choosePrimary(state);
+    return { state, key };
+  }
+
+  /**
+   * Whether this delivery is the first of its line or event (true: store it)
+   * or a copy of one stored a moment ago from another stream (false). The
+   * rule is at the top of this file. `identity` null: cannot be a copy.
+   */
+  function firstDelivery(memory, identity, key, rules) {
+    const at = now();
+    while (memory.length > 0 && at - memory[0].at >= rules.keepMs) memory.shift();
+    if (identity === null) return true;
+    const copyOf = memory.find((seen) => {
+      if (seen.hash !== identity.hash || seen.who !== identity.who || seen.from.has(key)) return false;
+      return seen.stamp !== null && identity.stamp !== null
+        ? Math.abs(seen.stamp - identity.stamp) <= rules.stampMs
+        : at - seen.at <= rules.arrivalMs;
+    });
+    if (copyOf) {
+      copyOf.from.add(key);
+      return false;
+    }
+    memory.push({ ...identity, at, from: new Set([key]) });
+    if (memory.length > rules.max) memory.shift();
+    return true;
+  }
+
+  /**
+   * A transcript line arrived from a stream: true when it is to be stored.
+   * `details` is `{ line: { speakerId, tStartMs, text }, operatorId,
+   * originalHost }`, each optional. Also notes the stream: see heardFrom().
+   */
+  function keepsLine(meetingId, streamId, details) {
+    const heard = heardFrom(meetingId, streamId, details);
+    return heard !== null && firstDelivery(heard.state.lines, lineIdentity(details?.line), heard.key, lineRules);
+  }
+
+  /**
+   * The same for one participant event: `details` is `{ event: { eventType,
+   * participantId, participantName }, operatorId, originalHost }`.
+   */
+  function keepsEvent(meetingId, streamId, details) {
+    const heard = heardFrom(meetingId, streamId, details);
+    return heard !== null && firstDelivery(heard.state.events, eventIdentity(details?.event), heard.key, eventRules);
+  }
+
+  /** True for the primary stream: see the top of this file. */
+  function isPrimary(meetingId, streamId) {
     const state = meetings.get(meetingId);
     if (!state) return false;
     const key = resolve(state, streamId);
     if (key === null) return false;
     if (holdsUnnamed(state, key)) return true;
-    return state.streams.has(key) && state.sourceKey === key;
+    return state.streams.has(key) && state.primaryKey === key;
   }
 
-  /**
-   * Whether a transcript line or a timeline event from this stream is to be
-   * kept. `details` is `{ line: { speakerId, tStartMs, text }, operatorId,
-   * originalHost }`, each optional; without `line` the call is about a
-   * timeline event.
-   *
-   * A stream first heard of through its data counts as started: this server
-   * may have restarted mid-meeting and missed the report. The rtms service
-   * says with every line whose stream it is (`operatorId`, `originalHost`), so
-   * such a stream has its operator, and one known without an operator gets it.
-   * Data never replaces another stream of the same user: only a start report
-   * does. A stream known to have stopped is not brought back by a late line.
-   *
-   * This is also where a dead source is noticed (see the top of this file): a
-   * line from another live stream, when the source has delivered nothing for
-   * `sourceSilentMs`, makes that stream the source.
-   *
-   * One case looks the same and is not a dead source. After a pause in the
-   * talk every stream has been silent, and the first line of the next sentence
-   * may arrive from another stream a moment before the source's own copy. When
-   * the old source delivers again within `sourceRevertMs` it has the role back.
-   *
-   * Lines: the source's are kept, and so are those of a stream that was the
-   * source up to `changeWindowMs` ago, in both cases unless the same line was
-   * stored already. Neither change of role drops a line by itself.
-   * Timeline events: only the source's are kept. The event with which a
-   * displaced source takes the role back is the copy of one kept already.
-   */
-  function acceptsDataFrom(meetingId, streamId, details) {
-    if (!isId(meetingId) || keyFor(streamId) === null) return false;
-    const state = stateFor(meetingId);
+  /** Whether this stream is known and running. */
+  function isLive(meetingId, streamId) {
+    const state = meetings.get(meetingId);
+    if (!state) return false;
     const key = resolve(state, streamId);
-    const isLine = details !== null && typeof details === 'object' && details.line !== undefined;
-    const at = now();
-    const keep = () => !isLine || isNewLine(state, lineKey(details.line), at);
-    if (holdsUnnamed(state, key)) {
-      state.sourceHeardAt = at;
-      return keep();
-    }
-    const learned = !state.streams.has(key);
-    const stream = learned ? addStream(state, key) : state.streams.get(key);
-    if (!stream) return false; // the meeting is full
-    const becameHost = details?.originalHost === true && !stream.originalHost;
-    if (stream.operatorId === null && isId(details?.operatorId)) stream.operatorId = details.operatorId;
-    if (becameHost) stream.originalHost = true;
-    if (learned || becameHost) chooseSource(state);
-    if (state.sourceKey === key) {
-      state.sourceHeardAt = at;
-      return keep();
-    }
-
-    if (stream.live) {
-      const { displaced } = state;
-      if (displaced && displaced.key === key && at - displaced.at < limits.sourceRevertMs) {
-        stream.demoted = false;
-        setSource(state, key);
-        return isLine ? keep() : false;
-      }
-      if (at - state.sourceHeardAt >= limits.sourceSilentMs) {
-        const silent = state.streams.get(state.sourceKey);
-        const silentKey = state.sourceKey;
-        if (silent) silent.demoted = true;
-        stream.demoted = false;
-        setSource(state, key);
-        if (silent?.live) state.displaced = { key: silentKey, at };
-        return keep();
-      }
-    }
-    // Not the source: its lines are kept only if it was the source a moment ago
-    return isLine && inHandover(state, key, at) && keep();
+    return key !== null && state.streams.get(key)?.live === true;
   }
 
   const anyLive = (meetingId) => {
@@ -384,26 +362,32 @@ function createMeetingStreams(options = {}) {
     return Boolean(state) && liveKeys(state).length > 0;
   };
 
-  /** Operator ids of the streams seen in this meeting, the source's first, each once. */
+  /** Operator ids of the streams seen in this meeting, the primary stream's first, each once. */
   function operators(meetingId) {
     const state = meetings.get(meetingId);
     if (!state) return [];
-    const ordered = [state.streams.get(state.sourceKey), ...state.streams.values()]
+    const ordered = [state.streams.get(state.primaryKey), ...state.streams.values()]
       .map((stream) => stream?.operatorId)
       .filter(Boolean);
     return [...new Set(ordered)];
   }
 
-  const sourceOperator = (meetingId) => {
+  const primaryOperator = (meetingId) => {
     const state = meetings.get(meetingId);
-    return state?.streams.get(state.sourceKey)?.operatorId ?? null;
+    return state?.streams.get(state.primaryKey)?.operatorId ?? null;
+  };
+
+  /** How many lines and events are remembered for a meeting (null: meeting not known). */
+  const remembered = (meetingId) => {
+    const state = meetings.get(meetingId);
+    return state ? { lines: state.lines.length, events: state.events.length } : null;
   };
 
   const forget = (meetingId) => meetings.delete(meetingId);
 
   return {
-    streamStarted, streamStopped, stopAll, isSource, acceptsDataFrom, anyLive,
-    operators, sourceOperator, forget, size: () => meetings.size,
+    streamStarted, streamStopped, stopAll, keepsLine, keepsEvent, isPrimary, isLive, anyLive,
+    operators, primaryOperator, remembered, forget, size: () => meetings.size,
   };
 }
 

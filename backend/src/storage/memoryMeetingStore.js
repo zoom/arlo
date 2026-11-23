@@ -81,9 +81,9 @@ function createMemoryMeetingStore(options = {}) {
     }
     const entry = entryFor(meetingId);
     // The store numbers the lines itself. The number a line arrives with is its
-    // stream's own count, and a meeting's lines can come from one stream after
-    // another (see services/meetingStreams.js), so those counts can repeat or
-    // jump. Numbers given here never repeat, skip or go backwards.
+    // stream's own count, and a meeting's lines come from whichever of its
+    // streams delivers them first (see services/meetingStreams.js), so those
+    // counts can repeat or jump. Numbers given here never repeat, skip or go backwards.
     const seqNo = entry.nextSeqNo;
     entry.nextSeqNo = Math.min(seqNo + 1, MAX_SEQ_NO - 1);
     const tStartMs = isTime(raw.tStartMs) ? raw.tStartMs : now();

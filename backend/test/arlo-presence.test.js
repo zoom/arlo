@@ -83,7 +83,7 @@ test('a second stream by another Arlo user makes two owners', () => {
   assert.deepEqual(presence.ownerUserIds(M), ['u-ana', 'u-ben']);
   assert.equal(presence.stateFor(M, 'u-ana').role, 'owner');
   assert.equal(presence.stateFor(M, 'u-ben').role, 'owner');
-  // the name shown is of the stream the transcript comes from
+  // the name shown is of the primary stream: the one that started first
   assert.equal(presence.stateFor(M, 'u-ben').ownerName, 'Ana Ruiz');
 });
 
@@ -95,7 +95,7 @@ test('the name shown is the original host\'s when their stream exists', () => {
   assert.deepEqual(presence.ownerUserIds(M), ['u-ben', 'u-ana']);
 });
 
-test('when the stored stream\'s operator is not an Arlo user, the first owner\'s name is shown', () => {
+test('when the primary stream\'s operator is not an Arlo user, the first owner\'s name is shown', () => {
   const { presence, start } = setup();
   start('s1', 'zoom-guest', true);
   start('s2', 'zoom-ben');
