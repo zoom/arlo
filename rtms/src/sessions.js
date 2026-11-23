@@ -1,7 +1,11 @@
 /**
  * RTMS session lifecycle.
  *
- * One session per stream (keyed by rtms_stream_id). This module holds the
+ * One session per stream (keyed by rtms_stream_id). A meeting can have several
+ * streams at once: each Zoom user can run one of their own, with its own stream
+ * id under the same meeting UUID. They are all kept, and every report to the
+ * backend says which stream it is about; the backend decides whose lines are
+ * stored. This module holds the
  * rules: when a stream counts as started, what happens when a join is refused,
  * how a stream ends, and what is forwarded to the backend. It never imports
  * the Zoom RTMS SDK: the client is injected, so the rules can be tested with a
@@ -80,11 +84,28 @@ function createSessionManager({
     log.warn(`Failed to send ${label} to the backend:`, error.message);
   });
 
-  function findByMeeting(meetingUuid) {
-    for (const [streamId, session] of sessions) {
-      if (session.meetingUuid === meetingUuid) return { streamId, session };
-    }
-    return null;
+  /** Tell the backend what happened to one stream. */
+  const report = (meetingUuid, streamId, status, extra = {}) => send('status', backend.status(
+    meetingUuid,
+    status,
+    { ...(streamId && { streamId }), ...extra },
+  ));
+  const reportFor = (session, status, extra) => report(session.meetingUuid, session.streamId, status, extra);
+
+  const sessionsOf = (meetingUuid) => [...sessions.values()].filter((s) => s.meetingUuid === meetingUuid);
+
+  /**
+   * The session a stopped or interrupted webhook is about. A webhook that names
+   * a stream means that stream and no other. One that names none can only mean
+   * the meeting's stream when there is exactly one: with several, guessing
+   * would end or rejoin another user's stream.
+   * Returns { session } (null = not held here) or { ambiguous: true }.
+   */
+  function sessionFor(meetingUuid, streamId) {
+    if (streamId) return { session: sessions.get(streamId) || null };
+    const held = sessionsOf(meetingUuid);
+    if (held.length > 1) return { ambiguous: true };
+    return { session: held[0] || null };
   }
 
   function clearTimers(session) {
@@ -132,7 +153,7 @@ function createSessionManager({
       tStartMs,
       tEndMs: tStartMs,
       seqNo: session.seqCounter,
-    }));
+    }, { streamId: session.streamId }));
   }
 
   function onParticipants(session, event, participants) {
@@ -165,10 +186,12 @@ function createSessionManager({
         timestamp: now(),
       };
     });
-    if (events.length > 0) send('participant events', backend.participantEvents(session.meetingUuid, events));
+    if (events.length > 0) {
+      send('participant events', backend.participantEvents(session.meetingUuid, events, { streamId: session.streamId }));
+    }
   }
 
-  function newSession({ meetingUuid, streamId, serverUrls, operatorId }) {
+  function newSession({ meetingUuid, streamId, serverUrls, operatorId, originalHost }) {
     return {
       client: null,
       meetingUuid,
@@ -187,13 +210,15 @@ function createSessionManager({
       participantNames: new Map(),
       startedAt: now(),
       operatorId: isId(operatorId) ? operatorId : null,
+      // The stream of the meeting's original host. Only the boolean counts.
+      originalHost: originalHost === true,
       seqCounter: 0,
     };
   }
 
   /** The first join failed: nothing to fall back on, so report it and let go. */
   function failStart(session) {
-    send('status', backend.status(session.meetingUuid, 'rtms_failed'));
+    reportFor(session, 'rtms_failed');
     release(session.streamId, session);
   }
 
@@ -233,13 +258,13 @@ function createSessionManager({
     clearTimers(session);
     dropClient(session, { alreadyClosed });
     session.state = 'waiting';
-    send('status', backend.status(session.meetingUuid, 'rtms_interrupted'));
+    reportFor(session, 'rtms_interrupted');
     session.cancelTimer = schedule(() => {
       session.cancelTimer = null;
       if (sessions.get(session.streamId) !== session) return;
       log.warn('No word from Zoom after the RTMS connection closed: reporting the stream as lost');
       sessions.delete(session.streamId);
-      send('status', backend.status(session.meetingUuid, 'rtms_stopped', { fault: true }));
+      reportFor(session, 'rtms_stopped', { fault: true });
     }, AWAIT_ZOOM_SIGNAL_MS);
   }
 
@@ -285,11 +310,12 @@ function createSessionManager({
         session.everJoined = true;
         session.joinedAt = now();
         log.log(rejoined ? 'Rejoined RTMS session' : 'Joined RTMS session');
-        send('status', backend.status(
-          meetingUuid,
-          rejoined ? 'rtms_reconnected' : 'rtms_started',
-          session.operatorId ? { operatorId: session.operatorId } : undefined,
-        ));
+        // Who runs this stream goes with both, so a backend that restarted
+        // mid-meeting learns it from the next rejoin
+        reportFor(session, rejoined ? 'rtms_reconnected' : 'rtms_started', {
+          ...(session.operatorId && { operatorId: session.operatorId }),
+          ...(session.originalHost && { originalHost: true }),
+        });
         if (chaosDropAfterMs > 0) {
           session.cancelChaos = schedule(() => {
             session.cancelChaos = null;
@@ -321,11 +347,7 @@ function createSessionManager({
         session.stopping = true;
         defer(() => dropClient(session));
         // Tell the meeting now instead of waiting for the stopped webhook
-        send('status', backend.status(
-          meetingUuid,
-          'rtms_stopped',
-          reason === MEETING_ENDED ? { meetingEnded: true } : undefined,
-        ));
+        reportFor(session, 'rtms_stopped', reason === MEETING_ENDED ? { meetingEnded: true } : undefined);
         return;
       }
       if (session.reconnecting) {
@@ -344,7 +366,7 @@ function createSessionManager({
     client.onMediaConnectionInterrupted((timestamp) => {
       if (!isCurrent()) return;
       log.warn(`Media connection interrupted at ${timestamp}`);
-      send('status', backend.status(meetingUuid, 'media_interrupted'));
+      reportFor(session, 'media_interrupted');
       if (session.state === 'streaming') scheduleReconnect(session);
     });
 
@@ -402,20 +424,27 @@ function createSessionManager({
       dropClient(existing);
       existing.reconnecting = true;
       existing.attempts = 0;
-      if (wasStreaming) send('status', backend.status(meetingUuid, 'rtms_interrupted'));
+      if (wasStreaming) reportFor(existing, 'rtms_interrupted');
       connect(existing);
       return;
     }
-    // A new stream id for a meeting we already hold replaces the old stream
-    for (const [existingId, other] of sessions) {
-      if (other.meetingUuid === meetingUuid) {
-        log.log('New stream for a meeting already connected: replacing the old stream');
-        release(existingId, other);
+    // A new stream id in a meeting already held is another user's stream, and
+    // both are kept. Only the same user starting again replaces their old one.
+    // Streams whose user is not known are never taken for the same user.
+    const operatorId = isId(payload.operator_id) ? payload.operator_id : null;
+    for (const other of sessionsOf(meetingUuid)) {
+      if (operatorId && other.operatorId === operatorId) {
+        log.log('The same user started a new stream in this meeting: replacing their old stream');
+        release(other.streamId, other);
       }
     }
 
     const session = newSession({
-      meetingUuid, streamId, serverUrls: payload.server_urls, operatorId: payload.operator_id,
+      meetingUuid,
+      streamId,
+      serverUrls: payload.server_urls,
+      operatorId,
+      originalHost: payload.is_original_host,
     });
     // Stored before joining so a duplicate webhook during the join is ignored
     sessions.set(streamId, session);
@@ -433,13 +462,18 @@ function createSessionManager({
       return;
     }
     const streamId = isId(payload.rtms_stream_id) ? payload.rtms_stream_id : null;
-    let session = (streamId && sessions.get(streamId)) || findByMeeting(meetingUuid)?.session || null;
+    const found = sessionFor(meetingUuid, streamId);
+    if (found.ambiguous) {
+      log.warn('rtms_interrupted without a stream id for a meeting with several streams: ignored');
+      return;
+    }
+    let { session } = found;
 
     if (!session) {
       // Not a stream this process knows (it restarted mid-stream, for example)
       if (!streamId || !isServerUrls(payload.server_urls)) {
         log.warn('rtms_interrupted for a stream not held here, and no server URLs to rejoin it');
-        send('status', backend.status(meetingUuid, 'rtms_interrupted'));
+        report(meetingUuid, streamId, 'rtms_interrupted');
         return;
       }
       session = newSession({ meetingUuid, streamId, serverUrls: payload.server_urls });
@@ -457,36 +491,39 @@ function createSessionManager({
         return;
       }
     }
-    send('status', backend.status(meetingUuid, 'rtms_interrupted'));
+    reportFor(session, 'rtms_interrupted');
     scheduleReconnect(session);
   }
 
-  /** meeting.rtms_stopped (gives the meeting, sometimes the stream) */
+  /** meeting.rtms_stopped (gives the meeting, and the stream when Zoom names it) */
   async function stopped(payload) {
     const meetingUuid = payload?.meeting_uuid;
     if (!isId(meetingUuid)) {
       log.warn('rtms_stopped ignored: missing meeting id');
       return;
     }
-    const byStream = isId(payload.rtms_stream_id) ? sessions.get(payload.rtms_stream_id) : null;
-    const found = byStream
-      ? { streamId: payload.rtms_stream_id, session: byStream }
-      : findByMeeting(meetingUuid);
+    const namedStreamId = isId(payload.rtms_stream_id) ? payload.rtms_stream_id : null;
+    const found = sessionFor(meetingUuid, namedStreamId);
+    if (found.ambiguous) {
+      log.warn('rtms_stopped without a stream id for a meeting with several streams: ignored');
+      return;
+    }
+    const { session } = found;
     // Scenario 4: ended by a fault, not by a person. Also a stop that lands while
     // this service is recovering the connection, whatever reason Zoom gives.
-    const recovering = Boolean(found) && (found.session.reconnecting || found.session.state === 'waiting');
+    const recovering = Boolean(session) && (session.reconnecting || session.state === 'waiting');
     const fault = isFaultStop(payload.stop_reason) || recovering;
-    if (found) {
-      release(found.streamId, found.session);
+    if (session) {
+      release(session.streamId, session);
       log.log(`RTMS session stopped${fault ? ' by a fault' : ''}`);
     }
     const meetingEnded = payload.stop_reason === MEETING_ENDED;
-    const extra = { ...(fault && { fault: true }), ...(meetingEnded && { meetingEnded: true }) };
-    await send('status', backend.status(
-      meetingUuid,
-      'rtms_stopped',
-      Object.keys(extra).length > 0 ? extra : undefined,
-    ));
+    // A stop for a stream not held here is still passed on: the backend may
+    // know the stream from before this process started
+    await report(meetingUuid, session ? session.streamId : namedStreamId, 'rtms_stopped', {
+      ...(fault && { fault: true }),
+      ...(meetingEnded && { meetingEnded: true }),
+    });
   }
 
   /** Drop sessions older than 24 hours. Returns how many were dropped. */

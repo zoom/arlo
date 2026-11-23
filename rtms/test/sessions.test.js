@@ -42,8 +42,8 @@ function setup({ clientFactory, chaosDropAfterMs } = {}) {
     createClient: clientFactory || (() => { const c = new FakeClient(); clients.push(c); return c; }),
     backend: {
       status: async (meetingId, status, extra) => { sent.status.push({ meetingId, status, ...extra }); },
-      segment: async (meetingId, segment) => { sent.segments.push({ meetingId, segment }); },
-      participantEvents: async (meetingId, events) => { sent.participantEvents.push({ meetingId, events }); },
+      segment: async (meetingId, segment, extra) => { sent.segments.push({ meetingId, segment, ...extra }); },
+      participantEvents: async (meetingId, events, extra) => { sent.participantEvents.push({ meetingId, events, ...extra }); },
     },
     now: () => clock.now,
     defer: (fn) => fn(),
@@ -68,7 +68,7 @@ test('a stream is reported as started only after Zoom confirms the join', async 
 
   clients[0].handlers.joinConfirm(0);
   await tick();
-  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_started', operatorId: 'op-1' }]);
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_started', streamId: 'stream-1', operatorId: 'op-1' }]);
   assert.equal(manager.size(), 1);
 });
 
@@ -89,7 +89,7 @@ test('a first join that Zoom refuses (status 16) is retried, and reported as sta
   clients[1].handlers.joinConfirm(0);
   await tick();
   // a first start, not a reconnection: the operator goes with it
-  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_started', operatorId: 'op-1' }]);
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_started', streamId: 'stream-1', operatorId: 'op-1' }]);
 });
 
 test('a first join that keeps being refused is given up and reported as failed', async () => {
@@ -118,7 +118,7 @@ test('Zoom ending a stream whose first join is still being retried is a fault, s
   await manager.stopped({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-1', stop_reason: 2 });
 
   assert.deepEqual(pending(), []);
-  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_stopped', fault: true }]);
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_stopped', streamId: 'stream-1', fault: true }]);
   assert.equal(manager.size(), 0);
 });
 
@@ -138,13 +138,158 @@ test('a repeated webhook for a stream that is already connected is ignored', asy
   assert.equal(clients.length, 1);
 });
 
-test('a new stream id for the same meeting replaces the old stream', async () => {
+// ---------------------------------------------------------------------------
+// Several streams in one meeting: each Zoom user can run a stream of their own
+// (own stream id, same meeting UUID), all at the same time.
+// ---------------------------------------------------------------------------
+
+const second = (overrides = {}) => started({ rtms_stream_id: 'stream-2', operator_id: 'op-2', ...overrides });
+
+test('two users\' streams in one meeting both stay joined', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  await manager.started(second());
+  clients[0].handlers.joinConfirm(0);
+  clients[1].handlers.joinConfirm(0);
+  await tick();
+
+  assert.equal(clients[0].left, 0);
+  assert.equal(clients[1].joined.rtms_stream_id, 'stream-2');
+  assert.equal(manager.size(), 2);
+  assert.deepEqual(sent.status, [
+    { meetingId: 'MEETING-1==', status: 'rtms_started', streamId: 'stream-1', operatorId: 'op-1' },
+    { meetingId: 'MEETING-1==', status: 'rtms_started', streamId: 'stream-2', operatorId: 'op-2' },
+  ]);
+});
+
+test('the same user starting again replaces their own old stream, and nobody else\'s', async () => {
   const { manager, clients } = setup();
   await manager.started(started());
-  await manager.started(started({ rtms_stream_id: 'stream-2' }));
-  assert.equal(clients[0].left, 1);
-  assert.equal(clients[1].joined.rtms_stream_id, 'stream-2');
+  await manager.started(second());
+  await manager.started(started({ rtms_stream_id: 'stream-3' })); // op-1 again
+  assert.deepEqual(clients.map((c) => c.left), [1, 0, 0]);
+  assert.equal(clients[2].joined.rtms_stream_id, 'stream-3');
+  assert.equal(manager.size(), 2);
+});
+
+test('streams whose user is not known are never taken for the same user', async () => {
+  const { manager, clients } = setup();
+  await manager.started(started({ operator_id: undefined }));
+  await manager.started(second({ operator_id: undefined }));
+  await manager.started(second({ rtms_stream_id: 'stream-3', operator_id: 42 }));
+  assert.deepEqual(clients.map((c) => c.left), [0, 0, 0]);
+  assert.equal(manager.size(), 3);
+});
+
+test('the same user in another meeting is left alone', async () => {
+  const { manager, clients } = setup();
+  await manager.started(started());
+  await manager.started(started({ meeting_uuid: 'MEETING-2==', rtms_stream_id: 'stream-2' }));
+  assert.deepEqual(clients.map((c) => c.left), [0, 0]);
+});
+
+test('a stop names one stream and the other keeps running', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  await manager.started(second());
+  await manager.stopped({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-2', stop_reason: 2 });
+
+  assert.deepEqual(clients.map((c) => c.left), [0, 1]);
   assert.equal(manager.size(), 1);
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_stopped', streamId: 'stream-2' }]);
+
+  clients[0].handlers.transcript(Buffer.from('Still here.'), 11, 1_700_000_000_000_000, { userId: 7 });
+  await tick();
+  assert.equal(sent.segments.length, 1);
+});
+
+test('a stop that names a stream not held here does not end another user\'s stream', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  await manager.stopped({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-7' });
+  assert.equal(clients[0].left, 0);
+  assert.equal(manager.size(), 1);
+  // still passed on: the backend may know that stream from before this process started
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_stopped', streamId: 'stream-7' }]);
+});
+
+test('a stop without a stream id is ignored when the meeting has two streams', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  await manager.started(second());
+  await manager.stopped({ meeting_uuid: 'MEETING-1==', stop_reason: 6 });
+  assert.deepEqual(clients.map((c) => c.left), [0, 0]);
+  assert.equal(manager.size(), 2);
+  assert.deepEqual(sent.status, []);
+});
+
+test('a stop without a stream id is reported with the id of the one stream it ended', async () => {
+  const { manager, sent } = setup();
+  await manager.started(started());
+  await manager.stopped({ meeting_uuid: 'MEETING-1==' });
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_stopped', streamId: 'stream-1' }]);
+});
+
+test('an interruption acts on the stream it names, and without a name only when there is one stream', async () => {
+  const { manager, clients, sent, pending } = setup();
+  await manager.started(started());
+  await manager.started(second());
+  clients[0].handlers.joinConfirm(0);
+  clients[1].handlers.joinConfirm(0);
+  await tick();
+  sent.status.length = 0;
+
+  await manager.interrupted({ meeting_uuid: 'MEETING-1==' });
+  assert.deepEqual(clients.map((c) => c.left), [0, 0]);
+  assert.deepEqual(sent.status, []);
+  assert.deepEqual(pending(), []);
+
+  await manager.interrupted({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-2' });
+  assert.deepEqual(clients.map((c) => c.left), [0, 1]);
+  assert.deepEqual(sent.status, [{ meetingId: 'MEETING-1==', status: 'rtms_interrupted', streamId: 'stream-2' }]);
+});
+
+test('an interruption that names a stream not held here does not touch another user\'s stream', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  clients[0].handlers.joinConfirm(0);
+  await tick();
+  await manager.interrupted({ meeting_uuid: 'MEETING-1==', rtms_stream_id: 'stream-7' });
+  assert.equal(clients[0].left, 0);
+  assert.deepEqual(sent.status.at(-1), { meetingId: 'MEETING-1==', status: 'rtms_interrupted', streamId: 'stream-7' });
+});
+
+test('every report says which stream it is about', async () => {
+  const { manager, clients, sent } = setup();
+  await manager.started(started());
+  await manager.started(second());
+  clients[1].handlers.joinConfirm(0);
+  clients[1].handlers.participant('join', 1, [{ participantId: 11, userName: 'Ana' }]);
+  clients[1].handlers.transcript(Buffer.from('Hello'), 5, 1_700_000_000_000_000, { userId: 11, userName: 'Ana' });
+  clients[1].handlers.mediaInterrupted(1);
+  clients[0].handlers.leave(3);
+  await tick();
+
+  assert.deepEqual(sent.status.map((s) => [s.status, s.streamId]), [
+    ['rtms_started', 'stream-2'], ['media_interrupted', 'stream-2'], ['rtms_stopped', 'stream-1'],
+  ]);
+  assert.equal(sent.segments[0].streamId, 'stream-2');
+  assert.equal(sent.participantEvents[0].streamId, 'stream-2');
+});
+
+test('the original host\'s stream is marked as such only when the webhook says true', async () => {
+  const values = [true, 'true', 1, false, undefined];
+  const { manager, clients, sent } = setup();
+  for (const [i, value] of values.entries()) {
+    await manager.started(started({ rtms_stream_id: `stream-${i}`, operator_id: `op-${i}`, is_original_host: value }));
+    clients[i].handlers.joinConfirm(0);
+  }
+  await tick();
+
+  assert.deepEqual(sent.status[0], {
+    meetingId: 'MEETING-1==', status: 'rtms_started', streamId: 'stream-0', operatorId: 'op-0', originalHost: true,
+  });
+  assert.deepEqual(sent.status.map((s) => 'originalHost' in s), [true, false, false, false, false]);
 });
 
 test('webhooks without a meeting or stream id are ignored', async () => {
@@ -169,6 +314,7 @@ test('transcript data is forwarded as numbered segments with the speaker and a m
   assert.deepEqual(sent.segments.map((s) => s.segment.seqNo), [1, 2, 3]);
   assert.deepEqual(sent.segments[0], {
     meetingId: 'MEETING-1==',
+    streamId: 'stream-1',
     segment: { speakerId: '7', speakerLabel: 'Ana', text: 'We ship on Friday.', tStartMs: 1_700_000_000_123, tEndMs: 1_700_000_000_123, seqNo: 1 },
   });
   assert.equal(sent.segments[1].segment.speakerLabel, 'Speaker 8');
@@ -294,8 +440,8 @@ test('scenario 2: rtms_interrupted rejoins signaling and media after 3 seconds',
   clients[1].handlers.joinConfirm(0);
   await tick();
   assert.deepEqual(sent.status.slice(1), [
-    { meetingId: MEETING, status: 'rtms_interrupted' },
-    { meetingId: MEETING, status: 'rtms_reconnected', operatorId: 'op-1' },
+    { meetingId: MEETING, status: 'rtms_interrupted', streamId: 'stream-1' },
+    { meetingId: MEETING, status: 'rtms_reconnected', streamId: 'stream-1', operatorId: 'op-1' },
   ]);
 });
 
@@ -427,8 +573,8 @@ test('scenario 4: a stop with a fault reason is reported as a fault', async () =
     const { manager, sent } = await streaming();
     await manager.stopped({ meeting_uuid: MEETING, rtms_stream_id: 'stream-1', stop_reason: reason });
     assert.deepEqual(sent.status.at(-1), fault
-      ? { meetingId: MEETING, status: 'rtms_stopped', fault: true }
-      : { meetingId: MEETING, status: 'rtms_stopped' }, `reason ${reason}`);
+      ? { meetingId: MEETING, status: 'rtms_stopped', streamId: 'stream-1', fault: true }
+      : { meetingId: MEETING, status: 'rtms_stopped', streamId: 'stream-1' }, `reason ${reason}`);
     assert.equal(manager.size(), 0);
   }
 });
@@ -436,17 +582,17 @@ test('scenario 4: a stop with a fault reason is reported as a fault', async () =
 test('a stop because the meeting ended says so, from the webhook or from the closed connection', async () => {
   const viaWebhook = await streaming();
   await viaWebhook.manager.stopped({ meeting_uuid: MEETING, rtms_stream_id: 'stream-1', stop_reason: 6 });
-  assert.deepEqual(viaWebhook.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', meetingEnded: true });
+  assert.deepEqual(viaWebhook.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', streamId: 'stream-1', meetingEnded: true });
 
   const viaConnection = await streaming();
   viaConnection.clients[0].handlers.leave(6);
   await tick();
-  assert.deepEqual(viaConnection.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', meetingEnded: true });
+  assert.deepEqual(viaConnection.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', streamId: 'stream-1', meetingEnded: true });
 
   const hostStopped = await streaming();
   hostStopped.clients[0].handlers.leave(1);
   await tick();
-  assert.deepEqual(hostStopped.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped' });
+  assert.deepEqual(hostStopped.sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', streamId: 'stream-1' });
 });
 
 test('a stop that lands while the connection is being recovered is a fault, and cancels the reconnect', async () => {
@@ -455,7 +601,7 @@ test('a stop that lands while the connection is being recovered is a fault, and 
   await manager.stopped({ meeting_uuid: MEETING, rtms_stream_id: 'stream-1', stop_reason: 20 });
   assert.deepEqual(pending(), []);
   assert.equal(clients.length, 1);
-  assert.deepEqual(sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', fault: true });
+  assert.deepEqual(sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', streamId: 'stream-1', fault: true });
 });
 
 test('a connection that closes without a deliberate stop waits for Zoom, and is not rejoined on its own', async () => {
@@ -480,7 +626,7 @@ test('if Zoom never says what happened to a closed connection, the stream is rep
   fire(AWAIT_ZOOM_SIGNAL_MS);
   await tick();
   assert.equal(manager.size(), 0);
-  assert.deepEqual(sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', fault: true });
+  assert.deepEqual(sent.status.at(-1), { meetingId: MEETING, status: 'rtms_stopped', streamId: 'stream-1', fault: true });
 });
 
 test('callbacks from a replaced client are ignored', async () => {

@@ -42,13 +42,15 @@ test('a cut value is a copy, so an oversized original is not kept in memory', ()
   assert.equal(store.appendEvent('M1', { eventType: 'e'.repeat(500) }).eventType.length, 50);
 });
 
-test('sequence numbers that are not sane whole numbers are replaced, and do not break later lines', () => {
+test('the store numbers the lines itself, whatever number a line arrives with', () => {
+  // The number a line arrives with is its stream's own count. A meeting can
+  // have several streams and the stored one can change, so those counts can
+  // repeat, jump or go backwards; the store's numbers never do.
   const store = createMemoryMeetingStore();
-  const numbers = [Number.MAX_SAFE_INTEGER, 1e308, -5, 1.5, '7', NaN, undefined]
+  const numbers = [5, 1, 1, 40, Number.MAX_SAFE_INTEGER, 1e308, -5, 1.5, '7', NaN, undefined]
     .map((seqNo) => store.appendSegment('M1', { text: 'line', seqNo }).seqNo);
-  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7]);
-  assert.equal(store.appendSegment('M1', { text: 'explicit', seqNo: 40 }).seqNo, 40);
-  assert.equal(store.appendSegment('M1', { text: 'next' }).seqNo, 41);
+  assert.deepEqual(numbers, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.equal(store.appendSegment('M2', { text: 'another meeting', seqNo: 9 }).seqNo, 1);
 });
 
 test('times that make no sense are replaced', () => {

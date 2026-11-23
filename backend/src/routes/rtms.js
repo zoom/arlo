@@ -36,9 +36,40 @@ const { requireAuth } = require('../middleware/auth');
 const { requireInternal, isInternalRequest, INTERNAL_KEY_HEADER, getInternalKey } = require('../lib/internalAuth');
 const { getMeetingStore } = require('../storage');
 const { getMeetingLifecycle } = require('../services/meetingLifecycle');
+const { getMeetingStreams } = require('../services/meetingStreams');
 
 // RTMS stop reason 6: the stream ended because the meeting did
 const RTMS_STOP_MEETING_ENDED = 6;
+
+const MAX_ID_CHARS = 256;
+const isStreamId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
+/** A stream or operator id from the rtms service: left out, or a sane string. */
+const isOptionalId = (value) => value === undefined || value === null || isStreamId(value);
+
+/**
+ * One stream of a meeting stopped, or never got in. A meeting can have several
+ * streams (services/meetingStreams.js), so this is a meeting stop only when no
+ * other stream is running. Returns true when it was the last one.
+ */
+function streamEnded(meetingId, streamId) {
+  const streams = getMeetingStreams();
+  const wasSource = streams.isSource(meetingId, streamId);
+  if (!streams.streamStopped(meetingId, streamId).anyLive) return true;
+  // The transcript now comes from another stream. The panels may have been
+  // told the old one was reconnecting: for them a stream is running.
+  if (wasSource) broadcastMeetingStatus(meetingId, 'rtms_started');
+  return false;
+}
+
+/**
+ * Whether lines and events from this stream are the ones kept. Answers false
+ * for a meeting that was flushed a moment ago, before anything is noted about
+ * its streams, so nothing about a meeting comes back after its flush.
+ */
+function keepsDataFrom(meetingId, streamId) {
+  return getMeetingLifecycle().dataReceived(meetingId)
+    && getMeetingStreams().acceptsDataFrom(meetingId, streamId);
+}
 
 /**
  * Keep a timeline event for the meeting, then send the stored copy (it has the
@@ -229,13 +260,20 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       // the panel shows "Reconnecting…" instead of a silent stall.
       const meetingUuid = payload?.meeting_uuid;
       const validUuid = typeof meetingUuid === 'string' && meetingUuid.length > 0 && meetingUuid.length <= 256;
-      if (event === 'meeting.rtms_interrupted' && validUuid) {
+      // Which stream Zoom means. An id that is not a sane string is not used:
+      // the webhook is then about the meeting's stream, as before streams were told apart.
+      const streamId = isStreamId(payload?.rtms_stream_id) ? payload.rtms_stream_id : undefined;
+      const streams = getMeetingStreams();
+      const aboutAnotherStream = validUuid && streamId !== undefined
+        && streams.anyLive(meetingUuid) && !streams.isSource(meetingUuid, streamId);
+      if (event === 'meeting.rtms_interrupted' && validUuid && !aboutAnotherStream) {
         broadcastMeetingStatus(meetingUuid, 'rtms_interrupted');
       }
       // A stop the rtms service never hears about would never be reported back,
       // so the meeting's data would stay in memory after the meeting. Zoom's
-      // signed webhook is enough to act on: tell the panels and the lifecycle.
-      if (event === 'meeting.rtms_stopped' && validUuid) {
+      // signed webhook is enough to act on: tell the panels and the lifecycle,
+      // once the meeting's last stream has stopped.
+      if (event === 'meeting.rtms_stopped' && validUuid && streamEnded(meetingUuid, streamId)) {
         broadcastMeetingStatus(meetingUuid, 'rtms_stopped');
         getMeetingLifecycle().streamStatus(meetingUuid, 'rtms_stopped', {
           meetingEnded: payload.stop_reason === RTMS_STOP_MEETING_ENDED,
@@ -264,6 +302,9 @@ const INTERNAL_STATUSES = new Set([
  * must be signed in and may only report pause/resume (the SDK pause/resume calls
  * happen client-side, so the backend learns about them from the browser).
  */
+const STREAM_RUNNING = new Set(['rtms_started', 'rtms_reconnected']);
+const STREAM_ENDED = new Set(['rtms_stopped', 'rtms_failed']);
+
 function authorizeStatusUpdate(req, res, next) {
   if (isInternalRequest(req)) {
     req.isInternal = true;
@@ -273,7 +314,9 @@ function authorizeStatusUpdate(req, res, next) {
 }
 
 router.post('/status', authorizeStatusUpdate, async (req, res) => {
-  const { meetingId, status, operatorId, fault, meetingEnded } = req.body || {};
+  const {
+    meetingId, status, streamId, operatorId, originalHost, fault, meetingEnded,
+  } = req.body || {};
 
   if (typeof meetingId !== 'string' || meetingId.length === 0 || meetingId.length > 200) {
     return res.status(400).json({ error: 'Invalid meetingId' });
@@ -283,14 +326,43 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
     return res.status(req.isInternal ? 400 : 403).json({ error: 'Status not allowed' });
   }
 
+  if (req.isInternal && (!isOptionalId(streamId) || !isOptionalId(operatorId))) {
+    return res.status(400).json({ error: 'Invalid streamId or operatorId' });
+  }
+
   console.log(`RTMS Status Update: ${status}`);
+
+  // A meeting can have several streams, one per user who started one. The rtms
+  // service reports each; the meeting as a whole (its panels, its timeline, its
+  // data lifecycle) only hears what changes for the meeting:
+  //   - a stream starting or rejoining, unless another stream is the one stored,
+  //   - a stream stopping or failing, only when it was the last one running,
+  //   - an interruption, only on the stream that is stored.
+  // `quiet` marks a report that changes nothing for the meeting.
+  const streams = getMeetingStreams();
+  let quiet = false;
+  let firstStream = false;
+  if (req.isInternal) {
+    if (STREAM_RUNNING.has(status)) {
+      firstStream = !streams.anyLive(meetingId);
+      streams.streamStarted(meetingId, {
+        streamId, operatorId, originalHost: originalHost === true,
+      });
+      quiet = !firstStream && !streams.isSource(meetingId, streamId);
+    } else if (STREAM_ENDED.has(status)) {
+      quiet = !streamEnded(meetingId, streamId);
+    } else {
+      quiet = isStreamId(streamId) && streams.anyLive(meetingId) && !streams.isSource(meetingId, streamId);
+    }
+  }
 
   // The meeting's data lifecycle (services/meetingLifecycle.js) follows the rtms
   // service's reports only: a browser cannot start a flush or hold data back.
-  // "The meeting ended" is applied last, after the meeting has been told.
+  // "The meeting ended" is applied last, after the meeting has been told, and
+  // like a fault it counts for the meeting's last stream only.
   const lifecycle = getMeetingLifecycle();
-  const meetingIsOver = req.isInternal && status === 'rtms_stopped' && meetingEnded === true;
-  if (req.isInternal && !meetingIsOver) lifecycle.streamStatus(meetingId, status);
+  const meetingIsOver = req.isInternal && !quiet && status === 'rtms_stopped' && meetingEnded === true;
+  if (req.isInternal && !quiet && !meetingIsOver) lifecycle.streamStatus(meetingId, status);
 
   // Cross-register user for WebSocket if we have an operator ID (internal only)
   if (req.isInternal && status === 'rtms_started' && operatorId) {
@@ -313,6 +385,10 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
     rtmsEvents.record({ event: ARLO_EVENTS[status], meetingUuid: meetingId });
   }
 
+  if (quiet) {
+    return res.status(200).json({ received: true, broadcast: 0 });
+  }
+
   // Broadcast status change to WebSocket clients. A rejoined stream is a running
   // stream to them. `fault` (from the rtms service only) marks a stream Zoom
   // ended because of a connection problem, so the panel can offer a restart.
@@ -328,7 +404,9 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
     rtms_paused: 'transcription_paused',
     rtms_resumed: 'transcription_resumed',
   };
-  const eventType = lifecycleMap[status];
+  // "Transcription started" is one line for the meeting, not one per stream
+  const anotherStreamStarted = req.isInternal && status === 'rtms_started' && !firstStream;
+  const eventType = anotherStreamStarted ? null : lifecycleMap[status];
   if (eventType) {
     const event = { eventType, participantName: 'Arlo', participantId: null, timestamp: Date.now() };
     // Only the rtms service's reports are kept. A browser names its own
@@ -348,16 +426,18 @@ router.post('/status', authorizeStatusUpdate, async (req, res) => {
  * until the meeting ends) and sent to the panels connected to it.
  */
 router.post('/broadcast', requireInternal, async (req, res) => {
-  const { meetingId, segment } = req.body || {};
-  if (typeof meetingId !== 'string' || !segment || typeof segment !== 'object') {
+  const { meetingId, segment, streamId } = req.body || {};
+  if (typeof meetingId !== 'string' || !segment || typeof segment !== 'object' || !isOptionalId(streamId)) {
     return res.status(400).json({ error: 'Invalid broadcast payload' });
   }
 
   if (typeof segment.text !== 'string' || segment.text.length === 0) {
     return res.status(400).json({ error: 'Invalid segment' });
   }
-  // A line still in flight for a meeting whose data was just flushed is dropped
-  if (!getMeetingLifecycle().dataReceived(meetingId)) {
+  // Dropped: a line still in flight for a meeting whose data was just flushed,
+  // and a line from a stream other than the one the transcript is taken from
+  // (each user's stream carries the same speech; one copy is kept)
+  if (!keepsDataFrom(meetingId, streamId)) {
     return res.status(200).json({ received: true, stored: false, broadcast: 0 });
   }
   const stored = getMeetingStore().appendSegment(meetingId, segment);
@@ -376,12 +456,16 @@ router.post('/broadcast', requireInternal, async (req, res) => {
  * Kept for the meeting (in memory) and sent to its panels
  */
 router.post('/participant-event', requireInternal, async (req, res) => {
-  const { meetingId, events } = req.body || {};
-  if (typeof meetingId !== 'string' || !Array.isArray(events)) {
+  const { meetingId, events, streamId } = req.body || {};
+  if (typeof meetingId !== 'string' || !Array.isArray(events) || !isOptionalId(streamId)) {
     return res.status(400).json({ error: 'Invalid participant-event payload' });
   }
 
   logger.debug(`Participant events received: ${events.length}`);
+  // Every stream of a meeting reports the same people: one stream's are kept
+  if (!keepsDataFrom(meetingId, streamId)) {
+    return res.status(200).json({ received: true, stored: false, broadcast: 0 });
+  }
 
   // Broadcast each event to WebSocket clients
   let sentCount = 0;

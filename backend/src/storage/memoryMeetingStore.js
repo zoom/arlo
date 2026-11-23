@@ -80,10 +80,12 @@ function createMemoryMeetingStore(options = {}) {
       return null;
     }
     const entry = entryFor(meetingId);
-    // A sequence number that is not a sane whole number is replaced, so one bad
-    // value cannot break the numbering of the lines that follow
-    const seqNo = isSeqNo(raw.seqNo) ? raw.seqNo : entry.nextSeqNo;
-    entry.nextSeqNo = Math.min(Math.max(entry.nextSeqNo, seqNo + 1), MAX_SEQ_NO - 1);
+    // The store numbers the lines itself. The number a line arrives with is its
+    // stream's own count, and a meeting's lines can come from one stream after
+    // another (see services/meetingStreams.js), so those counts can repeat or
+    // jump. Numbers given here never repeat, skip or go backwards.
+    const seqNo = entry.nextSeqNo;
+    entry.nextSeqNo = Math.min(seqNo + 1, MAX_SEQ_NO - 1);
     const tStartMs = isTime(raw.tStartMs) ? raw.tStartMs : now();
     const segment = {
       seqNo,

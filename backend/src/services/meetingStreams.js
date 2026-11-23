@@ -1,0 +1,215 @@
+/**
+ * The streams of each meeting, and which one the transcript is taken from.
+ *
+ * Several Zoom users can each run a stream in one meeting at the same time:
+ * each has its own stream id under the same meeting UUID and carries the same
+ * speech. The server keeps one transcript per meeting, so it stores the lines
+ * of one stream, the source, and drops the others:
+ *   - a live stream of the meeting's original host is the source; it can start
+ *     before the host joins and keeps running after the host leaves,
+ *   - otherwise the live stream that started first.
+ * The source stays the source while it runs. It is chosen again when it stops
+ * or when the original host's stream starts.
+ *
+ * This module also remembers who ran a stream in the meeting (operator ids),
+ * including streams that have stopped, until forget(). The meeting lifecycle
+ * calls forget() when it flushes the meeting, so nothing here outlives the
+ * meeting's data. Ids only: no meeting content is held or logged.
+ */
+const MAX_ID_CHARS = 256;
+const DEFAULTS = Object.freeze({ maxStreamsPerMeeting: 20, maxMeetings: 5000 });
+// A report without a stream id (an rtms process from before streams were
+// told apart) is the only stream of its meeting: it gets this key.
+const NO_STREAM_ID = '';
+
+const isId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
+const isMissing = (value) => value === undefined || value === null;
+/** The key a stream is kept under, or null when the id is not a sane one. */
+const keyFor = (streamId) => {
+  if (isMissing(streamId)) return NO_STREAM_ID;
+  return isId(streamId) ? streamId : null;
+};
+
+function createMeetingStreams(options = {}) {
+  const { log = console } = options;
+  const limits = { ...DEFAULTS };
+  for (const name of Object.keys(DEFAULTS)) {
+    if (Number.isInteger(options[name]) && options[name] > 0) limits[name] = options[name];
+  }
+  // meetingId -> { streams: Map(key -> { operatorId, originalHost, live }), sourceKey, warned }
+  // The streams Map keeps the order in which the streams started.
+  const meetings = new Map();
+
+  function stateFor(meetingId) {
+    let state = meetings.get(meetingId);
+    if (state) {
+      // Move to the end: the Map's first key is then the meeting heard from longest ago
+      meetings.delete(meetingId);
+    } else {
+      // A backstop only: a meeting normally leaves through forget()
+      if (meetings.size >= limits.maxMeetings) meetings.delete(meetings.keys().next().value);
+      state = { streams: new Map(), sourceKey: null, warned: false };
+    }
+    meetings.set(meetingId, state);
+    return state;
+  }
+
+  /**
+   * The key of the stream a report is about, or null for an id that is not sane.
+   * Reports with and without a stream id do not normally mix. When they do (an
+   * older rtms process, or Zoom's own webhook naming a stream that was reported
+   * without its id), the report is taken to be about the meeting's one stream:
+   *   - a named stream not known here, when the stream known has no id, is that stream;
+   *   - no id, when the streams known have ids: see holdsUnnamed().
+   */
+  function resolve(state, streamId) {
+    const key = keyFor(streamId);
+    if (key !== null && key !== NO_STREAM_ID && !state.streams.has(key) && state.streams.has(NO_STREAM_ID)) {
+      return NO_STREAM_ID;
+    }
+    return key;
+  }
+  /** A report without an id, about a meeting whose streams are known by id. */
+  const holdsUnnamed = (state, key) => key === NO_STREAM_ID && !state.streams.has(key) && state.streams.size > 0;
+
+  const liveKeys = (state) => [...state.streams].filter(([, stream]) => stream.live).map(([key]) => key);
+
+  /** Keep the source while it runs; otherwise pick the next one. */
+  function chooseSource(state) {
+    const live = liveKeys(state);
+    const hostKey = live.find((key) => state.streams.get(key).originalHost);
+    const current = state.streams.get(state.sourceKey);
+    if (current?.live && (current.originalHost || hostKey === undefined)) return;
+    // Nothing live: the stream that was the source keeps that place, so its
+    // last lines, still on their way, are kept
+    if (live.length === 0 && current) return;
+    state.sourceKey = hostKey ?? live[0] ?? null;
+  }
+
+  /** Add a stream to a meeting. Returns it, or null when the meeting is full. */
+  function addStream(state, key) {
+    if (state.streams.size >= limits.maxStreamsPerMeeting) {
+      if (!state.warned) {
+        state.warned = true;
+        log.warn(`More than ${limits.maxStreamsPerMeeting} streams in one meeting: the rest are ignored`);
+      }
+      return null;
+    }
+    const stream = { operatorId: null, originalHost: false, live: true };
+    state.streams.set(key, stream);
+    return stream;
+  }
+
+  /** A stream started, or reported itself running again after a rejoin. */
+  function streamStarted(meetingId, { streamId, operatorId, originalHost } = {}) {
+    if (!isId(meetingId) || keyFor(streamId) === null) return;
+    const state = stateFor(meetingId);
+    const key = resolve(state, streamId);
+    // Which of the known streams it is cannot be told: nothing to add
+    if (holdsUnnamed(state, key)) return;
+    const operator = isId(operatorId) ? operatorId : null;
+
+    // The same user started again: the rtms service has replaced their old
+    // stream without a stop report, so it is replaced here too
+    if (operator) {
+      for (const [otherKey, other] of state.streams) {
+        if (otherKey !== key && other.operatorId === operator) state.streams.delete(otherKey);
+      }
+    }
+
+    let stream = state.streams.get(key);
+    if (stream && !stream.live) {
+      // Stopped and started again: it takes its place after the streams running now
+      state.streams.delete(key);
+      state.streams.set(key, stream);
+    }
+    if (!stream) stream = addStream(state, key);
+    if (stream) {
+      stream.live = true;
+      if (operator) stream.operatorId = operator;
+      if (originalHost === true) stream.originalHost = true;
+    }
+    chooseSource(state);
+  }
+
+  /**
+   * A stream stopped or could not be joined. Without a stream id, every stream
+   * of the meeting is taken as stopped. Returns whether any stream still runs.
+   */
+  function streamStopped(meetingId, streamId) {
+    const state = meetings.get(meetingId);
+    if (!state) return { anyLive: false };
+    const key = resolve(state, streamId);
+    if (key === NO_STREAM_ID && !state.streams.has(key)) {
+      for (const stream of state.streams.values()) stream.live = false;
+    } else if (key !== null && state.streams.has(key)) {
+      state.streams.get(key).live = false;
+    }
+    chooseSource(state);
+    return { anyLive: liveKeys(state).length > 0 };
+  }
+
+  /** True for the one stream whose lines are stored. */
+  function isSource(meetingId, streamId) {
+    const state = meetings.get(meetingId);
+    if (!state) return false;
+    const key = resolve(state, streamId);
+    if (key === null) return false;
+    if (holdsUnnamed(state, key)) return true;
+    return state.streams.has(key) && state.sourceKey === key;
+  }
+
+  /**
+   * Whether a line or participant event from this stream is to be kept. Like
+   * isSource(), except that a stream first heard of through its data counts as
+   * started: this server may have restarted mid-meeting and missed the report.
+   * A stream known to have stopped is not brought back by a late line.
+   */
+  function acceptsDataFrom(meetingId, streamId) {
+    if (!isId(meetingId) || keyFor(streamId) === null) return false;
+    const state = stateFor(meetingId);
+    const key = resolve(state, streamId);
+    if (!state.streams.has(key) && !holdsUnnamed(state, key)) {
+      addStream(state, key);
+      chooseSource(state);
+    }
+    return isSource(meetingId, streamId);
+  }
+
+  const anyLive = (meetingId) => {
+    const state = meetings.get(meetingId);
+    return Boolean(state) && liveKeys(state).length > 0;
+  };
+
+  /** Operator ids of the streams seen in this meeting, the source's first, each once. */
+  function operators(meetingId) {
+    const state = meetings.get(meetingId);
+    if (!state) return [];
+    const ordered = [state.streams.get(state.sourceKey), ...state.streams.values()]
+      .map((stream) => stream?.operatorId)
+      .filter(Boolean);
+    return [...new Set(ordered)];
+  }
+
+  const sourceOperator = (meetingId) => {
+    const state = meetings.get(meetingId);
+    return state?.streams.get(state.sourceKey)?.operatorId ?? null;
+  };
+
+  const forget = (meetingId) => meetings.delete(meetingId);
+
+  return {
+    streamStarted, streamStopped, isSource, acceptsDataFrom, anyLive,
+    operators, sourceOperator, forget, size: () => meetings.size,
+  };
+}
+
+let instance = null;
+
+/** The record the running server uses. */
+function getMeetingStreams() {
+  if (!instance) instance = createMeetingStreams();
+  return instance;
+}
+
+module.exports = { createMeetingStreams, getMeetingStreams };

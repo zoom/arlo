@@ -18,6 +18,7 @@
  */
 const config = require('../config');
 const { getMeetingStore } = require('../storage');
+const { getMeetingStreams } = require('./meetingStreams');
 
 const MAX_ID_CHARS = 256;
 const isMeetingId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
@@ -39,6 +40,9 @@ function createMeetingLifecycle({
   schedule = defaultSchedule,
   graceMs = 2 * 60 * 1000,
   onFlush = () => {},
+  // Called with the meeting id when a meeting is flushed or no longer tracked,
+  // so state kept elsewhere per meeting goes at the same moment
+  onForget = () => {},
   now = Date.now,
 }) {
   const grace = Number.isFinite(graceMs) && graceMs >= 0 ? graceMs : 2 * 60 * 1000;
@@ -71,6 +75,14 @@ function createMeetingLifecycle({
     return true;
   }
 
+  function forget(meetingId) {
+    try {
+      onForget(meetingId);
+    } catch {
+      // A listener must never undo a flush or crash a timer
+    }
+  }
+
   function flush(meetingId, reason) {
     const state = meetings.get(meetingId);
     if (state?.cancel) {
@@ -87,6 +99,7 @@ function createMeetingLifecycle({
     // panel opened and closed before anyone spoke) must not silence a stream
     // that is in fact live.
     if (hadData || reason === 'meeting_ended') rememberFlushed(meetingId);
+    forget(meetingId);
     try {
       onFlush(reason, hadData);
     } catch {
@@ -167,6 +180,7 @@ function createMeetingLifecycle({
       if (state.panels === 0 && !store.has(meetingId)) {
         if (state.cancel) state.cancel();
         meetings.delete(meetingId);
+        forget(meetingId);
       }
     }
     for (const [meetingId, at] of flushedAt) {
@@ -189,6 +203,8 @@ function getMeetingLifecycle() {
       graceMs: config.meetingFlushGraceMs,
       // Reason and whether anything was held: never a meeting id
       onFlush: (reason, hadData) => console.log(`Meeting data flushed (${reason}${hadData ? '' : ', nothing held'})`),
+      // What is known about the meeting's streams (who ran one) goes with its data
+      onForget: (meetingId) => getMeetingStreams().forget(meetingId),
     });
     setInterval(() => {
       const deleted = instance.sweep();

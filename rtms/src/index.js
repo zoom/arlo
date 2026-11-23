@@ -199,13 +199,14 @@ app.post('/webhook', async (req, res) => {
 /**
  * Broadcast segment to WebSocket clients via backend
  */
-async function broadcastSegment(meetingId, segment) {
+async function broadcastSegment(meetingId, segment, { streamId } = {}) {
   try {
     // Use Docker service name for inter-container communication
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await internalHttp.post(`${backendUrl}/api/rtms/broadcast`, {
       meetingId,
       segment,
+      ...(streamId && { streamId }),
     });
   } catch (error) {
     // Non-critical, just log
@@ -216,12 +217,13 @@ async function broadcastSegment(meetingId, segment) {
 /**
  * Broadcast participant events to frontend via backend
  */
-async function broadcastParticipantEvents(meetingId, events) {
+async function broadcastParticipantEvents(meetingId, events, { streamId } = {}) {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await internalHttp.post(`${backendUrl}/api/rtms/participant-event`, {
       meetingId,
       events,
+      ...(streamId && { streamId }),
     });
     console.log(`Sent ${events.length} participant events to backend for broadcast`);
   } catch (error) {
@@ -230,15 +232,19 @@ async function broadcastParticipantEvents(meetingId, events) {
 }
 
 /**
- * Notify backend of RTMS status change
+ * Notify backend of RTMS status change. `streamId` says which stream it is
+ * about (a meeting can have several); `operatorId` and `originalHost` say whose
+ * stream it is.
  */
-async function notifyBackend(meetingId, status, { operatorId, fault, meetingEnded } = {}) {
+async function notifyBackend(meetingId, status, { streamId, operatorId, originalHost, fault, meetingEnded } = {}) {
   try {
     const backendUrl = process.env.BACKEND_URL || 'http://backend:3000';
     await internalHttp.post(`${backendUrl}/api/rtms/status`, {
       meetingId,
       status,
+      ...(streamId && { streamId }),
       ...(operatorId && { operatorId }),
+      ...(originalHost === true && { originalHost: true }),
       ...(fault === true && { fault: true }),
       ...(meetingEnded === true && { meetingEnded: true }),
     });

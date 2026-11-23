@@ -336,3 +336,48 @@ test('invalid meeting ids and counts are ignored', () => {
   for (const bad of [-1, 1.5, '0', null]) lifecycle.panelsChanged('M1', bad);
   assert.deepEqual(pending(), []); // still one panel connected
 });
+
+test('whoever keeps other state per meeting is told when a meeting is flushed or no longer tracked', () => {
+  const store = createMemoryMeetingStore();
+  const forgotten = [];
+  const timers = [];
+  const lifecycle = createMeetingLifecycle({
+    store, schedule: (fn) => { timers.push(fn); return () => {}; }, onForget: (meetingId) => forgotten.push(meetingId),
+  });
+
+  // the meeting ended
+  lifecycle.streamStatus('ENDED', 'rtms_started');
+  store.appendSegment('ENDED', { text: 'x' });
+  lifecycle.streamStatus('ENDED', 'rtms_stopped', { meetingEnded: true });
+  assert.deepEqual(forgotten, ['ENDED']);
+
+  // idle flush
+  lifecycle.streamStatus('IDLE', 'rtms_started');
+  lifecycle.streamStatus('IDLE', 'rtms_stopped');
+  timers.at(-1)();
+  assert.deepEqual(forgotten, ['ENDED', 'IDLE']);
+
+  // a stream that started and was never heard from again: dropped by the sweep
+  lifecycle.streamStatus('SILENT', 'rtms_started');
+  lifecycle.sweep();
+  assert.deepEqual(forgotten, ['ENDED', 'IDLE', 'SILENT']);
+  assert.equal(lifecycle.tracked(), 0);
+});
+
+test('a stop inside the meeting forgets nothing, and a listener that throws does not stop a flush', () => {
+  const store = createMemoryMeetingStore();
+  const forgotten = [];
+  const lifecycle = createMeetingLifecycle({
+    store, schedule: () => () => {}, onForget: (meetingId) => { forgotten.push(meetingId); throw new Error('listener down'); },
+  });
+  lifecycle.streamStatus('M1', 'rtms_started');
+  store.appendSegment('M1', { text: 'x' });
+  lifecycle.panelsChanged('M1', 1);
+  lifecycle.streamStatus('M1', 'rtms_stopped');
+  lifecycle.streamStatus('M1', 'rtms_started');
+  assert.deepEqual(forgotten, []);
+
+  lifecycle.streamStatus('M1', 'rtms_stopped', { meetingEnded: true });
+  assert.deepEqual(forgotten, ['M1']);
+  assert.equal(store.has('M1'), false);
+});
