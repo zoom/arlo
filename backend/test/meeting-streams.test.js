@@ -197,7 +197,7 @@ test('a stream first heard of through its data counts as started (this server re
   assert.equal(streams.isLive(M, 's1'), true);
 });
 
-test('at most 20 streams are kept per meeting; more are ignored with one warning', () => {
+test('at most 20 streams run in one meeting; more are ignored with one warning', () => {
   const { streams, warnings } = setup();
   for (let i = 1; i <= 25; i += 1) streams.streamStarted(M, { streamId: `s${i}`, operatorId: `op-${i}` });
 
@@ -207,10 +207,71 @@ test('at most 20 streams are kept per meeting; more are ignored with one warning
   assert.equal(streams.keepsEvent(M, 's26', { event: { eventType: 'joined', participantId: '1' } }), false);
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].includes('op-'), false);
+  assert.equal(warnings[0].includes(M), false);
+  assert.equal(/s\d/.test(warnings[0]), false);
 
-  // stopping the first 20 leaves nothing live: the ignored ones were never counted
-  for (let i = 1; i <= 19; i += 1) streams.streamStopped(M, `s${i}`);
-  assert.deepEqual(streams.streamStopped(M, 's20'), { anyLive: false });
+  // once one of the twenty has stopped there is room: the stopped one's record goes
+  streams.streamStopped(M, 's1');
+  assert.equal(streams.keepsLine(M, 's26', { line: line('y') }), true);
+  assert.equal(streams.isLive(M, 's26'), true);
+  assert.equal(streams.hasStopped(M, 's1'), false); // no longer known
+  assert.equal(warnings.length, 1);
+
+  // stopping the twenty that run leaves nothing live: the ignored ones were never counted
+  for (let i = 2; i <= 20; i += 1) streams.streamStopped(M, `s${i}`);
+  assert.deepEqual(streams.streamStopped(M, 's26'), { anyLive: false });
+});
+
+test('stopped streams do not use up the meeting\'s room: after twenty of them a new stream is taken', () => {
+  const { streams, warnings, after } = setup();
+  for (let i = 1; i <= 20; i += 1) {
+    streams.streamStarted(M, { streamId: `s${i}`, operatorId: `op-${i}` });
+    after(1);
+    streams.streamStopped(M, `s${i}`);
+  }
+  assert.equal(streams.anyLive(M), false);
+
+  // announced by a start report
+  streams.streamStarted(M, { streamId: 's21', operatorId: 'op-21' });
+  assert.equal(streams.isLive(M, 's21'), true);
+  assert.equal(streams.isPrimary(M, 's21'), true);
+  assert.equal(streams.keepsLine(M, 's21', { line: line('stored') }), true);
+  // or first heard of through its data
+  assert.equal(streams.keepsLine(M, 's22', { line: line('stored too', 2000), operatorId: 'op-22' }), true);
+  assert.equal(streams.keepsEvent(M, 's23', { event: { eventType: 'joined', participantId: '1' } }), true);
+  assert.equal(streams.isLive(M, 's22'), true);
+  assert.equal(warnings.length, 0);
+
+  // the streams that stopped longest ago made room; the rest are still known
+  for (const gone of ['s1', 's2', 's3']) assert.equal(streams.hasStopped(M, gone), false);
+  assert.equal(streams.hasStopped(M, 's4'), true);
+  assert.equal(streams.operators(M).length, 19); // 17 stopped with an operator, s21 and s22
+  assert.deepEqual(streams.liveOperators(M), ['op-21', 'op-22']);
+});
+
+test('room is made first with a stopped stream whose owner has another stream', () => {
+  const { streams, after } = setup({ maxStreamsPerMeeting: 3 });
+  streams.streamStarted(M, { streamId: 's1', operatorId: 'op-1' });
+  streams.streamStarted(M, { streamId: 's2', operatorId: 'op-2' });
+  after(1);
+  streams.streamStopped(M, 's2'); // stopped first, and op-2's only stream
+  after(1);
+  streams.streamStarted(M, { streamId: 's3', operatorId: 'op-1' }); // replaces s1, which is kept as stopped
+  assert.deepEqual(streams.operators(M), ['op-1', 'op-2']);
+
+  streams.streamStarted(M, { streamId: 's4', operatorId: 'op-4' });
+  assert.equal(streams.isLive(M, 's4'), true);
+  assert.equal(streams.hasStopped(M, 's1'), false); // went, though s2 stopped earlier
+  assert.equal(streams.hasStopped(M, 's2'), true);
+  assert.deepEqual(streams.operators(M), ['op-1', 'op-2', 'op-4']); // nobody stopped being an owner
+
+  // with no such stream left, the one that stopped longest ago goes, and its owner with it
+  streams.streamStarted(M, { streamId: 's5', operatorId: 'op-5' });
+  assert.equal(streams.hasStopped(M, 's2'), false);
+  assert.deepEqual(streams.operators(M), ['op-1', 'op-4', 'op-5']);
+  // three run now: a fourth is refused
+  streams.streamStarted(M, { streamId: 's6', operatorId: 'op-6' });
+  assert.equal(streams.isLive(M, 's6'), false);
 });
 
 test('ids that are not sane strings are refused', () => {
@@ -498,6 +559,110 @@ test('a line that cannot be identified is stored, never taken for a duplicate', 
   assert.equal(streams.keepsLine(M, 'A', { line: { text: 'a number', tStartMs: 1, speakerId: 7 } }), true);
   assert.equal(streams.keepsLine(M, 'B', { line: { text: 'a number', tStartMs: 1, speakerId: '7' } }), false);
   assert.equal(streams.keepsLine(M, 'B', { line: { text: 'a number', tStartMs: 1, speakerId: 8 } }), true);
+});
+
+// --- a line is a copy only for a stream that existed when it was stored ------
+
+test('a stream that replaces its user\'s old one: the same words said again are a second line', () => {
+  const { streams, after } = setup();
+  streams.streamStarted(M, { streamId: 'A', operatorId: 'op-1' });
+  assert.equal(streams.keepsLine(M, 'A', { line: line('Okay.', 100_000) }), true);
+  after(2);
+  streams.streamStarted(M, { streamId: 'B', operatorId: 'op-1' }); // replaces A
+  after(1.5);
+  // B did not exist when the first one was stored: this cannot be its copy
+  assert.equal(streams.keepsLine(M, 'B', { line: line('Okay.', 103_500) }), true);
+});
+
+test('a stream stops and another starts: the same words said again are a second line', () => {
+  const { streams, after } = setup();
+  streams.streamStarted(M, { streamId: 'A', operatorId: 'op-1' });
+  assert.equal(streams.keepsLine(M, 'A', { line: line('Okay.', 100_000) }), true);
+  after(1);
+  streams.streamStopped(M, 'A');
+  after(1);
+  streams.streamStarted(M, { streamId: 'B', operatorId: 'op-2' });
+  after(1.5);
+  assert.equal(streams.keepsLine(M, 'B', { line: line('Okay.', 103_500) }), true);
+
+  // the same stream id stopping and starting again is a new start too
+  const again = started(['A', 'B']);
+  assert.equal(again.streams.keepsLine(M, 'A', { line: line('Okay.', 100_000) }), true);
+  again.streams.streamStopped(M, 'B');
+  again.after(2);
+  again.streams.streamStarted(M, { streamId: 'B', operatorId: 'op-B' });
+  again.after(1.5);
+  assert.equal(again.streams.keepsLine(M, 'B', { line: line('Okay.', 103_500) }), true);
+});
+
+test('the same without timestamps: a new stream\'s line is not a copy of one stored before it started', () => {
+  const { streams, after } = setup();
+  const bare = (text) => ({ speakerId: '7', text });
+  streams.streamStarted(M, { streamId: 'A', operatorId: 'op-1' });
+  assert.equal(streams.keepsLine(M, 'A', { line: bare('Okay.') }), true);
+  after(3);
+  streams.streamStarted(M, { streamId: 'B', operatorId: 'op-1' });
+  after(5); // 8 seconds after the first: inside the 10 seconds copies are told by
+  assert.equal(streams.keepsLine(M, 'B', { line: bare('Okay.') }), true);
+  // and a stream first heard of through its data, seconds after the line was stored
+  after(2);
+  assert.equal(streams.keepsLine(M, 'C', { line: bare('Okay.') }), true);
+});
+
+test('a stream that starts mid-meeting: its copies of lines stored after it started are dropped', () => {
+  const { streams, after } = started(['A']);
+  const stored = replay(streams, [['A', 1], ['A', 2]]);
+  after(20);
+  streams.streamStarted(M, { streamId: 'B', operatorId: 'op-B' });
+  after(3);
+  replay(streams, [['A', 3], ['B', 3], ['B', 4], ['A', 4], ['A', 5]], stored);
+  after(8);
+  replay(streams, [['B', 5]], stored);
+  assert.deepEqual(stored, [1, 2, 3, 4, 5]);
+});
+
+test('a line stored up to a second before a stream was first seen can still be its copy', () => {
+  // Zoom may deliver to a stream that just started a line whose copy from
+  // another stream arrived a moment earlier
+  const { streams, after } = started(['A']);
+  assert.equal(streams.keepsLine(M, 'A', { line: line('one', 60_000) }), true);
+  after(1);
+  streams.streamStarted(M, { streamId: 'B', operatorId: 'op-B' });
+  assert.equal(streams.keepsLine(M, 'B', { line: line('one', 60_000) }), false);
+
+  assert.equal(streams.keepsLine(M, 'A', { line: line('two', 61_000) }), true);
+  after(1.001);
+  streams.streamStarted(M, { streamId: 'C', operatorId: 'op-C' });
+  assert.equal(streams.keepsLine(M, 'C', { line: line('two', 61_000) }), true);
+
+  // the grace can be set
+  const wide = started(['A'], { startGraceMs: 4000 });
+  assert.equal(wide.streams.keepsLine(M, 'A', { line: line('one', 60_000) }), true);
+  wide.after(4);
+  assert.equal(wide.streams.keepsLine(M, 'B', { line: line('one', 60_000) }), false);
+  assert.equal(wide.streams.keepsLine(M, 'A', { line: line('two', 61_000) }), true);
+  wide.after(4.001);
+  assert.equal(wide.streams.keepsLine(M, 'C', { line: line('two', 61_000) }), true);
+});
+
+test('a participant event is a copy only for a stream that existed when it was kept', () => {
+  const { streams, after } = started(['A']);
+  assert.equal(streams.keepsEvent(M, 'A', { event: { eventType: 'left', participantId: '12' } }), true);
+  after(3);
+  streams.streamStarted(M, { streamId: 'B', operatorId: 'op-A' }); // replaces A
+  after(2);
+  // the same person leaving again, reported by the new stream only
+  assert.equal(streams.keepsEvent(M, 'B', { event: { eventType: 'left', participantId: '12' } }), true);
+
+  // both streams were there: one event
+  streams.streamStarted(M, { streamId: 'C', operatorId: 'op-C' });
+  after(2);
+  assert.equal(streams.keepsEvent(M, 'B', { event: { eventType: 'joined', participantId: '13' } }), true);
+  assert.equal(streams.keepsEvent(M, 'C', { event: { eventType: 'joined', participantId: '13' } }), false);
+  // within the second of grace
+  assert.equal(streams.keepsEvent(M, 'C', { event: { eventType: 'joined', participantId: '14' } }), true);
+  after(1);
+  assert.equal(streams.keepsEvent(M, 'D', { event: { eventType: 'joined', participantId: '14' } }), false);
 });
 
 // --- participant events arrive once per stream too ---------------------------

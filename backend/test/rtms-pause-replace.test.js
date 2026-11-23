@@ -461,3 +461,73 @@ test('a paused only stream that is replaced: the new stream is running, not paus
   assert.deepEqual(told(panel), ['rtms_started', 'rtms_paused', 'rtms_resumed', 'rtms_started']);
   assert.deepEqual([state(panel).paused, state(panel).myStreamPaused], [false, false]);
 });
+
+test('a `replaced` stop for a stream that was not running starts no wait', async () => {
+  const meeting = 'REPLACE-9==';
+  const panel = await openPanel(meeting, null);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  await status(meeting, { status: 'rtms_stopped', streamId: 's1' });
+  // the stream stopped already, or was never heard of: nothing is being replaced
+  const timers = await catchingWait(async () => {
+    await status(meeting, { status: 'rtms_stopped', streamId: 's1', replaced: true });
+    await status(meeting, { status: 'rtms_stopped', streamId: 'never-seen', replaced: true });
+  });
+  assert.equal(timers.length, 0);
+  assert.equal(getMeetingStreams().awaitingReplacement(meeting), false);
+
+  // so the next start is the meeting's first stream again, not a replacement
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-1' });
+  await h.wait(100);
+  panel.socket.close();
+  assert.deepEqual(told(panel), ['rtms_started', 'rtms_stopped', 'rtms_started']);
+  assert.deepEqual(await timeline(meeting), ['transcription_started', 'transcription_stopped', 'transcription_started']);
+});
+
+test('the wait running out while a stream runs after all says nothing: the meeting is not stopped', async () => {
+  const meeting = 'REPLACE-10==';
+  const panel = await openPanel(meeting, null);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  const timers = await catchingWait(() => status(meeting, { status: 'rtms_stopped', streamId: 's1', replaced: true }));
+  assert.equal(timers.length, 1);
+  // the new stream's start report was lost; it is learned from its data, which settles nothing
+  await say(meeting, 's2', 'from the new stream');
+  assert.equal(getMeetingStreams().anyLive(meeting), true);
+
+  timers[0]();
+  await h.wait(100);
+  panel.socket.close();
+  assert.deepEqual(told(panel), ['rtms_started']);
+  assert.equal(state(panel).present, true);
+  assert.deepEqual(await timeline(meeting), ['transcription_started']);
+  // the lifecycle was not told "stopped": with no panel left the data stays
+  await h.wait(450);
+  assert.deepEqual(await texts(meeting), ['from the new stream']);
+});
+
+test('a browser\'s pause or resume report never reaches the meeting lifecycle; the rtms service\'s does', async () => {
+  const { getMeetingLifecycle } = require('../src/services/meetingLifecycle');
+  const lifecycle = getMeetingLifecycle();
+  const meeting = 'PAUSE-10==';
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana().zoomUserId });
+  await say(meeting, 's1', 'kept through the pause');
+
+  const original = lifecycle.streamStatus;
+  const calls = [];
+  lifecycle.streamStatus = (...args) => {
+    if (args[0] === meeting) calls.push(args[1]);
+    return original(...args);
+  };
+  try {
+    assert.equal((await report(meeting, ana(), 'rtms_paused')).status, 200);
+    assert.equal((await report(meeting, ana(), 'rtms_resumed')).status, 200);
+    assert.deepEqual(calls, []);
+    await status(meeting, { status: 'rtms_paused', streamId: 's1' });
+    assert.deepEqual(calls, ['rtms_paused']);
+  } finally {
+    lifecycle.streamStatus = original;
+  }
+  // paused with no panel connected, for longer than the grace period: nothing is flushed
+  await report(meeting, ana(), 'rtms_paused');
+  await h.wait(450);
+  assert.deepEqual(await texts(meeting), ['kept through the pause']);
+});

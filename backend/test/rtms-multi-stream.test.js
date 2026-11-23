@@ -523,3 +523,107 @@ test('copies without a timestamp are told by when they arrive; one that arrives 
   });
   assert.deepEqual(await texts(meeting, cookie), ['one', 'two', 'two']);
 });
+
+// --- a new stream carries what is said from when it started ------------------
+
+const okay = (meetingId, streamId, tStartMs) => h.postJson(
+  `${srv.base}/api/rtms/broadcast`,
+  {
+    meetingId,
+    streamId,
+    segment: { seqNo: 1, text: 'Okay.', speakerId: '7', speakerLabel: 'Ana', ...(tStartMs === undefined ? {} : { tStartMs, tEndMs: tStartMs }) },
+  },
+  internal,
+);
+
+test('the same words said again after a user replaced their stream are stored: the new stream did not exist for the first', async () => {
+  const meeting = 'MULTI-U==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  assert.equal('stored' in (await okay(meeting, 's1', 100_000)).body, false);
+  await later(2000, async () => {
+    await status(meeting, { status: 'rtms_stopped', streamId: 's1', replaced: true });
+    await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-1' });
+  });
+  const second = await later(3500, () => okay(meeting, 's2', 103_500));
+  await h.wait(100);
+  ws.socket.close();
+
+  assert.equal('stored' in second.body, false);
+  assert.deepEqual(await texts(meeting, cookie), ['Okay.', 'Okay.']);
+  assert.equal(ofType(ws, 'transcript.segment').length, 2);
+});
+
+test('the same after a stream stopped and another user\'s started, with and without timestamps', async () => {
+  for (const [meeting, first, second] of [['MULTI-V==', 100_000, 103_500], ['MULTI-V2==', undefined, undefined]]) {
+    const cookie = await cookieFor(meeting);
+    await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+    await okay(meeting, 's1', first);
+    await later(1000, () => status(meeting, { status: 'rtms_stopped', streamId: 's1' }));
+    await later(2500, () => status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' }));
+    const again = await later(4000, () => okay(meeting, 's2', second));
+    assert.equal('stored' in again.body, false, meeting);
+    assert.deepEqual(await texts(meeting, cookie), ['Okay.', 'Okay.'], meeting);
+  }
+});
+
+test('a stream that starts mid-meeting stores nothing twice from then on', async () => {
+  const meeting = 'MULTI-W==';
+  const cookie = await cookieFor(meeting);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  await say(meeting, 's1', 1, 'before the second stream');
+  await later(20_000, async () => {
+    await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' });
+    await say(meeting, 's1', 2, 'heard on both');
+    assert.equal((await say(meeting, 's2', 1, 'heard on both')).body.stored, false);
+    await say(meeting, 's2', 2, 'the second stream first');
+    assert.equal((await say(meeting, 's1', 3, 'the second stream first')).body.stored, false);
+  });
+  assert.deepEqual(await texts(meeting, cookie), ['before the second stream', 'heard on both', 'the second stream first']);
+});
+
+test('stored lines do not tell the panels again what they are to Arlo: no `arlo.state` per line', async () => {
+  const meeting = 'MULTI-X==';
+  const cookie = await cookieFor(meeting);
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started', streamId: 's1', operatorId: 'op-1' });
+  await status(meeting, { status: 'rtms_started', streamId: 's2', operatorId: 'op-2' });
+  await h.wait(100);
+  const before = ofType(ws, 'arlo.state').length;
+  assert.ok(before > 0);
+
+  const lineOn = (streamId, operatorId, n) => h.postJson(
+    `${srv.base}/api/rtms/broadcast`,
+    { meetingId: meeting, streamId, operatorId, segment: { seqNo: n, text: `line ${n}`, speakerId: '7', speakerLabel: 'Ana', tStartMs: n * 1000, tEndMs: n * 1000 } },
+    internal,
+  );
+  for (let n = 1; n <= 20; n += 1) await lineOn('s1', 'op-1', n);
+  // nor do copies, or participant events
+  assert.equal((await lineOn('s2', 'op-2', 20)).body.stored, false);
+  await events(meeting, 's2', [{ eventType: 'joined', participantName: 'Ben', participantId: '12', timestamp: 1700000000000 }]);
+  await h.wait(150);
+  ws.socket.close();
+
+  assert.equal(ofType(ws, 'transcript.segment').length, 20);
+  assert.equal(ofType(ws, 'arlo.state').length, before);
+});
+
+test('after twenty streams that stopped, a new stream\'s lines are stored', async () => {
+  const meeting = 'MULTI-Y==';
+  const cookie = await cookieFor(meeting);
+  for (let n = 1; n <= 20; n += 1) {
+    await status(meeting, { status: 'rtms_started', streamId: `old-${n}`, operatorId: `op-old-${n}` });
+    await status(meeting, { status: 'rtms_stopped', streamId: `old-${n}` });
+  }
+  const ws = await openPanel(meeting, cookie);
+  await status(meeting, { status: 'rtms_started', streamId: 'new', operatorId: 'op-new' });
+  const kept = await say(meeting, 'new', 1, 'from the twenty-first stream');
+  await h.wait(100);
+  ws.socket.close();
+
+  assert.equal('stored' in kept.body, false);
+  assert.deepEqual(await texts(meeting, cookie), ['from the twenty-first stream']);
+  assert.deepEqual(ofType(ws, 'meeting.status').map((d) => d.status).at(-1), 'rtms_started');
+  assert.equal(ofType(ws, 'transcript.segment').length, 1);
+});

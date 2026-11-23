@@ -16,7 +16,13 @@
  * from stream S is a copy of a remembered line when
  *   - the speaker and the words are the same,
  *   - S has not delivered that remembered line already (the same words twice
- *     on one stream were said twice), and
+ *     on one stream were said twice),
+ *   - S was already known when the remembered line arrived: what a stream
+ *     delivers cannot be a copy of something stored before that stream
+ *     existed (a user's new stream after a restart, or a stream that starts
+ *     after another stopped, carries what is said from then on). A second of
+ *     grace: Zoom may deliver to a stream that just started a line whose copy
+ *     from another stream arrived a moment earlier. And
  *   - they are close in time: start times within 5 seconds when both have
  *     one, otherwise arrivals within 10 seconds.
  * With several candidates the oldest is taken. A copy is dropped and S noted
@@ -27,7 +33,7 @@
  * Participant events (people joining and leaving) arrive once per stream too
  * and are told apart the same way: same event type and participant (the id,
  * or the name when there is no id), from a stream that has not reported it
- * yet, within 10 seconds.
+ * yet and was already known when it was kept, within 10 seconds.
  *
  * One stream is the "primary" one: a live stream of the meeting's original
  * host, otherwise the live stream that started first. It decides nothing about
@@ -43,6 +49,10 @@
  * was the meeting's only stream, the stop is not the meeting's yet: the wait
  * for the new stream's outcome is held here (awaitReplacement), bounded by a
  * timer, and ends with the meeting.
+ *
+ * At most 20 streams run in one meeting. Streams that have stopped stay known
+ * (their late lines, who ran them) but do not use up that room: when a stream
+ * appears in a full meeting, the record of a stopped one goes (see makeRoom).
  *
  * This module also remembers who ran a stream in the meeting (operator ids),
  * including streams that have stopped, until forget(). The meeting lifecycle
@@ -65,6 +75,9 @@ const DEFAULTS = Object.freeze({
   // The same for participant events, which are compared by arrival only
   maxRecentEvents: 1000,
   sameEventArrivalMs: 10 * 1000,
+  // A line or event stored up to this long before a stream was first seen can
+  // still be that stream's copy; anything stored earlier cannot
+  startGraceMs: 1000,
   // Lines said just before a pause are still on their way when the pause is
   // reported: only a line this long after it shows the stream is running
   pauseSettleMs: 3 * 1000,
@@ -150,7 +163,7 @@ function createMeetingStreams(options = {}) {
     arrivalMs: limits.sameEventArrivalMs,
   };
   // meetingId -> {
-  //   streams: Map(key -> { operatorId, originalHost, live, replaced, pausedAt }),
+  //   streams: Map(key -> { operatorId, originalHost, live, replaced, pausedAt, since, endedAt }),
   //   primaryKey: the primary stream, or the last one when none is live,
   //   lines, events: what was stored last, oldest first, each
   //     { who, hash, stamp, at, from: Set(stream keys that delivered it) },
@@ -158,7 +171,9 @@ function createMeetingStreams(options = {}) {
   //   warned }
   // The streams Map keeps the order in which the streams started. `replaced`
   // marks a stream that ended because its user started a new one, `pausedAt`
-  // is when a running stream was reported paused (null: not paused).
+  // is when a running stream was reported paused (null: not paused), `since`
+  // is when the stream was first seen or last started, `endedAt` when it
+  // stopped (null while it runs).
   const meetings = new Map();
 
   /** End the wait for a replacing stream, if there is one. Returns whether there was. */
@@ -213,6 +228,7 @@ function createMeetingStreams(options = {}) {
   const liveKeys = (state) => [...state.streams].filter(([, stream]) => stream.live).map(([key]) => key);
   /** A stream is over: it no longer runs, so it is no longer paused either. */
   const end = (stream) => {
+    if (stream.live) stream.endedAt = now();
     stream.live = false;
     stream.pausedAt = null;
   };
@@ -228,17 +244,44 @@ function createMeetingStreams(options = {}) {
     state.primaryKey = live.find((key) => state.streams.get(key).originalHost) ?? live[0];
   }
 
-  /** Add a stream to a meeting. Returns it, or null when the meeting is full. */
+  /**
+   * Make room in a full meeting by dropping the record of one stopped stream.
+   * Returns false when every stream known is running.
+   *
+   * Who brought Arlo in is read from these records (operators()), so a stopped
+   * stream whose operator is not known or has another stream here goes first:
+   * nobody stops being an owner for it. Otherwise the stream that stopped
+   * longest ago goes, and its operator is no longer listed as an owner. That
+   * only happens past the limit (20 stream records in one meeting, each of a
+   * different user) and is accepted there. A line of the dropped stream that
+   * is still on its way would be taken for a new stream's: the one that
+   * stopped longest ago is the least likely to have any.
+   */
+  function makeRoom(state) {
+    const stopped = [...state.streams].filter(([, stream]) => !stream.live);
+    if (stopped.length === 0) return false;
+    const spare = stopped.filter(([key, stream]) => stream.operatorId === null
+      || [...state.streams].some(([otherKey, other]) => otherKey !== key && other.operatorId === stream.operatorId));
+    const [oldest] = (spare.length > 0 ? spare : stopped).sort((a, b) => a[1].endedAt - b[1].endedAt);
+    state.streams.delete(oldest[0]);
+    return true;
+  }
+
+  /**
+   * Add a stream to a meeting. Returns it, or null when the meeting is full:
+   * the limit is on streams that run, so a stopped one makes room first.
+   */
   function addStream(state, key) {
-    if (state.streams.size >= limits.maxStreamsPerMeeting) {
+    if (state.streams.size >= limits.maxStreamsPerMeeting && !makeRoom(state)) {
       if (!state.warned) {
         state.warned = true;
-        log.warn(`More than ${limits.maxStreamsPerMeeting} streams in one meeting: the rest are ignored`);
+        // No id of any kind: the count says all there is to say
+        log.warn(`${limits.maxStreamsPerMeeting} streams are running in one meeting: more are ignored`);
       }
       return null;
     }
     const stream = {
-      operatorId: null, originalHost: false, live: true, replaced: false, pausedAt: null,
+      operatorId: null, originalHost: false, live: true, replaced: false, pausedAt: null, since: now(), endedAt: null,
     };
     state.streams.set(key, stream);
     return stream;
@@ -272,9 +315,12 @@ function createMeetingStreams(options = {}) {
 
     let stream = state.streams.get(key);
     if (stream && !stream.live) {
-      // Stopped and started again: it takes its place after the streams running now
+      // Stopped and started again: it takes its place after the streams running
+      // now, and carries what is said from now on (see `since`)
       state.streams.delete(key);
       state.streams.set(key, stream);
+      stream.since = now();
+      stream.endedAt = null;
     }
     // A stream that reports itself running again after a rejoin keeps its
     // pause mark: if it is in fact running, its next line says so
@@ -347,13 +393,21 @@ function createMeetingStreams(options = {}) {
    * Whether this delivery is the first of its line or event (true: store it)
    * or a copy of one stored a moment ago from another stream (false). The
    * rule is at the top of this file. `identity` null: cannot be a copy.
+   * `heard` is heardFrom()'s answer: the memory is `heard.state[kind]`, and
+   * the stream (none for an unnamed one more stream: nothing is known about
+   * when it started, so nothing stored is too old to be its copy).
    */
-  function firstDelivery(memory, identity, key, rules) {
+  function firstDelivery(heard, kind, identity, rules) {
+    const memory = heard.state[kind];
+    const { key } = heard;
     const at = now();
     while (memory.length > 0 && at - memory[0].at >= rules.keepMs) memory.shift();
     if (identity === null) return true;
+    // What was stored before the stream existed is not something it copies
+    const knownFrom = heard.stream ? heard.stream.since - limits.startGraceMs : -Infinity;
     const copyOf = memory.find((seen) => {
       if (seen.hash !== identity.hash || seen.who !== identity.who || seen.from.has(key)) return false;
+      if (seen.at < knownFrom) return false;
       return seen.stamp !== null && identity.stamp !== null
         ? Math.abs(seen.stamp - identity.stamp) <= rules.stampMs
         : at - seen.at <= rules.arrivalMs;
@@ -378,7 +432,7 @@ function createMeetingStreams(options = {}) {
     // A line, also a copy, shows that a stream marked paused is running
     const pausedAt = heard.stream?.pausedAt ?? null;
     if (pausedAt !== null && now() - pausedAt >= limits.pauseSettleMs) heard.stream.pausedAt = null;
-    return firstDelivery(heard.state.lines, lineIdentity(details?.line), heard.key, lineRules);
+    return firstDelivery(heard, 'lines', lineIdentity(details?.line), lineRules);
   }
 
   /**
@@ -387,7 +441,7 @@ function createMeetingStreams(options = {}) {
    */
   function keepsEvent(meetingId, streamId, details) {
     const heard = heardFrom(meetingId, streamId, details);
-    return heard !== null && firstDelivery(heard.state.events, eventIdentity(details?.event), heard.key, eventRules);
+    return heard !== null && firstDelivery(heard, 'events', eventIdentity(details?.event), eventRules);
   }
 
   /**
