@@ -438,6 +438,34 @@ function sendNotesUpdated(meetingId, ownerUserIds, notes) {
 /** The sockets notes for this meeting may go to: see sendNotesUpdated(). */
 const isOwnerPanel = (ws, meetingId, owners) => owners.has(ws.userId) && ws.allowedMeetingId === meetingId;
 
+const userIdSet = (ids) => new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string' && id.length > 0));
+
+/**
+ * Tell the owners' panels that someone asks for their approval
+ * (services/approvals.js). The same sockets the notes go to, and nobody else:
+ * `data` carries the asker's name.
+ */
+function sendApprovalOpened(meetingId, ownerUserIds, data) {
+  const owners = userIdSet(ownerUserIds);
+  if (owners.size === 0) return 0;
+  return sendToMeetingSockets(meetingId, (ws) => (
+    isOwnerPanel(ws, meetingId, owners) ? { type: 'arlo.approval', data } : null
+  ));
+}
+
+/**
+ * Tell how an approval ended: to the owners' panels and to the panels of the
+ * person who asked, each verified to be in this meeting. Nobody else.
+ */
+function sendApprovalClosed(meetingId, ownerUserIds, askedByUserId, data) {
+  const told = userIdSet(ownerUserIds);
+  if (typeof askedByUserId === 'string' && askedByUserId.length > 0) told.add(askedByUserId);
+  if (told.size === 0) return 0;
+  return sendToMeetingSockets(meetingId, (ws) => (
+    isOwnerPanel(ws, meetingId, told) ? { type: 'arlo.approval.closed', data } : null
+  ));
+}
+
 /**
  * Whether one of `ownerUserIds` has a panel open in this meeting: the same
  * sockets sendNotesUpdated() would send to. The notes engine asks before it
@@ -686,6 +714,8 @@ module.exports = {
   broadcastArloState,
   sendToMeetingSockets,
   sendNotesUpdated,
+  sendApprovalOpened,
+  sendApprovalClosed,
   hasOwnerPanel,
   currentStreamStatus,
   broadcastRtmsRequestStatus,

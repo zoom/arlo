@@ -231,6 +231,20 @@ module.exports = {
     return DEFAULT_MS;
   })(),
 
+  // How long a request to a meeting's owners (services/approvals.js: "share
+  // the notes?") waits for an answer before it runs out (milliseconds).
+  // Default 1 minute. Whole milliseconds only, 100 to 600000; anything else
+  // is refused with a warning and the default is used.
+  approvalExpiryMs: (() => {
+    const DEFAULT_MS = 60 * 1000;
+    const raw = process.env.APPROVAL_EXPIRY_MS;
+    if (raw === undefined || raw === '') return DEFAULT_MS;
+    const value = /^\d{1,6}$/.test(raw) ? Number(raw) : NaN;
+    if (Number.isInteger(value) && value >= 100 && value <= 10 * 60 * 1000) return value;
+    console.warn('APPROVAL_EXPIRY_MS must be whole milliseconds between 100 and 600000; using the default of 60000.');
+    return DEFAULT_MS;
+  })(),
+
   // How often the live notes are written again while new lines arrive
   // (milliseconds). Whole milliseconds only, 15000 to 600000; anything else
   // ("45s", "5") is refused with a warning and the default is used. Each run

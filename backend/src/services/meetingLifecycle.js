@@ -226,6 +226,9 @@ function getMeetingLifecycle() {
         // Required here: the notes engine's neighbours require this module
         // eslint-disable-next-line global-require
         require('./notesEngine').getNotesEngine().forget(meetingId);
+        // Open requests to the owners, and who asked a moment ago
+        // eslint-disable-next-line global-require
+        require('./approvals').getApprovals().forget(meetingId);
       },
     });
     setInterval(() => {
