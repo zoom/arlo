@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { runArloAction, handsFor, REACTIONS } from './arloActions';
+import { runArloAction, handsFor, REACTIONS, comparable } from './arloActions';
 import { createIndicatorTimer } from './indicatorTimer';
 import { INDICATOR_STRINGS } from './dynamicIndicator';
 
@@ -290,25 +290,27 @@ describe('open_notes_for_everyone', () => {
     expect(await runArloAction(collaborateSdk(), { tool: 'open_notes_for_everyone' }, { stillAllowed: yes })).toEqual({ ok: true });
   });
 
-  test('Collaborate does not start: the invitation goes out instead, and that is what is reported', async () => {
+  test('Collaborate does not start: sdk_error, and nobody is invited in its place', async () => {
     const sdk = collaborateSdk();
     sdk.startCollaborate = refuses();
-    expect(await open(sdk)).toEqual({ ok: false, code: 'fell_back_invite' });
-    expect(sdk.sendAppInvitationToAllParticipants).toHaveBeenCalledTimes(1);
-    expect(sdk.sendAppInvitationToAllParticipants).toHaveBeenCalledWith();
-  });
-
-  test('Collaborate does not start and the invitation fails too, or the client has none: sdk_error', async () => {
-    const both = collaborateSdk();
-    both.startCollaborate = refuses();
-    both.sendAppInvitationToAllParticipants = vi.fn(async () => { throw new Error('no'); });
-    expect(await open(both)).toEqual({ ok: false, code: 'sdk_error' });
-    expect(both.sendAppInvitationToAllParticipants).toHaveBeenCalledTimes(1);
+    expect(await open(sdk)).toEqual({ ok: false, code: 'sdk_error' });
+    expect(sdk.startCollaborate).toHaveBeenCalledTimes(1);
+    expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
     const throws = collaborateSdk();
     throws.startCollaborate = vi.fn(() => { throw new Error('at once'); });
-    throws.sendAppInvitationToAllParticipants = vi.fn(() => { throw new Error('at once'); });
     expect(await open(throws)).toEqual({ ok: false, code: 'sdk_error' });
+    expect(throws.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
     expect(await open({ startCollaborate: refuses() })).toEqual({ ok: false, code: 'sdk_error' });
+  });
+
+  test('no outcome is ever "the invitation went out instead"', async () => {
+    const outcomes = [];
+    for (const start of [refuses(), vi.fn(async () => ({})), vi.fn(() => { throw new Error('x'); })]) {
+      const sdk = collaborateSdk();
+      sdk.startCollaborate = start;
+      outcomes.push(await open(sdk));
+    }
+    expect(outcomes.some((outcome) => outcome.code === 'fell_back_invite')).toBe(false);
   });
 
   test('Zoom says the app is in Collaborate already: done, and nobody is invited', async () => {
@@ -458,6 +460,28 @@ describe('send_reaction', () => {
     const throws = meetingSdk();
     throws.setEmojiReaction = vi.fn(() => { throw new Error('no'); });
     expect(await react(throws, 'clap')).toEqual({ ok: false, code: 'sdk_error' });
+  });
+});
+
+describe('a name with an apostrophe', () => {
+  test('every apostrophe is the plain one, the set the server folds too', () => {
+    for (const mark of ['‘', '’', 'ʼ', '′', '`', '\'']) expect(comparable(`Dana O${mark}Brien`)).toBe('dana o\'brien');
+    // another mark is another name
+    expect(comparable('Dana O"Brien')).not.toBe('dana o\'brien');
+    expect(comparable(5)).toBe('');
+  });
+
+  test('"O\'Brien" typed is the person Zoom lists as "O’Brien", to mute and to admit', async () => {
+    const sdk = meetingSdk([person('Dana O’Brien', 'u-1'), person('Bo Lee', 'u-2')]);
+    expect(await mute(sdk, 'Dana O\'Brien')).toEqual({ ok: true });
+    expect(sdk.toggleParticipantMediaAudio).toHaveBeenCalledWith({ participantUUIDs: ['u-1'], audio: false });
+    const room = sdkWith([waiting('Dana Oʼbrien', 'w-1')]);
+    expect(await runArloAction(room, { tool: 'admit_from_waiting_room', args: { name: 'dana o`brien' } }, { zoomRole: 'host', stillAllowed: yes }))
+      .toEqual({ ok: true });
+    expect(room.admitParticipantFromWaitingRoom).toHaveBeenCalledWith({ participantUUID: 'w-1' });
+    // two people whose names differ only in the mark are the same name: nobody is picked
+    const two = meetingSdk([person('Dana O’Brien', 'u-1'), person('Dana O\'Brien', 'u-2')]);
+    expect(await mute(two, 'Dana O\'Brien')).toEqual({ ok: false, code: 'several_match' });
   });
 });
 

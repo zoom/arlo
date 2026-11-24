@@ -69,11 +69,13 @@ const DEFAULT_CHAT_NOTICES = {
 
 export function MeetingProvider({ children }) {
   const {
-    zoomSdk, meetingContext, isGuest, userContext, runningContext, rtmsStatusSupported, dynamicIndicatorSupported,
+    zoomSdk, meetingContext, isGuest, userContext, runningContext, rtmsStatusSupported, dynamicIndicatorSupported, inCollaborate,
   } = useZoomSdk();
   const { demoMode, autoStartAvailable } = useServerSettings();
   const autoStartAvailableRef = useRef(autoStartAvailable);
   autoStartAvailableRef.current = autoStartAvailable;
+  const inCollaborateRef = useRef(inCollaborate);
+  inCollaborateRef.current = inCollaborate;
   // Transcription state changes only on confirmed signals (see lib/rtmsMachine.js).
   const [rtms, dispatchRtms] = useReducer(rtmsReducer, initialRtmsState);
   const rtmsActive = isRtmsActive(rtms);
@@ -959,7 +961,7 @@ export function MeetingProvider({ children }) {
       // and only while it stands (not after Zoom answered "already running")
       const wantsTranscription = !isGuestRef.current
         && (startedHereRef.current
-          || (!ownStartUnconfirmedRef.current
+          || (!ownStartUnconfirmedRef.current && inCollaborateRef.current !== true
             && autoStartAvailableRef.current && localStorage.getItem('arlo-auto-start') !== 'false'));
       if (!shouldAutoRestart({
         phase: rtmsRef.current.phase,
@@ -1117,10 +1119,15 @@ export function MeetingProvider({ children }) {
     if (autoStartAttemptedRef.current || !isAuthenticated || !meetingId || rtmsActive || rtmsLoading) return;
     // Off unless the deployment turns it on (AUTO_START_RTMS) and the user has not turned it off
     if (!autoStartAvailable || localStorage.getItem('arlo-auto-start') === 'false') return;
+    // Never by itself while this view is on everyone's screen (Zoom's
+    // Collaborate mode): a start there is a person's own click, or none
+    if (inCollaborate === true) return;
     autoStartAttemptedRef.current = true;
-    const timer = setTimeout(() => startRTMSRef.current(true), 500);
+    const timer = setTimeout(() => {
+      if (inCollaborateRef.current !== true) startRTMSRef.current(true);
+    }, 500);
     return () => clearTimeout(timer);
-  }, [isAuthenticated, meetingId, rtmsActive, rtmsLoading, autoStartAvailable]);
+  }, [isAuthenticated, meetingId, rtmsActive, rtmsLoading, autoStartAvailable, inCollaborate]);
 
   // Check via REST API whether RTMS is already active.
   // Runs immediately (no delay) with retries to handle the race where the meeting

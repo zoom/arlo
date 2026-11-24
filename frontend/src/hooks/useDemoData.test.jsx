@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
+import { AuthProvider } from '../contexts/AuthContext';
 import { ServerSettingsProvider } from '../contexts/ServerSettingsContext';
 import { DemoDataProvider, useDemoData } from './useDemoData';
 
@@ -8,13 +9,16 @@ function Probe() {
   return <p>{`show:${showDemoData} available:${demoDataAvailable}`}</p>;
 }
 
+let settingsFetch = null;
 function renderWith({ demoMode, stored }) {
   if (stored === undefined) localStorage.removeItem('arlo-sample-data');
   else localStorage.setItem('arlo-sample-data', String(stored));
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ demoMode }), {
+  // Kept by name: the session watch of AuthProvider wraps window.fetch
+  settingsFetch = vi.fn(async () => new Response(JSON.stringify({ demoMode }), {
     status: 200, headers: { 'Content-Type': 'application/json' },
-  })));
-  return render(<ServerSettingsProvider><DemoDataProvider><Probe /></DemoDataProvider></ServerSettingsProvider>);
+  }));
+  vi.stubGlobal('fetch', settingsFetch);
+  return render(<AuthProvider><ServerSettingsProvider><DemoDataProvider><Probe /></DemoDataProvider></ServerSettingsProvider></AuthProvider>);
 }
 
 afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); });
@@ -32,7 +36,7 @@ test('in demo mode a user who turned it on sees it', async () => {
 test('outside demo mode sample data is never shown, whatever was saved', async () => {
   renderWith({ demoMode: false, stored: true });
   // the settings request has been answered, so this is the settled state, not the first render
-  await waitFor(() => expect(fetch).toHaveBeenCalled());
+  await waitFor(() => expect(settingsFetch.mock.calls.some(([url]) => String(url).startsWith('/api/auth/settings'))).toBe(true));
   await new Promise((resolve) => { setTimeout(resolve, 50); });
   expect(screen.getByText('show:false available:false')).toBeInTheDocument();
 });

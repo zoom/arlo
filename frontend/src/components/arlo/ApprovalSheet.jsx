@@ -45,11 +45,23 @@ const END_SLACK_PX = 2;
  * posted, then the buttons), focus that lands outside comes back, and a click
  * outside does nothing.
  *
+ * `reduced`: the owner's view is on everyone's screen (Zoom's Collaborate
+ * mode, see ApprovalHost). The sheet then says only that Arlo needs an OK:
+ * a fixed heading, the countdown, "Not now", and "Close for everyone"
+ * (`onCloseShared`) in place of the button that agrees. Who asked, what was
+ * asked, the server's question and the text to post are not rendered, and
+ * the request cannot be agreed to.
+ *
  * `onAnswer(id, { approve })` reports the answer and resolves how it went:
  * 'taken', 'failed' (the server could not do it) or 'unsent'. Mount one per approval (`key={approval.id}`). Where the
  * focus goes when the last sheet closes is ApprovalHost's business.
  */
-export default function ApprovalSheet({ approval, onAnswer }) {
+export const REDUCED_HEADING = 'Arlo needs your OK';
+export const REDUCED_LINE = 'Close the shared notes to see this request.';
+
+export default function ApprovalSheet({
+  approval, onAnswer, reduced = false, onCloseShared = null,
+}) {
   const { addToast } = useToast();
   const questionId = useId();
   const detailId = useId();
@@ -62,7 +74,8 @@ export default function ApprovalSheet({ approval, onAnswer }) {
   const bodyRef = useRef(null);
   const secondsLeft = useSecondsLeft(approval.expiresAt);
   const kind = approvalTexts(approval);
-  const body = kind?.body ?? null;
+  // Nothing of the request is read while the sheet is the reduced one
+  const body = reduced ? null : (kind?.body ?? null);
   // The whole of what will be posted has been on screen. Nothing to see: true
   const [bodySeen, setBodySeen] = useState(body === null);
   const bodySeenRef = useRef(bodySeen);
@@ -100,7 +113,7 @@ export default function ApprovalSheet({ approval, onAnswer }) {
   declineRef.current = decline;
 
   const agree = async () => {
-    if (!takesAnswer() || !kind || !bodySeenRef.current) return;
+    if (reduced || !takesAnswer() || !kind || !bodySeenRef.current) return;
     busyRef.current = true;
     setBusy(true);
     let went = 'unsent';
@@ -112,6 +125,26 @@ export default function ApprovalSheet({ approval, onAnswer }) {
     const done = went === 'taken';
     const toast = done ? kind.doneToast : (went === 'failed' ? kind.failedToast : kind.unsentToast);
     if (toast) addToast(toast, done ? 'success' : 'error');
+  };
+
+  // "Close for everyone": Collaborate ends, and the full sheet follows if the request is still open
+  const [closing, setClosing] = useState(false);
+  const closingRef = useRef(false);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  const closeShared = async () => {
+    if (!armedRef.current || busyRef.current || closingRef.current || typeof onCloseShared !== 'function') return;
+    closingRef.current = true;
+    setClosing(true);
+    try {
+      await onCloseShared();
+    } finally {
+      closingRef.current = false;
+      if (mountedRef.current) setClosing(false);
+    }
   };
 
   useEffect(() => {
@@ -179,6 +212,32 @@ export default function ApprovalSheet({ approval, onAnswer }) {
   }, []);
 
   if (!kind) return null;
+
+  if (reduced) {
+    return (
+      <div
+        className="arlo-sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={questionId}
+        aria-describedby={detailId}
+        tabIndex={-1}
+        ref={sheetRef}
+      >
+        <h2 className="arlo-sheet-question" id={questionId}>{REDUCED_HEADING}</h2>
+        <p className="arlo-sheet-detail" id={detailId}>{REDUCED_LINE}</p>
+        <div className="arlo-sheet-buttons">
+          <Button className="arlo-sheet-button" variant="outline" ref={primaryRef} onClick={closeShared} disabled={busy || closing}>
+            Close for everyone
+          </Button>
+          <Button className="arlo-sheet-button" variant="ghost" ref={secondaryRef} onClick={decline} disabled={busy}>
+            Not now
+          </Button>
+        </div>
+        {secondsLeft !== null && <p className="arlo-sheet-countdown">{`${secondsLeft}s`}</p>}
+      </div>
+    );
+  }
 
   return (
     <div

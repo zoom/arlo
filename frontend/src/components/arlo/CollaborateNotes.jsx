@@ -21,13 +21,19 @@ const NO_NOTES_YET = 'Notes appear after the first minute or so.';
  * gives them). The one bar has the status line, with the stream's own
  * controls, and "Close for everyone": it ends Collaborate for the meeting and
  * leaves sharing the notes as it is. The status line is told that Arlo is
- * thinking only for a request said aloud in the meeting.
- * (An approval sheet still rises over this view when a request arrives, and
- * is seen on the shared screen: it must be answerable. See ApprovalHost.)
+ * thinking only for a request said aloud in the meeting, and never the step
+ * it is at (a step can name who is admitted or which ticket is opened).
+ * (A request for the owner's approval rises over this view as a reduced
+ * sheet that says nothing of the request: see ApprovalHost.)
  *
  * Everyone else reads the same page with "Leave" (out of Collaborate, for
- * this person only): no asks, no choices. `notes` is null for them unless an
- * owner shares the notes (`notesShared`).
+ * this person only): no asks, no choices.
+ *
+ * The notes are on this page only while they are shared (`notesShared`), for
+ * the owner too: the owner's view is everyone's screen, so notes that are
+ * not shared are not on it. Then it reads "The notes are not shared right
+ * now." (An owner's panel also ends Collaborate when sharing stops:
+ * views/ArloMeetingView.jsx.)
  *
  * Zoom's error text is never shown or logged.
  */
@@ -61,7 +67,7 @@ export default function CollaborateNotes({
   };
 
   const publicActions = (Array.isArray(actions) ? actions : []).filter((action) => action?.public === true);
-  const hidden = !owner && notesShared !== true;
+  const hidden = notesShared !== true;
 
   return (
     <div className="arlo-screen arlo-collab">
@@ -70,6 +76,8 @@ export default function CollaborateNotes({
           <StatusLine
             {...status}
             thinking={status.thinking === true && status.thinkingChannel === 'voice'}
+            // The step can name a person or a ticket: not on everyone's screen
+            thinkingStep={null}
           />
         )}
         <div className="arlo-collab-bar-actions">

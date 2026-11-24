@@ -1,5 +1,7 @@
 import { vi } from 'vitest';
-import { createIndicatorTimer, isTimerMinutes, indicatorTimer } from './indicatorTimer';
+import {
+  createIndicatorTimer, isTimerMinutes, indicatorTimer, endTimerStoppedElsewhere,
+} from './indicatorTimer';
 import { INDICATOR_GUESSES } from './dynamicIndicator';
 
 const GRACE = INDICATOR_GUESSES.timerEndGraceMs;
@@ -83,6 +85,57 @@ describe('the timer a panel started on Zoom\'s indicator', () => {
     timer.end('stream');
     expect(gone).not.toHaveBeenCalled();
     expect(stays.mock.calls).toEqual([['stream']]);
+  });
+
+  test('a "stop the timer" that was done on another owner\'s panel ends this panel\'s record as stopped', () => {
+    const timer = createIndicatorTimer();
+    const ended = vi.fn();
+    timer.onEnd(ended);
+    timer.start(5);
+    expect(endTimerStoppedElsewhere(timer, { id: 'a-1', tool: 'stop_timer', status: 'done' })).toBe(true);
+    expect(timer.running()).toBe(false);
+    expect(ended.mock.calls).toEqual([['stopped']]);
+    // told also when no timer runs here: the indicator went all the same
+    vi.advanceTimersByTime(60 * 1000);
+    expect(endTimerStoppedElsewhere(timer, { id: 'a-2', tool: 'stop_timer', status: 'done' })).toBe(true);
+    expect(ended).toHaveBeenCalledTimes(2);
+  });
+
+  test('anything else that ended is not a stop: the record runs on', () => {
+    const timer = createIndicatorTimer();
+    const ended = vi.fn();
+    timer.onEnd(ended);
+    timer.start(5);
+    for (const action of [
+      { tool: 'stop_timer', status: 'failed' }, { tool: 'stop_timer', status: 'declined' }, { tool: 'stop_timer', status: 'pending' },
+      { tool: 'stop_timer' }, { tool: 'set_timer', status: 'done' }, { tool: 'post_to_chat', status: 'done' }, { status: 'done' },
+      null, undefined, 'stop_timer', {},
+    ]) expect(endTimerStoppedElsewhere(timer, action)).toBe(false);
+    expect(timer.running()).toBe(true);
+    expect(ended).not.toHaveBeenCalled();
+    expect(endTimerStoppedElsewhere(null, { tool: 'stop_timer', status: 'done' })).toBe(false);
+  });
+
+  test('the report of the stop this panel just did itself is not a second stop; the next one is', () => {
+    const timer = createIndicatorTimer();
+    const ended = vi.fn();
+    timer.onEnd(ended);
+    timer.start(5);
+    timer.end('stopped'); // this panel removed the indicator itself
+    expect(endTimerStoppedElsewhere(timer, { tool: 'stop_timer', status: 'done' })).toBe(false);
+    expect(ended).toHaveBeenCalledTimes(1);
+    // another stop, by someone else, right after: told
+    expect(endTimerStoppedElsewhere(timer, { tool: 'stop_timer', status: 'done' })).toBe(true);
+    expect(ended).toHaveBeenCalledTimes(2);
+    // a stop of this panel's long ago does not swallow one that comes now
+    timer.end('stopped');
+    vi.advanceTimersByTime(31 * 1000);
+    expect(endTimerStoppedElsewhere(timer, { tool: 'stop_timer', status: 'done' })).toBe(true);
+    // a timer started since: the stop is about that one
+    timer.end('stopped');
+    timer.start(1);
+    expect(endTimerStoppedElsewhere(timer, { tool: 'stop_timer', status: 'done' })).toBe(true);
+    expect(timer.running()).toBe(false);
   });
 
   test('the panel has one', () => {

@@ -2,7 +2,7 @@ import { vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useDynamicIndicator, COALESCE_MS, DID_MS } from './useDynamicIndicator';
 import { INDICATOR_STYLES, INDICATOR_STRINGS } from '../lib/dynamicIndicator';
-import { createIndicatorTimer } from '../lib/indicatorTimer';
+import { createIndicatorTimer, endTimerStoppedElsewhere } from '../lib/indicatorTimer';
 
 const ACTIVE = { phase: 'active', startedHere: true, guest: false, voiceEnabled: false, voiceProcessing: false, thinking: false, waiting: false };
 const fakeSdk = () => ({
@@ -282,6 +282,88 @@ describe('useDynamicIndicator', () => {
       zoomSdk.setDynamicIndicator.mockImplementation(async () => ({}));
       await settle(2 * 60 * 1000);
       expect(sets(zoomSdk).at(-1)).toEqual({ text: 'Arlo is thinking…' });
+    });
+  });
+
+  describe('two owners\' panels and one timer', () => {
+    const STOP_DONE = { id: 'act-stop', tool: 'stop_timer', status: 'done' };
+    /** Panel A started the stream (it keeps Arlo's status); panel B is another owner's. Each has its own record and its own Zoom client. */
+    const twoPanels = async () => {
+      const a = { zoomSdk: fakeSdk(), timer: createIndicatorTimer() };
+      const b = { zoomSdk: fakeSdk(), timer: createIndicatorTimer() };
+      a.view = mount({ zoomSdk: a.zoomSdk, timer: a.timer, inputs: ACTIVE });
+      b.view = mount({ zoomSdk: b.zoomSdk, timer: b.timer, inputs: { ...ACTIVE, startedHere: false } });
+      await settle();
+      for (const panel of [a, b]) {
+        panel.zoomSdk.setDynamicIndicator.mockClear();
+        panel.zoomSdk.removeDynamicIndicator.mockClear();
+      }
+      return { a, b };
+    };
+    /** What the panel that runs "stop the timer" does (lib/arloActions.js): the indicator comes down, its record is told. */
+    const stopsOn = (panel) => {
+      panel.zoomSdk.removeDynamicIndicator();
+      panel.timer.end('stopped');
+    };
+    /** Every owner's panel is told the action ended (`arlo.did`). */
+    const tellBoth = ({ a, b }, action = STOP_DONE) => [a, b].map((panel) => endTimerStoppedElsewhere(panel.timer, action));
+
+    test('A started the timer, B stops it: A\'s record ends and A sets the status again, at once and not at the timer\'s end', async () => {
+      const panels = await twoPanels();
+      const { a, b } = panels;
+      a.timer.start(30);
+      stopsOn(b);
+      expect(a.timer.running()).toBe(true);
+      expect(tellBoth(panels)).toEqual([true, false]);
+      await settle();
+      expect(a.timer.running()).toBe(false);
+      expect(sets(a.zoomSdk)).toEqual([{ text: 'Arlo is transcribing' }]);
+      expect(a.zoomSdk.removeDynamicIndicator).not.toHaveBeenCalled();
+      // B has no status of its own: it removed the indicator once, and sets nothing
+      expect(b.zoomSdk.removeDynamicIndicator).toHaveBeenCalledTimes(1);
+      expect(b.zoomSdk.setDynamicIndicator).not.toHaveBeenCalled();
+      // and nothing more happens when A's timer would have run out
+      await settle(31 * 60 * 1000);
+      expect(a.zoomSdk.setDynamicIndicator).toHaveBeenCalledTimes(1);
+    });
+
+    test('the same text as before the timer is sent again: the memo of what was shown is reset by the stop', async () => {
+      const panels = await twoPanels();
+      const { a, b } = panels;
+      b.timer.start(5); // B's timer covers A's status on Zoom's indicator; A never knew
+      stopsOn(b);
+      tellBoth(panels);
+      await settle();
+      expect(sets(a.zoomSdk)).toEqual([{ text: 'Arlo is transcribing' }]);
+      expect(b.timer.running()).toBe(false);
+    });
+
+    test('A stops its own timer: its status is set once, not again when the report of that stop arrives', async () => {
+      const panels = await twoPanels();
+      const { a, b } = panels;
+      a.timer.start(5);
+      stopsOn(a);
+      await settle();
+      expect(sets(a.zoomSdk)).toEqual([{ text: 'Arlo is transcribing' }]);
+      expect(tellBoth(panels)).toEqual([false, true]);
+      await settle();
+      expect(a.zoomSdk.setDynamicIndicator).toHaveBeenCalledTimes(1);
+      expect(a.zoomSdk.removeDynamicIndicator).toHaveBeenCalledTimes(1);
+      expect(b.zoomSdk.removeDynamicIndicator).not.toHaveBeenCalled();
+      expect(b.zoomSdk.setDynamicIndicator).not.toHaveBeenCalled();
+    });
+
+    test('a stop that was not done changes nothing on either panel', async () => {
+      const panels = await twoPanels();
+      const { a, b } = panels;
+      a.timer.start(5);
+      for (const status of ['failed', 'declined', 'expired', 'waiting_approval']) tellBoth(panels, { ...STOP_DONE, status });
+      await settle();
+      expect(a.timer.running()).toBe(true);
+      for (const panel of [a, b]) {
+        expect(panel.zoomSdk.setDynamicIndicator).not.toHaveBeenCalled();
+        expect(panel.zoomSdk.removeDynamicIndicator).not.toHaveBeenCalled();
+      }
     });
   });
 

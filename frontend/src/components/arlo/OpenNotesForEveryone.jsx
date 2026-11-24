@@ -100,7 +100,7 @@ export default function OpenNotesForEveryone({ notes }) {
       ) : (
         // onKeyDown: Escape from either button
         <div className="arlo-post-confirm" role="group" aria-labelledby={questionId} onKeyDown={onKeyDown}>
-          <span className="arlo-post-question" id={questionId}>Everyone in the meeting will see your Arlo view.</span>
+          <span className="arlo-post-question" id={questionId}>Everyone in the meeting will see your Arlo view. The notes stay shared until you stop sharing.</span>
           <Button variant="outline" size="sm" ref={openRef} onClick={open} disabled={step === 'opening'}>Open</Button>
           <Button variant="ghost" size="sm" onClick={leave} disabled={step === 'opening'}>Cancel</Button>
         </div>

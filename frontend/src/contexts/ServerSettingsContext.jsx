@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { useAuth } from './AuthContext';
 
 const ServerSettingsContext = createContext();
 
@@ -29,12 +30,24 @@ export function ServerSettingsProvider({ children }) {
     loaded: false,
   });
 
+  // Read again when someone signs in or out: the server tells the
+  // deployment's Jira only to a request with a valid session
+  const { isAuthenticated } = useAuth();
   useEffect(() => {
+    let cancelled = false;
+    // Signed out: what only a signed-in person is told goes at once
+    if (!isAuthenticated) {
+      setSettings((prev) => (prev.features?.jira?.baseUrl
+        ? { ...prev, features: { ...prev.features, jira: { baseUrl: null } } }
+        : prev));
+    }
     async function fetchSettings() {
       try {
-        const response = await fetch('/api/auth/settings');
+        const response = await fetch('/api/auth/settings', { credentials: 'include' });
+        if (cancelled) return;
         if (response.ok) {
           const data = await response.json();
+          if (cancelled) return;
           setSettings({
             demoMode: data.demoMode ?? true,
             meetingPersistenceEnabled: data.meetingPersistenceEnabled ?? false,
@@ -45,11 +58,12 @@ export function ServerSettingsProvider({ children }) {
         }
       } catch {
         // Use defaults if fetch fails
-        setSettings(prev => ({ ...prev, loaded: true }));
+        if (!cancelled) setSettings(prev => ({ ...prev, loaded: true }));
       }
     }
     fetchSettings();
-  }, []);
+    return () => { cancelled = true; };
+  }, [isAuthenticated]);
 
   const contextValue = useMemo(() => ({
     ...settings,

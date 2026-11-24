@@ -3,6 +3,7 @@ import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Search, Settings } from 'lucide-react';
 import { useServerSettings } from '../contexts/ServerSettingsContext';
 import { useArlo } from '../contexts/ArloContext';
+import { useZoomSdk } from '../contexts/ZoomSdkContext';
 import ArloLogo from './ArloLogo';
 import Button from './ui/Button';
 import LiveMeetingBanner from './LiveMeetingBanner';
@@ -14,6 +15,10 @@ export default function AppShell() {
   const location = useLocation();
   const { showSearch } = useServerSettings();
   const { afterNotesMeetingId } = useArlo();
+  // The owner's view is on everyone's screen (Zoom's Collaborate mode): nothing
+  // here leads away from the meeting's screen. CollaborateGuard holds the routes
+  const { inCollaborate } = useZoomSdk();
+  const shared = inCollaborate === true;
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -106,6 +111,7 @@ export default function AppShell() {
 
   return (
     <div className="app-shell">
+      {!shared && (
       <header className="app-header">
         <div className="header-left">
           {showBack ? (
@@ -177,8 +183,9 @@ export default function AppShell() {
           </Button>
         </div>
       </header>
+      )}
 
-      <LiveMeetingBanner />
+      {!shared && <LiveMeetingBanner />}
 
       <main className="app-main">
         <Outlet />

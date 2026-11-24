@@ -121,6 +121,14 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   // A choice that was not saved is never silent: say so, and which setting still holds
   // The same for sharing the notes: the control shows what the server holds
   const { setShareNotes } = arlo;
+  // Ask Zoom to end Collaborate, once per time the sharing stops (this
+  // owner's own "Stop sharing" and the state that follows it are one stop)
+  const collaborateClosedRef = useRef(false);
+  const closeCollaborate = useCallback(() => {
+    if (collaborateClosedRef.current || typeof zoomSdk?.endCollaborate !== 'function') return;
+    collaborateClosedRef.current = true;
+    Promise.resolve().then(() => zoomSdk.endCollaborate()).catch(() => {});
+  }, [zoomSdk]);
   const saveShareNotes = useCallback(async (value) => {
     const saved = await setShareNotes(value);
     if (!saved) addToast('Couldn\'t change sharing. Try again.', 'error');
@@ -128,11 +136,22 @@ export default function ArloMeetingView({ isGuestMode = false }) {
     // panel cannot be sure whether Collaborate runs (the side panel may stay
     // "in the meeting" while it does; lib/collaborate.js), so Zoom is asked
     // every time, and its "not in collaborate mode" is not an error
-    if (saved && value === false && typeof zoomSdk?.endCollaborate === 'function') {
-      Promise.resolve().then(() => zoomSdk.endCollaborate()).catch(() => {});
-    }
+    if (saved && value === false) closeCollaborate();
     return saved;
-  }, [setShareNotes, addToast, zoomSdk]);
+  }, [setShareNotes, addToast, closeCollaborate]);
+
+  // Another owner stopped sharing while this owner's view is the one everyone
+  // sees: the notes are off the page (CollaborateNotes) and this panel ends
+  // Collaborate itself. A failure is ignored: the page shows no notes anyway
+  const { notesShared } = arlo;
+  const wasSharedRef = useRef(notesShared);
+  const isOwnerHere = isAuthenticated && arlo.role === 'owner';
+  useEffect(() => {
+    const stopped = wasSharedRef.current === true && notesShared === false;
+    wasSharedRef.current = notesShared;
+    if (notesShared === true) collaborateClosedRef.current = false;
+    if (stopped && inCollaborate === true && isOwnerHere) closeCollaborate();
+  }, [notesShared, inCollaborate, isOwnerHere, closeCollaborate]);
   const saveWhoCanAsk = useCallback(async (value) => {
     const saved = await setWhoCanAsk(value);
     if (!saved) {
@@ -219,12 +238,13 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   let content;
   switch (shownScreen) {
     case 'collaborate': {
-      // The owner's view is the one Zoom shares as a screen: see CollaborateNotes
+      // The owner's view is the one Zoom shares as a screen: see CollaborateNotes.
+      // Notes that are not shared are not on it, for the owner either
       const owner = canControl && screen === 'notes';
       content = (
         <CollaborateNotes
           owner={owner}
-          notes={owner || arlo.notesShared ? arlo.notes : null}
+          notes={arlo.notesShared === true ? arlo.notes : null}
           notesShared={arlo.notesShared}
           actions={arlo.actions}
           status={owner ? {

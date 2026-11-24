@@ -733,12 +733,26 @@ describe('Arlo is thinking', () => {
       return { ...result, fetchMock };
     }
 
-    test('the panel that owns the indicator shows "Arlo is thinking…" and goes back to transcribing', async () => {
+    test('the panel that owns the indicator shows "Arlo is thinking…" for a spoken request and goes back to transcribing', async () => {
       const { sdk } = await broughtInHere();
-      await send(serverMessage.thinking(true));
+      await send(serverMessage.thinking(true, undefined, { step: 'Heard a request', channel: 'voice' }));
       await waitFor(() => expect(lastIndicator(sdk)).toBe(THINKING));
       await send(serverMessage.thinking(false));
       await waitFor(() => expect(lastIndicator(sdk)).toBe('Arlo is transcribing'));
+    });
+
+    test('an owner\'s own typed question is not on the indicator, which everyone reads; their status line says it', async () => {
+      const { sdk } = await broughtInHere();
+      const before = sdk.setDynamicIndicator.mock.calls.length;
+      for (const detail of [{ step: 'Writing an answer', channel: 'panel' }, {}, { channel: 'chat' }]) {
+        await send(serverMessage.thinking(true, undefined, detail));
+        await waitFor(() => expect(statusLine()).toHaveTextContent(detail.step ?? THINKING));
+        await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 400); }); });
+        await send(serverMessage.thinking(false));
+        await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 400); }); });
+      }
+      expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(before);
+      expect(sdk.setDynamicIndicator.mock.calls.some((call) => call[0]?.text === THINKING)).toBe(false);
     });
 
     test('the indicator, which everyone sees, never carries the step', async () => {

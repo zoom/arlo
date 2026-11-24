@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import {
-  COLLABORATE_GUESSES, isInCollaborate, meetingRunningContext, readRunningContext, startCollaborateForEveryone,
+  COLLABORATE_GUESSES, isInCollaborate, meetingRunningContext, readRunningContext, startCollaborateForEveryone, collaborateRedirect,
 } from './collaborate';
 
 describe('the running context in Collaborate', () => {
@@ -49,5 +49,31 @@ describe('startCollaborateForEveryone', () => {
     expect(await startCollaborateForEveryone({ startCollaborate: vi.fn(() => { throw new Error('at once'); }) })).toBe(false);
     expect(await startCollaborateForEveryone({})).toBe(false);
     expect(await startCollaborateForEveryone(undefined)).toBe(false);
+  });
+});
+
+describe('collaborateRedirect: in Collaborate the only screen is the meeting\'s Arlo screen', () => {
+  const at = (pathname, extra = {}) => collaborateRedirect({
+    inCollaborate: true, pathname, meetingId: 'M 1==', isAuthenticated: true, authLoading: false, ...extra,
+  });
+
+  test('every other route goes to it, by who is signed in', () => {
+    for (const pathname of ['/settings', '/home', '/meetings', '/meetings/5', '/search', '/upcoming', '/select-vertical', '/welcome',
+      '/meeting/M%201%3D%3D/record', '/meeting/M%201%3D%3D/classic', '/guest-meeting/x/record', '/guest', '/guest/x', '/nowhere', '/meeting', '/meeting/']) {
+      expect(at(pathname)).toBe('/meeting/M%201%3D%3D');
+      expect(at(pathname, { isAuthenticated: false })).toBe('/guest-meeting/M%201%3D%3D');
+    }
+  });
+
+  test('stays: on that screen, while the app starts or signs in, and before the meeting or the session is known', () => {
+    for (const pathname of ['/meeting/M%201%3D%3D', '/guest-meeting/M%201%3D%3D', '/meeting/another', '/', '/auth']) expect(at(pathname)).toBe(null);
+    expect(at('/settings', { authLoading: true })).toBe(null);
+    for (const meetingId of [null, undefined, '', 5]) expect(at('/settings', { meetingId })).toBe(null);
+    for (const pathname of [null, undefined, 5]) expect(at(pathname)).toBe(null);
+  });
+
+  test('out of Collaborate nothing is redirected', () => {
+    for (const inCollaborate of [false, null, undefined, 'true', 1]) expect(at('/settings', { inCollaborate })).toBe(null);
+    expect(collaborateRedirect()).toBe(null);
   });
 });

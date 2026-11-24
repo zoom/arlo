@@ -21,7 +21,7 @@ const NOTES = {
 const OWNER = { present: true, role: 'owner', ownerName: 'Ana', myStreamLive: true };
 const PARTICIPANT = { present: true, role: 'participant', ownerName: 'Ana', whoCanAsk: 'anyone', notesShared: true };
 const OPEN = 'Open notes for everyone';
-const WARNING = 'Everyone in the meeting will see your Arlo view.';
+const WARNING = 'Everyone in the meeting will see your Arlo view. The notes stay shared until you stop sharing.';
 const CLOSE = 'Close for everyone';
 const A1 = 'aaaaaaaa-1111-4111-8111-111111111111';
 
@@ -171,24 +171,15 @@ describe('Arlo asks the owner\'s panel to open the notes for everyone', () => {
     expect(results(fetchMock)[0]).toEqual({ ok: true });
   });
 
-  test('Zoom refuses: the invitation goes out instead and the panel says so', async () => {
+  test('Zoom refuses: sdk_error, and no invitation goes out in its place', async () => {
     const sdk = createZoomSdk();
     sdk.startCollaborate.mockImplementation(async () => { throw new Error('no'); });
-    const { fetchMock } = await open({ sdk });
-    await send(serverMessage.action({ actionId: A1, tool: 'open_notes_for_everyone', args: {} }));
-    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
-    expect(sdk.sendAppInvitationToAllParticipants).toHaveBeenCalledTimes(1);
-    expect(results(fetchMock)[0]).toEqual({ ok: false, code: 'fell_back_invite' });
-  });
-
-  test('Zoom refuses both: sdk_error', async () => {
-    const sdk = createZoomSdk();
-    sdk.startCollaborate.mockImplementation(async () => { throw new Error('no'); });
-    sdk.sendAppInvitationToAllParticipants.mockImplementation(async () => { throw new Error('no'); });
     const { fetchMock } = await open({ sdk });
     await send(serverMessage.action({ actionId: A1, tool: 'open_notes_for_everyone', args: {} }));
     await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
     expect(results(fetchMock)[0]).toEqual({ ok: false, code: 'sdk_error' });
+    await settle();
+    expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
   });
 
   test('the panel announces the tool only when the client took startCollaborate', async () => {
@@ -249,19 +240,146 @@ describe('the notes as a document while the app runs in Collaborate', () => {
     expect(calls(fetchMock, 'settings', 'PUT')).toHaveLength(0);
   });
 
-  test('a request for the owner is still asked on the shared view, and can be answered', async () => {
+  const REQUEST = {
+    id: A1, kind: 'agent_action', askedBy: 'Ben Okafor', askerVerified: false, channel: 'voice',
+    question: 'Admit James Carter from the waiting room?', primaryLabel: 'Admit James Carter',
+    body: 'The offer to Dana is 140k.', request: 'let James Carter in and post the offer',
+  };
+  const NOTHING_OF_IT = /Ben|Okafor|James|Carter|Admit|waiting room|offer|Dana|140k|They asked|Post/;
+
+  test('a request for the owner on the shared view: a sheet that says nothing of it and cannot be agreed to', async () => {
     const user = userEvent.setup();
     const { fetchMock } = await open({ sdk: inCollaborate(), state: { ...OWNER, notesShared: true } });
     await screen.findByRole('heading', { level: 1, name: 'Meeting notes' });
-    await send(serverMessage.approval({
-      id: A1, kind: 'agent_action', askedBy: 'Ben', askerVerified: false, channel: 'voice',
-      question: 'Stop the timer?', primaryLabel: 'Stop timer',
-    }));
+    await send(serverMessage.approval(REQUEST));
     const sheet = await screen.findByRole('dialog');
-    expect(within(sheet).getByText('Stop the timer?')).toBeInTheDocument();
+    expect(within(sheet).getByRole('heading', { name: 'Arlo needs your OK' })).toBeInTheDocument();
+    expect(within(sheet).getByText('Close the shared notes to see this request.')).toBeInTheDocument();
+    expect(within(sheet).getByText(/^\d+s$/)).toBeInTheDocument();
+    // who asked, what was asked, the server's question and the text to post: none of it
+    expect(sheet.textContent).not.toMatch(NOTHING_OF_IT);
+    expect(document.body.textContent).not.toMatch(NOTHING_OF_IT);
+    expect(within(sheet).queryByRole('region')).not.toBeInTheDocument();
+    expect(within(sheet).getAllByRole('button').map((one) => one.textContent)).toEqual([CLOSE, 'Not now']);
+    // nothing agrees: not a key, not a click
     await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 760); }); });
-    await user.click(within(sheet).getByRole('button', { name: 'Stop timer' }));
+    await user.keyboard('{Enter}');
+    await user.keyboard(' ');
+    await settle();
+    expect(calls(fetchMock, `approvals/${A1}`)).toHaveLength(0);
+    // "Not now" declines
+    await user.click(within(sheet).getByRole('button', { name: 'Not now' }));
     await waitFor(() => expect(calls(fetchMock, `approvals/${A1}`)).toHaveLength(1));
+    expect(JSON.parse(calls(fetchMock, `approvals/${A1}`)[0][1].body)).toEqual({ approve: false });
+  });
+
+  test('"Close for everyone" on that sheet ends Collaborate; the full sheet follows when Collaborate has ended', async () => {
+    const user = userEvent.setup();
+    const { sdk, fetchMock } = await open({ sdk: inCollaborate(), state: { ...OWNER, notesShared: true } });
+    await screen.findByRole('heading', { level: 1, name: 'Meeting notes' });
+    await send(serverMessage.approval(REQUEST));
+    const reduced = await screen.findByRole('dialog');
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 760); }); });
+    await user.click(within(reduced).getByRole('button', { name: CLOSE }));
+    await waitFor(() => expect(sdk.endCollaborate).toHaveBeenCalledTimes(1));
+    expect(sdk.endCollaborate).toHaveBeenCalledWith();
+    // Zoom said yes; the request is not answered by that, and still not shown
+    expect(calls(fetchMock, `approvals/${A1}`)).toHaveLength(0);
+    expect(document.body.textContent).not.toMatch(NOTHING_OF_IT);
+
+    // Zoom takes this app out of Collaborate: the request as it is, to be read and answered
+    await moveTo(sdk, 'inMeeting');
+    const full = await screen.findByRole('dialog');
+    expect(await within(full).findByText('Admit James Carter from the waiting room?')).toBeInTheDocument();
+    expect(within(full).getByText('The offer to Dana is 140k.')).toBeInTheDocument();
+    expect(within(full).queryByText('Arlo needs your OK')).not.toBeInTheDocument();
+    // a sheet that has just opened: its guard runs again
+    await user.click(within(full).getByRole('button', { name: 'Admit James Carter' }));
+    await settle();
+    expect(calls(fetchMock, `approvals/${A1}`)).toHaveLength(0);
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 760); }); });
+    await user.click(within(full).getByRole('button', { name: 'Admit James Carter' }));
+    await waitFor(() => expect(calls(fetchMock, `approvals/${A1}`)).toHaveLength(1));
+    expect(JSON.parse(calls(fetchMock, `approvals/${A1}`)[0][1].body)).toEqual({ approve: true });
+  });
+
+  test('"Close for everyone" on the sheet that Zoom refuses: said in this app\'s words, and the sheet stays reduced', async () => {
+    const user = userEvent.setup();
+    const sdk = inCollaborate();
+    sdk.endCollaborate.mockImplementation(async () => { throw new Error('You can only end collaboration.'); });
+    await open({ sdk, state: { ...OWNER, notesShared: true } });
+    await send(serverMessage.approval(REQUEST));
+    const sheet = await screen.findByRole('dialog');
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 760); }); });
+    await user.click(within(sheet).getByRole('button', { name: CLOSE }));
+    expect(await screen.findByText('Couldn\'t close the notes for everyone. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/only end collaboration/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole('dialog')).getByText('Arlo needs your OK')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(NOTHING_OF_IT);
+  });
+
+  test('Arlo thinking on the shared view: only for a spoken request, and never the step, which can name a person or a ticket', async () => {
+    await open({ sdk: inCollaborate(), state: { ...OWNER, notesShared: true } });
+    await screen.findByRole('heading', { level: 1, name: 'Meeting notes' });
+    await send(serverMessage.thinking(true, undefined, { step: 'Opening PROJ-123', channel: 'voice' }));
+    expect(await screen.findByText('Arlo is thinking…')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/PROJ|Opening/);
+    await send(serverMessage.thinking(true, undefined, { step: 'Muting Danny Reyes', channel: 'voice' }));
+    await settle();
+    expect(document.body.textContent).not.toMatch(/Danny|Muting/);
+    await send(serverMessage.thinking(false));
+    await send(serverMessage.thinking(true, undefined, { step: 'Writing an answer', channel: 'panel' }));
+    await settle();
+    expect(screen.queryByText('Arlo is thinking…')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/Writing an answer/);
+  });
+
+  test('the owner\'s view shows the notes only while they are shared', async () => {
+    await open({ sdk: inCollaborate(), state: { ...OWNER, notesShared: false } });
+    await screen.findByRole('heading', { level: 1, name: 'Meeting notes' });
+    expect(screen.getByText('The notes are not shared right now.')).toBeInTheDocument();
+    expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument();
+    expect(screen.queryByText('Beta launch moves to March 3')).not.toBeInTheDocument();
+    expect(button(CLOSE)).toBeInTheDocument();
+    // shared: there they are
+    await send(serverMessage.arloState({ ...OWNER, notesShared: true }));
+    expect(await screen.findByText(NOTES.summary)).toBeInTheDocument();
+    expect(screen.queryByText('The notes are not shared right now.')).not.toBeInTheDocument();
+  });
+
+  test('another owner stops sharing: the notes leave the shared view and this owner\'s panel ends Collaborate itself', async () => {
+    const sdk = inCollaborate();
+    sdk.endCollaborate.mockImplementation(async () => { throw new Error('no'); });
+    const { fetchMock } = await open({ sdk, state: { ...OWNER, notesShared: true } });
+    expect(await screen.findByText(NOTES.summary)).toBeInTheDocument();
+    expect(sdk.endCollaborate).not.toHaveBeenCalled();
+    await send(serverMessage.arloState({ ...OWNER, notesShared: false }));
+    await waitFor(() => expect(sdk.endCollaborate).toHaveBeenCalledTimes(1));
+    expect(sdk.endCollaborate).toHaveBeenCalledWith();
+    expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument();
+    expect(screen.getByText('The notes are not shared right now.')).toBeInTheDocument();
+    // Zoom's refusal is ignored, the state said again asks nothing again, and this panel changed no setting
+    await send(serverMessage.arloState({ ...OWNER, notesShared: false }));
+    await settle();
+    expect(sdk.endCollaborate).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(/Couldn't/)).not.toBeInTheDocument();
+    expect(calls(fetchMock, 'settings', 'PUT')).toHaveLength(0);
+  });
+
+  test('sharing stops for a participant, or for an owner whose app is not in Collaborate: nothing is ended from there', async () => {
+    const first = await open({ sdk: inCollaborate({ role: 'attendee' }), state: PARTICIPANT });
+    await screen.findByText(NOTES.summary);
+    await send(serverMessage.arloState({ ...PARTICIPANT, notesShared: false }));
+    await settle();
+    expect(first.sdk.endCollaborate).not.toHaveBeenCalled();
+    expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument();
+    first.unmount();
+    resetHarness();
+    const second = await open({ state: { ...OWNER, notesShared: true } });
+    await screen.findByText(NOTES.summary);
+    await send(serverMessage.arloState({ ...OWNER, notesShared: false }));
+    await settle();
+    expect(second.sdk.endCollaborate).not.toHaveBeenCalled();
   });
 
   test('a participant reads the same page: no asks, no choices, and "Leave"', async () => {
@@ -309,7 +427,7 @@ describe('the notes as a document while the app runs in Collaborate', () => {
   });
 
   test('Collaborate starts and ends under an open panel: the document, then the normal screen again', async () => {
-    const { sdk } = await open();
+    const { sdk } = await open({ state: { ...OWNER, notesShared: true } });
     await screen.findByText(NOTES.summary);
     expect(screen.queryByRole('heading', { level: 1, name: 'Meeting notes' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox')).toBeInTheDocument();
@@ -359,5 +477,85 @@ describe('"Stop sharing" also closes the notes that were opened for everyone', (
     await user.click(await screen.findByRole('button', { name: 'Stop sharing' }));
     expect(await screen.findByText('Couldn\'t change sharing. Try again.')).toBeInTheDocument();
     expect(second.sdk.endCollaborate).not.toHaveBeenCalled();
+  });
+});
+
+describe('while the app runs in Collaborate it stays on the meeting\'s screen, with nothing that leads away', () => {
+  const goTo = (hash) => act(async () => { window.location.hash = hash; });
+
+  test('the shell has no back arrow, logo, search or settings, and no live-meeting banner; toasts still show', async () => {
+    const user = userEvent.setup();
+    const sdk = inCollaborate();
+    sdk.endCollaborate.mockImplementation(async () => { throw new Error('no'); });
+    await open({ sdk, state: { ...OWNER, notesShared: true } });
+    await screen.findByRole('heading', { level: 1, name: 'Meeting notes' });
+    for (const name of [/back/i, 'Settings', 'Search']) expect(button(name)).not.toBeInTheDocument();
+    expect(screen.queryByTitle('Switch experience')).not.toBeInTheDocument();
+    expect(document.querySelector('.app-header')).toBeNull();
+    expect(screen.queryByText('Live meeting in progress')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: CLOSE }));
+    expect(await screen.findByText('Couldn\'t close the notes for everyone. Try again.')).toBeInTheDocument();
+  });
+
+  test('out of Collaborate the shell is as it was', async () => {
+    const { sdk } = await open({ state: { ...OWNER, notesShared: true } });
+    await screen.findByText(NOTES.summary);
+    expect(button('Settings')).toBeInTheDocument();
+    expect(button(/back/i)).toBeInTheDocument();
+    await moveTo(sdk, 'inCollaborate');
+    await waitFor(() => expect(button('Settings')).not.toBeInTheDocument());
+    await moveTo(sdk, 'inMeeting');
+    await waitFor(() => expect(button('Settings')).toBeInTheDocument());
+  });
+
+  test.each([
+    ['Settings', '#/settings'], ['Home', '#/home'], ['the meeting record', `#/meeting/${encodeURIComponent('MEETING-1==')}/record`],
+    ['the classic dashboard', `#/meeting/${encodeURIComponent('MEETING-1==')}/classic`], ['search', '#/search?q=x'],
+    ['an address that is no route', '#/nowhere'],
+  ])('%s goes back to the meeting\'s screen', async (name, hash) => {
+    await open({ sdk: inCollaborate(), state: { ...OWNER, notesShared: true } });
+    await screen.findByRole('heading', { level: 1, name: 'Meeting notes' });
+    await goTo(hash);
+    await waitFor(() => expect(window.location.hash).toBe(`#/meeting/${encodeURIComponent('MEETING-1==')}`));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Meeting notes' })).toBeInTheDocument();
+  });
+
+  test('a guest on the meeting record goes back to the guest\'s meeting screen', async () => {
+    await open({ sdk: inCollaborate({ status: 'unauthenticated', role: 'attendee' }), guest: true, state: PARTICIPANT });
+    await screen.findByRole('heading', { level: 1, name: 'Meeting notes' });
+    await goTo(`#/guest-meeting/${encodeURIComponent('MEETING-1==')}/record`);
+    await waitFor(() => expect(window.location.hash).toBe(`#/guest-meeting/${encodeURIComponent('MEETING-1==')}`));
+  });
+
+  test('out of Collaborate nothing is redirected', async () => {
+    await open({ state: { ...OWNER, notesShared: true } });
+    await screen.findByText(NOTES.summary);
+    await goTo('#/settings');
+    await settle();
+    expect(window.location.hash).toBe('#/settings');
+  });
+});
+
+describe('transcription is never requested by itself while the app runs in Collaborate', () => {
+  const wait = (ms) => act(async () => { await new Promise((resolve) => { setTimeout(resolve, ms); }); });
+
+  test('AUTO_START_RTMS and the user\'s own setting are on: no start in Collaborate, and one when it has ended', async () => {
+    const sdk = inCollaborate();
+    mockFetch({ [arloPath('state')]: () => json({ ...ARLO_ABSENT }) });
+    renderInMeeting({ sdk, autoStart: true });
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    await send(serverMessage.subscribed());
+    await send(serverMessage.arloState({}));
+    await wait(900);
+    expect(sdk.startRTMS).not.toHaveBeenCalled();
+    await moveTo(sdk, 'inMeeting');
+    await waitFor(() => expect(sdk.startRTMS).toHaveBeenCalledTimes(1), { timeout: 2000 });
+  });
+
+  test('the same settings out of Collaborate start it, as before', async () => {
+    const sdk = createZoomSdk();
+    mockFetch({ [arloPath('state')]: () => json({ ...ARLO_ABSENT }) });
+    renderInMeeting({ sdk, autoStart: true });
+    await waitFor(() => expect(sdk.startRTMS).toHaveBeenCalledTimes(1), { timeout: 2000 });
   });
 });

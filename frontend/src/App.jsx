@@ -13,6 +13,7 @@ import { FeatureLayoutProvider } from './hooks/useFeatureLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import AppShell from './components/AppShell';
 import ProtectedRoute from './components/ProtectedRoute';
+import CollaborateGuard from './components/CollaborateGuard';
 import LoadingSpinner from './components/ui/LoadingSpinner';
 
 // Views
@@ -147,6 +148,8 @@ function App() {
                   <ToastProvider>
                 <ErrorBoundary>
                   <HashRouter>
+                    {/* In Zoom's Collaborate mode the only screen is the meeting's Arlo screen */}
+                    <CollaborateGuard />
                     <Routes>
                       {/* Root: landing page (browser) or redirect to /auth (Zoom) */}
                       <Route path="/" element={<RootView />} />

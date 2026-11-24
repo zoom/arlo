@@ -28,6 +28,12 @@ import { INDICATOR_GUESSES } from './dynamicIndicator';
  *   running()       whether a timer of this panel runs now
  *   onEnd(fn)       → a function that stops listening
  *
+ * A timer is the meeting's, and any owner's panel can stop it: the panel that
+ * did calls end('stopped') itself; every other owner's panel learns of it
+ * from `arlo.did` and ends its own record the same way
+ * (endTimerStoppedElsewhere). Without that, the panel that keeps Arlo's status
+ * would stay silent until its own record ran out.
+ *
  * In memory only: a panel that reloads no longer knows of its timer, and its
  * next status may then end the countdown early.
  */
@@ -41,9 +47,12 @@ export function createIndicatorTimer() {
   let handle = null;
   const listeners = new Set();
 
+  // When end('stopped') was last told, by this record's own clock
+  let stoppedAt = null;
   const end = (reason) => {
     if (handle !== null) clearTimeout(handle);
     handle = null;
+    stoppedAt = reason === 'stopped' ? Date.now() : null;
     [...listeners].forEach((listener) => {
       try {
         listener(reason);
@@ -57,6 +66,7 @@ export function createIndicatorTimer() {
     start(minutes) {
       if (!isTimerMinutes(minutes)) return false;
       if (handle !== null) clearTimeout(handle);
+      stoppedAt = null;
       handle = setTimeout(() => {
         handle = null;
         end('expired');
@@ -65,11 +75,40 @@ export function createIndicatorTimer() {
     },
     end,
     running: () => handle !== null,
+    /**
+     * Whether a stop was told here within the last `withinMs` and no timer was
+     * started since. Answered true once per stop: the next question is about
+     * another one.
+     */
+    takeOwnStop(withinMs) {
+      const recent = stoppedAt !== null && Date.now() - stoppedAt <= withinMs;
+      stoppedAt = null;
+      return recent;
+    },
     onEnd(listener) {
       listeners.add(listener);
       return () => { listeners.delete(listener); };
     },
   };
+}
+
+// The report of a stop this panel did itself comes back within this time
+const OWN_STOP_ECHO_MS = 30 * 1000;
+
+/**
+ * An action that ended, as `arlo.did` tells an owner's panel. When it is a
+ * "stop the timer" that was done, the indicator was taken down by whoever
+ * stopped it: this panel's record ends as 'stopped', and the hook that keeps
+ * the status sets it again (or knows there is nothing left to take down).
+ * Not a second time for the stop this panel just did itself. true when the
+ * record was told.
+ */
+export function endTimerStoppedElsewhere(timer, action) {
+  if (action === null || typeof action !== 'object' || action.tool !== 'stop_timer' || action.status !== 'done') return false;
+  if (timer === null || typeof timer !== 'object' || typeof timer.end !== 'function') return false;
+  if (!timer.running() && typeof timer.takeOwnStop === 'function' && timer.takeOwnStop(OWN_STOP_ECHO_MS)) return false;
+  timer.end('stopped');
+  return true;
 }
 
 /** This panel's timer: the action that starts one and the hook that keeps the status share it. */

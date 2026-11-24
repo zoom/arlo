@@ -8,7 +8,7 @@ import { identityReport } from '../lib/arloIdentity';
 import { parseApproval, approvalTimeLeft, approvalTexts } from '../lib/approvalKinds';
 import { createApprovalNotifier } from '../lib/approvalNotice';
 import { handsFor, runArloAction } from '../lib/arloActions';
-import { indicatorTimer } from '../lib/indicatorTimer';
+import { indicatorTimer, endTimerStoppedElsewhere } from '../lib/indicatorTimer';
 import { parseAction, mergeActions } from '../lib/arloDid';
 import { readThinkingStep, readThinkingChannel } from '../lib/thinkingStep';
 import { useZoomSdk } from './ZoomSdkContext';
@@ -590,6 +590,10 @@ export function ArloProvider({ children }) {
           const told = parseAction(data.action);
           if (told !== null && told.status === 'done' && stateRef.current.role === 'owner' && signedInRef.current && !endedRef.current) {
             reportArloDid({ id: told.id, tool: told.tool });
+            // "Stop the timer" was done, on whichever owner's panel: the
+            // countdown is off Zoom's indicator, so this panel's own record
+            // of a timer ends and its status is put back (lib/indicatorTimer.js)
+            endTimerStoppedElsewhere(indicatorTimer, told);
           }
           break;
         }
@@ -970,11 +974,15 @@ export function ArloProvider({ children }) {
 
   // Only an owner is told, and not about a meeting that is over
   const thinking = thinkingNow !== null && role === 'owner' && isAuthenticated && !meetingOver && !switchingMeeting;
-  useEffect(() => {
-    setArloThinking(thinking);
-  }, [thinking, setArloThinking]);
   const thinkingStep = thinking ? thinkingNow.step : null;
   const thinkingChannel = thinking ? thinkingNow.channel : null;
+  // Zoom's indicator is read by everyone in the meeting: it says "Arlo is
+  // thinking…" only for a request that was said aloud there. An owner's
+  // private typed question shows on their own status line and nowhere else
+  const thinkingAloud = thinking && thinkingChannel === 'voice';
+  useEffect(() => {
+    setArloThinking(thinkingAloud);
+  }, [thinkingAloud, setArloThinking]);
   const shownActions = switchingMeeting ? NO_ACTIONS : actions;
 
   // The render between Zoom reporting another meeting and the reset above

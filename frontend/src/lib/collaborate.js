@@ -58,6 +58,28 @@ export const meetingRunningContext = (runningContext) => (
   isInCollaborate(runningContext) ? COLLABORATE_GUESSES.asMeeting : runningContext
 );
 
+// The meeting's Arlo screen, for a signed-in person and for a guest
+const ARLO_SCREEN_PATH = /^\/(?:guest-)?meeting\/[^/]+$/;
+// Where the app starts and signs in: nothing of a meeting is on them, and
+// they lead to the meeting's screen themselves
+const START_PATHS = new Set(['/', '/auth']);
+
+/**
+ * Where the app must be while it runs in Collaborate: the owner's view is on
+ * everyone's screen then, so the only screen is the meeting's Arlo screen
+ * (the notes as a document). The path to go to, or null to stay: null out of
+ * Collaborate, on that screen already, while the app starts or signs in, and
+ * before the meeting or who is signed in is known.
+ */
+export function collaborateRedirect({
+  inCollaborate, pathname, meetingId, isAuthenticated, authLoading,
+} = {}) {
+  if (inCollaborate !== true || typeof pathname !== 'string') return null;
+  if (ARLO_SCREEN_PATH.test(pathname) || START_PATHS.has(pathname)) return null;
+  if (authLoading === true || typeof meetingId !== 'string' || meetingId.length === 0) return null;
+  return `/${isAuthenticated === true ? 'meeting' : 'guest-meeting'}/${encodeURIComponent(meetingId)}`;
+}
+
 /** The context out of getRunningContext's answer ({ context } or the bare value), or null. */
 export function readRunningContext(answer) {
   const value = answer !== null && typeof answer === 'object' && !Array.isArray(answer) ? answer.context : answer;

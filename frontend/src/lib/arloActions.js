@@ -25,18 +25,14 @@
  * the name is how someone else's begins, or it mixes look-alike scripts: Arlo
  * then asks for the full name), 'sdk_error' (Zoom refused or failed, or the
  * list of people is longer than is looked through), 'share_failed' (the
- * ticket was opened in the browser and the share dialog was not),
- * 'fell_back_invite' (Collaborate did not start, and the invitation to open
- * Arlo was sent to everyone instead).
+ * ticket was opened in the browser and the share dialog was not).
  *
  * Opening the notes for everyone: the server has shared the notes before it
  * asks. Collaborate is started with the screen share (lib/collaborate.js,
  * where what is guessed about that API is kept). When Zoom refuses (the
- * feature is off for the app, a webinar or a breakout room, an older client),
- * the next best thing is done without asking again: the app invitation goes
- * to everyone, as for invite_everyone, and the report says which of the two
- * happened. The owner agreed to "open the notes for everyone"; an invitation
- * to open them is less than that, never more.
+ * feature is off for the app, a webinar or a breakout room, an older client)
+ * that is 'sdk_error' and nothing is done in its place: the owner agreed to
+ * "open the notes for everyone", and the sheet said nothing of an invitation.
  *
  * A ticket's URL is never taken as it comes: this panel builds it again from
  * the deployment's Jira base URL (the server's settings, given as
@@ -187,11 +183,14 @@ export function handsFor({
  * it stands for), without format characters (zero-width space and joiners,
  * soft hyphen, direction marks: nobody sees them, so they make no other
  * name), no case, single spaces. Two names that are equal after this are one
- * name to the person who reads them.
+ * name to the person who reads them. Every apostrophe is the plain one
+ * ("O’Brien" is "O'Brien"), the same set the server folds when it reads a
+ * typed request (backend services/agent/policy.js `plain`).
  */
-const comparable = (value) => (
+export const comparable = (value) => (
   typeof value === 'string'
-    ? value.normalize('NFKC').replace(/\p{Cf}/gu, '').toLowerCase().replace(/\s+/gu, ' ').trim()
+    ? value.normalize('NFKC').replace(/\p{Cf}/gu, '').replace(/[‘’ʼ′`]/g, '\'').toLowerCase().replace(/\s+/gu, ' ')
+      .trim()
     : ''
 );
 
@@ -393,16 +392,9 @@ async function openNotesForEveryone(zoomSdk, args, stillAllowed) {
   if (!has(zoomSdk, 'startCollaborate')) return fail('unsupported');
   if (typeof stillAllowed !== 'function' || stillAllowed() !== true) return fail('not_allowed');
 
-  if (await startCollaborateForEveryone(zoomSdk)) return ok;
-  // Zoom did not start Collaborate. The invitation instead, when this panel
-  // may still act and the client has it; otherwise nothing more was done
-  if (stillAllowed() !== true || !has(zoomSdk, 'sendAppInvitationToAllParticipants')) return fail('sdk_error');
-  try {
-    await zoomSdk.sendAppInvitationToAllParticipants();
-  } catch {
-    return fail('sdk_error');
-  }
-  return fail('fell_back_invite');
+  // Zoom did not start Collaborate: nothing is done in its place. The owner
+  // agreed to opening the notes, not to an invitation
+  return (await startCollaborateForEveryone(zoomSdk)) ? ok : fail('sdk_error');
 }
 
 /**

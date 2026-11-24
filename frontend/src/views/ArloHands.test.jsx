@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 import { indicatorTimer } from '../lib/indicatorTimer';
 import {
   createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage, serverMessagesFor,
-  arloPath, ARLO_ABSENT,
+  arloPath, ARLO_ABSENT, arloAction,
 } from '../test/harness';
 
 // The panel as Arlo's hands: an owner's panel tells the server what it can do
@@ -433,6 +433,26 @@ describe('an action from the server', () => {
       await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS.slice(0, 5), 'open_ticket', ...TIMERS, OPEN_NOTES] }));
     });
 
+    test('the settings are read again when someone signs in, and the Jira they then name is announced', async () => {
+      // As the server answers: the Jira only to a request that has a session
+      let reads = 0;
+      const fetchMock = mockFetch({
+        '/api/auth/settings': () => {
+          reads += 1;
+          return json({ demoMode: true, features: { autoStart: true, ownStream: true, jira: { baseUrl: reads === 1 ? null : BASE } } });
+        },
+      });
+      renderInMeeting();
+      await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+      await send(serverMessage.subscribed());
+      await send(serverMessage.status('rtms_started'));
+      await send(serverMessage.arloState(OWNER));
+      await waitFor(() => expect(lastHands()?.can).toContain('open_ticket'));
+      const settingsReads = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/auth/settings'));
+      expect(settingsReads.length).toBeGreaterThanOrEqual(2);
+      for (const [, init] of settingsReads) expect(init).toMatchObject({ credentials: 'include' });
+    });
+
     test('not announced when the settings name none, one that is not https, or the client cannot open URLs', async () => {
       for (const [jira, sdkOptions] of [[{ baseUrl: null }, {}], [{ baseUrl: 'http://jira.example.test' }, {}], [{ baseUrl: BASE }, { unsupportedApis: ['openUrl'] }]]) {
         const routes = { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true, jira } }) };
@@ -613,6 +633,41 @@ describe('a timer on Zoom\'s indicator', () => {
     expect(sdk.removeDynamicIndicator).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(calls + 1));
     expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({ text: 'Arlo is transcribing' });
+  });
+
+  test('started here and stopped on another owner\'s panel: told by `arlo.did`, this panel ends its record and sets the status again', async () => {
+    const { sdk, fetchMock } = await broughtInHere();
+    await send(serverMessage.action({ actionId: A1, tool: 'set_timer', args: { minutes: 30 } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(indicatorTimer.running()).toBe(true);
+    const calls = sdk.setDynamicIndicator.mock.calls.length;
+    // a stop that was not done, and something else that was: the timer runs on
+    await send(serverMessage.did(arloAction({ id: 'act-s0', tool: 'stop_timer', label: 'Asked to stop the timer', status: 'failed' })));
+    await send(serverMessage.did(arloAction({ id: 'act-p', tool: 'send_reaction', label: 'Sent a reaction' })));
+    await wait(350);
+    expect(indicatorTimer.running()).toBe(true);
+    expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(calls);
+
+    await send(serverMessage.did(arloAction({ id: 'act-s1', tool: 'stop_timer', label: 'Stopped the timer' })));
+    await waitFor(() => expect(indicatorTimer.running()).toBe(false));
+    await waitFor(() => expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(calls + 1));
+    expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({ text: 'Arlo is transcribing' });
+    // the other panel took the indicator down: this one removes nothing
+    expect(sdk.removeDynamicIndicator).not.toHaveBeenCalled();
+  });
+
+  test('stopped here: the report of that stop does not set the status a second time', async () => {
+    const { sdk, fetchMock } = await broughtInHere();
+    await send(serverMessage.action({ actionId: A1, tool: 'set_timer', args: { minutes: 5 } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    const calls = sdk.setDynamicIndicator.mock.calls.length;
+    await send(serverMessage.action({ actionId: A2, tool: 'stop_timer', args: {} }));
+    await waitFor(() => expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(calls + 1));
+    await send(serverMessage.did(arloAction({ id: 'act-s2', tool: 'stop_timer', label: 'Stopped the timer' })));
+    await wait(350);
+    expect(sdk.removeDynamicIndicator).toHaveBeenCalledTimes(1);
+    const texts = sdk.setDynamicIndicator.mock.calls.slice(calls).map((call) => call[0].text);
+    expect(texts.filter((text) => text === 'Arlo is transcribing')).toHaveLength(1);
   });
 
   test('started on an owner\'s panel that does not own the indicator: it starts, and that panel sends no status of its own', async () => {
