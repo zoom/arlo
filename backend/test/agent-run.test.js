@@ -1683,3 +1683,165 @@ test('the log of the new tools says a tool and an outcome, never a name or a rea
   assert.equal(/danny|reyes|tada|party|\u{1F389}/iu.test(lines.join('\n')), false);
   assert.equal(lines.includes('Arlo agent: invite_everyone failed (sdk_error) (panel)'), true);
 });
+
+// --- "open PROJ-123 and share it" ---------------------------------------------------
+
+const JIRA = 'https://jira.example.test';
+const withJira = (extra = {}) => setup({ agent: { toolOptions: { jiraBaseUrl: JIRA }, ...extra } });
+
+test('a ticket, typed by an owner with its key: their panel gets the one URL, the key and whether to share', async () => {
+  const s = withJira();
+  s.picks('open_ticket', { key: 'proj 123', share: false });
+  const res = await s.typed('open proj 123');
+  assert.deepEqual([res.status, res.tool, res.reply], ['done', 'open_ticket', 'Done: opened PROJ-123.']);
+  assert.deepEqual(s.t.handed, [{
+    meetingId: M, tool: 'open_ticket', args: { url: 'https://jira.example.test/browse/PROJ-123', key: 'PROJ-123', share: false }, userId: 'user-ana',
+  }]);
+  assert.deepEqual([res.action.label, res.action.status, res.action.public], ['Opened PROJ-123', 'done', true]);
+  assert.deepEqual(s.t.approval, []);
+  assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Opening PROJ-123', 'panel'], [false]]);
+
+  s.picks('open_ticket', { key: 'PROJ-123', share: true });
+  const shared = await s.typed('Open PROJ-123 and share it');
+  assert.deepEqual([shared.status, shared.reply], ['done', 'Done: opened PROJ-123 and opened the share dialog.']);
+  assert.deepEqual(s.t.handed.at(-1).args, { url: 'https://jira.example.test/browse/PROJ-123', key: 'PROJ-123', share: true });
+  assert.equal(shared.action.label, 'Opened PROJ-123 and opened the share dialog');
+  assert.deepEqual(s.t.approval, []);
+  // the model that picks the tool is given the request and nothing of the deployment's Jira
+  assert.equal(JSON.stringify(s.t.chosen).includes('jira.example.test'), false);
+});
+
+test('a ticket: the panel opened it and not the share dialog, or did nothing', async () => {
+  const s = withJira();
+  s.picks('open_ticket', { key: 'PROJ-123', share: true });
+  s.t.hands = async () => ({ ok: false, code: 'share_failed' });
+  const half = await s.typed('open PROJ-123 and share it');
+  assert.deepEqual([half.status, half.code, half.reply], ['failed', 'share_failed', 'Opened PROJ-123. Couldn\'t open the share dialog.']);
+  assert.deepEqual([half.action.status, half.action.label], ['failed', 'Opened PROJ-123. Couldn\'t open the share dialog.']);
+
+  for (const code of ['sdk_error', 'unsupported', 'not_allowed', 'timeout']) {
+    s.t.hands = async () => ({ ok: false, code });
+    const failed = await s.typed('open PROJ-123 and share it');
+    assert.deepEqual([failed.status, failed.code, 'reply' in failed], ['failed', code, false], code);
+    assert.deepEqual([failed.action.status, failed.action.label], ['failed', 'Asked to open PROJ-123'], code);
+  }
+  s.t.hands = async () => ({ ok: false, code: 'no_hands' });
+  const noPanel = await s.typed('open PROJ-123 and share it');
+  assert.deepEqual([noPanel.status, noPanel.code, noPanel.action.label], ['failed', 'no_hands', NO_OWN_PANEL]);
+
+  // a panel that says the share failed when none was asked for: a failure like any other
+  s.picks('open_ticket', { key: 'PROJ-123', share: false });
+  s.t.hands = async () => ({ ok: false, code: 'share_failed' });
+  const odd = await s.typed('open PROJ-123');
+  assert.deepEqual([odd.status, odd.code, 'reply' in odd, odd.action.label], ['failed', 'share_failed', false, 'Asked to open PROJ-123']);
+});
+
+test('a ticket, spoken or not in what was typed: the sheet says what opens, and it opens on the panel of the owner who agreed', async () => {
+  const s = withJira();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+
+  s.picks('open_ticket', { key: 'PROJ dash 123', share: true });
+  // also for a speaker verified to be an owner
+  s.t.verified = () => true;
+  const res = await s.said('Arlo, open PROJ dash 123 and share it', ANA_SPEAKING);
+  assert.equal(res.status, 'waiting_approval');
+  assert.deepEqual(
+    [s.sheet().question, s.sheet().primaryLabel, 'body' in s.sheet(), s.sheet().kind],
+    ['Open PROJ-123 in your browser and share your screen?', 'Open and share', false, 'agent_action'],
+  );
+  assert.equal(res.action.label, 'Asked to open PROJ-123');
+  // the URL is in nothing the owners are shown
+  assert.equal(JSON.stringify(s.sheet()).includes('jira.example.test'), false);
+  assert.deepEqual(s.t.handed, []);
+  await s.approve('user-cy');
+  assert.deepEqual(s.t.handed, [{
+    meetingId: M, tool: 'open_ticket', args: { url: 'https://jira.example.test/browse/PROJ-123', key: 'PROJ-123', share: true }, userId: 'user-cy',
+  }]);
+  assert.equal(lastAction(s).label, 'Opened PROJ-123 and opened the share dialog');
+  s.t.verified = () => false;
+
+  s.picks('open_ticket', { key: 'OPS-7', share: false });
+  await s.said('open ops 7');
+  assert.deepEqual([s.sheet().question, s.sheet().primaryLabel, 'body' in s.sheet()], ['Open OPS-7 in your browser?', 'Open', false]);
+  s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+  await s.agent.whenIdle(M);
+  assert.deepEqual([lastAction(s).status, lastAction(s).label], ['declined', 'Asked to open OPS-7']);
+  assert.equal(s.t.handed.length, 1);
+
+  // typed by an owner, and what would be done is not what they typed: the sheet
+  const sheets = [
+    ['open the ticket we talked about', { key: 'PROJ-123', share: false }], // no key typed
+    ['open PROJ-124', { key: 'PROJ-123', share: false }], // another key
+    ['open PROJ-123', { key: 'PROJ-123', share: true }], // sharing was not typed
+  ];
+  for (const [text, args] of sheets) {
+    s.picks('open_ticket', args);
+    const asked = await s.typed(text);
+    assert.equal(asked.status, 'waiting_approval', text);
+    assert.equal(s.sheet().question, args.share ? 'Open PROJ-123 in your browser and share your screen?' : 'Open PROJ-123 in your browser?');
+    s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+    await s.agent.whenIdle(M);
+  }
+  // typed by someone who is not an owner: the sheet, and it opens for the owner who agrees
+  s.picks('open_ticket', { key: 'PROJ-123', share: false });
+  assert.equal((await s.typed('open PROJ-123', BEN)).status, 'waiting_approval');
+  await s.approve('user-ana');
+  assert.equal(s.t.handed.length, 2);
+  assert.equal(s.t.handed.at(-1).userId, 'user-ana');
+  // it ran out: recorded, nothing opened
+  await s.said('open ops 7');
+  s.advance(10 * 60 * 1000);
+  await s.agent.whenIdle(M);
+  assert.deepEqual([lastAction(s).status, lastAction(s).label], ['expired', 'Asked to open PROJ-123']);
+  assert.equal(s.t.handed.length, 2);
+});
+
+test('a ticket key that is not one, or a URL from a model, is no tool: nothing is opened', async () => {
+  const s = withJira();
+  const calls = [
+    { key: 'https://evil.example/browse/PROJ-123', share: false },
+    { key: 'PROJ-123/../x', share: false },
+    { key: '\u0420ROJ-123', share: false },
+    { key: 'PROJ-123\n', share: false },
+    { key: 'PROJ-123', share: 'true' },
+    { key: 'PROJ-123' },
+    { key: 'PROJ-123', share: false, url: 'https://evil.example' },
+    { url: 'https://evil.example', share: false },
+  ];
+  for (const args of calls) {
+    s.picks('open_ticket', args);
+    // typed: answered from the transcript as a question, as when no tool fits
+    const typed = await s.typed('open PROJ-123 and share it');
+    assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting'], JSON.stringify(args));
+    // spoken: silent
+    assert.deepEqual(await s.said('open PROJ-123 and share it'), { status: 'none' });
+  }
+  assert.deepEqual(s.t.handed, []);
+  assert.deepEqual(s.t.approval, []);
+  assert.equal(s.store.listActions(M).some((action) => action.tool === 'open_ticket'), false);
+});
+
+test('without a Jira base URL there is no such tool, whatever a model picks', async () => {
+  for (const s of [setup(), setup({ agent: { toolOptions: { jiraBaseUrl: null } } }), setup({ agent: { toolOptions: { jiraBaseUrl: 'http://jira.example.test' } } })]) {
+    s.picks('open_ticket', { key: 'PROJ-123', share: true });
+    const typed = await s.typed('open PROJ-123 and share it');
+    assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting']);
+    assert.deepEqual(await s.said('open PROJ-123 and share it'), { status: 'none' });
+    assert.deepEqual(s.t.handed, []);
+    assert.deepEqual(s.t.approval, []);
+  }
+});
+
+test('a ticket: the log has the tool and how it ended, never the key or the URL', async () => {
+  const lines = [];
+  const s = withJira({ log: { log: (line) => lines.push(String(line)), warn: (line) => lines.push(String(line)) } });
+  s.picks('open_ticket', { key: 'PROJ-123', share: true });
+  await s.typed('open PROJ-123 and share it');
+  s.t.hands = async () => ({ ok: false, code: 'share_failed' });
+  await s.typed('open PROJ-123 and share it');
+  await s.said('open PROJ-123 and share it');
+  assert.equal(lines.includes('Arlo agent: open_ticket done (panel)'), true);
+  assert.equal(lines.includes('Arlo agent: open_ticket failed (share_failed) (panel)'), true);
+  assert.equal(/proj|123|jira|example|browse/i.test(lines.join('\n')), false);
+});

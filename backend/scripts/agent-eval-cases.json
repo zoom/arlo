@@ -302,6 +302,45 @@
     }
   },
   {
+    "kind": "tool",
+    "said": "open PROJ-123 and share it",
+    "expectTool": "open_ticket",
+    "expectArgs": {
+      "key": {
+        "equals": "PROJ-123"
+      },
+      "share": {
+        "equals": true
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "pull up ticket ABC dash 42",
+    "expectTool": "open_ticket",
+    "expectArgs": {
+      "key": {
+        "equals": "ABC-42"
+      },
+      "share": {
+        "equals": false
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "can you open OPS-7 in the browser",
+    "expectTool": "open_ticket",
+    "expectArgs": {
+      "key": {
+        "equals": "OPS-7"
+      },
+      "share": {
+        "equals": false
+      }
+    }
+  },
+  {
     "kind": "no_tool",
     "said": "unmute Danny",
     "expectTool": "none"
@@ -349,6 +388,16 @@
   {
     "kind": "non_request",
     "said": "someone should really learn where the mute button is",
+    "expectTool": "none"
+  },
+  {
+    "kind": "non_request",
+    "said": "I filed a ticket about the login page yesterday",
+    "expectTool": "none"
+  },
+  {
+    "kind": "non_request",
+    "said": "PROJ-123 is still blocked on the vendor, by the way",
     "expectTool": "none"
   },
   {
@@ -445,6 +494,14 @@
       "answer_from_meeting",
       "summarize_so_far",
       "none"
+    ]
+  },
+  {
+    "kind": "ambiguous",
+    "said": "open the ticket in the chat",
+    "expectTool": [
+      "none",
+      "answer_from_meeting"
     ]
   }
 ]

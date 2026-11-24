@@ -12,15 +12,21 @@
  *
  * This calls OpenRouter: it needs AI_ENABLED=true and OPENROUTER_API_KEY, and
  * tests only models in OPENROUTER_MODELS. The key is never printed. Free
- * models are rate limited per minute and per day: 53 cases x 2 runs is 106
+ * models are rate limited per minute and per day: 59 cases x 2 runs is 118
  * requests per model, so name one or two models at a time with --models when
  * the daily limit is small. A model that is rate limited five times in a row
  * is stopped.
  *
+ * A tool that a deployment turns on with a setting is tested too: the table
+ * given to the models has open_ticket also when JIRA_BASE_URL is not set (a
+ * line says so; the base URL is never part of what a model is given). A case
+ * that needs a tool the table does not have is left out, and that is printed.
+ *
  * A case: { kind, said, expectTool, expectArgs?, context? }
  *   expectTool  a tool name or 'none', or a list when more than one is right
- *   expectArgs  { <argument>: { equals?: string, includes?: string[], excludes?: string[] } },
- *               compared without regard to case; checked when a tool was picked
+ *   expectArgs  { <argument>: { equals?: string | boolean, includes?: string[], excludes?: string[] } },
+ *               text compared without regard to case, yes or no as such;
+ *               checked when a tool was picked
  *   context     lines of a made-up meeting. Not given to the model any more: the
  *               model that picks a tool gets the request alone, as on the server
  *               (services/agent/agent.js), so these lines cannot steer it
@@ -33,7 +39,10 @@ const lower = (value) => String(value).toLowerCase();
 
 /** Whether one argument is what the case expects. */
 function argumentMatches(value, rule) {
-  if (typeof value !== 'string' || rule === null || typeof rule !== 'object') return false;
+  if (rule === null || typeof rule !== 'object') return false;
+  // Yes or no: the same boolean, never a word for it
+  if (typeof rule.equals === 'boolean') return value === rule.equals;
+  if (typeof value !== 'string') return false;
   const got = lower(value).trim();
   if (typeof rule.equals === 'string' && got !== lower(rule.equals).trim()) return false;
   if (Array.isArray(rule.includes) && !rule.includes.every((part) => got.includes(lower(part)))) return false;
@@ -137,7 +146,18 @@ async function main({
     return 1;
   }
 
-  log(`${cases.length} cases x ${flags.runs} run(s) for ${models.length} model(s), ${flags.delayMs} ms between requests.`);
+  // A case that can only be right with a tool this table does not have (one a
+  // deployment turns on with a setting) says nothing about a model: left out
+  const offered = new Set((Array.isArray(tools) ? tools : []).map((tool) => tool && tool.name));
+  const needs = (testCase) => [].concat(testCase.expectTool).filter((name) => name !== 'none');
+  const missing = (testCase) => needs(testCase).length > 0 && needs(testCase).every((name) => !offered.has(name));
+  const skipped = cases.filter(missing);
+  if (skipped.length > 0) {
+    const names = [...new Set(skipped.flatMap(needs))].filter((name) => /^[a-z_]{1,40}$/.test(name));
+    log(`${skipped.length} case(s) skipped: they need a tool that is not in this table (${names.join(', ')}).`);
+  }
+
+  log(`${cases.length - skipped.length} cases x ${flags.runs} run(s) for ${models.length} model(s), ${flags.delayMs} ms between requests.`);
   const results = [];
   for (const model of models) {
     const rows = [];
@@ -147,6 +167,7 @@ async function main({
     for (let run = 0; run < flags.runs && !stopped; run += 1) {
       for (let index = 0; index < cases.length && !stopped; index += 1) {
         const testCase = cases[index];
+        if (missing(testCase)) continue;
         const started = now();
         try {
           let result = await chooseTool({
@@ -198,20 +219,26 @@ if (require.main === module) {
   /* eslint-disable global-require */
   const config = require('../src/config');
   const { chooseTool } = require('../src/services/openrouter');
-  const { listTools, validateToolCall } = require('../src/services/agent/tools');
+  const { listTools, validateToolCall, jiraBaseUrl } = require('../src/services/agent/tools');
   const cases = require(path.join(__dirname, 'agent-eval-cases.json'));
   /* eslint-enable global-require */
   // The client's own failure lines (model and status) would bury the table
   console.error = () => {};
   console.warn = () => {};
+  const log = (line) => process.stdout.write(`${line}\n`);
+  // open_ticket is in the table only with a Jira base URL. Which one makes no
+  // difference to a model (it is in nothing a model is given), so without
+  // JIRA_BASE_URL a stand-in puts the tool in the table for this run
+  const toolOptions = jiraBaseUrl() === null ? { jiraBaseUrl: 'https://jira.invalid' } : undefined;
+  if (toolOptions) log('JIRA_BASE_URL is not set: open_ticket is tested all the same, with a stand-in base URL that no model sees.');
   main({
     argv: process.argv.slice(2),
     config,
     cases,
     chooseTool,
-    tools: listTools(),
-    validateToolCall,
-    log: (line) => process.stdout.write(`${line}\n`),
+    tools: listTools(toolOptions),
+    validateToolCall: (name, args) => validateToolCall(name, args, toolOptions),
+    log,
     wait: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
   }).then((code) => process.exit(code), () => {
     process.stdout.write('The evaluation stopped on an unexpected error.\n');

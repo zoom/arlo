@@ -537,6 +537,9 @@ router.get('/settings', (req, res) => {
       aiChat: false,                // Disabled - requires database
       autoStart: config.autoStartRtms, // AUTO_START_RTMS=true; off by default
       ownStream: config.ownStream,     // On by default; ALLOW_OWN_ARLO_STREAM=false hides it
+      // The deployment's Jira (JIRA_BASE_URL), or null: the panel opens a
+      // ticket only at exactly this base + /browse/ + the key
+      jira: { baseUrl: config.jiraBaseUrl },
     },
     privacyNotice: 'Arlo keeps this meeting\'s transcript and notes in memory while the meeting is running, and they are deleted when the meeting ends. Nothing is written to disk or kept between meetings.',
   });

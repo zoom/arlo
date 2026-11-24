@@ -309,6 +309,17 @@ module.exports = {
   // unless WEB_SEARCH_ENABLED is exactly "true": it needs a paid model plugin
   webSearchEnabled: process.env.WEB_SEARCH_ENABLED === 'true',
 
+  // Where "Arlo, open PROJ-123" opens a ticket: the base URL of the
+  // deployment's Jira (https, a host, an optional context path; lib/jira.js).
+  // Not set: Arlo has no such tool. A value that is not accepted is ignored
+  // with one warning, which does not print it.
+  jiraBaseUrl: (() => {
+    // eslint-disable-next-line global-require
+    const { url, known } = require('./lib/jira').readJiraBaseUrl(process.env.JIRA_BASE_URL);
+    if (!known) console.warn('JIRA_BASE_URL must be an https URL of at most 200 characters without user name, password, query or fragment; ignoring it.');
+    return url;
+  })(),
+
   // Feature Flags
   extractionEnabled: process.env.EXTRACTION_ENABLED === 'true',
   publicLinksEnabled: process.env.PUBLIC_LINKS_ENABLED === 'true',

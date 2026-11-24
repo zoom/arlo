@@ -45,6 +45,11 @@ test('ALLOW_OWN_ARLO_STREAM=false turns "Use Arlo yourself" off, and only that e
   for (const other of ['0', 'no', 'off', 'FALSE', ' false']) assert.equal(ownStreamFor(other), 'true', `"${other}"`);
 });
 
+test('without JIRA_BASE_URL the settings say there is no Jira', async () => {
+  const body = await (await fetch(`${srv.base}/api/auth/settings`)).json();
+  assert.deepEqual(body.features.jira, { baseUrl: null });
+});
+
 test('the privacy notice says what is held and when it is deleted', async () => {
   const body = await (await fetch(`${srv.base}/api/auth/settings`)).json();
   assert.match(body.privacyNotice, /in memory while the meeting is running/);

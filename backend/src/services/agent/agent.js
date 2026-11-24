@@ -67,7 +67,11 @@
  *      it fails at once. Inviting everyone is both: the server shares the
  *      notes first (the same way as for share_notes), then that owner's
  *      panel sends the invitation; when the panel does not, the notes stay
- *      shared and the action ends as failed, saying both. Each run has `runLimitMs`; a model call still running
+ *      shared and the action ends as failed, saying both. Opening a ticket
+ *      sends that owner's panel one URL, built here from the deployment's
+ *      Jira base URL and the key the tool table rebuilt (lib/jira.js); when
+ *      the panel opened it and could not bring up the share dialog
+ *      ('share_failed'), the action ends as failed, saying both. Each run has `runLimitMs`; a model call still running
  *      then, or when the meeting's data goes, is aborted (an AbortSignal).
  *   8. Recording: every request that got as far as a tool is an action in the
  *      meeting store, with a label from services/agent/texts.js. An answer to
@@ -119,7 +123,10 @@
  */
 const { newestLines } = require('../../lib/transcriptLines');
 const { cleanName } = require('../../lib/displayName');
-const { getTool, validateToolCall, NO_TOOL_NAME } = require('./tools');
+const {
+  getTool, validateToolCall, jiraBaseUrl, NO_TOOL_NAME,
+} = require('./tools');
+const { ticketUrl } = require('../../lib/jira');
 const {
   decide, panelMayAsk, voiceIsHeard, typedRequestCovers,
 } = require('./policy');
@@ -144,7 +151,7 @@ const MAX_PRIVATE_ANSWERS = 500;
 const NOTES_FRESH_WITHIN_LINES = 10;
 const SUMMARY_QUESTION = 'Summarize the meeting so far in a few sentences: what was discussed, what was decided, and what is still open.';
 // What the hands can report (services/agent/hands.js); anything else is 'error'
-const HANDS_CODES = new Set(['no_hands', 'timeout', 'gone', 'busy', 'not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed']);
+const HANDS_CODES = new Set(['no_hands', 'timeout', 'gone', 'busy', 'not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed']);
 // The name the store gives a line without a speaker name: nobody's name
 const NO_SPEAKER_NAME = 'Speaker';
 
@@ -213,7 +220,7 @@ function createAgent({
   // (the fourth only with `on` true; `step` is a sentence of texts.js or null),
   // `did(meetingId, action, { everyone, userIds })`, `approval(meetingId, userIds, data)`
   send = {},
-  // Passed to the tool table: { webSearch } (tests)
+  // Passed to the tool table: { webSearch, jiraBaseUrl } (tests)
   toolOptions,
   now = Date.now,
   schedule = defaultSchedule,
@@ -519,6 +526,14 @@ function createAgent({
           // The invitation was not sent: the notes stay shared, and the outcome says both
           return invited.ok ? invited : { ok: false, code: invited.code, sharedOnly: true };
         }
+        case 'open_ticket': {
+          // The one URL there is: the deployment's base, "/browse/", the key
+          // the tool table rebuilt. Nothing a model or a speaker gave is in it
+          // but that key. No base (the setting went), no URL: nothing is sent
+          const url = ticketUrl(jiraBaseUrl(toolOptions), args.key);
+          if (url === null || typeof args.share !== 'boolean') return { ok: false, code: 'unsupported' };
+          return await viaHands(meetingId, { tool: tool.name, args: { url, key: args.key, share: args.share } }, actorUserId);
+        }
         default:
           // A tool of the panel goes to the hands; a tool of the server that
           // is not above (web search) is not built
@@ -547,6 +562,10 @@ function createAgent({
       // Half of it was done: the record must not read as if nothing happened
       failedLabel = INVITE_NOT_SENT;
       reply = INVITE_NOT_SENT;
+    }
+    if (!outcome.ok && tool.name === 'open_ticket' && outcome.code === 'share_failed' && reply !== null) {
+      // The ticket is open and the share dialog is not: the record says both, like the answer
+      failedLabel = reply;
     }
     const stored = action
       ? finish(meetingId, state, action.id, outcome.ok ? 'done' : 'failed', outcome.ok ? texts.done(args) : failedLabel)

@@ -17,9 +17,16 @@
  * An argument is text within a length, or (`enum`) one of a fixed list of
  * names, which is how a reaction is given: a model never writes the emoji.
  *
+ * A ticket's key (`key` of open_ticket) is rebuilt by lib/jira.js: letters, a
+ * dash, a number, or the call is refused. `share` is a boolean and nothing
+ * else. No tool takes a URL: the one URL there is, is built by the server from
+ * the deployment's Jira base URL and that key. Without a base URL
+ * (JIRA_BASE_URL) the tool is not in the table.
+ *
  * This file has no code that runs a tool.
  */
 const { showableName } = require('../../lib/displayName');
+const { readJiraBaseUrl, normalizeTicketKey } = require('../../lib/jira');
 const {
   NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS, REACTION_NAMES,
 } = require('./texts');
@@ -27,6 +34,8 @@ const {
 const text = (description, maxLength) => ({ type: 'string', description, maxLength });
 // One of a fixed list of names: the model is told the list, and the server checks it again
 const oneOf = (description, names) => ({ type: 'string', description, enum: [...names] });
+// Yes or no: true or false and nothing else, never a word for one
+const yesNo = (description) => ({ type: 'boolean', description });
 const parameters = (properties = {}) => ({
   type: 'object', properties, required: Object.keys(properties), additionalProperties: false,
 });
@@ -105,6 +114,19 @@ const TABLE = deepFreeze([
     needsHost: true,
   },
   {
+    name: 'open_ticket',
+    // The panel of the owner who typed or approved it opens the ticket in the
+    // system browser and, when asked, Zoom's share dialog, where that owner
+    // picks the window. Only with JIRA_BASE_URL (listTools below)
+    description: 'Open one ticket of the issue tracker in the browser, and bring up screen sharing when that is asked too. Use only when asked to open, pull up or show a ticket or issue and the asker gives its key, like PROJ-123. Not when no key is given, not for a link or a web page, and not when a ticket is only talked about.',
+    parameters: parameters({
+      key: text('The ticket key as the asker gave it: letters, a dash, a number, like PROJ-123. Never a link.', 40),
+      share: yesNo('true only when the asker also asked to share it or to share the screen. Otherwise false.'),
+    }),
+    runs: 'panel',
+    changesMeeting: true,
+  },
+  {
     name: 'web_search',
     description: 'Look something up on the web. Use only for a question about the world outside this meeting.',
     parameters: parameters({ query: text('What to search for.', 200) }),
@@ -130,10 +152,30 @@ function webSearchOn(options) {
   return require('../../config').webSearchEnabled === true;
 }
 
-/** The tools of this deployment, in the table's order. Frozen. `{ webSearch }` overrides the setting (tests). */
+/**
+ * The deployment's Jira base URL (JIRA_BASE_URL as config accepted it), or
+ * null. Read when asked, like web search. `{ jiraBaseUrl }` overrides the
+ * setting (tests, the evaluation script): a base URL in the form config keeps
+ * it in, anything else is none.
+ */
+function jiraBaseUrl(options) {
+  if (options && Object.prototype.hasOwnProperty.call(options, 'jiraBaseUrl')) {
+    const given = options.jiraBaseUrl;
+    return typeof given === 'string' && readJiraBaseUrl(given).url === given ? given : null;
+  }
+  // eslint-disable-next-line global-require
+  const configured = require('../../config').jiraBaseUrl;
+  return typeof configured === 'string' && configured.length > 0 ? configured : null;
+}
+
+/**
+ * The tools of this deployment, in the table's order. Frozen.
+ * `{ webSearch, jiraBaseUrl }` override the settings (tests).
+ */
 function listTools(options) {
   const search = webSearchOn(options);
-  return TABLE.filter((tool) => tool.name !== 'web_search' || search);
+  const tickets = jiraBaseUrl(options) !== null;
+  return TABLE.filter((tool) => (tool.name !== 'web_search' || search) && (tool.name !== 'open_ticket' || tickets));
 }
 
 const toolNames = (options) => listTools(options).map((tool) => tool.name);
@@ -153,7 +195,11 @@ const MAX_ENUM_VALUE_CHARS = 40;
 
 /** One argument, trimmed, or null when it is not allowed. `property`: its entry in the tool's parameters. */
 function readArgument(key, value, property) {
+  // true or false as such: "true", 1 or "yes" is refused, never read as one
+  if (property.type === 'boolean') return typeof value === 'boolean' ? value : null;
   if (typeof value !== 'string') return null;
+  // A ticket key is rebuilt, or it is not one (lib/jira.js)
+  if (key === 'key') return value.length <= property.maxLength ? normalizeTicketKey(value) : null;
   if (Array.isArray(property.enum)) {
     // One of the listed names, as listed: anything else is refused, never mapped to one
     if (value.length > MAX_ENUM_VALUE_CHARS) return null;
@@ -190,5 +236,5 @@ function validateToolCall(name, args, options) {
 }
 
 module.exports = {
-  listTools, toolNames, getTool, validateToolCall, ALL_TOOL_NAMES, NO_TOOL_NAME, PANEL_TOOL_NAMES, HOST_TOOL_NAMES,
+  listTools, toolNames, getTool, validateToolCall, jiraBaseUrl, ALL_TOOL_NAMES, NO_TOOL_NAME, PANEL_TOOL_NAMES, HOST_TOOL_NAMES,
 };

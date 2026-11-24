@@ -83,7 +83,7 @@ test('an action goes to one panel, and its result is the outcome', async () => {
   assert.equal(s.live(), 0);
 
   // every code a panel may report is passed on; anything else is "the SDK failed"
-  assert.deepEqual([...RESULT_CODES], ['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed']);
+  assert.deepEqual([...RESULT_CODES], ['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed']);
   for (const [code, expected] of [...RESULT_CODES].map((one) => [one, one]).concat([[undefined, 'sdk_error'], ['rm -rf', 'sdk_error'], [5, 'sdk_error']])) {
     const again = s.hands.run(M, POST);
     s.hands.result(M, ana.got.at(-1).data.actionId, 'user-ana', { ok: false, code });

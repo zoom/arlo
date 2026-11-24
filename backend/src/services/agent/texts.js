@@ -17,12 +17,16 @@
  * The emoji of a reaction is from this file as well (REACTIONS): a model
  * names one of six reactions, and never writes the character that is shown.
  *
+ * A ticket's key in a sentence is the one the tool table rebuilt (lib/jira.js);
+ * anything else is "a ticket". Its URL is in no sentence.
+ *
  * Arlo posts no line of its own to the chat: not "I am busy", not "the host
  * declined". A line nobody approved is unapproved content; those outcomes are
  * in the record only.
  */
 
 const { cleanName } = require('../../lib/displayName');
+const { isTicketKey } = require('../../lib/jira');
 
 // Never part of text that is shown or posted: control characters, invisible
 // format characters (a direction override turns the text around it),
@@ -114,6 +118,11 @@ function reactionEmoji(args) {
 /** "a 👍 reaction", or "a reaction" for one that is not in the table (the tool table lets none through). */
 const aReaction = (args) => (reactionEmoji(args) === null ? 'a reaction' : `a ${reactionEmoji(args)} reaction`);
 
+/** The ticket's key as it is shown: the rebuilt key, or "a ticket" for anything else. */
+const ticketName = (args) => (args !== null && typeof args === 'object' && isTicketKey(args.key) ? args.key : 'a ticket');
+/** Whether the share dialog is opened after the ticket. */
+const sharesToo = (args) => args !== null && typeof args === 'object' && args.share === true;
+
 // The sheet for text a model wrote (an answer, a summary): the text is the body
 const POST_ANSWER_QUESTION = 'Post Arlo\'s answer in the meeting chat?';
 const POST_ANSWER_PRIMARY = 'Post answer';
@@ -177,6 +186,14 @@ const TOOL_TEXTS = Object.freeze({
     primary: () => 'Mute',
     reply: (args) => `Done: muted ${args.name}.`,
   }),
+  open_ticket: Object.freeze({
+    asked: (args) => `Asked to open ${ticketName(args)}`,
+    done: (args) => `Opened ${ticketName(args)}${sharesToo(args) ? ' and opened the share dialog' : ''}`,
+    // "your": it opens on the panel of the owner who agrees, and they pick what is shared
+    question: (args) => `Open ${ticketName(args)} in your browser${sharesToo(args) ? ' and share your screen' : ''}?`,
+    primary: (args) => (sharesToo(args) ? 'Open and share' : 'Open'),
+    reply: (args) => `Done: opened ${ticketName(args)}${sharesToo(args) ? ' and opened the share dialog' : ''}.`,
+  }),
   web_search: Object.freeze({
     asked: () => 'Asked for a web search',
     done: () => 'Searched the web',
@@ -219,6 +236,10 @@ const TOOL_FAILURES = Object.freeze({
     not_found: (args) => `I couldn't find ${args.name} in the meeting.`,
     several_match: (args) => `Several people in the meeting match ${args.name}. Ask again with the full name.`,
   }),
+  open_ticket: Object.freeze({
+    // Half of it was done: the ticket is open in the browser. null when no share was asked for
+    share_failed: (args) => (sharesToo(args) ? ticketShareFailed(args) : null),
+  }),
 });
 
 /** The sentence of its own for this tool and code, or null when there is none. */
@@ -227,6 +248,15 @@ function failedReply(toolName, code, args) {
   if (!Object.prototype.hasOwnProperty.call(TOOL_FAILURES, toolName)) return null;
   const byCode = TOOL_FAILURES[toolName];
   return Object.prototype.hasOwnProperty.call(byCode, code) ? byCode[code](args) : null;
+}
+
+/**
+ * Opening a ticket and sharing is two things: the browser opened the ticket,
+ * and then Zoom's share dialog did not come up. The record and the asker's
+ * panel say both halves.
+ */
+function ticketShareFailed(args) {
+  return `Opened ${ticketName(args)}. Couldn't open the share dialog.`;
 }
 
 /**
@@ -249,7 +279,7 @@ const NO_HANDS = Object.freeze({
 // table; a test holds the two lists together), and the ones any panel of the
 // owner runs that post nothing to the chat
 const NEEDS_HOST_PANEL = new Set(['admit_from_waiting_room', 'mute_participant']);
-const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'send_reaction']);
+const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'send_reaction', 'open_ticket']);
 function noHands(toolName) {
   if (NEEDS_HOST_PANEL.has(toolName)) return NO_HANDS.host;
   return NEEDS_OWN_PANEL.has(toolName) ? NO_HANDS.panel : NO_HANDS.chat;
@@ -282,6 +312,7 @@ const STEPS = Object.freeze({
   inviting: 'Inviting everyone to open Arlo',
   reacting: 'Sending a reaction',
   mutingSomeone: 'Muting someone',
+  openingTicket: 'Opening a ticket',
 });
 // The name came with the request: shown only when it is a name (lib/displayName.js), and short
 const stepName = (args) => cleanName(args !== null && typeof args === 'object' ? args.name : null, MAX_STEP_NAME_CHARS);
@@ -301,6 +332,8 @@ const TOOL_STEPS = Object.freeze({
     const name = stepName(args);
     return name.length > 0 ? `Muting ${name}` : STEPS.mutingSomeone;
   },
+  // The key only as the tool table rebuilt it; whether it is shared is not part of the step
+  open_ticket: (args) => (ticketName(args) === 'a ticket' ? STEPS.openingTicket : `Opening ${ticketName(args)}`),
 });
 
 /** The step while this tool runs, or null for a tool that has none (then the step before it stays). */
@@ -322,6 +355,7 @@ module.exports = {
   noHands,
   failedReply,
   INVITE_NOT_SENT,
+  ticketShareFailed,
   REACTIONS,
   REACTION_NAMES,
   NEEDS_HOST_PANEL,

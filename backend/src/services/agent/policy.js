@@ -44,6 +44,8 @@
  *
  * Anything unknown takes the stricter way: never 'run'.
  */
+const { isTicketKey, ticketKeysIn } = require('../../lib/jira');
+
 const ASKERS = new Set(['owner', 'other']);
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 const DOES_SOMETHING = new Set(['read', 'change']);
@@ -98,6 +100,9 @@ const MUTE_WORD = /mute/i;
 // "unmute", "un-mute", "un mute": asked for the opposite of what the tool does
 const UNMUTE_WORD = /(?<![\p{L}\p{N}])un[\s\-\u2010-\u2015]*mut/iu;
 
+// "share", "shares", "shared", "sharing" as a word of its own: not "shareholder" or "unshared"
+const SHARE_WORD = /(?<![\p{L}\p{N}_])shar(?:e|es|ed|ing)(?![\p{L}\p{N}_])/iu;
+
 /** Compared without case and with every run of whitespace as one space. */
 const folded = (value) => value.normalize('NFC').replace(/\s+/gu, ' ').trim().toLowerCase();
 
@@ -117,6 +122,11 @@ const folded = (value) => value.normalize('NFC').replace(/\s+/gu, ' ').trim().to
  *                            and nothing that reads as "unmute": the tool
  *                            only mutes, so a typed "unmute Danny" that a
  *                            model turned into a mute goes to the sheet
+ *   open_ticket              the key is one of the ticket keys in the typed
+ *                            text, read the way a key a model gave is read
+ *                            (lib/jira.js: "open proj 123" has PROJ-123);
+ *                            and when the share dialog would be opened too,
+ *                            the typed text has "share" as a word
  * Any other tool, or anything that is not text: false.
  */
 function typedRequestCovers(typed, toolName, args) {
@@ -132,6 +142,11 @@ function typedRequestCovers(typed, toolName, args) {
       && REACTION_WORDS[reaction].test(typed);
   }
   if (toolName === 'mute_participant') return said(args.name) && MUTE_WORD.test(typed) && !UNMUTE_WORD.test(typed);
+  if (toolName === 'open_ticket') {
+    const { key, share } = args;
+    if (!isTicketKey(key) || typeof share !== 'boolean') return false;
+    return ticketKeysIn(typed).includes(key) && (share === false || SHARE_WORD.test(typed));
+  }
   return false;
 }
 
