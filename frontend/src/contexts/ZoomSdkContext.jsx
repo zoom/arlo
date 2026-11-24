@@ -75,23 +75,21 @@ const PARTICIPANT_AUDIO_CAPABILITIES = [
   'toggleParticipantMediaAudio',
 ];
 
-// Reactions: Arlo sends one as the owner whose panel it is. Only
-// setEmojiReaction is called; getEmojiConfiguration (the emoji a client
-// accepts) is asked for with it and not used yet. Desktop 5.14.5+.
+// Reactions: Arlo sends one as the owner whose panel it is. Only what is
+// called is asked for: an API in this list that a client or the app's
+// configuration refuses takes the whole tier with it. Desktop 5.14.5+.
 const REACTION_CAPABILITIES = [
   'setEmojiReaction',
-  'getEmojiConfiguration',
 ];
 
 // The share dialog: after Arlo opened a ticket in the browser ("Arlo, open
 // PROJ-123 and share it"), the owner's panel brings up Zoom's share dialog and
 // the owner picks the window (lib/arloActions.js). Only promptShareScreen is
-// called; stopShareScreen is asked for with it and not used yet. Desktop
-// 5.13.5 and 5.14.0, older than the reactions (5.14.5), so they are asked for
-// in the reactions' tier and not in one of their own: no config attempt more.
+// called, so only it is asked for. Desktop 5.13.5, older than the reactions
+// (5.14.5), so it is asked for in the reactions' tier and not in one of its
+// own: no config attempt more.
 const SHARE_SCREEN_CAPABILITIES = [
   'promptShareScreen',
-  'stopShareScreen',
 ];
 
 // Check if running outside Zoom - evaluated dynamically

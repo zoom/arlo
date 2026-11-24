@@ -6,6 +6,11 @@ const ID2 = '22222222-2222-4222-8222-222222222222';
 const sdk = () => ({ showNotification: vi.fn(async () => ({ message: 'Success' })) });
 const hidden = { visibilityState: 'hidden' };
 const visible = { visibilityState: 'visible' };
+/** A clock for the notifier: `clock.now` for it, `clock.advance(ms)` for the test. */
+function clockAt(start = 1_000_000) {
+  let at = start;
+  return { now: () => at, advance: (ms) => { at += ms; } };
+}
 
 test('the panel is visible: no notification', () => {
   const zoomSdk = sdk();
@@ -26,16 +31,20 @@ test('the panel is not visible: one notification, with fixed words and nothing o
 
 test('any state but "visible" counts as not visible', () => {
   const zoomSdk = sdk();
-  const notify = createApprovalNotifier();
+  const clock = clockAt();
+  const notify = createApprovalNotifier({ now: clock.now });
   expect(notify(zoomSdk, ID1, { visibilityState: 'prerender' })).toBe(true);
+  clock.advance(30_000);
   expect(notify(zoomSdk, ID2, {})).toBe(true);
   expect(zoomSdk.showNotification).toHaveBeenCalledTimes(2);
 });
 
-test('the same approval twice: one notification; another approval: its own', () => {
+test('the same approval twice: one notification; another approval, later: its own', () => {
   const zoomSdk = sdk();
-  const notify = createApprovalNotifier();
+  const clock = clockAt();
+  const notify = createApprovalNotifier({ now: clock.now });
   notify(zoomSdk, ID1, hidden);
+  clock.advance(60_000);
   expect(notify(zoomSdk, ID1, hidden)).toBe(false);
   expect(zoomSdk.showNotification).toHaveBeenCalledTimes(1);
   expect(notify(zoomSdk, ID2, hidden)).toBe(true);
@@ -66,7 +75,7 @@ test('Zoom refuses (do not disturb), or throws at once: swallowed, and not tried
   notify(rejects, ID1, hidden);
   expect(rejects.showNotification).toHaveBeenCalledTimes(1);
   const throws = { showNotification: vi.fn(() => { throw new Error('no'); }) };
-  expect(() => notify(throws, ID2, hidden)).not.toThrow();
+  expect(() => createApprovalNotifier()(throws, ID2, hidden)).not.toThrow();
   expect(throws.showNotification).toHaveBeenCalledTimes(1);
 });
 
@@ -81,11 +90,62 @@ test('an id that is not one: nothing', () => {
 
 test('only so many ids are remembered: the oldest is forgotten first', () => {
   const zoomSdk = sdk();
-  const notify = createApprovalNotifier({ remember: 2 });
+  const notify = createApprovalNotifier({ remember: 2, minGapMs: 0 });
   notify(zoomSdk, 'a', hidden);
   notify(zoomSdk, 'b', hidden);
   notify(zoomSdk, 'c', hidden);
   expect(notify(zoomSdk, 'c', hidden)).toBe(false);
   expect(notify(zoomSdk, 'b', hidden)).toBe(false);
   expect(notify(zoomSdk, 'a', hidden)).toBe(true);
+});
+
+test('at most one notification in 30 seconds, however many approvals arrive', () => {
+  const zoomSdk = sdk();
+  const clock = clockAt();
+  const notify = createApprovalNotifier({ now: clock.now });
+  expect(notify(zoomSdk, 'a', hidden)).toBe(true);
+  // a run of requests (anyone in the meeting can speak them): nothing more is shown
+  for (let i = 0; i < 20; i += 1) {
+    clock.advance(1000);
+    expect(notify(zoomSdk, `burst-${i}`, hidden)).toBe(false);
+  }
+  clock.advance(9_999);
+  expect(notify(zoomSdk, 'b', hidden)).toBe(false);
+  expect(zoomSdk.showNotification).toHaveBeenCalledTimes(1);
+  clock.advance(1);
+  expect(notify(zoomSdk, 'c', hidden)).toBe(true);
+  expect(zoomSdk.showNotification).toHaveBeenCalledTimes(2);
+  // one that was held back is not announced later either: it is not news then
+  clock.advance(60_000);
+  expect(notify(zoomSdk, 'b', hidden)).toBe(false);
+  expect(zoomSdk.showNotification).toHaveBeenCalledTimes(2);
+});
+
+test('what was not shown does not start the 30 seconds: a visible panel, a client without the API', () => {
+  const zoomSdk = sdk();
+  const clock = clockAt();
+  const notify = createApprovalNotifier({ now: clock.now });
+  expect(notify(zoomSdk, 'a', visible)).toBe(false);
+  expect(notify({}, 'b', hidden)).toBe(false);
+  expect(notify(zoomSdk, 'c', hidden)).toBe(true);
+  // a refusal counts: Zoom was asked
+  const rejects = { showNotification: vi.fn(async () => { throw new Error('10042'); }) };
+  const other = createApprovalNotifier({ now: clock.now });
+  expect(other(rejects, 'a', hidden)).toBe(true);
+  expect(other(rejects, 'b', hidden)).toBe(false);
+  expect(rejects.showNotification).toHaveBeenCalledTimes(1);
+});
+
+test('a clock that fails or goes backwards shows nothing more, and never throws', () => {
+  const zoomSdk = sdk();
+  let at = 5000;
+  const notify = createApprovalNotifier({ now: () => at });
+  expect(notify(zoomSdk, 'a', hidden)).toBe(true);
+  at = 1000;
+  expect(notify(zoomSdk, 'b', hidden)).toBe(false);
+  at = NaN;
+  expect(notify(zoomSdk, 'c', hidden)).toBe(false);
+  const broken = createApprovalNotifier({ now: () => { throw new Error('no clock'); } });
+  expect(() => broken(zoomSdk, 'd', hidden)).not.toThrow();
+  expect(zoomSdk.showNotification).toHaveBeenCalledTimes(1);
 });

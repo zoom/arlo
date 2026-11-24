@@ -138,7 +138,7 @@ describe('the sheet for something Arlo was asked to do', () => {
       expect(notices(sdk)).toHaveLength(0);
     });
 
-    test('the panel is hidden: one, with fixed words and nothing of the request; the same approval again adds none', async () => {
+    test('the panel is hidden: one, with fixed words and nothing of the request; the same approval again, or another one right after, adds none', async () => {
       const { sdk } = await openAsOwner();
       panelIs('hidden');
       await send(serverMessage.approval({ ...POST, askedBy: 'Danny Lee' }));
@@ -146,8 +146,9 @@ describe('the sheet for something Arlo was asked to do', () => {
       expect(notices(sdk)).toHaveLength(1);
       expect(notices(sdk)[0]).toEqual([NOTICE]);
       await send(serverMessage.approval({ ...POST, askedBy: 'Danny Lee' }));
+      // at most one in 30 seconds per panel (lib/approvalNotice.js), whatever the approval
       await send(serverMessage.approval({ id: ID2, kind: 'share_notes', askedBy: 'Ben' }));
-      expect(notices(sdk)).toHaveLength(2);
+      expect(notices(sdk)).toHaveLength(1);
     });
 
     test('nothing for a request this panel does not show: not an owner, another meeting, a kind it does not know, texts it may not show', async () => {

@@ -16,9 +16,10 @@
  * Zoom client without the API, or muting the person whose panel this is:
  * Zoom's call does not act on its caller), 'not_allowed' (this person's Zoom
  * role may not, or this panel may no longer act for Arlo), 'not_found' (nobody
- * there by that name), 'several_match' (more than one person has that exact
- * name, or the name is only the first word of someone's: Arlo then asks for
- * the full name), 'sdk_error' (Zoom refused or failed), 'share_failed' (the
+ * there by that name), 'several_match' (more than one person has that name,
+ * the name is how someone else's begins, or it mixes look-alike scripts: Arlo
+ * then asks for the full name), 'sdk_error' (Zoom refused or failed, or the
+ * list of people is longer than is looked through), 'share_failed' (the
  * ticket was opened in the browser and the share dialog was not).
  *
  * A ticket's URL is never taken as it comes: this panel builds it again from
@@ -28,7 +29,8 @@
  * dialog opens and this person picks the browser.
  *
  * Only the person the owner approved is admitted or muted: the sheet named
- * them, so the name must be someone's whole name, and exactly one person's.
+ * them, so the name must be someone's whole name, and exactly one person's
+ * (theOneNamed below says what "the same name" is, and when it is not sure).
  *
  * The arguments are checked again here although the server checked them: this
  * is the last step before Zoom acts. Nothing is logged: a message, a name and
@@ -48,10 +50,14 @@ export const HAND_TOOLS = Object.freeze({
  * this table's, never the server's: nothing else reaches Zoom.
  * SetEmojiReactionOptions takes one of `emoji`, `name` or `unicode` (error
  * 10156 when several are given and disagree), so only `emoji` is passed. The
- * docs do not list the emoji a meeting accepts (getEmojiConfiguration does,
- * per client) or say whether the heart is written with its variation selector
- * (U+FE0F); it is here, as Zoom's own example writes emoji in full. One Zoom
- * does not take is refused by Zoom (10155) and reported as 'sdk_error'.
+ * docs do not list the emoji a meeting accepts or say whether the heart is
+ * written with its variation selector (U+FE0F); it is here, as Zoom's own
+ * example writes emoji in full. One Zoom does not take is refused by Zoom
+ * (10155) and reported as 'sdk_error'.
+ *
+ * The server has the same table (backend/src/services/agent/texts.js,
+ * REACTIONS) for the sheet's words; a test on each side holds its table to
+ * the same literal.
  */
 export const REACTIONS = Object.freeze({
   thumbs_up: '\u{1F44D}',
@@ -75,7 +81,8 @@ const MUTE = false;
 // "Arlo: " and an answer of up to 500 characters
 const MAX_MESSAGE_CHARS = 510;
 const MAX_NAME_CHARS = 100;
-// More people than this in a waiting room, or in a meeting, are not looked through
+// A waiting room, or a meeting, of more people than this is not looked through
+// at all: a match in a part of the list says nothing about the rest
 const MAX_WAITING = 1000;
 const MAX_PARTICIPANTS = 1000;
 
@@ -135,10 +142,29 @@ export function handsFor({
   return can;
 }
 
-/** A name for comparing: NFC, no case, single spaces. */
+/**
+ * A name for comparing: NFKC (a full-width letter or a ligature is the letter
+ * it stands for), without format characters (zero-width space and joiners,
+ * soft hyphen, direction marks: nobody sees them, so they make no other
+ * name), no case, single spaces. Two names that are equal after this are one
+ * name to the person who reads them.
+ */
 const comparable = (value) => (
-  typeof value === 'string' ? value.normalize('NFC').trim().replace(/\s+/gu, ' ').toLowerCase() : ''
+  typeof value === 'string'
+    ? value.normalize('NFKC').replace(/\p{Cf}/gu, '').toLowerCase().replace(/\s+/gu, ' ').trim()
+    : ''
 );
+
+const LATIN = /\p{Script=Latin}/u;
+const LOOKS_LATIN = /[\p{Script=Cyrillic}\p{Script=Greek}]/u;
+/**
+ * Whether a word of the name has Latin letters next to Cyrillic or Greek
+ * ones ("Dаnny" with a Cyrillic а): it reads as another name than it is, and
+ * no normalization tells them apart. A name wholly in one script, or with one
+ * script per word, is not that. (A name written wholly in look-alike letters
+ * of another script is not caught here.)
+ */
+const mixesScripts = (name) => name.split(/[^\p{L}\p{M}]+/u).some((word) => LATIN.test(word) && LOOKS_LATIN.test(word));
 
 const isEmptyObject = (value) => (
   typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0
@@ -146,23 +172,30 @@ const isEmptyObject = (value) => (
 
 /**
  * The one person in Zoom's list ({ participants: [{ screenName,
- * participantUUID }] }, the first `max` of them) whose whole name is `asked`
- * (already comparable): { participantUUID }, or { code } when there is not
- * exactly one, the list is not one, or Zoom gave that person no UUID.
+ * participantUUID }] }) whose whole name is `asked` (already comparable):
+ * { participantUUID }, or { code } when it is not sure who is meant:
+ *   'sdk_error'      the list is not one, has more than `max` people (it is
+ *                    not looked through in part), or Zoom gave that person no UUID
+ *   'several_match'  more than one person has that name; or someone else's
+ *                    name begins with it as whole words ("Danny" while "Danny"
+ *                    and "Danny Lee" are both there, or only "Danny Lee" is);
+ *                    or the name mixes look-alike scripts in a word
+ *   'not_found'      nobody has it
  */
 function theOneNamed(answer, asked, max) {
-  if (!Array.isArray(answer?.participants)) return { code: 'sdk_error' };
-  const people = answer.participants.slice(0, max)
+  if (!Array.isArray(answer?.participants) || answer.participants.length > max) return { code: 'sdk_error' };
+  // A name that reads as another one than it is: nobody is picked by it
+  if (mixesScripts(asked)) return { code: 'several_match' };
+  const people = answer.participants
     .map((person) => ({ name: comparable(person?.screenName), participantUUID: person?.participantUUID }))
     .filter((person) => person.name !== '');
 
   // The whole name, and exactly one person by it. A first name alone is
-  // nobody: the owner approved "Sam", not whoever's name starts with it.
+  // nobody: the owner approved "Sam", not whoever's name starts with it, and
+  // not "Sam" when a "Sam Stranger" is there too.
   const matches = people.filter((person) => person.name === asked);
-  if (matches.length > 1) return { code: 'several_match' };
-  if (matches.length === 0) {
-    return { code: people.some((person) => person.name.split(' ')[0] === asked) ? 'several_match' : 'not_found' };
-  }
+  if (matches.length > 1 || people.some((person) => person.name.startsWith(`${asked} `))) return { code: 'several_match' };
+  if (matches.length === 0) return { code: 'not_found' };
   const { participantUUID } = matches[0];
   if (typeof participantUUID !== 'string' || participantUUID.length === 0) return { code: 'sdk_error' };
   return { participantUUID };

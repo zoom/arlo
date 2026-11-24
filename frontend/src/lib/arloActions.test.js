@@ -131,11 +131,60 @@ describe('admit_from_waiting_room', () => {
     expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
   });
 
-  test('someone whose whole name it is, beside someone it is the first name of: the one whose name it is', async () => {
+  test('someone whose whole name it is, beside someone whose name starts with it: several_match, nobody admitted', async () => {
     const sdk = sdkWith([waiting('James', 'u-1'), waiting('James Jones', 'u-2')]);
-    expect(await admit(sdk, 'James')).toEqual({ ok: true });
-    expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledTimes(1);
+    expect(await admit(sdk, 'James')).toEqual({ ok: false, code: 'several_match' });
+    const twoWords = sdkWith([waiting('James Lee Jones', 'u-2'), waiting('James Lee', 'u-1')]);
+    expect(await admit(twoWords, 'James Lee')).toEqual({ ok: false, code: 'several_match' });
+    expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    expect(twoWords.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    // a name that only begins with the same letters is another name
+    const other = sdkWith([waiting('James', 'u-1'), waiting('Jameson Jones', 'u-2')]);
+    expect(await admit(other, 'James')).toEqual({ ok: true });
+    expect(other.admitParticipantFromWaitingRoom).toHaveBeenCalledWith({ participantUUID: 'u-1' });
+  });
+
+  test('a name that differs only by characters nobody sees is the same name: several_match', async () => {
+    for (const hidden of ['\u200B', '\u200C', '\u200D', '\u00AD', '\u200E', '\u202E', '\u2060', '\uFEFF']) {
+      const sdk = sdkWith([waiting('James Smith', 'u-1'), waiting(`James Smith${hidden}`, 'u-2')]);
+      expect(await admit(sdk, 'James Smith')).toEqual({ ok: false, code: 'several_match' });
+      const inside = sdkWith([waiting('James Smith', 'u-1'), waiting(`Ja${hidden}mes Smith`, 'u-2')]);
+      expect(await admit(inside, 'James Smith')).toEqual({ ok: false, code: 'several_match' });
+      expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+      expect(inside.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    }
+    // written in compatibility forms (full width, a ligature, a no-break space): the same name too
+    const wide = sdkWith([waiting('James Smith', 'u-1'), waiting('\uFF2A\uFF41\uFF4D\uFF45\uFF53\u00A0Smith', 'u-2')]);
+    expect(await admit(wide, 'James Smith')).toEqual({ ok: false, code: 'several_match' });
+    // and alone, such a name is that person's
+    const alone = sdkWith([waiting('James\u200B Smith', 'u-1')]);
+    expect(await admit(alone, 'James Smith')).toEqual({ ok: true });
+  });
+
+  test('a name that mixes Latin letters with Cyrillic or Greek ones in a word is nobody\'s: several_match', async () => {
+    // "Jаmes" with a Cyrillic а, "Jοhn" with a Greek omicron
+    const cyrillic = 'J\u0430mes Smith';
+    const sdk = sdkWith([waiting('James Smith', 'u-1'), waiting(cyrillic, 'u-2'), waiting('J\u03BFhn', 'u-3')]);
+    expect(await admit(sdk, cyrillic)).toEqual({ ok: false, code: 'several_match' });
+    expect(await admit(sdk, 'J\u03BFhn')).toEqual({ ok: false, code: 'several_match' });
+    expect(await admit(sdkWith([]), cyrillic)).toEqual({ ok: false, code: 'several_match' });
+    expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    // the real one is still found
+    expect(await admit(sdk, 'James Smith')).toEqual({ ok: true });
     expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledWith({ participantUUID: 'u-1' });
+    // names wholly in one script, and one script per word, work as before
+    const names = ['\u0418\u0432\u0430\u043D \u041F\u0435\u0442\u0440\u043E\u0432', '\u039D\u03AF\u03BA\u03BF\u03C2', 'Anna \u0418\u0432\u0430\u043D\u043E\u0432\u0430', '\u7530\u4E2D Ken'];
+    for (const name of names) {
+      const one = sdkWith([waiting(name, 'u-9'), waiting('Bo Lee', 'u-2')]);
+      expect(await admit(one, name)).toEqual({ ok: true });
+    }
+  });
+
+  test('more people waiting than are looked through: sdk_error, nobody admitted', async () => {
+    const many = Array.from({ length: 1000 }, (_, i) => waiting(`Guest ${i}`, `g-${i}`));
+    const sdk = sdkWith([waiting('James Smith', 'u-1'), ...many]);
+    expect(await admit(sdk, 'James Smith')).toEqual({ ok: false, code: 'sdk_error' });
+    expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
   });
 
   test('the panel may no longer act once the list is back: not_allowed, nobody admitted', async () => {
@@ -242,10 +291,20 @@ describe('invite_everyone', () => {
 });
 
 describe('send_reaction', () => {
+  // The same table is on the server (backend/src/services/agent/texts.js,
+  // REACTIONS), which shows the emoji on the sheet; this one is what Zoom is
+  // sent. backend/test/agent-steps.test.js holds the server's to the same
+  // literal: change one and a test fails until both are changed.
   test('the table is fixed: six reactions, these emoji, and it cannot be changed', () => {
-    expect(REACTIONS).toEqual({
-      thumbs_up: '👍', clap: '👏', heart: '❤️', joy: '😂', tada: '🎉', open_mouth: '😮',
-    });
+    expect(Object.entries(REACTIONS)).toEqual([
+      ['thumbs_up', '\u{1F44D}'],
+      ['clap', '\u{1F44F}'],
+      // the heart with its variation selector: U+2764 U+FE0F
+      ['heart', '\u2764\uFE0F'],
+      ['joy', '\u{1F602}'],
+      ['tada', '\u{1F389}'],
+      ['open_mouth', '\u{1F62E}'],
+    ]);
     expect(Object.isFrozen(REACTIONS)).toBe(true);
   });
 
@@ -371,8 +430,8 @@ describe('mute_participant', () => {
     expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
   });
 
-  test('someone whose whole name it is, beside someone it is the first name of: the one whose name it is', async () => {
-    const sdk = meetingSdk([person('Danny', 'u-1'), person('Danny Lee', 'u-2')]);
+  test('someone whose whole name it is, beside someone whose name only starts with the same letters: the one whose name it is', async () => {
+    const sdk = meetingSdk([person('Danny', 'u-1'), person('Dannyboy Lee', 'u-2'), person('Lee Danny', 'u-3')]);
     expect(await mute(sdk, 'Danny')).toEqual({ ok: true });
     expect(sdk.toggleParticipantMediaAudio).toHaveBeenCalledWith({ participantUUIDs: ['u-1'], audio: false });
   });
@@ -439,11 +498,32 @@ describe('mute_participant', () => {
     expect(await mute(sdk, name)).toEqual({ ok: true });
   });
 
-  test('people beyond the first 1000 are not looked through', async () => {
+  test('a meeting of more than 1000 people is not looked through at all: sdk_error, whoever is asked for', async () => {
     const many = Array.from({ length: 1000 }, (_, i) => person(`Guest ${i}`, `g-${i}`));
-    const sdk = meetingSdk([...many, person('Danny Lee', 'u-1')]);
-    expect(await mute(sdk, 'Danny Lee')).toEqual({ ok: false, code: 'not_found' });
-    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+    for (const list of [[...many, person('Danny Lee', 'u-1')], [person('Danny Lee', 'u-1'), ...many]]) {
+      const sdk = meetingSdk(list);
+      expect(await mute(sdk, 'Danny Lee')).toEqual({ ok: false, code: 'sdk_error' });
+      expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+    }
+    // exactly 1000 are looked through
+    const full = meetingSdk([...many.slice(1), person('Danny Lee', 'u-1')]);
+    expect(await mute(full, 'Danny Lee')).toEqual({ ok: true });
+  });
+
+  test('"Danny" beside "Danny Lee", or beside a "Danny" nobody can tell apart: several_match, nobody muted', async () => {
+    const lists = [
+      [person('Danny', 'u-1'), person('Danny Lee', 'u-2')],
+      [person('Danny', 'u-1'), person('Danny\u200B', 'u-2')],
+      [person('Danny', 'u-1'), person('D\u0430nny', 'u-2'), person('danny  park', 'u-3')],
+    ];
+    for (const list of lists) {
+      const sdk = meetingSdk(list);
+      expect(await mute(sdk, 'Danny')).toEqual({ ok: false, code: 'several_match' });
+      expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+    }
+    const lookalike = meetingSdk([person('Danny', 'u-1'), person('D\u0430nny', 'u-2')]);
+    expect(await mute(lookalike, 'D\u0430nny')).toEqual({ ok: false, code: 'several_match' });
+    expect(lookalike.toggleParticipantMediaAudio).not.toHaveBeenCalled();
   });
 
   test('the person asking is the one named: Zoom does not mute the caller this way, so unsupported and no call', async () => {

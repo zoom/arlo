@@ -86,7 +86,6 @@ export function createZoomSdk({
     // Mute (audio: false) or unmute people; host and co-host only in Zoom
     toggleParticipantMediaAudio: vi.fn(async () => ({ message: 'Success' })),
     setEmojiReaction: vi.fn(async () => ({ message: 'Success' })),
-    getEmojiConfiguration: vi.fn(async () => ({})),
     onRunningContextChange: on('onRunningContextChange'),
     onMyUserContextChange: on('onMyUserContextChange'),
     onSendAppInvitation: on('onSendAppInvitation'),
@@ -100,7 +99,6 @@ export function createZoomSdk({
     // The system browser, and Zoom's share dialog
     openUrl: vi.fn(async () => ({ message: 'Success' })),
     promptShareScreen: vi.fn(async () => ({ message: 'Success' })),
-    stopShareScreen: vi.fn(async () => ({ message: 'Success' })),
     sendAppInvitationToAllParticipants: vi.fn(async () => ({})),
     showAppInvitationDialog: vi.fn(async () => ({})),
     startCollaborate: vi.fn(async () => ({})),
