@@ -21,7 +21,9 @@
  *   expectTool  a tool name or 'none', or a list when more than one is right
  *   expectArgs  { <argument>: { equals?: string, includes?: string[], excludes?: string[] } },
  *               compared without regard to case; checked when a tool was picked
- *   context     lines of a made-up meeting given to the model as the excerpt
+ *   context     lines of a made-up meeting. Not given to the model any more: the
+ *               model that picks a tool gets the request alone, as on the server
+ *               (services/agent/agent.js), so these lines cannot steer it
  */
 const path = require('node:path');
 
@@ -148,7 +150,7 @@ async function main({
         const started = now();
         try {
           let result = await chooseTool({
-            request: testCase.said, tools, context: testCase.context || [], model, fallback: false,
+            request: testCase.said, tools, model, fallback: false,
           });
           // As the server will: a call that fails the tool table's check is no call
           if (result && result.tool !== 'none' && validateToolCall) {

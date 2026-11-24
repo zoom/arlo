@@ -42,8 +42,9 @@ function getAgentRuntime() {
       presence: getArloPresence(),
       approvals: getApprovals(),
       hands,
-      choose: ({ request, context }) => openrouter.chooseTool({
-        request, context, tools: listTools(), model: config.agentModel,
+      // The request and the tool table: nothing of the meeting goes to the model that picks
+      choose: ({ request }) => openrouter.chooseTool({
+        request, tools: listTools(), model: config.agentModel,
       }),
       answer: ({ question, lines }) => openrouter.answerFromTranscript({ question, lines, model: config.notesModel }),
       shareNotes: (meetingId, userId) => typeof userId === 'string' && shareNotes(meetingId, userId, true) !== 'refused',

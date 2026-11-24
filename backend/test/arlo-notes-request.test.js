@@ -271,7 +271,7 @@ test('429 too_many_open when the meeting has as many requests open as it takes; 
   assert.equal(mine.status, 200);
   // the meeting fills up with other requests (Arlo's own sheets count too)
   let opened = 1;
-  while (getApprovals().open(m.meetingId, { kind: 'agent_action', askedByName: null, question: 'Do it?', primaryLabel: 'Do it' })) opened += 1;
+  while (getApprovals().open(m.meetingId, { kind: 'agent_action', askedByName: null, question: 'Do it?', primaryLabel: 'Do it', channel: 'voice' })) opened += 1;
   assert.equal(opened, 20);
 
   const full = await requestNotes(m, m.third);

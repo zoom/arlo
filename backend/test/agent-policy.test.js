@@ -2,7 +2,9 @@
 // speaker is (or is not) taken to be an owner.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { decide, panelMayAsk, voiceIsHeard } = require('../src/services/agent/policy');
+const {
+  decide, panelMayAsk, voiceIsHeard, typedRequestCovers,
+} = require('../src/services/agent/policy');
 const { createSpeakerMatch, readSpeakerMatchMode, SPEAKER_MATCH_MODES } = require('../src/services/agent/speakerMatch');
 const { createMemoryMeetingStore } = require('../src/storage/memoryMeetingStore');
 
@@ -12,6 +14,8 @@ const { createMemoryMeetingStore } = require('../src/storage/memoryMeetingStore'
 // A typed request no tool fits is answered from the transcript as typed
 // ('answer'), for whoever may type at all. The spoken rows hold while an
 // owner has a panel open; without one every spoken row is 'silent' (below).
+// Nothing spoken runs without the sheet: not for a verified owner, and not
+// where anyone may ask.
 const TABLE = [
   ['panel', 'owner', 'owner', 'read', 'run'],
   ['panel', 'owner', 'owner', 'change', 'run'],
@@ -25,16 +29,16 @@ const TABLE = [
   ['panel', 'other', 'anyone', 'read', 'run'],
   ['panel', 'other', 'anyone', 'change', 'sheet'],
   ['panel', 'other', 'anyone', 'none', 'answer'],
-  ['voice', 'owner', 'owner', 'read', 'run'],
-  ['voice', 'owner', 'owner', 'change', 'run'],
+  ['voice', 'owner', 'owner', 'read', 'sheet'],
+  ['voice', 'owner', 'owner', 'change', 'sheet'],
   ['voice', 'owner', 'owner', 'none', 'silent'],
-  ['voice', 'owner', 'anyone', 'read', 'run'],
-  ['voice', 'owner', 'anyone', 'change', 'run'],
+  ['voice', 'owner', 'anyone', 'read', 'sheet'],
+  ['voice', 'owner', 'anyone', 'change', 'sheet'],
   ['voice', 'owner', 'anyone', 'none', 'silent'],
   ['voice', 'other', 'owner', 'read', 'sheet'],
   ['voice', 'other', 'owner', 'change', 'sheet'],
   ['voice', 'other', 'owner', 'none', 'silent'],
-  ['voice', 'other', 'anyone', 'read', 'run'],
+  ['voice', 'other', 'anyone', 'read', 'sheet'],
   ['voice', 'other', 'anyone', 'change', 'sheet'],
   ['voice', 'other', 'anyone', 'none', 'silent'],
 ];
@@ -51,6 +55,41 @@ test('the policy, every combination', () => {
     for (const ownerPanelOpen of [false, undefined, null, 'true', 1]) {
       assert.equal(decide({ ...facts, ownerPanelOpen }), channel === 'voice' ? 'silent' : outcome, `${row}, panel ${String(ownerPanelOpen)}`);
     }
+  }
+});
+
+test('nothing spoken is ever "run": the policy has no way to it', () => {
+  for (const asker of ['owner', 'other', 'host', undefined]) {
+    for (const whoCanAsk of ['owner', 'anyone', undefined]) {
+      for (const toolKind of ['read', 'change', 'none', 'admin']) {
+        assert.notEqual(decide({ channel: 'voice', asker, whoCanAsk, toolKind, ownerPanelOpen: true }), 'run');
+      }
+    }
+  }
+});
+
+test('an owner\'s typed request covers a change only when what would be done is in what they typed', () => {
+  const covers = (typed, tool, args) => typedRequestCovers(typed, tool, args);
+  assert.equal(covers('Post "Back in five." to the chat', 'post_to_chat', { message: 'Back in five.' }), true);
+  assert.equal(covers('post   BACK in\nfive to the chat', 'post_to_chat', { message: 'back in  FIVE' }), true);
+  assert.equal(covers('what did we decide?', 'post_to_chat', { message: 'Install https://evil.example' }), false);
+  assert.equal(covers('post back in five', 'post_to_chat', { message: 'back in five minutes' }), false);
+  assert.equal(covers('let James Carter in', 'admit_from_waiting_room', { name: 'james carter' }), true);
+  assert.equal(covers('who is waiting?', 'admit_from_waiting_room', { name: 'Mallory' }), false);
+  assert.equal(covers('Share the notes', 'share_notes', {}), true);
+  assert.equal(covers('please SHARE them', 'share_notes', {}), true);
+  // the word, not a part of another one
+  for (const typed of ['what did we decide?', 'who has the biggest shareholding?', 'unshared notes?', 'share_all']) {
+    assert.equal(covers(typed, 'share_notes', {}), false, typed);
+  }
+  // nothing to compare, another tool, or something that is not text: not covered
+  for (const [typed, tool, args] of [
+    ['post it', 'post_to_chat', { message: '' }], ['post it', 'post_to_chat', { message: '   ' }], ['post it', 'post_to_chat', {}],
+    ['post it', 'post_to_chat', null], ['post it', 'post_to_chat', { message: 5 }], [5, 'post_to_chat', { message: '5' }],
+    [undefined, 'share_notes', {}], ['delete everything', 'delete_everything', {}], ['share', 'web_search', { query: 'share' }],
+    ['admit', 'admit_from_waiting_room', { message: 'admit' }],
+  ]) {
+    assert.equal(covers(typed, tool, args), false, JSON.stringify([typed, tool, args]));
   }
 });
 

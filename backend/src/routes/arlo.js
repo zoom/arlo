@@ -231,6 +231,8 @@ const BUSY_MESSAGE = 'Arlo is busy right now. Try again in a moment.';
  *     `action.status` is 'done' or 'failed'.
  *   - Something an owner has to approve first: `answer` says so and
  *     `action.status` is 'waiting_approval'; how it ends arrives as `arlo.did`.
+ *     That is so for an owner too when what would be done is not in what
+ *     they typed (services/agent/policy.js typedRequestCovers).
  * When no tool fits what was typed, or the model that picks a tool cannot be
  * asked, the text is answered from the transcript as typed: the Ask input
  * always answers a question about the meeting. A typed request waits ahead of
@@ -387,8 +389,8 @@ router.post('/notes-request', requireAuth, requireMeetingAccess, requireJson, (r
  * For a request for the notes ('share_notes') the server turns sharing the
  * notes on, as PUT /settings { shareNotes: true } does. For something Arlo
  * was asked to do ('agent_action') the answer is all that happens here: the
- * agent, which waits for it, then runs what was approved and records how it
- * ended (`arlo.did`). A boolean `done` is still accepted and ignored (panels
+ * agent, which waits for it, then posts the text the sheet showed or runs what
+ * was approved, and records how it ended (`arlo.did`). A boolean `done` is still accepted and ignored (panels
  * that posted the notes to the chat sent it). The first answer wins; 404 for
  * an id nothing is open under. The owners and the person who asked are told
  * over their sockets (services/approvals.js).
@@ -438,7 +440,9 @@ router.post('/approvals/:approvalId', requireAuth, requireMeetingAccess, require
  * { approvals: [{ meetingId, id, kind, askedBy, expiresAt, expiresInMs }] },
  * oldest first: what an owner's panel that reloads still has to answer, each
  * with the time left by the server's clock when this was answered. One of kind
- * 'agent_action' also has `question` and `primaryLabel`, the sheet's texts.
+ * 'agent_action' also has the sheet's fields: `question`, `primaryLabel`,
+ * `channel`, `askerVerified`, and when there is one `body` (the exact text
+ * that will be posted to the chat) and `request` (what was asked).
  */
 router.get('/approvals', requireAuth, requireMeetingAccess, (req, res) => {
   const meetingId = req.params.zoomMeetingId;

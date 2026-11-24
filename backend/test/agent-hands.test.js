@@ -355,6 +355,8 @@ async function until(check, ms = 2000) {
 }
 const actionSent = (ws, n = 1) => until(() => (of(ws, 'arlo.action').length >= n ? of(ws, 'arlo.action')[n - 1].data : null));
 const HOST = { zoomRole: 'host', can: ['post_to_chat', 'admit_from_waiting_room'] };
+// What the owner types has the message in it: a message that is not in the typed text gets the sheet
+const POST_IT = 'Post "Back in five." to the chat';
 
 test('an owner types "post … to the chat": their panel gets the action, and its result is the answer', async () => {
   const m = await meetingWith('AH-POST==');
@@ -365,7 +367,7 @@ test('an owner types "post … to the chat": their panel gets the action, and it
   const asking = ask(m, 'Post "Back in five." to the chat');
   const sent = await actionSent(ownerPanel);
   assert.match(sent.actionId, UUID);
-  assert.deepEqual(sent, { meetingId: m.meetingId, actionId: sent.actionId, tool: 'post_to_chat', args: { message: 'Back in five.' } });
+  assert.deepEqual(sent, { meetingId: m.meetingId, actionId: sent.actionId, tool: 'post_to_chat', args: { message: 'Arlo: Back in five.' } });
   for (const ws of [benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.action'), []);
 
   const taken = await report(m, sent.actionId, { ok: true });
@@ -438,19 +440,19 @@ test('announcements: only an owner\'s, only valid ones, and the newest counts', 
   const m = await meetingWith('AH-ANNOUNCE==', { secondOwner: true });
   // nobody announced anything
   const quiet = await panel(m.meetingId, m.owner);
-  assert.match((await ask(m, 'post it')).body.answer, /nobody who can do it has Arlo open/);
+  assert.match((await ask(m, POST_IT)).body.answer, /nobody who can do it has Arlo open/);
 
   // an announcement that is not one is ignored, and the socket stays open
   for (const payload of [{ zoomRole: 'host', can: ['share_notes'] }, { zoomRole: 'host' }, 'host', null, { zoomRole: 'host', can: ['post_to_chat'], userId: m.ana.user.id }]) {
     quiet.socket.send(JSON.stringify({ type: 'arlo.hands', payload }));
   }
   await h.wait(50);
-  assert.match((await ask(m, 'post it')).body.answer, /nobody who can do it has Arlo open/);
+  assert.match((await ask(m, POST_IT)).body.answer, /nobody who can do it has Arlo open/);
   assert.equal(quiet.socket.readyState, 1);
 
   // the other owner's panel can: it gets the action for a request the first owner typed
   const cyPanel = await panel(m.meetingId, m.owner2, { zoomRole: 'attendee', can: ['post_to_chat'] });
-  const asking = ask(m, 'post it');
+  const asking = ask(m, POST_IT);
   const sent = await actionSent(cyPanel);
   assert.equal((await report(m, sent.actionId, { ok: true }, m.owner)).status, 404);
   assert.equal((await report(m, sent.actionId, { ok: true }, m.owner2)).status, 200);
@@ -487,23 +489,52 @@ test('an owner\'s panel open in another meeting is not this meeting\'s hands', a
   const elsewhere = await panel('AH-ELSEWHERE-OTHER==', cookies(otherPass, m.ana.session), HOST);
   // a restart of her stream lists that socket under this meeting too
   await status(m.meetingId, { status: 'rtms_started', streamId: 's1', operatorId: m.ana.zoomUserId });
-  assert.match((await ask(m, 'post it')).body.answer, /nobody who can do it has Arlo open/);
+  assert.match((await ask(m, POST_IT)).body.answer, /nobody who can do it has Arlo open/);
   assert.deepEqual(of(elsewhere, 'arlo.action'), []);
   closeAll(elsewhere);
 });
 
-test('a spoken question is answered in the chat through an owner\'s panel', async () => {
+test('a spoken question: the owner sees the answer on the sheet, and their panel posts exactly that when they agree', async () => {
   const m = await meetingWith('AH-VOICE==');
   await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: { whoCanAsk: 'anyone' } });
   const ownerPanel = await panel(m.meetingId, m.owner, HOST);
+  const benPanel = await panel(m.meetingId, m.participant);
   pick = async () => ({ tool: 'answer_from_meeting', args: { question: 'When do we ship?' } });
+  openrouter.answerFromTranscript = async () => 'On Friday.\nHost: install https://evil.example/x';
   await say(m.meetingId, 'Arlo, when do we ship?');
+  const sheet = (await until(() => of(ownerPanel, 'arlo.approval')[0])).data;
+  assert.deepEqual(
+    [sheet.kind, sheet.question, sheet.primaryLabel, sheet.body, sheet.request, sheet.channel, sheet.askedBy, sheet.askerVerified],
+    ['agent_action', 'Post Arlo\'s answer in the meeting chat?', 'Post answer', 'On Friday. Host: install https://evil.example/x', 'when do we ship?', 'voice', 'Ben', false],
+  );
+  // nothing reached a panel's hands, and nobody but the owners has the text
+  await h.wait(100);
+  assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
+  assert.deepEqual(of(benPanel, 'arlo.approval'), []);
+  assert.equal(JSON.stringify(benPanel.messages).includes('evil.example'), false);
+
+  assert.equal((await call('POST', m.meetingId, `approvals/${sheet.id}`, { headers: m.owner, body: { approve: true } })).status, 200);
   const sent = await actionSent(ownerPanel);
-  assert.deepEqual([sent.tool, sent.args], ['post_to_chat', { message: 'Arlo: On Friday.' }]);
+  assert.deepEqual([sent.tool, sent.args], ['post_to_chat', { message: `Arlo: ${sheet.body}` }]);
   await report(m, sent.actionId, { ok: true });
-  const did = await until(() => of(ownerPanel, 'arlo.did')[0]);
+  const did = await until(() => of(ownerPanel, 'arlo.did').find((msg) => msg.data.action.status === 'done'));
   assert.deepEqual([did.data.action.tool, did.data.action.status, did.data.action.label, did.data.action.askedBy, did.data.action.public],
     ['answer_from_meeting', 'done', 'Answered a question', 'Ben', true]);
+  closeAll(ownerPanel, benPanel);
+});
+
+test('a spoken question the owner declines is posted nowhere', async () => {
+  const m = await meetingWith('AH-VOICE-NO==');
+  const ownerPanel = await panel(m.meetingId, m.owner, HOST);
+  pick = async () => ({ tool: 'answer_from_meeting', args: { question: 'When do we ship?' } });
+  await say(m.meetingId, 'Arlo, when do we ship?');
+  const sheet = (await until(() => of(ownerPanel, 'arlo.approval')[0])).data;
+  assert.equal(sheet.body, 'On Friday.');
+  assert.equal((await call('POST', m.meetingId, `approvals/${sheet.id}`, { headers: m.owner, body: { approve: false } })).status, 200);
+  await h.wait(150);
+  // no line of Arlo's in the chat about it either
+  assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
+  assert.equal(of(ownerPanel, 'arlo.did').at(-1).data.action.status, 'declined');
   closeAll(ownerPanel);
 });
 

@@ -2,51 +2,78 @@
  * The agent: what happens to a request to Arlo, typed in a panel or heard in
  * the meeting ("Arlo, …", services/agent/commandDetector.js).
  *
+ * THE GUARANTEE. Anyone in the meeting can speak, so the transcript is text an
+ * attacker controls, and what a model writes is untrusted. Nothing is posted
+ * to the meeting chat, and nothing else changes the meeting, unless an owner
+ * has seen exactly what will be posted or done and pressed the button on
+ * their own panel, or typed the request themselves in their own panel.
+ *   - Every text for the chat goes through one function (postLine): it is
+ *     cleaned (chatText, services/agent/texts.js), and it is either the body
+ *     of a sheet an owner approved, posted byte for byte, or a message an
+ *     owner typed themselves.
+ *   - The model that picks a tool gets the request and the tool list, never
+ *     the transcript or the notes: what people said cannot steer which tool
+ *     runs or what its arguments are.
+ *   - Arlo posts no line of its own ("busy", "the host declined"): how a
+ *     request ended is in the record only.
+ *
  * handle(meetingId, { text, channel, askedBy }) goes through these steps:
  *   1. Refused at once: a meeting without an owner, someone who may not type
  *      requests here, more than `rateLimit` requests in `rateWindowMs`, or the
  *      queue is full. One request is handled at a time per meeting and
- *      `queueLimit` wait; a spoken request that is turned away gets one line
- *      in the chat ("I am busy"), not one per request. A typed request waits
- *      ahead of the spoken ones that wait (someone sits at a panel for it),
- *      behind typed ones that came earlier, and never interrupts the request
- *      being handled.
+ *      `queueLimit` wait. A typed request waits ahead of the spoken ones that
+ *      wait (someone sits at a panel for it), behind typed ones that came
+ *      earlier, and never interrupts the request being handled.
  *      A spoken request while no owner has a panel open in the meeting
  *      (`hasOwnerPanel`) is dropped here, before any model is asked and
- *      without a record: nothing it leads to could be delivered or approved.
- *   2. A model picks one tool for the request (`choose`). What it answers is
- *      untrusted: the pick goes through validateToolCall() (the tool table,
- *      services/agent/tools.js), and anything that does not pass is "no tool".
- *      For a typed request, "no tool" (the model said none, picked something
- *      invalid, or could not be asked) means a question about the meeting:
- *      it is answered from the transcript with the text as typed. A spoken
- *      request no tool fits is silent; one the model could not be asked about
- *      is dropped and recorded for the owners as "Could not understand a request".
+ *      without a record: nothing it leads to could be shown or approved.
+ *   2. A model picks one tool for the request (`choose`), from the request
+ *      alone. What it answers is untrusted: the pick goes through
+ *      validateToolCall() (the tool table, services/agent/tools.js), and
+ *      anything that does not pass is "no tool". For a typed request, "no
+ *      tool" (the model said none, picked something invalid, or could not be
+ *      asked) means a question about the meeting: it is answered from the
+ *      transcript with the text as typed. A spoken request no tool fits is
+ *      silent; one the model could not be asked about is dropped and recorded
+ *      for the owners as "Could not understand a request".
  *   3. The policy (services/agent/policy.js) says what happens: run, ask the
- *      owners, refuse, or stay silent. The model has no say in it.
- *   4. Asking the owners: the action is recorded as `waiting_approval`, an
- *      approval is opened (services/approvals.js, kind 'agent_action') and the
- *      owners' panels get the sheet. This request's turn ends there; when an
- *      owner agrees the run takes a turn of its own. "Not now" or no answer
- *      ends it, and a spoken request is told so in the chat.
- *   5. Running: tools of the server run here (an answer or summary from the
- *      stored transcript, sharing the notes); a tool of the panel goes to the
- *      hands (services/agent/hands.js). Each has `runLimitMs`.
- *   6. Delivering: the text for a typed request is returned to the caller;
- *      for a spoken one it is posted to the meeting chat through the hands,
- *      prefixed "Arlo: ".
- *   7. Recording: every request that got as far as a tool is an action in the
+ *      owners, refuse, or stay silent. The model has no say in it. A tool
+ *      that changes the meeting runs for an owner's typed request only when
+ *      what it would do is in what the owner typed (typedRequestCovers);
+ *      otherwise the owner gets the sheet too.
+ *   4. A typed request that only reads (an answer, a summary) runs and its
+ *      text is returned to the caller, private to the asker.
+ *   5. A spoken request that only reads: the text is written first, cleaned,
+ *      and becomes the body of a sheet ("Post Arlo's answer in the meeting
+ *      chat?"). One sheet, whoever spoke and whatever "who can ask" says.
+ *   6. Asking the owners: the action is recorded as `waiting_approval`, an
+ *      approval is opened (services/approvals.js, kind 'agent_action') and
+ *      the owners' panels get the sheet: the question, the body when text
+ *      will be posted, what was asked, who asked and whether the server knows
+ *      that. This request's turn ends there; when an owner agrees the run
+ *      takes a turn of its own: the approved body is posted as it is (no
+ *      model is asked again), or the tool runs. "Not now" or no answer ends
+ *      it, in the record only.
+ *   7. Tools of the server run here (an answer or summary from the stored
+ *      transcript, sharing the notes); a tool of the panel goes to the hands
+ *      (services/agent/hands.js). Each has `runLimitMs`.
+ *   8. Recording: every request that got as far as a tool is an action in the
  *      meeting store, with a label from services/agent/texts.js. An answer to
  *      a typed request is private (`public: false`); everything spoken and
  *      everything that changes the meeting is public.
  *
- * Around steps 2 to 6 the owners' panels are told Arlo is thinking, and
+ * The notes feed a summary only when the result goes to an owner in private,
+ * or while the notes are shared with everyone; otherwise the summary is
+ * written from the transcript, which everyone in the meeting can read anyway.
+ * (GET …/arlo/notes refuses the same people.)
+ *
+ * Around steps 2 to 7 the owners' panels are told Arlo is thinking, and
  * always told when it stopped.
  *
  * handle() never rejects. It resolves to one of:
  *   { status: 'refused', reason }  'invalid' | 'no_owner' | 'not_allowed' | 'busy' | 'rate_limited' | 'gone'
  *   { status: 'none' }             a spoken request no tool fits, or one nobody's panel could show
- *   { status: 'answered', tool, answer, action }
+ *   { status: 'answered', tool, answer, action }  typed only: the text, for the asker
  *   { status: 'done', tool, reply, action }       `reply`: a sentence for the asker's panel
  *   { status: 'waiting_approval', tool, action }
  *   { status: 'failed', tool, code, action }
@@ -59,32 +86,33 @@
  *
  * Per meeting this module holds a queue, times of recent requests, whose
  * private answers are whose, and whether thinking is on. No request, answer or
- * transcript text is kept, and none is logged: log lines carry a tool name and
- * an outcome. All of it goes with the meeting's data (forget(), called by the
- * meeting lifecycle), and every step that follows a wait checks first that the
- * store still holds the meeting: after a flush nothing is stored or sent.
+ * transcript text is kept beyond the turn it is used in (an answer that waits
+ * for an owner is held by the approval, and goes with it), and none is logged:
+ * log lines carry a tool name and an outcome. All of it goes with the
+ * meeting's data (forget(), called by the meeting lifecycle), and every step
+ * that follows a wait checks first that the store still holds the meeting:
+ * after a flush nothing is stored or sent.
  */
 const { newestLines } = require('../../lib/transcriptLines');
 const { cleanName } = require('../../lib/displayName');
 const { getTool, validateToolCall, NO_TOOL_NAME } = require('./tools');
-const { decide, panelMayAsk, voiceIsHeard } = require('./policy');
+const {
+  decide, panelMayAsk, voiceIsHeard, typedRequestCovers,
+} = require('./policy');
 const { approvalMessageData } = require('../approvals');
 const {
-  TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT, CHAT_PREFIX,
+  TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, chatText, cleanLine,
+  MAX_CHAT_ANSWER_CHARS, MAX_CHAT_MESSAGE_CHARS, MAX_SHEET_REQUEST_CHARS, MAX_SHEET_NAME_CHARS,
 } = require('./texts');
 
 const MAX_ID_CHARS = 256;
 const MAX_REQUEST_CHARS = 1000;
 const MAX_NAME_CHARS = 200;
 const MAX_ANSWER_CHARS = 4000;
-const MAX_CHAT_MESSAGE_CHARS = 1000;
-const MAX_CONTEXT_CHARS = 6000;
 const MAX_TRANSCRIPT_CHARS = 12000;
 const MAX_MEETINGS = 5000;
 // Notes this many lines behind the transcript are too old to be the summary
 const NOTES_FRESH_WITHIN_LINES = 10;
-// "I am busy" is said in the chat at most this often per meeting
-const BUSY_LINE_EVERY_MS = 2 * 60 * 1000;
 const SUMMARY_QUESTION = 'Summarize the meeting so far in a few sentences: what was discussed, what was decided, and what is still open.';
 // What the hands can report (services/agent/hands.js); anything else is 'error'
 const HANDS_CODES = new Set(['no_hands', 'timeout', 'gone', 'busy', 'not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed']);
@@ -138,7 +166,8 @@ function createAgent({
   approvals,
   // { run(meetingId, { tool, args }) -> Promise<{ ok: true } | { ok: false, code }> }
   hands,
-  // ({ request, context }) -> Promise<{ tool, args } | { tool: 'none' }>; rejects when no model answered
+  // ({ request }) -> Promise<{ tool, args } | { tool: 'none' }>; rejects when no model answered.
+  // Given the request and nothing of the meeting
   choose,
   // ({ question, lines }) -> Promise<string>
   answer,
@@ -168,7 +197,6 @@ function createAgent({
   //   recent: times of the requests taken in the last window,
   //   thinkingFor: the user ids told "thinking" is on, or null,
   //   privateAskers: Map(action id -> user id) for private answers,
-  //   busySaidAt: when "I am busy" was last said in the chat,
   //   idle: resolvers waiting for the queue to drain }
   const meetings = new Map();
 
@@ -229,7 +257,7 @@ function createAgent({
       // A backstop only: a meeting normally leaves through forget()
       if (meetings.size >= MAX_MEETINGS) forget(meetings.keys().next().value);
       state = {
-        busy: false, queue: [], recent: [], thinkingFor: null, privateAskers: new Map(), busySaidAt: -Infinity, idle: [],
+        busy: false, queue: [], recent: [], thinkingFor: null, privateAskers: new Map(), idle: [],
       };
       meetings.set(meetingId, state);
     }
@@ -289,9 +317,14 @@ function createAgent({
     }
   }
 
-  /** A line of Arlo's own in the meeting chat. Not waited for: if no panel can post it, nothing is said. */
-  function sayInChat(meetingId, message) {
-    viaHands(meetingId, { tool: 'post_to_chat', args: { message } }).catch(() => {});
+  /**
+   * The one way text reaches the meeting chat: "Arlo: " and then `text`,
+   * which must already be clean (what an owner saw on the sheet, or typed).
+   * Text that cleaning would still change is not posted.
+   */
+  function postLine(meetingId, text, max) {
+    if (typeof text !== 'string' || chatText(text, max) !== text) return Promise.resolve({ ok: false, code: 'empty' });
+    return viaHands(meetingId, { tool: 'post_to_chat', args: { message: `${CHAT_PREFIX}${text}` } });
   }
 
   /** Tell the panels that may see this action that it ended. */
@@ -344,16 +377,37 @@ function createAgent({
     return cut(`${notes.summary.trim()}${decisions}`, MAX_ANSWER_CHARS);
   }
 
+  /**
+   * Whether the notes may feed what this request is answered: only when the
+   * answer goes to an owner in private (they typed it in their own panel), or
+   * while the notes are shared with everyone, asked at this moment. A spoken
+   * request is answered in the chat, so for it only sharing counts.
+   */
+  function notesMayFeed(meetingId, req, asker) {
+    if (req.channel === 'panel' && asker === 'owner') return true;
+    try {
+      return store.getMeta(meetingId).notesShared === true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Do what the tool does: { ok: true, text? } or { ok: false, code }. Never throws. */
-  async function runTool(meetingId, tool, args, actorUserId) {
+  async function runTool(ctx, actorUserId) {
+    const {
+      meetingId, tool, args, req, asker,
+    } = ctx;
     try {
       switch (tool.name) {
         case 'answer_from_meeting':
+          // From the transcript only, which everyone in the meeting can read
           return await answerWith(meetingId, args.question);
         case 'summarize_so_far': {
-          const fromNotes = summaryFromNotes(meetingId);
+          const fromNotes = notesMayFeed(meetingId, req, asker) ? summaryFromNotes(meetingId) : null;
           return fromNotes !== null ? { ok: true, text: fromNotes } : await answerWith(meetingId, SUMMARY_QUESTION);
         }
+        case 'post_to_chat':
+          return await postLine(meetingId, args.message, MAX_CHAT_MESSAGE_CHARS);
         case 'share_notes':
           // As an owner: the one who typed or approved it, else the first
           return shareNotes(meetingId, actorUserId ?? ownersOf(meetingId)[0] ?? null) === true
@@ -371,23 +425,11 @@ function createAgent({
     }
   }
 
-  /** Run the tool, deliver its result, record how it ended. */
-  async function runAndFinish(ctx, action, actorUserId) {
+  /** How a run ended, recorded and as handle() answers it. `text`: an answer for the asker's own panel. */
+  function ended(ctx, action, outcome, text) {
     const {
-      meetingId, state, req, tool, args, alive,
+      meetingId, state, req, tool, args,
     } = ctx;
-    const result = await runTool(meetingId, tool, args, actorUserId);
-    if (!alive()) return GONE;
-    const hasText = result.ok && typeof result.text === 'string';
-    let outcome = result;
-    if (hasText && req.channel === 'voice') {
-      // A spoken request is answered where everyone reads it
-      const posted = await viaHands(meetingId, {
-        tool: 'post_to_chat', args: { message: cut(`${CHAT_PREFIX}${result.text}`, MAX_CHAT_MESSAGE_CHARS) },
-      });
-      if (!alive()) return GONE;
-      if (!posted.ok) outcome = posted;
-    }
     const texts = TOOL_TEXTS[tool.name];
     const stored = action
       ? finish(meetingId, state, action.id, outcome.ok ? 'done' : 'failed', outcome.ok ? texts.done(args) : undefined)
@@ -398,14 +440,27 @@ function createAgent({
         status: 'failed', tool: tool.name, code: outcome.code, action: stored,
       };
     }
-    if (hasText) {
+    if (typeof text === 'string') {
       return {
-        status: 'answered', tool: tool.name, answer: result.text, action: stored,
+        status: 'answered', tool: tool.name, answer: text, action: stored,
       };
     }
     return {
       status: 'done', tool: tool.name, reply: texts.reply(args), action: stored,
     };
+  }
+
+  /**
+   * Run the tool and record how it ended. A text it wrote is returned to the
+   * caller, never posted: this is the way of a typed request, and of a tool
+   * an owner approved that posts nothing a model wrote.
+   */
+  async function runAndFinish(ctx, action, actorUserId) {
+    const result = await runTool(ctx, actorUserId);
+    if (!ctx.alive()) return GONE;
+    // Only someone at a panel is handed a text; nothing spoken gets here with one
+    const text = result.ok && typeof result.text === 'string' && ctx.req.channel === 'panel' ? result.text : undefined;
+    return ended(ctx, action, result, text);
   }
 
   /** One turn in the meeting's queue with "thinking" on, and off again whatever happens. */
@@ -420,8 +475,11 @@ function createAgent({
     }
   }
 
-  /** The owners answered the sheet, or it ran out. */
-  function ownersAnswered(ctx, action, outcome, byUserId) {
+  /**
+   * The owners answered the sheet, or it ran out. `body`: the text the sheet
+   * showed for an answer a model wrote; then approving posts exactly that.
+   */
+  function ownersAnswered(ctx, action, outcome, byUserId, body) {
     const {
       meetingId, state, req, tool, alive,
     } = ctx;
@@ -430,33 +488,50 @@ function createAgent({
       // A turn of its own: other requests were handled while the owners decided
       enqueue(meetingId, state, () => thinkingWhile(meetingId, state, async () => {
         store.updateAction(meetingId, action.id, { status: 'pending' });
-        return runAndFinish(ctx, action, isId(byUserId) ? byUserId : null);
+        const approver = isId(byUserId) ? byUserId : null;
+        if (body === null) return runAndFinish(ctx, action, approver);
+        // The answer the owner saw, as it is: no model is asked again
+        const posted = await postLine(meetingId, body, MAX_CHAT_ANSWER_CHARS);
+        return alive() ? ended(ctx, action, posted) : GONE;
       })).catch(() => {});
       return;
     }
+    // Declined or ran out: recorded, and nothing is said in the chat about it
     const status = outcome === 'declined' || outcome === 'expired' ? outcome : 'failed';
     finish(meetingId, state, action.id, status);
     log.log(`Arlo agent: ${tool.name} ${status} (${req.channel})`);
-    if (req.channel === 'voice' && status !== 'failed') sayInChat(meetingId, CHAT[status]);
   }
 
-  /** Record the request as waiting and put the sheet on the owners' panels. */
-  function askOwners(ctx) {
+  /**
+   * Record the request as waiting and put the sheet on the owners' panels.
+   * `answer`: for a spoken request that only reads, the action it was recorded
+   * under and the cleaned text a model wrote, which becomes the sheet's body.
+   */
+  function askOwners(ctx, answer = null) {
     const {
       meetingId, state, req, tool, args,
     } = ctx;
     const texts = TOOL_TEXTS[tool.name];
-    const action = store.appendAction(meetingId, {
-      tool: tool.name, label: texts.asked(args), askedBy: req.name, channel: req.channel, status: 'waiting_approval', public: true,
-    });
+    const action = answer !== null
+      ? store.updateAction(meetingId, answer.action.id, { status: 'waiting_approval' })
+      : store.appendAction(meetingId, {
+        tool: tool.name, label: texts.asked(args), askedBy: req.name, channel: req.channel, status: 'waiting_approval', public: true,
+      });
     if (!action) return refused('busy');
+    // What will be posted: the answer a model wrote, or the message asked for
+    const body = answer !== null ? answer.body : (tool.name === 'post_to_chat' ? args.message : null);
     const opened = approvals.open(meetingId, {
       kind: 'agent_action',
       askedByUserId: req.userId,
-      askedByName: req.name,
+      // A spoken request's name is a Zoom display name: shown, short, and never taken as proof
+      askedByName: cleanLine(req.name, MAX_SHEET_NAME_CHARS),
+      askerVerified: ctx.askerVerified,
+      channel: req.channel,
       question: texts.question(args),
       primaryLabel: texts.primary(args),
-      onOutcome: (outcome, by) => ownersAnswered(ctx, action, outcome, by ? by.byUserId : null),
+      body,
+      request: cleanLine(req.text, MAX_SHEET_REQUEST_CHARS),
+      onOutcome: (outcome, by) => ownersAnswered(ctx, action, outcome, by ? by.byUserId : null, answer !== null ? answer.body : null),
     });
     if (!opened) {
       // The owners have as many questions open as they take
@@ -470,6 +545,27 @@ function createAgent({
     if (approval) tellPanels('approval', meetingId, ownersOf(meetingId), approvalMessageData(meetingId, approval, now()));
     log.log(`Arlo agent: ${tool.name} waiting for approval (${req.channel})`);
     return { status: 'waiting_approval', tool: tool.name, action };
+  }
+
+  /**
+   * A spoken request that only reads: the text is written now, cleaned, and
+   * shown to the owners as what would be posted. Nothing is posted here.
+   */
+  async function answerThenAsk(ctx) {
+    const {
+      meetingId, state, req, tool, args, alive,
+    } = ctx;
+    const action = store.appendAction(meetingId, {
+      tool: tool.name, label: TOOL_TEXTS[tool.name].asked(args), askedBy: req.name, channel: req.channel, status: 'pending', public: true,
+    });
+    // Nothing the meeting sees is prepared without a record of it
+    if (!action) return refused('busy');
+    const result = await runTool(ctx, null);
+    if (!alive()) return GONE;
+    // What a model wrote is untrusted: one line of plain text, bounded, or nothing
+    const body = result.ok && typeof result.text === 'string' ? chatText(result.text, MAX_CHAT_ANSWER_CHARS) : null;
+    if (body === null) return ended(ctx, action, result.ok ? { ok: false, code: 'empty' } : result);
+    return askOwners(ctx, { action, body });
   }
 
   /** 'owner' or 'other', decided here: typed by an owner, or spoken by a speaker verified to be one. */
@@ -488,9 +584,11 @@ function createAgent({
 
     let picked = null;
     let pickFailed = false;
+    // The request alone, as one line of plain text: nothing of the transcript
+    // or the notes, so what people said cannot steer the pick
+    const request = cleanLine(req.text, MAX_REQUEST_CHARS);
     try {
-      const context = newestLines(store.listSegments(meetingId), MAX_CONTEXT_CHARS).lines;
-      picked = await limited(() => choose({ request: req.text, context }), chooseLimitMs);
+      if (request !== null) picked = await limited(() => choose({ request }), chooseLimitMs);
     } catch (error) {
       pickFailed = true;
       // The code only, and only one that looks like a code: a message can quote the request
@@ -538,13 +636,26 @@ function createAgent({
     }
     if (outcome === 'silent') return { status: 'none' };
     if (outcome === 'refuse') return tool === null ? { status: 'none' } : refused('not_allowed');
+    // An owner typed it, but a model wrote what would be done: when that is
+    // not in the owner's own words, they get the sheet like anyone else
+    if (outcome === 'run' && tool.changesMeeting && !typedRequestCovers(req.text, tool.name, args)) outcome = 'sheet';
 
     const ctx = {
-      meetingId, state, req, tool, args, alive,
+      meetingId,
+      state,
+      req,
+      tool,
+      args,
+      alive,
+      asker,
+      // Whether the server knows who asked: signed in and typing, or a speaker verified to be an owner
+      askerVerified: req.channel === 'panel' || asker === 'owner',
     };
+    // Nothing spoken runs without the sheet, whatever was decided above
+    if (req.channel === 'voice') return tool.changesMeeting ? askOwners(ctx) : answerThenAsk(ctx);
     if (outcome === 'sheet') return askOwners(ctx);
 
-    const isPublic = req.channel === 'voice' || tool.changesMeeting;
+    const isPublic = tool.changesMeeting;
     const action = store.appendAction(meetingId, {
       tool: tool.name, label: TOOL_TEXTS[tool.name].asked(args), askedBy: req.name, channel: req.channel, status: 'pending', public: isPublic,
     });
@@ -552,16 +663,6 @@ function createAgent({
     if (!action && isPublic) return refused('busy');
     if (action && !isPublic) state.privateAskers.set(action.id, req.userId);
     return runAndFinish(ctx, action, asker === 'owner' ? req.userId : null);
-  }
-
-  /** A request is turned away before it is looked at. A spoken one is told so in the chat, now and then. */
-  function turnAway(meetingId, state, req, reason) {
-    const at = now();
-    if (req.channel === 'voice' && at - state.busySaidAt >= BUSY_LINE_EVERY_MS) {
-      state.busySaidAt = at;
-      sayInChat(meetingId, CHAT.busy);
-    }
-    return refused(reason);
   }
 
   async function handle(meetingId, request) {
@@ -578,8 +679,9 @@ function createAgent({
       const state = stateFor(meetingId);
       const at = now();
       state.recent = state.recent.filter((time) => at - time < rateWindowMs);
-      if (state.recent.length >= rateLimit) return turnAway(meetingId, state, req, 'rate_limited');
-      if (state.busy && state.queue.length >= queueLimit) return turnAway(meetingId, state, req, 'busy');
+      if (state.recent.length >= rateLimit) return refused('rate_limited');
+      // Turned away without a word in the chat: nobody approved one
+      if (state.busy && state.queue.length >= queueLimit) return refused('busy');
       state.recent.push(at);
       // Someone waits at a panel for a typed request: it goes ahead of the spoken ones
       return await enqueue(

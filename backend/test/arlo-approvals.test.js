@@ -237,6 +237,7 @@ const agentAsk = (approvals, extra = {}, meetingId = M) => approvals.open(meetin
   askedByName: 'James',
   question: 'Admit James from the waiting room?',
   primaryLabel: 'Admit James',
+  channel: 'voice',
   ...extra,
 });
 
@@ -252,6 +253,8 @@ test('agent_action: carries the sheet\'s texts, needs no user id, and is not lim
     expiresAt: first.expiresAt,
     question: 'Admit James from the waiting room?',
     primaryLabel: 'Admit James',
+    channel: 'voice',
+    askerVerified: false,
   });
   // spoken requests have no user; the same person may have several open
   assert.notEqual(agentAsk(approvals), null);
@@ -268,11 +271,49 @@ test('agent_action: carries the sheet\'s texts, needs no user id, and is not lim
     id: first.id,
     kind: 'agent_action',
     askedBy: 'James',
+    askerVerified: false,
     expiresAt: first.expiresAt,
     expiresInMs: 60000,
     question: 'Admit James from the waiting room?',
     primaryLabel: 'Admit James',
+    channel: 'voice',
   });
+});
+
+test('agent_action: the text that will be posted is kept as given, with what was asked and how', () => {
+  const { approvals, clock } = setup();
+  const body = 'On Friday.  Two spaces stay, as given ';
+  const opened = agentAsk(approvals, {
+    askedByUserId: 'user-ben', askedByName: 'Ben', question: 'Post Arlo\'s answer in the meeting chat?', primaryLabel: 'Post answer',
+    body, request: 'when do we ship?', channel: 'panel', askerVerified: true,
+  });
+  const data = approvalMessageData(M, approvals.get(M, opened.id), clock());
+  assert.deepEqual(data, {
+    meetingId: M,
+    id: opened.id,
+    kind: 'agent_action',
+    askedBy: 'Ben',
+    askerVerified: true,
+    expiresAt: opened.expiresAt,
+    expiresInMs: 60000,
+    question: 'Post Arlo\'s answer in the meeting chat?',
+    primaryLabel: 'Post answer',
+    channel: 'panel',
+    body,
+    request: 'when do we ship?',
+  });
+  // only `true` is verified
+  for (const askerVerified of ['true', 1, {}, undefined, null, false]) {
+    const one = agentAsk(approvals, { askerVerified });
+    assert.equal(approvalMessageData(M, approvals.get(M, one.id)).askerVerified, false, String(askerVerified));
+    approvals.answer(M, one.id, { byUserId: 'owner-1', approve: false });
+  }
+  // no body, no request: the fields are absent, not empty
+  const plain = agentAsk(approvals, { body: null, request: undefined });
+  assert.deepEqual(Object.keys(approvalMessageData(M, approvals.get(M, plain.id))),
+    ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt', 'expiresInMs', 'askerVerified', 'question', 'primaryLabel', 'channel']);
+  // 500 and 200 characters are the most; a longer one is refused, never cut
+  assert.notEqual(agentAsk(approvals, { body: 'b'.repeat(500), request: 'r'.repeat(200) }), null);
 });
 
 test('agent_action: refused without its texts, with texts that are too long, or with a bad asker', () => {
@@ -282,6 +323,9 @@ test('agent_action: refused without its texts, with texts that are too long, or 
     { primaryLabel: undefined }, { primaryLabel: '' }, { primaryLabel: {} }, { primaryLabel: 'p'.repeat(121) },
     { askedByUserId: '' }, { askedByUserId: 5 }, { askedByUserId: {} }, { askedByUserId: 'x'.repeat(257) },
     { onOutcome: 'call me' },
+    { body: 'b'.repeat(501) }, { body: '' }, { body: '   ' }, { body: 5 }, { body: ['x'] },
+    { request: 'r'.repeat(201) }, { request: '' }, { request: {} },
+    { channel: undefined }, { channel: 'chat' }, { channel: '' }, { channel: 5 },
   ]) {
     assert.equal(agentAsk(approvals, extra), null, JSON.stringify(extra));
   }
@@ -346,10 +390,10 @@ test('what the panels are told carries the time left by the server\'s clock, a w
   const left = approvalMessageData(M, { ...approval, expiresAt: Date.now() + 5000 }).expiresInMs;
   assert.ok(Number.isInteger(left) && left > 4000 && left <= 5000);
   // an agent's sheet has it too, before its texts
-  const sheet = approvals.open(M, { kind: 'agent_action', askedByName: 'Ben', question: 'Do it?', primaryLabel: 'Do it' });
+  const sheet = approvals.open(M, { kind: 'agent_action', askedByName: 'Ben', question: 'Do it?', primaryLabel: 'Do it', channel: 'voice' });
   assert.deepEqual(
     Object.keys(approvalMessageData(M, approvals.get(M, sheet.id), clock())),
-    ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt', 'expiresInMs', 'question', 'primaryLabel'],
+    ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt', 'expiresInMs', 'askerVerified', 'question', 'primaryLabel', 'channel'],
   );
 });
 
@@ -372,7 +416,7 @@ test('tryOpen says why a request is refused: asked a moment ago, too many open, 
   assert.equal(approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-dee' }).ok, true);
   assert.deepEqual(approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-eve' }), { ok: false, reason: 'too_many_open' });
   assert.deepEqual(
-    approvals.tryOpen(M, { kind: 'agent_action', question: 'Do it?', primaryLabel: 'Do it' }),
+    approvals.tryOpen(M, { kind: 'agent_action', question: 'Do it?', primaryLabel: 'Do it', channel: 'voice' }),
     { ok: false, reason: 'too_many_open' },
   );
   // someone who asked a moment ago hears that, also while the meeting is full

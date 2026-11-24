@@ -1,51 +1,111 @@
 /**
  * Every sentence Arlo's agent writes: what the record says it was asked and
- * did, what the approval sheet asks an owner, what a panel is answered, and
- * the few lines it posts to the meeting chat.
+ * did, what the approval sheet asks an owner, and what a panel is answered.
+ * And the one place text bound for the meeting chat, or for the approval
+ * sheet, is cleaned (chatText, cleanLine).
  *
- * All of them are templates of this server. The only things filled in are a
+ * The sentences are templates of this server. The only things filled in are a
  * tool call's arguments after validateToolCall() accepted them
- * (services/agent/tools.js), shortened where the place is small. A model's own
- * words are never a label, a question or a button.
+ * (services/agent/tools.js). A model's own words are never a label, a
+ * question or a button: text a model wrote that is to be posted is the
+ * sheet's `body`, shown as what it is.
+ *
+ * Arlo posts no line of its own to the chat: not "I am busy", not "the host
+ * declined". A line nobody approved is unapproved content; those outcomes are
+ * in the record only.
  */
-const SHEET_QUESTION_QUOTE_CHARS = 140;
 
-/** One line, cut to `max` characters with an ellipsis, never ending in half an emoji. */
-function short(value, max) {
-  const oneLine = String(value).replace(/\s+/g, ' ').trim();
-  if (oneLine.length <= max) return oneLine;
-  return `${oneLine.slice(0, max - 1).replace(/[\uD800-\uDBFF]$/, '')}…`;
+// Never part of text that is shown or posted: control characters, invisible
+// format characters (a direction override turns the text around it),
+// private-use and unassigned characters, lone surrogates, line and paragraph
+// separators. The joiners that names and emoji sequences need are allowed, as
+// in lib/displayName.js. The tool table refuses an argument that has one
+// (services/agent/tools.js); text a model wrote loses them here.
+const NOT_IN_TEXT = /(?![\u200C\u200D])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/u;
+const NOT_IN_TEXT_ANYWHERE = new RegExp(NOT_IN_TEXT.source, 'gu');
+// "Arlo:" at the start, any case, with or without spaces, a full-width colon too
+const OWN_PREFIX = /^(?:arlo\s*[:：]\s*)+/iu;
+
+const MAX_CHAT_ANSWER_CHARS = 500;
+const MAX_CHAT_MESSAGE_CHARS = 300;
+const MAX_SHEET_REQUEST_CHARS = 200;
+const MAX_SHEET_NAME_CHARS = 60;
+
+/** NFC, every line break and run of whitespace one space, no character of NOT_IN_TEXT, trimmed. */
+function plainLine(value) {
+  return value.normalize('NFC')
+    .replace(/\s+/gu, ' ')
+    .replace(NOT_IN_TEXT_ANYWHERE, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+}
+
+/** At most `max` characters: cut at a word where there is one, with an ellipsis, never ending in half an emoji. */
+function cutAtWord(value, max) {
+  if (value.length <= max) return value;
+  let kept = value.slice(0, max - 1);
+  const space = kept.lastIndexOf(' ');
+  // A word that fills more than half of what is allowed is cut inside
+  if (value[max - 1] !== ' ' && space >= max / 2) kept = kept.slice(0, space);
+  return `${kept.replace(/[\uD800-\uDBFF]$/, '').trimEnd()}…`;
+}
+
+/**
+ * One line of plain text of at most `max` characters, or null when nothing is
+ * left: what someone asked, or a name, as the approval sheet shows it and as
+ * the model that picks a tool gets it.
+ */
+function cleanLine(value, max) {
+  if (typeof value !== 'string') return null;
+  const line = cutAtWord(plainLine(value), max);
+  return line.length > 0 ? line : null;
+}
+
+/**
+ * Text as it may be posted to the meeting chat, or null when nothing is left:
+ * one line of plain text (cleanLine), without an "Arlo:" of its own at the
+ * start (the posted line gets the one prefix, so a second speaker line cannot
+ * be faked), at most `max` characters. Cleaning a cleaned text changes nothing.
+ */
+function chatText(value, max) {
+  if (typeof value !== 'string') return null;
+  const text = cutAtWord(plainLine(value).replace(OWN_PREFIX, '').trim(), max);
+  return text.length > 0 ? text : null;
 }
 
 /**
  * Per tool:
  *   asked(args)     the record while it waits, and when it was declined, ran out or failed
  *   done(args)      the record when it was done
- *   question(args)  the approval sheet's question
+ *   question(args)  the approval sheet's question. Text that will be posted is never in
+ *                   it: that is the sheet's `body` (services/agent/agent.js)
  *   primary(args)   the sheet's button that agrees
  *   reply(args)     what the panel of someone who typed the request is answered when it is done
  */
+// The sheet for text a model wrote (an answer, a summary): the text is the body
+const POST_ANSWER_QUESTION = 'Post Arlo\'s answer in the meeting chat?';
+const POST_ANSWER_PRIMARY = 'Post answer';
+
 const TOOL_TEXTS = Object.freeze({
   answer_from_meeting: Object.freeze({
     asked: () => 'Asked a question',
     done: () => 'Answered a question',
-    question: (args) => `Answer “${short(args.question, SHEET_QUESTION_QUOTE_CHARS)}” in the meeting chat?`,
-    primary: () => 'Answer',
+    question: () => POST_ANSWER_QUESTION,
+    primary: () => POST_ANSWER_PRIMARY,
     reply: () => 'Done: answered.',
   }),
   summarize_so_far: Object.freeze({
     asked: () => 'Asked for a summary',
     done: () => 'Summarized the meeting so far',
-    question: () => 'Post a summary of the meeting so far to the meeting chat?',
-    primary: () => 'Post summary',
+    question: () => POST_ANSWER_QUESTION,
+    primary: () => POST_ANSWER_PRIMARY,
     reply: () => 'Done: summarized the meeting so far.',
   }),
   post_to_chat: Object.freeze({
     asked: () => 'Asked to post to chat',
     done: () => 'Posted to chat',
-    // The whole message, line breaks and all (at most 300 characters,
-    // services/agent/tools.js): what the owner approves is what is posted
-    question: (args) => `Post “${args.message}” to the meeting chat?`,
+    // The message is the sheet's body: what the owner approves is what is posted
+    question: () => 'Post this in the meeting chat?',
     primary: () => 'Post to chat',
     reply: () => 'Done: posted to chat.',
   }),
@@ -66,8 +126,8 @@ const TOOL_TEXTS = Object.freeze({
   web_search: Object.freeze({
     asked: () => 'Asked for a web search',
     done: () => 'Searched the web',
-    question: () => 'Search the web and post the answer to the meeting chat?',
-    primary: () => 'Search',
+    question: () => POST_ANSWER_QUESTION,
+    primary: () => POST_ANSWER_PRIMARY,
     reply: () => 'Done: searched the web.',
   }),
 });
@@ -89,6 +149,7 @@ const REASONS = Object.freeze({
   model_rate_limited: 'the AI models are rate limited right now',
   model_error: 'the AI service could not answer right now',
   busy: 'too many requests are waiting for an answer',
+  empty: 'there was nothing to post',
 });
 
 /** What a panel is answered when a request it typed was not done. */
@@ -99,14 +160,20 @@ const REPLIES = Object.freeze({
   waitingApproval: 'I asked the person who brought Arlo in to approve that.',
 });
 
-// Lines Arlo posts to the meeting chat itself
+// What is posted to the meeting chat is this, then the text an owner approved or typed
 const CHAT_PREFIX = 'Arlo: ';
-const CHAT = Object.freeze({
-  busy: `${CHAT_PREFIX}I am busy right now. Ask again in a moment.`,
-  declined: `${CHAT_PREFIX}The host declined that request.`,
-  expired: `${CHAT_PREFIX}The host did not answer that request.`,
-});
 
 module.exports = {
-  TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, REPLIES, CHAT, CHAT_PREFIX, couldNot, short,
+  TOOL_TEXTS,
+  NOT_UNDERSTOOD_LABEL,
+  REPLIES,
+  CHAT_PREFIX,
+  couldNot,
+  cleanLine,
+  chatText,
+  NOT_IN_TEXT,
+  MAX_CHAT_ANSWER_CHARS,
+  MAX_CHAT_MESSAGE_CHARS,
+  MAX_SHEET_REQUEST_CHARS,
+  MAX_SHEET_NAME_CHARS,
 };

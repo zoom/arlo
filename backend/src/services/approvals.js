@@ -8,10 +8,18 @@
  *                   every ASK_AGAIN_MS.
  *   'agent_action'  someone asked Arlo for something that an owner has to
  *                   agree to first (services/agent/agent.js decides when). It
- *                   carries the sheet's texts, `question` and `primaryLabel`:
- *                   sentences the server wrote. The asker may have no user id
- *                   (a request spoken in the meeting); how often someone may
- *                   ask is the agent's limit, not this module's.
+ *                   carries the sheet's texts: `question` and `primaryLabel`,
+ *                   sentences the server wrote; `body`, the exact text that
+ *                   will be posted to the meeting chat when an owner agrees
+ *                   (kept as given, never trimmed or cut here), absent when
+ *                   nothing is posted; `request`, what was asked, as context;
+ *                   `channel`, 'voice' or 'panel'; and `askerVerified`: true
+ *                   only when the server knows who asked (a signed-in person
+ *                   who typed it, or a speaker verified to be an owner). A
+ *                   name on a spoken request is a Zoom display name, which
+ *                   anyone can set. The asker may have no user id (a request
+ *                   spoken in the meeting); how often someone may ask is the
+ *                   agent's limit, not this module's.
  *
  * What an answer means: whoever calls answer() does the work first (for
  * 'share_notes' the route turns sharing on, routes/arlo.js), then reports.
@@ -45,6 +53,9 @@ const ONE_PER_ASKER = new Set(['share_notes']);
 const WITH_TEXTS = new Set(['agent_action']);
 const MAX_QUESTION_CHARS = 500;
 const MAX_PRIMARY_LABEL_CHARS = 120;
+const MAX_BODY_CHARS = 500;
+const MAX_REQUEST_CHARS = 200;
+const CHANNELS = new Set(['voice', 'panel']);
 // One request per person, per kind, per meeting in this long
 const ASK_AGAIN_MS = 2 * 60 * 1000;
 const MAX_ID_CHARS = 256;
@@ -55,6 +66,17 @@ const isId = (value) => typeof value === 'string' && value.length > 0 && value.l
 const isKind = (value) => typeof value === 'string' && APPROVAL_KINDS.has(value);
 /** A sentence for the sheet: a string with something in it, at most `max` characters. */
 const isSheetText = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
+const isAbsent = (value) => value === undefined || value === null;
+
+/** The fields of the sheet, for a kind that has them. Absent `body` and `request` are left out. */
+const sheetTexts = (from) => ({
+  question: from.question,
+  primaryLabel: from.primaryLabel,
+  channel: from.channel,
+  askerVerified: from.askerVerified,
+  ...(from.body !== null && { body: from.body }),
+  ...(from.request !== null && { request: from.request }),
+});
 
 const defaultSchedule = (fn, ms) => {
   const timer = setTimeout(fn, ms);
@@ -81,7 +103,7 @@ function createApprovals({
     askedByUserId: entry.askedByUserId,
     askedByName: entry.askedByName,
     expiresAt: entry.expiresAt,
-    ...(WITH_TEXTS.has(entry.kind) && { question: entry.question, primaryLabel: entry.primaryLabel }),
+    ...(WITH_TEXTS.has(entry.kind) && sheetTexts(entry)),
   });
 
   const askerKey = (kind, userId) => `${kind}:${userId}`;
@@ -139,7 +161,9 @@ function createApprovals({
   /**
    * Open an approval: { ok: true, id, expiresAt }, or { ok: false, reason }:
    *   'invalid'        an unknown kind, no asker where one is needed, or (for
-   *                    'agent_action') sheet texts that are missing or too long
+   *                    'agent_action') sheet texts that are missing or too
+   *                    long, a `body` or `request` that is not text within
+   *                    its limit, or a `channel` that is not one
    *   'too_soon'       this person asked a moment ago or has one open
    *   'too_many_open'  the meeting has as many open as it takes, remembers as
    *                    many askers as it takes, or the service holds as many
@@ -147,7 +171,7 @@ function createApprovals({
    * Someone who asked a moment ago hears 'too_soon' also while the meeting is full.
    */
   function tryOpen(meetingId, {
-    kind, askedByUserId, askedByName, question, primaryLabel, onOutcome,
+    kind, askedByUserId, askedByName, question, primaryLabel, body, request, channel, askerVerified, onOutcome,
   } = {}) {
     if (!isId(meetingId) || !isKind(kind)) return refuse('invalid');
     const perAsker = ONE_PER_ASKER.has(kind);
@@ -156,6 +180,12 @@ function createApprovals({
     if (onOutcome !== undefined && typeof onOutcome !== 'function') return refuse('invalid');
     const withTexts = WITH_TEXTS.has(kind);
     if (withTexts && (!isSheetText(question, MAX_QUESTION_CHARS) || !isSheetText(primaryLabel, MAX_PRIMARY_LABEL_CHARS))) {
+      return refuse('invalid');
+    }
+    // What will be posted is refused when it is too long, never cut: the owner must see all of it
+    if (withTexts && (!CHANNELS.has(channel)
+        || !(isAbsent(body) || isSheetText(body, MAX_BODY_CHARS))
+        || !(isAbsent(request) || isSheetText(request, MAX_REQUEST_CHARS)))) {
       return refuse('invalid');
     }
     if (!mayOpen(meetingId, kind, askedByUserId)) return refuse('too_soon');
@@ -177,6 +207,11 @@ function createApprovals({
       cancel: null,
       question: withTexts ? question.trim() : null,
       primaryLabel: withTexts ? primaryLabel.trim() : null,
+      // As given: what the owner is shown is what is posted, byte for byte
+      body: withTexts && !isAbsent(body) ? body : null,
+      request: withTexts && !isAbsent(request) ? request : null,
+      channel: withTexts ? channel : null,
+      askerVerified: withTexts ? askerVerified === true : null,
       onOutcome: typeof onOutcome === 'function' ? onOutcome : null,
     };
     if (perAsker) meeting.askedAt.set(key, now());
@@ -275,8 +310,10 @@ const msLeft = (expiresAt, at = Date.now()) => {
  * What the panels are told about an open approval: the asker's name, never
  * their id. `expiresInMs` is the time left by this server's clock at `at`
  * (now, when the message is built): a panel counts down from it, so a device
- * whose clock is off shows the right time. For 'agent_action' also the
- * sheet's texts (`question`, `primaryLabel`), which the server wrote.
+ * whose clock is off shows the right time. For 'agent_action' also
+ * `askerVerified` and the sheet's fields: `question` and `primaryLabel`, which
+ * the server wrote, `channel`, and when there is one `body` (the exact text
+ * that will be posted) and `request` (what was asked).
  */
 const approvalMessageData = (meetingId, approval, at = Date.now()) => ({
   meetingId,
@@ -285,7 +322,14 @@ const approvalMessageData = (meetingId, approval, at = Date.now()) => ({
   askedBy: approval.askedByName,
   expiresAt: approval.expiresAt,
   expiresInMs: msLeft(approval.expiresAt, at),
-  ...(WITH_TEXTS.has(approval.kind) && { question: approval.question, primaryLabel: approval.primaryLabel }),
+  ...(WITH_TEXTS.has(approval.kind) && {
+    askerVerified: approval.askerVerified === true,
+    question: approval.question,
+    primaryLabel: approval.primaryLabel,
+    channel: approval.channel,
+    ...(typeof approval.body === 'string' && { body: approval.body }),
+    ...(typeof approval.request === 'string' && { request: approval.request }),
+  }),
 });
 
 /** The one the running server uses: a close is told to the owners and to the person who asked. */

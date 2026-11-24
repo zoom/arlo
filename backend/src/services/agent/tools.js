@@ -16,6 +16,7 @@
  * This file has no code that runs a tool.
  */
 const { showableName } = require('../../lib/displayName');
+const { NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS } = require('./texts');
 
 const text = (description, maxLength) => ({ type: 'string', description, maxLength });
 const parameters = (properties = {}) => ({
@@ -48,9 +49,9 @@ const TABLE = deepFreeze([
   {
     name: 'post_to_chat',
     description: 'Post a short message, given by the asker, to the meeting chat. Use only when asked to post, write, send or tell something in the chat. Not for sharing the notes.',
-    // 300: the approval sheet quotes the whole message, so what an owner
-    // approves is what is posted
-    parameters: parameters({ message: text('The message to post, as the asker gave it. At most 300 characters.', 300) }),
+    // 300: the approval sheet shows the whole message as its body, so what an
+    // owner approves is what is posted
+    parameters: parameters({ message: text('The message to post, as the asker gave it. At most 300 characters.', MAX_CHAT_MESSAGE_CHARS) }),
     runs: 'panel',
     changesMeeting: true,
   },
@@ -107,13 +108,9 @@ function getTool(name, options) {
   return listTools(options).find((tool) => tool.name === name) || null;
 }
 
-// Never part of an argument: control characters, invisible format characters
-// (a direction override turns the text around it), private-use and unassigned
-// characters, lone surrogates, line and paragraph separators. The joiners that
-// names and emoji sequences need are allowed, as in lib/displayName.js.
-const NOT_IN_TEXT = /(?![\u200C\u200D])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/u;
-// A chat message may have line breaks
-const NOT_IN_A_MESSAGE = /(?![\u200C\u200D\n])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/u;
+// Never part of an argument: NOT_IN_TEXT (services/agent/texts.js). A chat
+// message may be given with line breaks; they become spaces (chatText).
+const NOT_IN_A_MESSAGE = new RegExp(NOT_IN_TEXT.source.replace('\\u200D', '\\u200D\\n\\r\\t'), 'u');
 
 /** One argument, trimmed, or null when it is not allowed. */
 function readArgument(key, value, maxLength) {
@@ -122,7 +119,9 @@ function readArgument(key, value, maxLength) {
   const cleaned = key === 'name' ? showableName(value) : value.normalize('NFC').trim();
   if (cleaned.length === 0 || cleaned.length > maxLength) return null;
   if ((key === 'message' ? NOT_IN_A_MESSAGE : NOT_IN_TEXT).test(cleaned)) return null;
-  return cleaned;
+  // A chat message is what will be posted: one line, without an "Arlo:" of
+  // its own, and refused when nothing is left of it
+  return key === 'message' ? chatText(cleaned, maxLength) : cleaned;
 }
 
 /**

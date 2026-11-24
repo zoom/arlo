@@ -118,7 +118,9 @@ test('a typed question is answered as before; the picking model gets the request
   assert.equal(res.cache, 'no-store');
   assert.equal(chosen.length, 1);
   assert.equal(chosen[0].request, 'When do we ship?');
-  assert.deepEqual(chosen[0].context, ['Ana: We ship on Friday.']);
+  // nothing of the meeting goes to the model that picks: no transcript, no notes
+  assert.deepEqual(Object.keys(chosen[0]).filter((key) => key !== 'signal').sort(), ['model', 'request', 'tools']);
+  assert.equal(JSON.stringify(chosen[0]).includes('Friday'), false);
   assert.deepEqual(chosen[0].tools.map((tool) => tool.name), ['answer_from_meeting', 'summarize_so_far', 'post_to_chat', 'admit_from_waiting_room', 'share_notes']);
   assert.equal(typeof chosen[0].model, 'string');
 
@@ -289,10 +291,13 @@ test('spoken by someone not verified: the owners get the sheet, and agreeing doe
     id: data.id,
     kind: 'agent_action',
     askedBy: 'Ben',
+    askerVerified: false,
     expiresAt: data.expiresAt,
     expiresInMs: data.expiresInMs,
     question: 'Share the notes with everyone in the meeting?',
     primaryLabel: 'Share notes',
+    channel: 'voice',
+    request: 'share the notes with everyone.',
   });
   assert.deepEqual(of(cyPanel, 'arlo.approval'), sheets);
   for (const ws of [benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.approval'), []);
@@ -361,7 +366,7 @@ test('"not now" ends a spoken request, and a request for the notes keeps working
   closeAll(ownerPanel);
 });
 
-test('AGENT_SPEAKER_MATCH=participant_id: a speaker whose id an owner\'s panel reported is not asked twice', async () => {
+test('AGENT_SPEAKER_MATCH=participant_id: a speaker whose id an owner\'s panel reported is verified on the sheet, and still gets the sheet', async () => {
   const m = await meetingWith('AG-VOICE-VERIFIED==');
   const ownerPanel = await panel(m.meetingId, m.owner);
   assert.equal((await call('POST', m.meetingId, 'identity', { headers: m.owner, body: { participantId: '7', screenName: 'Ana Ruiz' } })).status, 200);
@@ -371,11 +376,18 @@ test('AGENT_SPEAKER_MATCH=participant_id: a speaker whose id an owner\'s panel r
   await say(m.meetingId, 'Arlo, share the notes with everyone.', { speakerId: '9', speakerLabel: 'Ana Ruiz' });
   await h.wait(150);
   assert.equal(of(ownerPanel, 'arlo.approval').length, 1);
+  assert.deepEqual([of(ownerPanel, 'arlo.approval')[0].data.askedBy, of(ownerPanel, 'arlo.approval')[0].data.askerVerified], ['Ana Ruiz', false]);
   assert.equal((await call('GET', m.meetingId, 'state', { headers: m.guest })).body.notesShared, false);
 
+  // her id, whatever the name: the sheet says the server knows who spoke. Nothing is done before the button
   await say(m.meetingId, 'Arlo, share the notes with everybody now.', { speakerId: '7', speakerLabel: 'Renamed' });
   await h.wait(150);
-  assert.equal(of(ownerPanel, 'arlo.approval').length, 1);
+  const sheets = of(ownerPanel, 'arlo.approval');
+  assert.equal(sheets.length, 2);
+  assert.deepEqual([sheets[1].data.askedBy, sheets[1].data.askerVerified], ['Renamed', true]);
+  assert.equal((await call('GET', m.meetingId, 'state', { headers: m.guest })).body.notesShared, false);
+  assert.equal((await call('POST', m.meetingId, `approvals/${sheets[1].data.id}`, { headers: m.owner, body: { approve: true } })).status, 200);
+  await h.wait(100);
   assert.equal((await call('GET', m.meetingId, 'state', { headers: m.guest })).body.notesShared, true);
   closeAll(ownerPanel);
 });
