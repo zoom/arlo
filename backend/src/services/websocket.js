@@ -1,6 +1,8 @@
 const WebSocket = require('ws');
 const url = require('url');
 const { verifySessionToken } = require('./auth');
+const { restoreIfMissing, RESTORE_COOKIE } = require('./sessionRestore');
+const deauthorized = require('../lib/deauthorized');
 const { verifyMeetingAccessToken } = require('./zoomAppContext');
 const { getMeetingLifecycle } = require('./meetingLifecycle');
 const { getArloPresence } = require('./arloPresence');
@@ -28,6 +30,63 @@ function getCookie(req, name) {
 // Store active connections
 const connections = new Map(); // meetingId -> Set of WebSocket connections
 const userConnections = new Map(); // userId -> Set of WebSocket connections
+
+/**
+ * Who a socket is.
+ *
+ * A socket is a signed-in user only through a valid session (`sessionToken`
+ * cookie on the handshake, verified as the HTTP middleware verifies it). The
+ * `meetingAccess` token says which meeting the socket is in and nothing else:
+ * a user id inside it never makes the socket that user.
+ *
+ * A session can end while its socket stays open (it expires, or the user
+ * removed the app). Sessions are signed tokens, not rows in a store, so "is
+ * it still live" is two in-memory facts kept from the handshake: the token's
+ * expiry time and whether its Zoom user was deauthorized since. userOf() checks
+ * both every time anything reads the socket's user (owner-only sends, the
+ * role in `arlo.state`, hands, presence), which costs a comparison and a map
+ * lookup and re-verifies no token. A socket whose session ended becomes a
+ * guest's socket on the spot and is told its new state. Logout and
+ * deauthorization also close the user's sockets (disconnectUser).
+ */
+function sessionLive(ws) {
+  const session = ws.session;
+  if (!session) return false;
+  if (typeof session.exp === 'number' && Date.now() > session.exp) return false;
+  if (session.zoomUserId && deauthorized.isDeauthorized(session.zoomUserId)) return false;
+  return true;
+}
+
+/** Remove a socket from its user's list. */
+function unlistUserSocket(ws, userId) {
+  const sockets = userConnections.get(userId);
+  if (!sockets) return;
+  sockets.delete(ws);
+  if (sockets.size === 0) userConnections.delete(userId);
+}
+
+/** From here on this is a guest's socket in its meeting. */
+function makeGuest(ws) {
+  const userId = ws.userId;
+  ws.userId = null;
+  ws.session = null;
+  ws.isGuest = true;
+  ws.arloHands = null;
+  if (userId) unlistUserSocket(ws, userId);
+}
+
+/** The signed-in user of this socket right now, or null (a guest, or a session that ended). */
+function userOf(ws) {
+  if (!ws.userId) return null;
+  if (!sessionLive(ws)) {
+    makeGuest(ws);
+    console.log('WebSocket session ended: the socket continues as a guest');
+    // Told what it is now (sendArloState is a function declaration below)
+    if (ws.readyState === WebSocket.OPEN && ws.allowedMeetingId) sendArloState(ws, ws.allowedMeetingId);
+    return null;
+  }
+  return ws.userId;
+}
 
 /** Tell the lifecycle how many panels are connected for a meeting right now. */
 function reportPanels(meetingId) {
@@ -64,13 +123,14 @@ function initWebSocketServer(server) {
     // signed-in users because the Zoom App Context proves they're in the meeting.
     let meetingId = null;
     let userId = null;
+    let session = null;
 
     const accessToken = getCookie(req, 'meetingAccess');
     if (accessToken) {
       try {
-        const access = verifyMeetingAccessToken(accessToken);
-        meetingId = access.meetingId;
-        userId = access.userId || null;
+        // Meeting membership only. A user id in this token is not taken: who
+        // the socket is comes from the session below, or it is a guest.
+        meetingId = verifyMeetingAccessToken(accessToken).meetingId;
       } catch (error) {
         console.warn('WebSocket meeting access rejected:', error.message);
       }
@@ -81,7 +141,12 @@ function initWebSocketServer(server) {
     const sessionToken = getCookie(req, 'sessionToken');
     if (sessionToken) {
       try {
-        userId = verifySessionToken(sessionToken).userId;
+        // As middleware/auth.js does: signature, expiry, not deauthorized, and
+        // the user rebuilt from their restore cookie after a server restart
+        const payload = verifySessionToken(sessionToken);
+        restoreIfMissing({ cookies: { [RESTORE_COOKIE]: getCookie(req, RESTORE_COOKIE) } }, payload);
+        userId = payload.userId;
+        session = { zoomUserId: payload.zoomUserId || null, exp: typeof payload.exp === 'number' ? payload.exp : null };
       } catch {
         // Not signed in (or expired) — fine for guests.
       }
@@ -104,6 +169,7 @@ function initWebSocketServer(server) {
 
     // Store connection
     ws.userId = userId;
+    ws.session = session;
     ws.meetingId = meetingId;
     ws.allowedMeetingId = meetingId;
     ws.isAlive = true;
@@ -149,15 +215,10 @@ function initWebSocketServer(server) {
 
     // Handle disconnect
     ws.on('close', () => {
-      console.log(`📡 WebSocket disconnected (${userId ? 'signed-in user' : 'guest'})`);
+      console.log(`📡 WebSocket disconnected (${ws.userId ? 'signed-in user' : 'guest'})`);
 
-      // Remove from user connections (only for authenticated users)
-      if (userId && userConnections.has(userId)) {
-        userConnections.get(userId).delete(ws);
-        if (userConnections.get(userId).size === 0) {
-          userConnections.delete(userId);
-        }
-      }
+      // Remove from user connections (a socket whose session ended left already)
+      if (userId) unlistUserSocket(ws, userId);
 
       // Remove from meeting connections and broadcast updated presence
       const disconnectedMeetingId = ws.meetingId;
@@ -198,6 +259,8 @@ function initWebSocketServer(server) {
   // Heartbeat interval (every 30 seconds)
   const heartbeat = setInterval(() => {
     wss.clients.forEach((ws) => {
+      // A session that ended is noticed here at the latest (see userOf)
+      userOf(ws);
       if (ws.isAlive === false) {
         console.log('💀 Terminating inactive WebSocket connection');
         return ws.terminate();
@@ -288,7 +351,7 @@ async function handleWebSocketMessage(ws, data) {
       // signed in has no hands, and what is not an announcement is ignored.
       // eslint-disable-next-line global-require
       const announced = require('./agent/hands').readHandsAnnouncement(payload);
-      if (announced !== null && ws.userId && ws.allowedMeetingId) ws.arloHands = announced;
+      if (announced !== null && userOf(ws) && ws.allowedMeetingId) ws.arloHands = announced;
       break;
     }
 
@@ -321,9 +384,10 @@ function broadcastPresence(meetingId) {
     if (client.readyState !== WebSocket.OPEN) return;
 
     // Deduplicate authenticated users by userId
-    if (client.userId) {
-      if (seenUserIds.has(client.userId)) return;
-      seenUserIds.add(client.userId);
+    const clientUserId = userOf(client);
+    if (clientUserId) {
+      if (seenUserIds.has(clientUserId)) return;
+      seenUserIds.add(clientUserId);
     }
 
     if (client.isGuest) {
@@ -384,7 +448,7 @@ function broadcastToMeeting(meetingId, message) {
 /**
  * Send each socket of a meeting its own message: `buildMessage(ws)` returns the
  * message for that socket, or null for none. For anything that differs per
- * person (ws.userId is the signed-in Arlo user, or null). A socket that cannot
+ * person (userOf(ws) is the signed-in Arlo user, or null). A socket that cannot
  * be built for or sent to does not stop the others. Returns how many were sent.
  */
 function sendToMeetingSockets(meetingId, buildMessage) {
@@ -412,7 +476,7 @@ function sendToMeetingSockets(meetingId, buildMessage) {
  */
 const arloStateMessage = (ws, meetingId) => ({
   type: 'arlo.state',
-  data: { meetingId, ...getArloPresence().stateFor(meetingId, ws.userId) },
+  data: { meetingId, ...getArloPresence().stateFor(meetingId, userOf(ws)) },
 });
 
 /** Tell one socket, when it connects or subscribes. */
@@ -440,7 +504,7 @@ const userIdSet = (ids) => new Set((Array.isArray(ids) ? ids : []).filter((id) =
  * socket (no user) never matches. Nor does an owner's panel in another
  * meeting, which crossRegisterUser() lists under this meeting too.
  */
-const isOwnerPanel = (ws, meetingId, owners) => owners.has(ws.userId) && ws.allowedMeetingId === meetingId;
+const isOwnerPanel = (ws, meetingId, owners) => ws.allowedMeetingId === meetingId && owners.has(userOf(ws));
 
 /** Whether the meeting's owners share its notes with everyone, read now. A lookup that fails says no. */
 function notesSharedIn(meetingId) {
@@ -526,7 +590,7 @@ function sendArloDid(meetingId, action, { everyone = false, userIds = [] } = {})
   const told = userIdSet(userIds);
   if (everyone !== true && told.size === 0) return 0;
   return sendToMeetingSockets(meetingId, (ws) => (
-    ws.allowedMeetingId === meetingId && (everyone === true || told.has(ws.userId))
+    ws.allowedMeetingId === meetingId && (everyone === true || told.has(userOf(ws)))
       ? { type: 'arlo.did', data: { meetingId, action } }
       : null
   ));
@@ -543,14 +607,16 @@ function handsPanels(meetingId) {
   if (!clients) return [];
   const panels = [];
   clients.forEach((ws) => {
-    if (ws.readyState !== WebSocket.OPEN || ws.allowedMeetingId !== meetingId || !ws.userId || !ws.arloHands) return;
+    const userId = userOf(ws);
+    if (ws.readyState !== WebSocket.OPEN || ws.allowedMeetingId !== meetingId || !userId || !ws.arloHands) return;
     panels.push({
-      userId: ws.userId,
+      userId,
       zoomRole: ws.arloHands.zoomRole,
       can: [...ws.arloHands.can],
       since: ws.connectedAt,
       send(message) {
-        if (ws.readyState !== WebSocket.OPEN) return false;
+        // Not to a socket whose session ended since it was listed
+        if (ws.readyState !== WebSocket.OPEN || userOf(ws) !== userId) return false;
         try {
           ws.send(JSON.stringify(message));
           return true;
@@ -735,16 +801,19 @@ function broadcastRtmsRequestStatus(meetingId, status) {
 }
 
 /**
- * Close every socket a user has open (they removed the app). The panel
- * reconnects by itself as a plain meeting participant if it is still open.
+ * Close every socket a user has open (they signed out, or removed the app).
+ * Each stops being that user's at once, before the close completes. A panel
+ * that is still open reconnects by itself and, without a session, comes back
+ * as a guest in its meeting.
  */
-function disconnectUser(userId) {
+function disconnectUser(userId, reason = 'App deauthorized') {
   const clients = userConnections.get(userId);
   if (!clients) return 0;
   let closed = 0;
   for (const client of [...clients]) {
+    makeGuest(client);
     try {
-      client.close(4001, 'App deauthorized');
+      client.close(4001, reason === 'Signed out' ? 'Signed out' : 'App deauthorized');
       closed += 1;
     } catch {
       // already closing
@@ -767,8 +836,9 @@ function crossRegisterUser(userId, rtmsMeetingId) {
   }
 
   let count = 0;
-  clients.forEach(ws => {
-    if (ws.readyState === WebSocket.OPEN) {
+  [...clients].forEach(ws => {
+    // Only a socket that is still this user's (userOf drops one whose session ended)
+    if (ws.readyState === WebSocket.OPEN && userOf(ws) === userId) {
       connections.get(rtmsMeetingId).add(ws);
       // Clean up old cross-registration if present
       if (ws.rtmsMeetingId && ws.rtmsMeetingId !== rtmsMeetingId && connections.has(ws.rtmsMeetingId)) {

@@ -282,13 +282,17 @@ test('spoken by someone not verified: the owners get the sheet, and agreeing doe
     kind: 'agent_action',
     askedBy: 'Ben',
     expiresAt: data.expiresAt,
+    expiresInMs: data.expiresInMs,
     question: 'Share the notes with everyone in the meeting?',
     primaryLabel: 'Share notes',
   });
   assert.deepEqual(of(cyPanel, 'arlo.approval'), sheets);
   for (const ws of [benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.approval'), []);
   // a panel that reloads still finds it
-  assert.deepEqual((await call('GET', m.meetingId, 'approvals', { headers: m.owner2 })).body, { approvals: [data] });
+  const listed = (await call('GET', m.meetingId, 'approvals', { headers: m.owner2 })).body;
+  // the same sheet, with the time left when the list was read
+  assert.ok(Number.isInteger(listed.approvals[0].expiresInMs) && listed.approvals[0].expiresInMs <= data.expiresInMs);
+  assert.deepEqual(listed, { approvals: [{ ...data, expiresInMs: listed.approvals[0].expiresInMs }] });
   // waiting, and everyone in the meeting can see that it was asked
   const waiting = (await actions(m, m.guest)).body.actions;
   assert.deepEqual(waiting.map((action) => [action.tool, action.status, action.label, action.askedBy, action.channel]),
@@ -334,7 +338,7 @@ test('"not now" ends a spoken request, and a request for the notes keeps working
   const sheets = of(ownerPanel, 'arlo.approval').map((msg) => msg.data);
   assert.deepEqual(sheets.map((data) => data.kind), ['agent_action', 'share_notes']);
   assert.deepEqual([sheets[0].question, sheets[0].primaryLabel], ['Admit James from the waiting room?', 'Admit James']);
-  assert.deepEqual(Object.keys(sheets[1]), ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt']);
+  assert.deepEqual(Object.keys(sheets[1]), ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt', 'expiresInMs']);
 
   const declined = await call('POST', m.meetingId, `approvals/${sheets[0].id}`, { headers: m.owner, body: { approve: false } });
   assert.deepEqual(declined.body, { id: sheets[0].id, outcome: 'declined' });

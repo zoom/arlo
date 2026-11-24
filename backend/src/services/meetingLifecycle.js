@@ -9,6 +9,7 @@
  *     grace period (a panel knows the meeting is still going; none left
  *     means nobody is there to read the data), or
  *   - the store's age limit passes (sweep), in case no signal ever arrives.
+ * Every one of these also calls `onForget` for the meeting, exactly once.
  *
  * Per meeting this module knows three things: whether the stream is running
  * (told by the rtms service, or implied by a transcript line arriving when
@@ -186,10 +187,29 @@ function createMeetingLifecycle({
     return true;
   }
 
-  /** Age-limit backstop and housekeeping. Returns how many meetings the store deleted. */
+  /**
+   * Age-limit backstop and housekeeping. Returns how many meetings the store deleted.
+   * Each meeting whose data the store deleted is forgotten (onForget) once,
+   * also while a panel is still connected: who ran its streams, its approvals
+   * and the agent's state go with the data, so nothing of the old meeting
+   * owns what is stored under that id afterwards.
+   */
   function sweep() {
-    const deleted = store.sweep();
+    const aged = new Set();
+    const deleted = store.sweep((meetingId) => aged.add(meetingId));
+    for (const meetingId of aged) {
+      const state = meetings.get(meetingId);
+      if (state?.cancel) {
+        state.cancel();
+        state.cancel = null;
+      }
+      // Panels that are still connected stay counted, as in flush()
+      if (state && state.panels === 0) meetings.delete(meetingId);
+      forget(meetingId);
+    }
     for (const [meetingId, state] of meetings) {
+      // Forgotten above already: its state stays only for the panel count
+      if (aged.has(meetingId)) continue;
       // Nothing held and nobody connected: nothing left to decide about
       if (state.panels === 0 && !store.has(meetingId)) {
         if (state.cancel) state.cancel();

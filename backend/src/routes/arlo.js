@@ -36,7 +36,7 @@ const { requireAuth, optionalAuth, requireMeetingAccess } = require('../middlewa
 const { aiLimiter } = require('../middleware/aiLimiter');
 const { getMeetingStore } = require('../storage');
 const { getArloPresence } = require('../services/arloPresence');
-const { getApprovals, approvalMessageData } = require('../services/approvals');
+const { getApprovals, approvalMessageData, msLeft } = require('../services/approvals');
 const { broadcastArloState, sendApprovalOpened } = require('../services/websocket');
 const { shareNotes } = require('../services/notesSharing');
 const { getAgentRuntime } = require('../services/agent');
@@ -339,11 +339,14 @@ router.post('/actions/:actionId/result', requireAuth, requireMeetingAccess, requ
 
 /**
  * POST /notes-request
- * {} -> { id, expiresAt }. A signed-in participant asks the people who brought
- * Arlo in to share the notes with everyone in the meeting. Their panels are
- * asked (`arlo.approval`); when one agrees the server turns sharing on, and
- * the notes then reach the asker like everyone else. 409 `already_shared`
- * when they are shared already.
+ * {} -> { id, expiresAt, expiresInMs }. A signed-in participant asks the people
+ * who brought Arlo in to share the notes with everyone in the meeting. Their
+ * panels are asked (`arlo.approval`); when one agrees the server turns sharing
+ * on, and the notes then reach the asker like everyone else. `expiresInMs` is
+ * the time left by the server's clock. 409 `already_shared` when they are
+ * shared already. 429 `too_soon` when this person asked a moment ago or has a
+ * request open; 429 `too_many_open` when the meeting (or the service) holds as
+ * many open requests as it takes.
  */
 router.post('/notes-request', requireAuth, requireMeetingAccess, requireJson, (req, res) => {
   const meetingId = req.params.zoomMeetingId;
@@ -360,17 +363,20 @@ router.post('/notes-request', requireAuth, requireMeetingAccess, requireJson, (r
   if (presence.stateFor(meetingId, req.user.id).present !== true) {
     return res.status(409).json({ error: 'arlo_absent', message: 'Arlo is not in the meeting right now.' });
   }
-  const opened = getApprovals().open(meetingId, {
+  const opened = getApprovals().tryOpen(meetingId, {
     kind: 'share_notes', askedByUserId: req.user.id, askedByName: accountName(req.user.id),
   });
-  if (!opened) {
+  if (!opened.ok) {
+    if (opened.reason === 'too_many_open') {
+      return res.status(429).json({ error: 'too_many_open', message: 'Too many requests are waiting in this meeting. Try again in a minute.' });
+    }
     return res.status(429).json({ error: 'too_soon', message: 'You asked a moment ago. Try again in a couple of minutes.' });
   }
   // That it happened: never who asked
   console.log('Arlo approval opened (share_notes)');
   const approval = getApprovals().get(meetingId, opened.id);
   if (approval) sendApprovalOpened(meetingId, owners, approvalMessageData(meetingId, approval));
-  return res.json({ id: opened.id, expiresAt: opened.expiresAt });
+  return res.json({ id: opened.id, expiresAt: opened.expiresAt, expiresInMs: msLeft(opened.expiresAt) });
 });
 
 /**
@@ -427,8 +433,9 @@ router.post('/approvals/:approvalId', requireAuth, requireMeetingAccess, require
 
 /**
  * GET /approvals
- * { approvals: [{ meetingId, id, kind, askedBy, expiresAt }] }, oldest first:
- * what an owner's panel that reloads still has to answer. One of kind
+ * { approvals: [{ meetingId, id, kind, askedBy, expiresAt, expiresInMs }] },
+ * oldest first: what an owner's panel that reloads still has to answer, each
+ * with the time left by the server's clock when this was answered. One of kind
  * 'agent_action' also has `question` and `primaryLabel`, the sheet's texts.
  */
 router.get('/approvals', requireAuth, requireMeetingAccess, (req, res) => {

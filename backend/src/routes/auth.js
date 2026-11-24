@@ -20,6 +20,9 @@ const { setRestoreCookie, clearRestoreCookie } = require('../services/sessionRes
 
 const router = express.Router();
 
+// The meeting-access cookie's options, for setting it and for removing it
+const MEETING_ACCESS_COOKIE = Object.freeze({ httpOnly: true, secure: config.secureCookies, sameSite: 'lax' });
+
 // OAuth state is self-validating and the PKCE verifier is derived from it, so a
 // server restart in the middle of a sign-in does not break it (services/oauthState.js).
 
@@ -557,13 +560,23 @@ router.post('/logout', async (req, res) => {
     tokenStore.delete(req.user.id);
     apiTokens.revokeAllFor(req.user.id);
 
-    // Clear session cookie
+    // Their open panels stop being theirs now: the sockets are closed, and a
+    // panel that reconnects comes back as a guest.
+    // Required here: the socket server's neighbours require this module
+    // eslint-disable-next-line global-require
+    require('../services/websocket').disconnectUser(req.user.id, 'Signed out');
+    // That it happened, never who
+    console.log('User signed out: session ended, sockets closed');
+
+    // Clear the session cookies, and the meeting-access cookie with them: it
+    // was issued to the signed-in user. Same options as when each was set.
     res.clearCookie('sessionToken', {
       httpOnly: true,
       secure: config.secureCookies,
       sameSite: 'lax',
     });
     clearRestoreCookie(res);
+    res.clearCookie('meetingAccess', MEETING_ACCESS_COOKIE);
 
     res.json({ message: 'Logged out successfully' });
   } catch (error) {
@@ -634,12 +647,7 @@ router.post('/meeting-access', (req, res) => {
     zoomUserId: verified.zoomUserId,
     userId,
   });
-  res.cookie('meetingAccess', token, {
-    httpOnly: true,
-    secure: config.secureCookies,
-    sameSite: 'lax',
-    maxAge: ACCESS_TOKEN_TTL_MS,
-  });
+  res.cookie('meetingAccess', token, { ...MEETING_ACCESS_COOKIE, maxAge: ACCESS_TOKEN_TTL_MS });
 
   res.json({
     verified: true,

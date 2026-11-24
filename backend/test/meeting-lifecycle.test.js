@@ -418,3 +418,66 @@ test('hasEnded: true after the meeting ended, whatever is reported for it, until
   assert.equal(lifecycle.hasEnded('M3'), false);
   assert.equal(lifecycle.dataReceived('M3'), false); // though its late lines are still refused
 });
+
+test('the age sweep tells whoever keeps state per meeting, once per meeting, also while a panel is connected', () => {
+  const clock = { now: 0 };
+  const store = createMemoryMeetingStore({ now: () => clock.now, maxAgeMs: 1000 });
+  const forgotten = [];
+  const lifecycle = createMeetingLifecycle({
+    store, schedule: () => () => {}, now: () => clock.now, onForget: (meetingId) => forgotten.push(meetingId),
+  });
+  const speak = (meetingId) => {
+    assert.equal(lifecycle.dataReceived(meetingId), true);
+    store.appendSegment(meetingId, { text: 'x' });
+  };
+
+  // a long meeting with a panel open, one nobody watches, and data nothing ever tracked
+  lifecycle.streamStatus('WATCHED', 'rtms_started');
+  speak('WATCHED');
+  lifecycle.panelsChanged('WATCHED', 1);
+  lifecycle.streamStatus('ALONE', 'rtms_started');
+  speak('ALONE');
+  store.appendSegment('UNTRACKED', { text: 'x' });
+
+  assert.equal(lifecycle.sweep(), 0);
+  assert.deepEqual(forgotten, []);
+
+  clock.now = 2000;
+  assert.equal(lifecycle.sweep(), 3);
+  assert.equal(store.has('WATCHED'), false);
+  assert.deepEqual([...forgotten].sort(), ['ALONE', 'UNTRACKED', 'WATCHED']);
+  // the connected panel is still counted; the meeting nobody watches is no longer tracked
+  assert.equal(lifecycle.tracked(), 1);
+
+  // nothing more to forget on the next sweep
+  assert.equal(lifecycle.sweep(), 0);
+  assert.equal(forgotten.length, 3);
+
+  // new lines under the same id start a meeting of their own, forgotten once when its data goes
+  speak('WATCHED');
+  clock.now = 4000;
+  assert.equal(lifecycle.sweep(), 1);
+  assert.deepEqual(forgotten.filter((id) => id === 'WATCHED'), ['WATCHED', 'WATCHED']);
+  assert.equal(lifecycle.sweep(), 0);
+  assert.equal(forgotten.length, 4);
+  // the panel leaves and nothing is held: the meeting is no longer tracked,
+  // and what was learned about it since (a stream may have started) goes too
+  lifecycle.panelsChanged('WATCHED', 0);
+  lifecycle.sweep();
+  assert.equal(lifecycle.tracked(), 0);
+  assert.deepEqual(forgotten.filter((id) => id === 'WATCHED'), ['WATCHED', 'WATCHED', 'WATCHED']);
+});
+
+test('the store\'s sweep names each meeting it deletes', () => {
+  const clock = { now: 0 };
+  const store = createMemoryMeetingStore({ now: () => clock.now, maxAgeMs: 1000 });
+  store.appendSegment('OLD', { text: 'x' });
+  clock.now = 900;
+  store.appendSegment('NEW', { text: 'x' });
+  clock.now = 1500;
+  const named = [];
+  assert.equal(store.sweep((meetingId) => { named.push(meetingId); throw new Error('listener down'); }), 1);
+  assert.deepEqual(named, ['OLD']);
+  assert.equal(store.has('NEW'), true);
+  assert.equal(store.sweep('not a function'), 0);
+});

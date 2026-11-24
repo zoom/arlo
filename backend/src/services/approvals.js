@@ -25,6 +25,11 @@
  * | 'expired', or 'forgotten' when the meeting's data went first. That is how
  * the agent waits for the owners' answer.
  *
+ * open() answers { id, expiresAt } or null. tryOpen() is the same and says why
+ * not: 'too_soon' (this person asked a moment ago or has one open),
+ * 'too_many_open' (the meeting, or the service, holds as many as it takes) or
+ * 'invalid' (not a request).
+ *
  * Kept in memory per meeting and gone with the meeting (`forget`, called from
  * the meeting lifecycle). Bounded: at most `maxPerMeeting` open at once, one
  * 'share_notes' per person every ASK_AGAIN_MS, and a bounded memory of who asked.
@@ -129,29 +134,38 @@ function createApprovals({
     tellOpener(entry, outcome, byUserId);
   }
 
+  const refuse = (reason) => ({ ok: false, reason });
+
   /**
-   * Open an approval. { id, expiresAt } or null when it is refused: an unknown
-   * kind, this person asked a moment ago or has one open, the meeting has
-   * as many open as it takes, or (for 'agent_action') the sheet's texts are
-   * missing or too long.
+   * Open an approval: { ok: true, id, expiresAt }, or { ok: false, reason }:
+   *   'invalid'        an unknown kind, no asker where one is needed, or (for
+   *                    'agent_action') sheet texts that are missing or too long
+   *   'too_soon'       this person asked a moment ago or has one open
+   *   'too_many_open'  the meeting has as many open as it takes, remembers as
+   *                    many askers as it takes, or the service holds as many
+   *                    meetings as it takes
+   * Someone who asked a moment ago hears 'too_soon' also while the meeting is full.
    */
-  function open(meetingId, {
+  function tryOpen(meetingId, {
     kind, askedByUserId, askedByName, question, primaryLabel, onOutcome,
   } = {}) {
-    if (!mayOpen(meetingId, kind, askedByUserId)) return null;
-    if (onOutcome !== undefined && typeof onOutcome !== 'function') return null;
+    if (!isId(meetingId) || !isKind(kind)) return refuse('invalid');
+    const perAsker = ONE_PER_ASKER.has(kind);
+    const noAsker = askedByUserId === null || askedByUserId === undefined;
+    if (!isId(askedByUserId) && (perAsker || !noAsker)) return refuse('invalid');
+    if (onOutcome !== undefined && typeof onOutcome !== 'function') return refuse('invalid');
     const withTexts = WITH_TEXTS.has(kind);
     if (withTexts && (!isSheetText(question, MAX_QUESTION_CHARS) || !isSheetText(primaryLabel, MAX_PRIMARY_LABEL_CHARS))) {
-      return null;
+      return refuse('invalid');
     }
-    const perAsker = ONE_PER_ASKER.has(kind);
+    if (!mayOpen(meetingId, kind, askedByUserId)) return refuse('too_soon');
     let meeting = meetings.get(meetingId);
     if (!meeting) {
-      if (meetings.size >= MAX_MEETINGS) return null;
+      if (meetings.size >= MAX_MEETINGS) return refuse('too_many_open');
       meeting = { open: new Map(), askedAt: new Map() };
     }
     const key = askerKey(kind, askedByUserId);
-    if (meeting.open.size >= maxPerMeeting || (perAsker && !roomForAsker(meeting, key))) return null;
+    if (meeting.open.size >= maxPerMeeting || (perAsker && !roomForAsker(meeting, key))) return refuse('too_many_open');
     meetings.set(meetingId, meeting);
 
     const entry = {
@@ -172,7 +186,13 @@ function createApprovals({
       // Only when it is still the open one: answered or forgotten meanwhile is over
       if (meetings.get(meetingId)?.open.get(entry.id) === entry) close(meetingId, meeting, entry, 'expired');
     }, expiryMs);
-    return { id: entry.id, expiresAt: entry.expiresAt };
+    return { ok: true, id: entry.id, expiresAt: entry.expiresAt };
+  }
+
+  /** As tryOpen(): { id, expiresAt }, or null when it is refused, whatever the reason. */
+  function open(meetingId, request) {
+    const opened = tryOpen(meetingId, request);
+    return opened.ok ? { id: opened.id, expiresAt: opened.expiresAt } : null;
   }
 
   /** The open entry, or null: unknown, closed, or past its time. */
@@ -238,22 +258,33 @@ function createApprovals({
     return { meetings: meetings.size, open: openCount, askers };
   }
 
-  return { open, answer, get, listOpen, mayOpen, forget, size };
+  return {
+    open, tryOpen, answer, get, listOpen, mayOpen, forget, size,
+  };
 }
 
 let instance = null;
 
+/** How long until `expiresAt`, in whole milliseconds, never below zero. */
+const msLeft = (expiresAt, at = Date.now()) => {
+  const left = Math.floor(expiresAt - at);
+  return Number.isFinite(left) && left > 0 ? left : 0;
+};
+
 /**
  * What the panels are told about an open approval: the asker's name, never
- * their id. For 'agent_action' also the sheet's texts (`question`,
- * `primaryLabel`), which the server wrote.
+ * their id. `expiresInMs` is the time left by this server's clock at `at`
+ * (now, when the message is built): a panel counts down from it, so a device
+ * whose clock is off shows the right time. For 'agent_action' also the
+ * sheet's texts (`question`, `primaryLabel`), which the server wrote.
  */
-const approvalMessageData = (meetingId, approval) => ({
+const approvalMessageData = (meetingId, approval, at = Date.now()) => ({
   meetingId,
   id: approval.id,
   kind: approval.kind,
   askedBy: approval.askedByName,
   expiresAt: approval.expiresAt,
+  expiresInMs: msLeft(approval.expiresAt, at),
   ...(WITH_TEXTS.has(approval.kind) && { question: approval.question, primaryLabel: approval.primaryLabel }),
 });
 
@@ -281,5 +312,5 @@ function getApprovals() {
 }
 
 module.exports = {
-  createApprovals, getApprovals, approvalMessageData, APPROVAL_KINDS, ASK_AGAIN_MS,
+  createApprovals, getApprovals, approvalMessageData, msLeft, APPROVAL_KINDS, ASK_AGAIN_MS,
 };

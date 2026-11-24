@@ -103,7 +103,9 @@ Stored lines → notes engine (timer) → notes in the meeting store → `notes.
 **SECURITY:** Meeting data lives in memory only (`backend/src/storage/`) and is never written to disk. `backend/src/services/meetingLifecycle.js` deletes a meeting's data when:
 - Zoom reports the stream stopped because the meeting ended (stop reason 6), or
 - the stream is stopped and no Arlo panel has been connected for `MEETING_FLUSH_GRACE_MS` (default 2 minutes), or
-- it is older than 12 hours.
+- it is older than 12 hours (also while a panel is still connected).
+
+Every one of these calls the lifecycle's `onForget` for the meeting once, so what other services hold per meeting (stream operators, approvals, the notes engine's and the agent's state) goes with the data.
 
 The notes, the "who can ask" setting, whether the notes are shared (`notesShared`), what is known about the meeting's streams (and so who its owners are) and the notes engine's timer go in the same flush. A stop, pause, reconnect or restart inside one meeting keeps the data. A server restart clears everything. A transcript line that arrives within ten minutes after a meeting's data was flushed is dropped, not kept. In the ten minutes after Zoom said a meeting ended, a start or reconnect report for it is ignored too: a meeting UUID that ended does not start again.
 
@@ -196,7 +198,7 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `services/meetingStreams.js` — The streams of each meeting, which one the transcript is taken from, and who ran one
 - `services/arloPresence.js` — Who brought Arlo in (the owners), the "who can ask" setting, and what each panel is told
 - `services/notesEngine.js` — When the live notes are written again, and validation of the model's answer
-- `services/approvals.js` — Requests that an owner answers in their panel (one kind today, `share_notes`: a participant asks the owners to share the notes with everyone; approving turns `notesShared` on, on the server). In memory per meeting, each open for `APPROVAL_EXPIRY_MS` (default one minute), at most 20 open per meeting, one per person every 2 minutes; flushed with the meeting (the lifecycle's `onForget`). Never logs a name or a user id
+- `services/approvals.js` — Requests that an owner answers in their panel (one kind today, `share_notes`: a participant asks the owners to share the notes with everyone; approving turns `notesShared` on, on the server). In memory per meeting, each open for `APPROVAL_EXPIRY_MS` (default one minute), at most 20 open per meeting, one per person every 2 minutes; flushed with the meeting (the lifecycle's `onForget`). `tryOpen()` says why a request is refused (`too_soon`, `too_many_open`, `invalid`). Never logs a name or a user id
 - `routes/arlo.js` — Arlo's routes for one meeting (state, settings, notes, ask, notes-request, approvals)
 - `routes/` — auth, meetings, arlo, ai, home, rtms, search, highlights, zoom-meetings, preferences, tokens
 - `services/` — auth (token/PKCE/encryption), openrouter (LLM), websocket (broadcast)
@@ -254,7 +256,7 @@ import { Tabs } from '@base-ui/react/tabs';
 - `POST /api/auth/callback` — Exchange code for tokens (in-client PKCE)
 - `GET /api/auth/me` — Get current authenticated user
 - `GET /api/auth/settings` — Get server settings and feature flags
-- `POST /api/auth/logout` — Clear session
+- `POST /api/auth/logout` — Clear session: removes the `sessionToken`, `sessionRestore` and `meetingAccess` cookies and closes the user's open sockets (code 4001). A panel that stays open asks for meeting access again and reconnects as a guest
 
 ### API tokens and RTMS REST testing
 Arlo can act as a test proxy for Zoom's RTMS REST API. A script authenticates with a short-lived API token (`Authorization: Bearer arlo_…`) instead of a browser session.
@@ -269,9 +271,9 @@ All under `/api/meetings/by-zoom-id/:zoomMeetingId/arlo`. Every route needs the 
 - `PUT /settings` — `{ whoCanAsk?: 'owner' | 'anyone', displayName?, shareNotes?: boolean }`, at least one and nothing else, owners only. `shareNotes: true` shares the live notes with everyone in the meeting who has Arlo open (and sends them the notes so far at once); `false` stops it. Every panel of the meeting is told over its socket
 - `GET /notes` — `{ notes: { summary, decisions, actionItems, updatedAt, throughSeqNo } | null }`. Owners always. Anyone else with the meeting-access cookie for this meeting (a guest too: no session needed) only while `notesShared` is true; 403 otherwise
 - `POST /ask` — `{ question }` (1 to 500 characters) → `{ answer }`, from the stored transcript, private to the asker. For an owner, and for other signed-in people in the meeting when the setting is `anyone`. Shares the AI rate limit. Takes no transcript and no model from the client; questions and answers are not stored or logged
-- `POST /notes-request` — body `{}` → `{ id, expiresAt }`. A signed-in participant asks the owners to share the notes with everyone. 400 for an owner (they have the notes), 409 `{ error: 'no_owner' }` when nobody brought Arlo in, 409 `{ error: 'already_shared' }` when the notes are shared already, 409 `{ error: 'arlo_absent' }` when Arlo is not in the meeting right now, 429 when this person asked in the last 2 minutes or has a request open. Opens an approval (`services/approvals.js`) and tells the owners' panels. The server never posts to the chat; the asker gets the notes like everyone else once an owner agrees; the asker's name is never logged
+- `POST /notes-request` — body `{}` → `{ id, expiresAt, expiresInMs }` (`expiresInMs`: the time left by the server's clock). A signed-in participant asks the owners to share the notes with everyone. 400 for an owner (they have the notes), 409 `{ error: 'no_owner' }` when nobody brought Arlo in, 409 `{ error: 'already_shared' }` when the notes are shared already, 409 `{ error: 'arlo_absent' }` when Arlo is not in the meeting right now, 429 `{ error: 'too_soon' }` when this person asked in the last 2 minutes or has a request open, 429 `{ error: 'too_many_open' }` when the meeting has as many requests open as it takes (20) or the service is at its meeting cap. Opens an approval (`services/approvals.js`) and tells the owners' panels. The server never posts to the chat; the asker gets the notes like everyone else once an owner agrees; the asker's name is never logged
 - `POST /approvals/:approvalId` — owners only (403), id a UUID. `{ approve: false }` → declined; `{ approve: true }` → approved: the server turns `notesShared` on (the same code path as the setting). A boolean `done` is accepted and ignored; `failed` only if the server could not turn sharing on. → `{ id, outcome }`. The first answer wins; 404 when unknown, closed, expired, or the meeting's data is gone
-- `GET /approvals` — owners only: `{ approvals: [{ meetingId, id, kind, askedBy, expiresAt }] }`, oldest first, so a panel that reloads still shows a pending sheet
+- `GET /approvals` — owners only: `{ approvals: [{ meetingId, id, kind, askedBy, expiresAt, expiresInMs }] }` (`expiresInMs` computed when the list is read), oldest first, so a panel that reloads still shows a pending sheet
 - The three routes above take JSON only (415 otherwise) and exactly the fields listed (400 otherwise)
 - `GET /api/meetings/by-zoom-id/:id/transcript` and `/participant-events` — what the server holds so far (catch-up and the meeting record)
 
@@ -297,6 +299,8 @@ All under `/api/meetings/by-zoom-id/:zoomMeetingId/arlo`. Every route needs the 
 
 **Security:** every WebSocket connection is authenticated by httpOnly cookies sent on the handshake (`meetingAccess`, plus `sessionToken` for signed-in users). No token goes in the URL.
 
+The two cookies answer different questions. `meetingAccess` says which meeting the socket is in and nothing else: a user id inside that token never makes the socket that user. Who the socket is comes only from a valid session (`sessionToken`, verified as the HTTP middleware verifies it: signature, expiry, not deauthorized, user restored from `sessionRestore` after a restart); without one it is a guest's socket (role `participant`, no owner-only messages, no hands). A session can end while its socket stays open: `userOf(ws)` in `services/websocket.js` checks the session's expiry time and the deauthorized list (both in memory, no token is verified again) every time the socket's user is read, and on the 30-second heartbeat; a socket whose session ended becomes a guest's on the spot and gets a new `arlo.state`. Logout and `app_deauthorized` close the user's sockets (4001).
+
 ```
 Connection: ws://host/ws?meeting_id={uuid}   (cookies authenticate; the server binds the socket to the verified meeting)
 Client → Server: { type: 'subscribe', meetingId: 'uuid' }
@@ -305,7 +309,7 @@ Server → Client: { type: 'ai.suggestion', data: { meetingId, suggestion: {...}
 Server → Client: { type: 'meeting.status', data: { meetingId, status: '...', fault?: true, meetingEnded?: true } }
 Server → Client: { type: 'arlo.state', data: { meetingId, present, paused, myStreamPaused?, myStreamLive?, role, ownerName, whoCanAsk, notesShared } }
 Server → Client: { type: 'notes.updated', data: { meetingId, notes } }
-Server → Client: { type: 'arlo.approval', data: { meetingId, id, kind: 'share_notes', askedBy: name | null, expiresAt } }
+Server → Client: { type: 'arlo.approval', data: { meetingId, id, kind: 'share_notes', askedBy: name | null, expiresAt, expiresInMs } }   (expiresInMs: time left by the server's clock when sent)
 Server → Client: { type: 'arlo.approval.closed', data: { meetingId, id, outcome: 'approved' | 'declined' | 'failed' | 'expired' } }
 Server → Client: { type: 'participant.event', data: { meetingId, event: {...} } }
 ```
@@ -359,7 +363,7 @@ MEETING_FLUSH_GRACE_MS=120000   # Whole milliseconds, 100 to 3600000. How long a
 4. **SDK Capabilities** — See `.claude/skills/zoom-apps/02-sdk-setup.md`
 5. **Home URL** — Your ngrok/production URL
 6. **Event Subscriptions** — `meeting.rtms_started`, `meeting.rtms_stopped`, `meeting.rtms_interrupted`; optional `rtms.request_status` (shows why a stream request failed). Endpoint: `https://{your-domain}/api/rtms/webhook`
-7. **Deauthorization Notification Endpoint URL** — the same `https://{your-domain}/api/rtms/webhook`. On `app_deauthorized` the server deletes the user's record and tokens and ends their session.
+7. **Deauthorization Notification Endpoint URL** — the same `https://{your-domain}/api/rtms/webhook`. On `app_deauthorized` the server deletes the user's record and tokens, ends their session and closes their open sockets; a panel that reconnects is a guest.
 
 ## Security (Demo Mode)
 
@@ -372,7 +376,7 @@ This demo mode version prioritizes security by never storing customer data:
 - **Session cookies** — httpOnly, secure, SameSite=lax. Three kinds that cannot stand in for each other: `sessionToken` (who you are), `meetingAccess` (which meeting you are in), `sessionRestore` (encrypted, rebuilds a session after a restart)
 - **HMAC verification** — All Zoom webhooks verified with timing-safe comparisons
 - **Rate limiting** — Global, auth, and AI endpoint limits via `express-rate-limit`
-- **WebSocket auth** — verified meeting-access cookie required for all connections
+- **WebSocket auth** — verified meeting-access cookie required for all connections; it grants the meeting only. A socket is a signed-in user only through a valid session, re-checked whenever its user is read
 
 **Privacy Notice:** Arlo keeps a meeting's transcript and notes in memory while the meeting is running, and they are deleted when the meeting ends. Nothing is written to disk or kept between meetings. Transcript text is sent to the configured AI provider to produce notes and answers; that provider's retention terms apply to what it receives.
 

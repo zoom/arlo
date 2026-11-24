@@ -216,6 +216,7 @@ test('someone who is not an owner types, anyone may ask: answers at once, change
     kind: 'agent_action',
     askedBy: 'Ben Okafor',
     expiresAt: s.now() + 60000,
+    expiresInMs: 60000,
     question: 'Admit James from the waiting room?',
     primaryLabel: 'Admit James',
   });

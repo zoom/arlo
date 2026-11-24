@@ -439,7 +439,7 @@ function createAgent({
       };
     }
     const approval = approvals.get(meetingId, opened.id);
-    if (approval) tellPanels('approval', meetingId, ownersOf(meetingId), approvalMessageData(meetingId, approval));
+    if (approval) tellPanels('approval', meetingId, ownersOf(meetingId), approvalMessageData(meetingId, approval, now()));
     log.log(`Arlo agent: ${tool.name} waiting for approval (${req.channel})`);
     return { status: 'waiting_approval', tool: tool.name, action };
   }

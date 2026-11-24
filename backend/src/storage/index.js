@@ -37,7 +37,8 @@
  *   listActions(meetingId)            -> action[], oldest first
  *   has(meetingId)                    -> boolean
  *   deleteMeeting(meetingId)          -> boolean
- *   sweep()                           -> number of meetings deleted
+ *   sweep(onDeleted?)                 -> number of meetings deleted; `onDeleted(meetingId)` is called
+ *                                        for each, so state kept elsewhere per meeting can go with it
  *   size()                            -> number of meetings held
  *
  * setNotes, setMeta, setIdentity, addIdentityCheck, appendAction and updateAction only work for a meeting already held (a segment or event

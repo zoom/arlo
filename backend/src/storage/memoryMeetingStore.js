@@ -373,14 +373,22 @@ function createMemoryMeetingStore(options = {}) {
    * Delete meetings older than the age limit, counted from when the meeting's
    * first line arrived. This is a hard ceiling on how long anything is held,
    * so it applies to a meeting that is still running too.
-   * Returns how many were deleted.
+   * Returns how many were deleted. `onDeleted(meetingId)`, when given, is
+   * called for each one after it is gone; what it throws is ignored.
    */
-  function sweep() {
+  function sweep(onDeleted) {
     let deleted = 0;
     for (const [meetingId, entry] of meetings) {
       if (now() - entry.createdAt > limits.maxAgeMs) {
         meetings.delete(meetingId);
         deleted += 1;
+        if (typeof onDeleted === 'function') {
+          try {
+            onDeleted(meetingId);
+          } catch {
+            // A listener must never stop the sweep
+          }
+        }
       }
     }
     return deleted;

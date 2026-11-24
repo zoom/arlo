@@ -241,7 +241,7 @@ const agentAsk = (approvals, extra = {}, meetingId = M) => approvals.open(meetin
 });
 
 test('agent_action: carries the sheet\'s texts, needs no user id, and is not limited per asker', () => {
-  const { approvals } = setup();
+  const { approvals, clock } = setup();
   const first = agentAsk(approvals);
   assert.match(first.id, UUID);
   assert.deepEqual(approvals.get(M, first.id), {
@@ -263,12 +263,13 @@ test('agent_action: carries the sheet\'s texts, needs no user id, and is not lim
   assert.notEqual(ask(approvals, 'user-ben'), null);
   assert.equal(ask(approvals, 'user-ben'), null);
 
-  assert.deepEqual(approvalMessageData(M, approvals.get(M, first.id)), {
+  assert.deepEqual(approvalMessageData(M, approvals.get(M, first.id), clock()), {
     meetingId: M,
     id: first.id,
     kind: 'agent_action',
     askedBy: 'James',
     expiresAt: first.expiresAt,
+    expiresInMs: 60000,
     question: 'Admit James from the waiting room?',
     primaryLabel: 'Admit James',
   });
@@ -293,7 +294,7 @@ test('share_notes keeps its shape: texts given to it are not kept', () => {
     kind: 'share_notes', askedByUserId: 'user-ben', askedByName: 'Ben', question: 'Do anything?', primaryLabel: 'Yes',
   });
   assert.deepEqual(Object.keys(approvals.get(M, opened.id)), ['id', 'kind', 'askedByUserId', 'askedByName', 'expiresAt']);
-  assert.deepEqual(Object.keys(approvalMessageData(M, approvals.get(M, opened.id))), ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt']);
+  assert.deepEqual(Object.keys(approvalMessageData(M, approvals.get(M, opened.id))), ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt', 'expiresInMs']);
 });
 
 test('whoever opened an approval is told once how it ended, and by whom', () => {
@@ -331,4 +332,55 @@ test('a listener that throws does not undo a close', () => {
   assert.equal(approvals.answer(M, opened.id, { byUserId: 'user-ana', approve: false }), 'declined');
   assert.equal(approvals.get(M, opened.id), null);
   assert.equal(closed.length, 1);
+});
+
+test('what the panels are told carries the time left by the server\'s clock, a whole number never below zero', () => {
+  const { approvals, clock } = setup();
+  const opened = ask(approvals);
+  const approval = approvals.get(M, opened.id);
+  assert.equal(approvalMessageData(M, approval, clock()).expiresInMs, 60000);
+  assert.equal(approvalMessageData(M, approval, clock() + 12345.6).expiresInMs, 47654);
+  assert.equal(approvalMessageData(M, approval, clock() + 60000).expiresInMs, 0);
+  assert.equal(approvalMessageData(M, approval, clock() + 999999).expiresInMs, 0);
+  // without a time: this machine's clock, now
+  const left = approvalMessageData(M, { ...approval, expiresAt: Date.now() + 5000 }).expiresInMs;
+  assert.ok(Number.isInteger(left) && left > 4000 && left <= 5000);
+  // an agent's sheet has it too, before its texts
+  const sheet = approvals.open(M, { kind: 'agent_action', askedByName: 'Ben', question: 'Do it?', primaryLabel: 'Do it' });
+  assert.deepEqual(
+    Object.keys(approvalMessageData(M, approvals.get(M, sheet.id), clock())),
+    ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt', 'expiresInMs', 'question', 'primaryLabel'],
+  );
+});
+
+test('tryOpen says why a request is refused: asked a moment ago, too many open, or not a request', () => {
+  const { approvals, advance } = setup({ maxPerMeeting: 2, maxAskersPerMeeting: 3 });
+  const first = approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-ben', askedByName: 'Ben' });
+  assert.deepEqual(Object.keys(first), ['ok', 'id', 'expiresAt']);
+  assert.equal(first.ok, true);
+  assert.equal(approvals.get(M, first.id).id, first.id);
+  const again = { kind: 'share_notes', askedByUserId: 'user-ben', askedByName: 'Ben' };
+  // has one open
+  assert.deepEqual(approvals.tryOpen(M, again), { ok: false, reason: 'too_soon' });
+  assert.equal(approvals.open(M, again), null);
+  // not a request at all
+  assert.deepEqual(approvals.tryOpen(M, { kind: 'nope', askedByUserId: 'user-dee' }), { ok: false, reason: 'invalid' });
+  assert.deepEqual(approvals.tryOpen(M, { kind: 'share_notes' }), { ok: false, reason: 'invalid' });
+  assert.deepEqual(approvals.tryOpen(M, { kind: 'agent_action' }), { ok: false, reason: 'invalid' });
+  assert.deepEqual(approvals.tryOpen('', again), { ok: false, reason: 'invalid' });
+  // the meeting has as many open as it takes
+  assert.equal(approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-dee' }).ok, true);
+  assert.deepEqual(approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-eve' }), { ok: false, reason: 'too_many_open' });
+  assert.deepEqual(
+    approvals.tryOpen(M, { kind: 'agent_action', question: 'Do it?', primaryLabel: 'Do it' }),
+    { ok: false, reason: 'too_many_open' },
+  );
+  // someone who asked a moment ago hears that, also while the meeting is full
+  assert.deepEqual(approvals.tryOpen(M, again), { ok: false, reason: 'too_soon' });
+  // closed, and still within two minutes
+  advance(60000);
+  assert.deepEqual(approvals.tryOpen(M, again), { ok: false, reason: 'too_soon' });
+  // the memory of who asked is full: a cap, not this person's own doing
+  assert.equal(approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-eve' }).ok, true);
+  assert.deepEqual(approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-fay' }), { ok: false, reason: 'too_many_open' });
 });

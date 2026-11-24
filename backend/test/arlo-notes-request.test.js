@@ -137,14 +137,22 @@ test('a request opens an approval and only the owners\' panels are told, with th
   const res = await requestNotes(m);
   assert.equal(res.status, 200);
   assert.equal(res.cache, 'no-store');
-  assert.deepEqual(Object.keys(res.body), ['id', 'expiresAt']);
+  assert.deepEqual(Object.keys(res.body), ['id', 'expiresAt', 'expiresInMs']);
   assert.match(res.body.id, UUID);
   assert.ok(res.body.expiresAt >= before + 60000 && res.body.expiresAt <= Date.now() + 60000);
+  // the time left by the server's clock, for a panel whose own clock is off
+  assert.ok(Number.isInteger(res.body.expiresInMs) && res.body.expiresInMs > 59000 && res.body.expiresInMs <= 60000);
   await h.wait(100);
 
-  assert.deepEqual(approvalMessages(ownerPanel), [{
+  const told = approvalMessages(ownerPanel);
+  assert.equal(told.length, 1);
+  const leftWhenSent = told[0].data.expiresInMs;
+  assert.ok(Number.isInteger(leftWhenSent) && leftWhenSent > 59000 && leftWhenSent <= 60000);
+  assert.deepEqual(told, [{
     type: 'arlo.approval',
-    data: { meetingId: m.meetingId, id: res.body.id, kind: 'share_notes', askedBy: 'Ben Okafor', expiresAt: res.body.expiresAt },
+    data: {
+      meetingId: m.meetingId, id: res.body.id, kind: 'share_notes', askedBy: 'Ben Okafor', expiresAt: res.body.expiresAt, expiresInMs: leftWhenSent,
+    },
   }]);
   for (const ws of [askerPanel, thirdPanel, guestPanel]) assert.deepEqual(approvalMessages(ws), []);
   closeAll(ownerPanel, askerPanel, thirdPanel, guestPanel);
@@ -257,6 +265,28 @@ test('one request per person per meeting: 429 while it is open and for two minut
   assert.equal((await call('POST', other.meetingId, 'notes-request', { headers: cookies(other.pass, m.ben.session), body: {} })).status, 200);
 });
 
+test('429 too_many_open when the meeting has as many requests open as it takes; "asked a moment ago" stays too_soon', async () => {
+  const m = await meetingWith('NR-FULL==');
+  const mine = await requestNotes(m);
+  assert.equal(mine.status, 200);
+  // the meeting fills up with other requests (Arlo's own sheets count too)
+  let opened = 1;
+  while (getApprovals().open(m.meetingId, { kind: 'agent_action', askedByName: null, question: 'Do it?', primaryLabel: 'Do it' })) opened += 1;
+  assert.equal(opened, 20);
+
+  const full = await requestNotes(m, m.third);
+  assert.equal(full.status, 429);
+  assert.equal(full.cache, 'no-store');
+  assert.deepEqual(full.body, { error: 'too_many_open', message: 'Too many requests are waiting in this meeting. Try again in a minute.' });
+  // the one who has a request open is told that, not that the meeting is full
+  const again = await requestNotes(m);
+  assert.equal(again.status, 429);
+  assert.deepEqual(again.body, { error: 'too_soon', message: 'You asked a moment ago. Try again in a couple of minutes.' });
+  // Dee was not counted as having asked: when there is room, she can
+  getApprovals().forget(m.meetingId);
+  assert.equal((await requestNotes(m, m.third)).status, 200);
+});
+
 test('only an owner answers; the answer is { approve } for a UUID, and a boolean done is ignored', async () => {
   const m = await meetingWith('NR-ANSWER-GUARD==');
   const { id } = (await requestNotes(m)).body;
@@ -365,13 +395,17 @@ test('an owner\'s panel that reloads reads the open approvals', async () => {
   const first = (await requestNotes(m)).body;
   const second = (await requestNotes(m, m.third)).body;
 
+  await h.wait(120);
   const list = await call('GET', m.meetingId, 'approvals', { headers: m.owner2 });
   assert.equal(list.status, 200);
   assert.equal(list.cache, 'no-store');
+  // each with the time left when the list was read: less than when it was opened
+  const left = list.body.approvals.map((one) => one.expiresInMs);
+  for (const ms of left) assert.ok(Number.isInteger(ms) && ms > 58000 && ms <= 60000 - 100, String(ms));
   assert.deepEqual(list.body, {
     approvals: [
-      { meetingId: m.meetingId, id: first.id, kind: 'share_notes', askedBy: 'Ben Okafor', expiresAt: first.expiresAt },
-      { meetingId: m.meetingId, id: second.id, kind: 'share_notes', askedBy: 'Dee Marsh', expiresAt: second.expiresAt },
+      { meetingId: m.meetingId, id: first.id, kind: 'share_notes', askedBy: 'Ben Okafor', expiresAt: first.expiresAt, expiresInMs: left[0] },
+      { meetingId: m.meetingId, id: second.id, kind: 'share_notes', askedBy: 'Dee Marsh', expiresAt: second.expiresAt, expiresInMs: left[1] },
     ],
   });
   await answer(m, first.id, { approve: false });
