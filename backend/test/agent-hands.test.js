@@ -905,14 +905,32 @@ test('forgetting a meeting through the runtime ends what its hands and its detec
 const ALL_HANDS = { zoomRole: 'host', can: ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant'] };
 const state = (m, headers = m.owner) => call('GET', m.meetingId, 'state', { headers });
 
-test('"invite everyone": the notes are shared the one way they ever are, then the owner\'s panel is sent the invitation', async () => {
+const OWN_SHEET = 'Check the request on your screen and confirm it.';
+const OWNERS_ASKED = 'I asked the person who brought Arlo in to approve that.';
+const approveSheet = (m, id, headers = m.owner) => call('POST', m.meetingId, `approvals/${id}`, { headers, body: { approve: true } });
+const sheetSent = async (ws, n = 1) => (await until(() => (of(ws, 'arlo.approval').length >= n ? of(ws, 'arlo.approval')[n - 1] : null))).data;
+const didEnd = (ws, id) => until(() => of(ws, 'arlo.did').map((msg) => msg.data.action).find((action) => action.id === id && action.status !== 'waiting_approval'));
+
+test('"invite everyone", typed by the owner: the sheet first, then the notes are shared the one way they ever are and the owner\'s panel is sent the invitation', async () => {
   const m = await meetingWith('AH-INVITE==');
   const ownerPanel = await panel(m.meetingId, m.owner, ALL_HANDS);
   const benPanel = await panel(m.meetingId, m.participant, ALL_HANDS);
   pick = async () => ({ tool: 'invite_everyone', args: {} });
   assert.equal((await state(m)).body.notesShared, false);
 
-  const asking = ask(m, 'Invite everyone to see the notes');
+  // the owner's own words, and still the sheet: it shares the notes too
+  const asked = await ask(m, 'Invite everyone to see the notes');
+  assert.deepEqual(asked.body, {
+    answer: OWN_SHEET,
+    action: { id: asked.body.action.id, tool: 'invite_everyone', status: 'waiting_approval', label: 'Asked to share the notes and invite everyone to open Arlo' },
+  });
+  const sheet = await sheetSent(ownerPanel);
+  assert.deepEqual([sheet.question, sheet.primaryLabel], ['Share the notes and invite everyone to open Arlo?', 'Share and invite']);
+  await h.wait(50);
+  assert.equal((await state(m)).body.notesShared, false);
+  assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
+
+  assert.equal((await approveSheet(m, sheet.id)).status, 200);
   const sent = await actionSent(ownerPanel);
   assert.deepEqual(sent, { meetingId: m.meetingId, actionId: sent.actionId, tool: 'invite_everyone', args: {} });
   // by the time the panel is asked to invite, sharing is on, and everyone's panel was told
@@ -921,34 +939,45 @@ test('"invite everyone": the notes are shared the one way they ever are, then th
   assert.deepEqual(of(benPanel, 'arlo.action'), []);
 
   assert.equal((await report(m, sent.actionId, { ok: true })).status, 200);
-  const done = await asking;
-  assert.deepEqual(done.body, {
-    answer: 'Done: shared the notes and invited everyone to open Arlo.',
-    action: { id: done.body.action.id, tool: 'invite_everyone', status: 'done', label: 'Shared the notes and invited everyone to open Arlo' },
-  });
+  const done = await didEnd(ownerPanel, asked.body.action.id);
+  assert.deepEqual([done.status, done.label], ['done', 'Shared the notes and invited everyone to open Arlo']);
 
-  // shared already: only the invitation. The panel fails: sharing stays on, and the answer says both halves
-  const again = ask(m, 'invite everyone again');
+  // shared already: only the invitation. The panel fails: sharing stays on, and the record says both halves
+  const again = await ask(m, 'invite everyone again');
+  assert.equal((await approveSheet(m, (await sheetSent(ownerPanel, 2)).id)).status, 200);
   const second = await actionSent(ownerPanel, 2);
   assert.equal(second.tool, 'invite_everyone');
   assert.equal((await report(m, second.actionId, { ok: false, code: 'unsupported' })).status, 200);
-  const failed = await again;
-  const notSent = 'Shared the notes. Couldn\'t send the invitation.';
-  assert.deepEqual(failed.body, { answer: notSent, action: { id: failed.body.action.id, tool: 'invite_everyone', status: 'failed', label: notSent } });
+  const failed = await didEnd(ownerPanel, again.body.action.id);
+  assert.deepEqual([failed.status, failed.label], ['failed', 'Shared the notes. Couldn\'t send the invitation.']);
   assert.equal((await state(m)).body.notesShared, true);
   closeAll(ownerPanel, benPanel);
 });
 
-test('"invite everyone" with no panel that can: the notes are shared, and the answer says the invitation was not sent', async () => {
+test('"invite everyone" with no panel that can: nothing is shared, and the record says to open Arlo', async () => {
   const m = await meetingWith('AH-INVITE-NOPANEL==');
   // a panel that did not announce inviting (an older panel)
   const ownerPanel = await panel(m.meetingId, m.owner, HOST);
   pick = async () => ({ tool: 'invite_everyone', args: {} });
-  const res = await ask(m, 'invite everyone');
-  const notSent = 'Shared the notes. Couldn\'t send the invitation.';
-  assert.deepEqual([res.body.answer, res.body.action.status, res.body.action.label], [notSent, 'failed', notSent]);
+  const asked = await ask(m, 'invite everyone');
+  assert.equal(asked.body.action.status, 'waiting_approval');
+  assert.equal((await approveSheet(m, (await sheetSent(ownerPanel)).id)).status, 200);
+  const failed = await didEnd(ownerPanel, asked.body.action.id);
+  assert.deepEqual([failed.status, failed.label], ['failed', 'Open Arlo to let it do that.']);
   assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
-  assert.equal((await state(m)).body.notesShared, true);
+  assert.equal((await state(m)).body.notesShared, false);
+  closeAll(ownerPanel);
+});
+
+test('what the asker is told while a sheet waits: an owner looks at their own screen, anyone else is told the owners were asked', async () => {
+  const m = await meetingWith('AH-SHEET-WORDS==');
+  const ownerPanel = await panel(m.meetingId, m.owner, ALL_HANDS);
+  assert.equal((await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: { whoCanAsk: 'anyone' } })).status, 200);
+  pick = async () => ({ tool: 'share_notes', args: {} });
+  // an owner, and what the model picked is not in what they typed
+  assert.equal((await ask(m, 'what did we decide?')).body.answer, OWN_SHEET);
+  // someone who is not an owner
+  assert.equal((await ask(m, 'share the notes', m.participant)).body.answer, OWNERS_ASKED);
   closeAll(ownerPanel);
 });
 
@@ -990,6 +1019,7 @@ test('a reaction and a mute through the panel: the arguments the panel gets, and
   const before = of(ownerPanel, 'arlo.action').length;
   const unmute = await ask(m, 'unmute Danny');
   assert.equal(unmute.body.action.status, 'waiting_approval');
+  assert.equal(unmute.body.answer, OWN_SHEET);
   await h.wait(50);
   assert.equal(of(ownerPanel, 'arlo.action').length, before);
   const sheet = of(ownerPanel, 'arlo.approval').at(-1).data;

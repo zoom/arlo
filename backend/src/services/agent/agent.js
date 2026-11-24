@@ -42,8 +42,9 @@
  *   3. The policy (services/agent/policy.js) says what happens: run, ask the
  *      owners, refuse, or stay silent. The model has no say in it. A tool
  *      that changes the meeting runs for an owner's typed request only when
- *      what it would do is in what the owner typed (typedRequestCovers);
- *      otherwise the owner gets the sheet too.
+ *      what it would do is in what the owner typed (typedRequestCovers,
+ *      read from the cleaned request the model was given); otherwise the
+ *      owner gets the sheet too.
  *   4. A typed request that only reads (an answer, a summary) runs and its
  *      text is returned to the caller, private to the asker.
  *   5. A spoken request that only reads: the text is written first, cleaned,
@@ -64,10 +65,13 @@
  *      that owner has no panel that can do it, it fails as 'no_hands'. A
  *      sheet for a tool that needs a host's panel (admitting, muting) is put
  *      only to the owners who have one open; with none there is no sheet and
- *      it fails at once. Inviting everyone is both: the server shares the
- *      notes first (the same way as for share_notes), then that owner's
- *      panel sends the invitation; when the panel does not, the notes stay
- *      shared and the action ends as failed, saying both. Opening a ticket
+ *      it fails at once. Inviting everyone is both, and always after the
+ *      sheet, also for an owner's typed request: when no panel of the owner
+ *      who agreed announced that it can invite, it fails as 'no_hands' and
+ *      nothing is shared; otherwise the server shares the notes first (the
+ *      same way as for share_notes), then that owner's panel sends the
+ *      invitation; when the panel does not, the notes stay shared and the
+ *      action ends as failed, saying both. Opening a ticket
  *      sends that owner's panel one URL, built here from the deployment's
  *      Jira base URL and the key the tool table rebuilt (lib/jira.js); when
  *      the panel opened it and could not bring up the share dialog
@@ -102,7 +106,8 @@
  *   { status: 'none' }             a spoken request no tool fits, or one nobody's panel could show
  *   { status: 'answered', tool, answer, action }  typed only: the text, for the asker
  *   { status: 'done', tool, reply, action }       `reply`: a sentence for the asker's panel
- *   { status: 'waiting_approval', tool, action }
+ *   { status: 'waiting_approval', tool, action, askerIsAsked }  `askerIsAsked`: the sheet is on
+ *                                  the panel of the owner who typed the request
  *   { status: 'failed', tool, code, action, reply? }  `reply`: a sentence for the asker's panel,
  *                                  when this failure has one of its own (services/agent/texts.js)
  * `action` is the stored action, or null when the record is full.
@@ -518,10 +523,15 @@ function createAgent({
             ? { ok: true }
             : { ok: false, code: 'not_allowed' };
         case 'invite_everyone': {
-          // Two things, in this order. The notes are shared first, the same
-          // way share_notes does it and as the same owner ("it was so
-          // already" counts); when that cannot be done nothing goes to a panel
-          if (!isId(actorUserId) || shareNotes(meetingId, actorUserId) !== true) return { ok: false, code: 'not_allowed' };
+          // Two things, in this order, and only after an owner agreed on the
+          // sheet. Before anything is shared: a panel of that owner must be
+          // able to send the invitation, or nothing is done at all
+          if (!isId(actorUserId)) return { ok: false, code: 'not_allowed' };
+          if (!hostsAmong(meetingId, tool.name).includes(actorUserId)) return { ok: false, code: 'no_hands' };
+          // The notes are shared first, the same way share_notes does it and
+          // as the same owner ("it was so already" counts); when that cannot
+          // be done nothing goes to a panel
+          if (shareNotes(meetingId, actorUserId) !== true) return { ok: false, code: 'not_allowed' };
           const invited = await viaHands(meetingId, { tool: tool.name, args }, actorUserId);
           // The invitation was not sent: the notes stay shared, and the outcome says both
           return invited.ok ? invited : { ok: false, code: invited.code, sharedOnly: true };
@@ -713,7 +723,12 @@ function createAgent({
     const approval = approvals.get(meetingId, opened.id);
     if (approval) tellPanels('approval', meetingId, audience, approvalMessageData(meetingId, approval, now()));
     log.log(`Arlo agent: ${tool.name} waiting for approval (${req.channel})`);
-    return { status: 'waiting_approval', tool: tool.name, action };
+    // Whether the sheet is on the panel of the person who typed the request:
+    // an owner who is among those asked. Then they are told to look at it
+    const askerIsAsked = req.channel === 'panel' && audience.includes(req.userId);
+    return {
+      status: 'waiting_approval', tool: tool.name, action, askerIsAsked,
+    };
   }
 
   /**
@@ -812,7 +827,8 @@ function createAgent({
     if (outcome === 'refuse') return tool === null ? { status: 'none' } : refused('not_allowed');
     // An owner typed it, but a model wrote what would be done: when that is
     // not in the owner's own words, they get the sheet like anyone else
-    if (outcome === 'run' && tool.changesMeeting && !typedRequestCovers(req.text, tool.name, args)) outcome = 'sheet';
+    // (read from the request as the model got it: cleaned, nothing invisible in it)
+    if (outcome === 'run' && tool.changesMeeting && (request === null || !typedRequestCovers(request, tool.name, args))) outcome = 'sheet';
 
     const ctx = {
       meetingId,

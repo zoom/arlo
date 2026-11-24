@@ -290,6 +290,8 @@ const TOO_MANY_WAITING_LABEL = 'Too many requests are waiting';
 const REPLIES = Object.freeze({
   none: 'I didn\'t catch a request.',
   waitingApproval: 'I asked the person who brought Arlo in to approve that.',
+  // The asker is an owner and the sheet is on their own panel
+  waitingApprovalOwn: 'Check the request on your screen and confirm it.',
 });
 
 /**

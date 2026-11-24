@@ -282,7 +282,11 @@ router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, a
     case 'done':
       return res.json({ answer: result.reply, ...actionSummary(result.action) });
     case 'waiting_approval':
-      return res.json({ answer: REPLIES.waitingApproval, ...actionSummary(result.action) });
+      // An owner who gets the sheet themselves is told to look at it; anyone else, that the owners were asked
+      return res.json({
+        answer: result.askerIsAsked === true ? REPLIES.waitingApprovalOwn : REPLIES.waitingApproval,
+        ...actionSummary(result.action),
+      });
     case 'none':
       // Not reached for text that passed the checks above; kept as the answer to nothing
       return res.json({ answer: REPLIES.none });

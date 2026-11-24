@@ -1349,41 +1349,56 @@ const EMOJI = {
 };
 const lastAction = (s) => s.store.listActions(M).at(-1);
 
-test('inviting everyone, typed by an owner: the notes are shared first, then that owner\'s panel sends the invitation', async () => {
+test('inviting everyone, typed by an owner: the sheet all the same, then the notes are shared and that owner\'s panel sends the invitation', async () => {
   const s = setup();
   s.picks('invite_everyone');
   const order = [];
   s.t.share = () => { order.push('share'); return true; };
   s.t.hands = async (call) => { order.push(`panel:${call.tool}`); return { ok: true }; };
-  const res = await s.typed('Invite everyone to see the notes');
-  assert.equal(res.status, 'done');
-  assert.equal(res.reply, 'Done: shared the notes and invited everyone to open Arlo.');
+  // however plainly it is typed: it does two things, and only the sheet says both
+  for (const text of ['Invite everyone to see the notes', 'invite everyone', 'share the notes and invite everyone']) {
+    const res = await s.typed(text);
+    assert.deepEqual([res.status, res.tool, res.askerIsAsked], ['waiting_approval', 'invite_everyone', true], text);
+    assert.deepEqual([s.sheet().question, s.sheet().primaryLabel], ['Share the notes and invite everyone to open Arlo?', 'Share and invite']);
+    assert.deepEqual([order, s.t.shared, s.t.handed], [[], [], []], text);
+    s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+    await s.agent.whenIdle(M);
+  }
+  assert.deepEqual([order, s.t.shared, s.t.handed], [[], [], []]);
+
+  await s.typed('Invite everyone to see the notes');
+  await s.approve();
   assert.deepEqual(order, ['share', 'panel:invite_everyone']);
   assert.deepEqual(s.t.shared, [[M, 'user-ana']]);
   assert.deepEqual(s.t.handed, [{ meetingId: M, tool: 'invite_everyone', args: {}, userId: 'user-ana' }]);
-  assert.deepEqual([res.action.label, res.action.status, res.action.public], ['Shared the notes and invited everyone to open Arlo', 'done', true]);
+  assert.deepEqual([lastAction(s).label, lastAction(s).status, lastAction(s).public], ['Shared the notes and invited everyone to open Arlo', 'done', true]);
   assert.deepEqual(s.t.did.at(-1).audience, { everyone: true, userIds: ['user-ana'] });
-  assert.deepEqual(s.t.approval, []);
-  assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Inviting everyone to open Arlo', 'panel'], [false]]);
+  assert.deepEqual(s.t.steps.slice(-2), [[true, 'Inviting everyone to open Arlo', 'panel'], [false]]);
 });
+
+/** "invite everyone", typed by Ana and approved by her: the action as it ended. */
+async function inviteApproved(s) {
+  assert.equal((await s.typed('invite everyone')).status, 'waiting_approval');
+  await s.approve();
+  return lastAction(s);
+}
 
 test('inviting everyone: the panel fails and the notes stay shared; sharing fails and nothing is sent to a panel', async () => {
   const s = setup();
   s.picks('invite_everyone');
-  // whatever the panel reports, a panel that is not there included
+  // whatever the panel reports
   for (const code of ['no_hands', 'sdk_error', 'unsupported', 'not_allowed', 'timeout', 'busy']) {
     s.t.hands = async () => ({ ok: false, code });
     const shared = s.t.shared.length;
-    const failed = await s.typed('invite everyone');
-    assert.deepEqual([failed.status, failed.code, failed.reply], ['failed', code, INVITE_NOT_SENT], code);
-    assert.deepEqual([failed.action.status, failed.action.label, failed.action.public], ['failed', INVITE_NOT_SENT, true], code);
+    const failed = await inviteApproved(s);
+    assert.deepEqual([failed.status, failed.label, failed.public], ['failed', INVITE_NOT_SENT, true], code);
     // sharing was turned on, once, and nothing turned it off again
     assert.deepEqual(s.t.shared.slice(shared), [[M, 'user-ana']], code);
   }
   for (const hands of [async () => null, async () => { throw new Error('socket'); }]) {
     s.t.hands = hands;
-    const failed = await s.typed('invite everyone');
-    assert.deepEqual([failed.status, failed.code, failed.action.label], ['failed', 'error', INVITE_NOT_SENT]);
+    const failed = await inviteApproved(s);
+    assert.deepEqual([failed.status, failed.label], ['failed', INVITE_NOT_SENT]);
   }
 
   // sharing cannot be turned on: no invitation, and the record does not claim the notes were shared
@@ -1391,12 +1406,31 @@ test('inviting everyone: the panel fails and the notes stay shared; sharing fail
   const handed = s.t.handed.length;
   for (const share of [() => false, () => 'yes', () => { throw new Error('down'); }]) {
     s.t.share = share;
-    const refused = await s.typed('invite everyone');
-    assert.equal(refused.status, 'failed');
-    assert.equal('reply' in refused, false);
-    assert.deepEqual([refused.action.status, refused.action.label], ['failed', 'Asked to share the notes and invite everyone to open Arlo']);
+    const refused = await inviteApproved(s);
+    assert.deepEqual([refused.status, refused.label], ['failed', 'Asked to share the notes and invite everyone to open Arlo']);
   }
   assert.equal(s.t.handed.length, handed);
+});
+
+test('inviting everyone when the owner who agreed has no panel that can invite: nothing is shared, and they are told to open Arlo', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.picks('invite_everyone');
+  const asked = [];
+  // nobody's panel announced it; only another owner's did; the check fails; it answers something that is no list
+  for (const canDo of [() => [], () => ['user-cy'], () => { throw new Error('down'); }, () => 'user-ana', () => ['user-ben']]) {
+    s.t.canDo = (tool) => { asked.push(tool); return canDo(); };
+    const failed = await inviteApproved(s);
+    assert.deepEqual([failed.status, failed.label, failed.public], ['failed', NO_OWN_PANEL, true]);
+  }
+  assert.deepEqual([s.t.shared, s.t.handed], [[], []]);
+  assert.equal(asked.every((tool) => tool === 'invite_everyone'), true);
+  assert.equal(s.store.getMeta(M).notesShared, false);
+  // the other owner, whose panel can, agrees: shared and invited as them
+  s.t.canDo = () => ['user-cy'];
+  await s.typed('invite everyone');
+  await s.approve('user-cy');
+  assert.deepEqual([s.t.shared, s.t.handed], [[[M, 'user-cy']], [{ meetingId: M, tool: 'invite_everyone', args: {}, userId: 'user-cy' }]]);
 });
 
 test('inviting everyone while the notes are shared already: the invitation is sent all the same', async () => {
@@ -1404,8 +1438,8 @@ test('inviting everyone while the notes are shared already: the invitation is se
   s.store.setMeta(M, { notesShared: true });
   s.picks('invite_everyone');
   // the one code path for sharing says "it was so already" as true (services/agent/index.js)
-  const res = await s.typed('invite everyone');
-  assert.equal(res.status, 'done');
+  const done = await inviteApproved(s);
+  assert.equal(done.status, 'done');
   assert.deepEqual(s.t.handed, [{ meetingId: M, tool: 'invite_everyone', args: {}, userId: 'user-ana' }]);
 });
 
@@ -1418,6 +1452,7 @@ test('inviting everyone, spoken or not in what was typed: the sheet first, then 
     () => s.said('invite everyone to open Arlo'),
     () => s.said('invite everyone', ANA_SPEAKING),
     () => s.typed('what did we decide?'), // an owner, but not their words
+    () => s.typed('invite everyone'), // an owner, in their words
     () => s.typed('invite everyone', BEN), // not an owner, anyone may ask
   ];
   for (const ask of asks) {
@@ -1551,7 +1586,11 @@ test('muting, typed by an owner with the name and the word: done on their host p
 test('"unmute Danny" never mutes without a sheet, whatever the model picks', async () => {
   const s = setup();
   s.picks('mute_participant', { name: 'Danny' });
-  for (const text of ['unmute Danny', 'Unmute Danny please', 'un-mute Danny', 'un mute Danny', 'please UNMUTE danny now']) {
+  for (const text of [
+    'unmute Danny', 'Unmute Danny please', 'un-mute Danny', 'un mute Danny', 'please UNMUTE danny now',
+    // an invisible character in it hides nothing
+    'un\u00ADmute Danny', 'un\u200Bmute Danny', 'un\u200Dmute Danny', 'don\'t mute Danny', 'mute everyone except Danny',
+  ]) {
     const res = await s.typed(text);
     assert.equal(res.status, 'waiting_approval', text);
     // the owner is shown what would be done: a mute, in so many words
@@ -1679,6 +1718,7 @@ test('the log of the new tools says a tool and an outcome, never a name or a rea
   s.picks('invite_everyone');
   s.t.hands = async () => ({ ok: false, code: 'sdk_error' });
   await s.typed('invite everyone');
+  await s.approve();
   assert.equal(lines.length > 0, true);
   assert.equal(/danny|reyes|tada|party|\u{1F389}/iu.test(lines.join('\n')), false);
   assert.equal(lines.includes('Arlo agent: invite_everyone failed (sdk_error) (panel)'), true);
@@ -1844,4 +1884,23 @@ test('a ticket: the log has the tool and how it ended, never the key or the URL'
   assert.equal(lines.includes('Arlo agent: open_ticket done (panel)'), true);
   assert.equal(lines.includes('Arlo agent: open_ticket failed (share_failed) (panel)'), true);
   assert.equal(/proj|123|jira|example|browse/i.test(lines.join('\n')), false);
+});
+
+test('a sheet says whether it is on the panel of the person who asked', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  s.picks('share_notes');
+  // an owner typed something that is not covered: the sheet is on their own panel
+  assert.equal((await s.typed('what did we decide?')).askerIsAsked, true);
+  // someone who is not an owner, and anything spoken: the owners are asked
+  assert.equal((await s.typed('share the notes', BEN)).askerIsAsked, false);
+  assert.equal((await s.said('share the notes', ANA_SPEAKING)).askerIsAsked, false);
+  // a sheet that goes to hosts only, typed by an owner whose panel is not a host's
+  s.picks('mute_participant', { name: 'Danny' });
+  s.t.canDo = () => ['user-cy'];
+  const res = await s.typed('who is talking?');
+  assert.deepEqual([res.status, res.askerIsAsked], ['waiting_approval', false]);
+  assert.deepEqual(s.t.approval.at(-1).userIds, ['user-cy']);
+  assert.equal((await s.typed('who is talking?', CY)).askerIsAsked, true);
 });

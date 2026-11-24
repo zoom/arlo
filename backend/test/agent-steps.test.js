@@ -79,10 +79,19 @@ test('the tools that need a host\'s panel are the same in the tool table and in 
   }
   // an answer or a summary is posted through the chat
   assert.equal(noHands('answer_from_meeting'), 'Open Arlo to let it post in the chat.');
-  // the emoji of a reaction is the server's, one per name
-  assert.deepEqual({ ...REACTIONS }, {
-    thumbs_up: '\u{1F44D}', clap: '\u{1F44F}', heart: '❤️', joy: '\u{1F602}', tada: '\u{1F389}', open_mouth: '\u{1F62E}',
-  });
+  // the emoji of a reaction is the server's, one per name. The same table is
+  // in the panel (frontend/src/lib/arloActions.js, REACTIONS), which is what
+  // Zoom is sent; frontend/src/lib/arloActions.test.js holds it to the same
+  // literal: change one and a test fails until both are changed
+  assert.deepEqual(Object.entries(REACTIONS), [
+    ['thumbs_up', '\u{1F44D}'],
+    ['clap', '\u{1F44F}'],
+    // the heart with its variation selector: U+2764 U+FE0F
+    ['heart', '\u2764\uFE0F'],
+    ['joy', '\u{1F602}'],
+    ['tada', '\u{1F389}'],
+    ['open_mouth', '\u{1F62E}'],
+  ]);
   assert.deepEqual([...REACTION_NAMES], Object.keys(REACTIONS));
   assert.equal(Object.isFrozen(REACTIONS), true);
 });
