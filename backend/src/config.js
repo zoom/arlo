@@ -289,6 +289,12 @@ module.exports = {
   allowedOpenRouterModels,
   // The model that writes the live notes: one of the allowed models, else the default
   notesModel: allowedModelOrDefault(process.env.NOTES_MODEL, defaultOpenRouterModel),
+  // The model that picks a tool when someone asks Arlo for something: one of
+  // the allowed models, else the default. Chosen with scripts/agent-eval.js
+  agentModel: allowedModelOrDefault(process.env.AGENT_MODEL, defaultOpenRouterModel),
+  // Whether Arlo's tool table has web search (services/agent/tools.js). Off
+  // unless WEB_SEARCH_ENABLED is exactly "true": it needs a paid model plugin
+  webSearchEnabled: process.env.WEB_SEARCH_ENABLED === 'true',
 
   // Feature Flags
   extractionEnabled: process.env.EXTRACTION_ENABLED === 'true',
