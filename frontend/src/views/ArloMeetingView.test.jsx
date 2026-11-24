@@ -1079,7 +1079,7 @@ describe('use Arlo yourself (someone else already brought Arlo in)', () => {
   }
   const onParticipantView = (container) => container.querySelector('[data-screen]').getAttribute('data-screen') === 'participant';
 
-  test('the action is not offered when the deployment has it off (the default)', async () => {
+  test('the action is not offered when the deployment has it off', async () => {
     const { sdk } = await openBesideAna({
       routes: { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: false } }) },
     });

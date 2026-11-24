@@ -264,12 +264,14 @@ module.exports = {
   autoStartRtms: process.env.AUTO_START_RTMS === 'true',
 
   // Offer "Use Arlo yourself" to a person in a meeting where someone else
-  // already runs Arlo (a second RTMS stream in the same meeting). Off by
-  // default: on 2026-11-23 Zoom sent no meeting.rtms_started webhook for the
-  // second person's start, so the server never learned of it and their panel
-  // waited without end. The server side (several streams, one transcript) is
-  // built and stays; this only hides the button.
-  ownStream: process.env.ALLOW_OWN_ARLO_STREAM === 'true',
+  // already runs Arlo (a second RTMS stream in the same meeting). Offered by
+  // default; ALLOW_OWN_ARLO_STREAM=false hides the button (only that exact
+  // value does). Known gap: in the two-user test of 2026-11-23 Zoom sent no
+  // second meeting.rtms_started webhook for the second person's start, so the
+  // server never learned of it. Until that changes, the second person's start
+  // can end on "Try again" instead of the notes. The server side (several
+  // streams, one transcript) is built and does not depend on this setting.
+  ownStream: process.env.ALLOW_OWN_ARLO_STREAM !== 'false',
 
   // Security
   sessionSecret: process.env.SESSION_SECRET,
