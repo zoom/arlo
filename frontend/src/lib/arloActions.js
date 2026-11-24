@@ -11,6 +11,8 @@
  *   mute_participant         { name }      host or co-host only; mutes, never unmutes
  *   open_ticket              { url, key, share }  the ticket in the system browser, then
  *                                          Zoom's share dialog when `share` is true
+ *   set_timer                { minutes }   a countdown on Zoom's Dynamic Indicator, for everyone
+ *   stop_timer               {}            takes it down again
  *
  * Codes: 'unsupported' (not a tool of this panel, arguments it cannot use, a
  * Zoom client without the API, or muting the person whose panel this is:
@@ -28,6 +30,17 @@
  * the same text. Zoom's SDK cannot pick the window that is shared: the share
  * dialog opens and this person picks the browser.
  *
+ * A timer is Zoom's own countdown on the Dynamic Indicator. What is sent for
+ * it (the unit of `timer.start`, the text beside it) is a guess, kept with
+ * the other guesses about that API in lib/dynamicIndicator.js
+ * (INDICATOR_GUESSES). The text is fixed: nothing of the request is shown.
+ * The panel's own record of the timer (lib/indicatorTimer.js, given as
+ * `indicatorTimer`) is started before Zoom is asked: from then on the hook
+ * that keeps Arlo's status on the indicator sends nothing that might end the
+ * countdown, and it puts the status back when the timer is over. Stopping
+ * removes the indicator (the one call that surely ends a countdown) and
+ * tells that record, so the panel that owns the status sets it again.
+ *
  * Only the person the owner approved is admitted or muted: the sheet named
  * them, so the name must be someone's whole name, and exactly one person's
  * (theOneNamed below says what "the same name" is, and when it is not sure).
@@ -36,6 +49,9 @@
  * is the last step before Zoom acts. Nothing is logged: a message, a name and
  * Zoom's error text are meeting content.
  */
+import { INDICATOR_GUESSES } from './dynamicIndicator';
+import { isTimerMinutes } from './indicatorTimer';
+
 export const HAND_TOOLS = Object.freeze({
   chat: 'post_to_chat',
   admit: 'admit_from_waiting_room',
@@ -43,6 +59,8 @@ export const HAND_TOOLS = Object.freeze({
   reaction: 'send_reaction',
   mute: 'mute_participant',
   ticket: 'open_ticket',
+  setTimer: 'set_timer',
+  stopTimer: 'stop_timer',
 });
 
 /**
@@ -127,10 +145,13 @@ export function jiraBaseOf(value) {
  * and muting when the client accepted their APIs and Zoom says this person is
  * the host or a co-host; a ticket when the client opens URLs and the
  * deployment has a Jira (the share dialog is not needed to announce it: a
- * ticket can be opened without it). At most six names (the server takes ten).
+ * ticket can be opened without it); a timer, to start and to stop, when the
+ * client accepted the Dynamic Indicator APIs. At most eight names (the server
+ * takes ten).
  */
 export function handsFor({
-  chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl, zoomRole,
+  chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl,
+  indicatorSupported, zoomRole,
 }) {
   const can = [];
   if (chatSupported === true) can.push(HAND_TOOLS.chat);
@@ -139,6 +160,7 @@ export function handsFor({
   if (reactionSupported === true) can.push(HAND_TOOLS.reaction);
   if (muteSupported === true && MAY_MUTE.has(zoomRole)) can.push(HAND_TOOLS.mute);
   if (openUrlSupported === true && jiraBaseOf(jiraBaseUrl) !== null) can.push(HAND_TOOLS.ticket);
+  if (indicatorSupported === true) can.push(HAND_TOOLS.setTimer, HAND_TOOLS.stopTimer);
   return can;
 }
 
@@ -299,6 +321,54 @@ async function openTicket(zoomSdk, args, stillAllowed, jiraBaseUrl) {
   return ok;
 }
 
+const isTimer = (value) => value !== null && typeof value === 'object'
+  && typeof value.start === 'function' && typeof value.end === 'function';
+
+async function setTimer(zoomSdk, args, stillAllowed, indicatorTimer) {
+  // The minutes and nothing else: no text, no sound, no option of Zoom's comes with the request
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return fail('unsupported');
+  const keys = Object.keys(args);
+  if (keys.length !== 1 || keys[0] !== 'minutes' || !isTimerMinutes(args.minutes)) return fail('unsupported');
+  if (!has(zoomSdk, 'setDynamicIndicator') || !isTimer(indicatorTimer)) return fail('unsupported');
+  if (typeof stillAllowed !== 'function' || stillAllowed() !== true) return fail('not_allowed');
+
+  // From here on the status hook sends nothing: a status text might end the countdown
+  if (indicatorTimer.start(args.minutes) !== true) return fail('unsupported');
+  try {
+    await zoomSdk.setDynamicIndicator({
+      text: INDICATOR_GUESSES.timerText,
+      timer: {
+        action: 'start',
+        direction: 'down',
+        // A guess: `timer.start` in seconds (INDICATOR_GUESSES in lib/dynamicIndicator.js)
+        start: args.minutes * INDICATOR_GUESSES.timerStartPerMinute,
+        showNotification: true,
+        withSound: false,
+      },
+    });
+  } catch {
+    // No countdown: the status goes back on the indicator
+    indicatorTimer.end('failed');
+    return fail('sdk_error');
+  }
+  return ok;
+}
+
+async function stopTimer(zoomSdk, args, stillAllowed, indicatorTimer) {
+  if (args !== undefined && args !== null && !isEmptyObject(args)) return fail('unsupported');
+  if (!has(zoomSdk, 'removeDynamicIndicator') || !isTimer(indicatorTimer)) return fail('unsupported');
+  if (typeof stillAllowed !== 'function' || stillAllowed() !== true) return fail('not_allowed');
+  // Removing the indicator ends whatever countdown is on it. `timer: { action:
+  // 'end' }` might do it and keep the text, but whether it needs a text, and
+  // what it leaves, is not documented. When Zoom refuses, the timer is left
+  // as it is ('sdk_error', below)
+  await zoomSdk.removeDynamicIndicator();
+  // Told also when this panel knows of no timer: the indicator is gone, and
+  // the panel that owns Arlo's status sets it again
+  indicatorTimer.end('stopped');
+  return ok;
+}
+
 /**
  * Run one action with the Zoom Apps SDK. `zoomRole`: this person's role in
  * the Zoom meeting, as Zoom reports it. `stillAllowed()`: true while this
@@ -307,10 +377,12 @@ async function openTicket(zoomSdk, args, stillAllowed, jiraBaseUrl) {
  * Zoom acts. Without it nobody is admitted or muted and nothing is opened. `selfParticipantUUID`:
  * this person's participant UUID in the meeting, when Zoom gave one.
  * `jiraBaseUrl`: the deployment's Jira base URL from the server's settings;
- * without it no ticket is opened. Never rejects.
+ * without it no ticket is opened. `indicatorTimer`: this panel's record of a
+ * countdown it started (lib/indicatorTimer.js); without it no timer is
+ * started or stopped. Never rejects.
  */
 export async function runArloAction(zoomSdk, action, {
-  zoomRole = null, stillAllowed = null, selfParticipantUUID = null, jiraBaseUrl = null,
+  zoomRole = null, stillAllowed = null, selfParticipantUUID = null, jiraBaseUrl = null, indicatorTimer = null,
 } = {}) {
   try {
     switch (action?.tool) {
@@ -326,6 +398,10 @@ export async function runArloAction(zoomSdk, action, {
         return await muteParticipant(zoomSdk, action.args, zoomRole, stillAllowed, selfParticipantUUID);
       case HAND_TOOLS.ticket:
         return await openTicket(zoomSdk, action.args, stillAllowed, jiraBaseUrl);
+      case HAND_TOOLS.setTimer:
+        return await setTimer(zoomSdk, action.args, stillAllowed, indicatorTimer);
+      case HAND_TOOLS.stopTimer:
+        return await stopTimer(zoomSdk, action.args, stillAllowed, indicatorTimer);
       default:
         return fail('unsupported');
     }

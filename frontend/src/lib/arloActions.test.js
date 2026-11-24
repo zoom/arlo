@@ -1,5 +1,7 @@
 import { vi } from 'vitest';
 import { runArloAction, handsFor, REACTIONS } from './arloActions';
+import { createIndicatorTimer } from './indicatorTimer';
+import { INDICATOR_STRINGS } from './dynamicIndicator';
 
 const sdkWith = (participants = []) => ({
   sendMessageToChat: vi.fn(async () => ({})),
@@ -52,10 +54,21 @@ describe('handsFor: what a panel announces', () => {
     expect(handsFor({ invitationSupported: 'yes', reactionSupported: 1, muteSupported: {}, zoomRole: 'host' })).toEqual([]);
   });
 
-  test('never more names than the server takes', () => {
+  test('a timer, to start and to stop, when the client took the Dynamic Indicator APIs, whatever the Zoom role', () => {
+    expect(handsFor({ indicatorSupported: true, zoomRole: 'attendee' })).toEqual(['set_timer', 'stop_timer']);
+    expect(handsFor({ indicatorSupported: true, zoomRole: null })).toEqual(['set_timer', 'stop_timer']);
+    expect(handsFor({ chatSupported: true, indicatorSupported: true, zoomRole: 'host' })).toEqual(['post_to_chat', 'set_timer', 'stop_timer']);
+    for (const indicatorSupported of [false, undefined, 'yes', 1]) expect(handsFor({ indicatorSupported, zoomRole: 'host' })).toEqual([]);
+  });
+
+  test('never more names than the server takes: a host whose client has everything announces eight', () => {
     const all = {
       chatSupported: true, waitingRoomSupported: true, invitationSupported: true, reactionSupported: true, muteSupported: true,
+      openUrlSupported: true, jiraBaseUrl: 'https://jira.example.test', indicatorSupported: true,
     };
+    expect(handsFor({ ...all, zoomRole: 'host' })).toEqual([
+      'post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant', 'open_ticket', 'set_timer', 'stop_timer',
+    ]);
     expect(handsFor({ ...all, zoomRole: 'host' }).length).toBeLessThanOrEqual(10);
   });
 });
@@ -725,4 +738,118 @@ test('a tool the panel does not have: unsupported, and nothing is called', async
   expect(await runArloAction(sdk, { tool: 'constructor', args: {} })).toEqual({ ok: false, code: 'unsupported' });
   expect(await runArloAction(sdk, null)).toEqual({ ok: false, code: 'unsupported' });
   expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
+});
+
+describe('set_timer and stop_timer', () => {
+  const indicatorSdk = () => ({
+    setDynamicIndicator: vi.fn(async () => ({ message: 'Success' })),
+    removeDynamicIndicator: vi.fn(async () => ({ message: 'Success' })),
+  });
+  const setTimer = (sdk, args, options = {}) => runArloAction(sdk, { tool: 'set_timer', args }, { stillAllowed: yes, indicatorTimer: createIndicatorTimer(), ...options });
+  const stopTimer = (sdk, args, options = {}) => runArloAction(sdk, { tool: 'stop_timer', args }, { stillAllowed: yes, indicatorTimer: createIndicatorTimer(), ...options });
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  test('starts a countdown on Zoom\'s indicator: down, from the minutes as seconds, with a notification and no sound', async () => {
+    const sdk = indicatorSdk();
+    const indicatorTimer = createIndicatorTimer();
+    expect(await setTimer(sdk, { minutes: 5 }, { indicatorTimer })).toEqual({ ok: true });
+    expect(sdk.setDynamicIndicator.mock.calls).toEqual([[{
+      text: 'Timer',
+      timer: {
+        action: 'start', direction: 'down', start: 300, showNotification: true, withSound: false,
+      },
+    }]]);
+    expect(INDICATOR_STRINGS.has(sdk.setDynamicIndicator.mock.calls[0][0].text)).toBe(true);
+    // the panel knows a timer of its own runs, until its time is up
+    expect(indicatorTimer.running()).toBe(true);
+    vi.advanceTimersByTime(5 * 60 * 1000 + 10 * 1000);
+    expect(indicatorTimer.running()).toBe(false);
+
+    await setTimer(sdk, { minutes: 1 });
+    await setTimer(sdk, { minutes: 120 });
+    expect(sdk.setDynamicIndicator.mock.calls.slice(1).map((call) => call[0].timer.start)).toEqual([60, 7200]);
+  });
+
+  test('the panel\'s timer is marked as running before Zoom is asked, so no status is sent over it meanwhile', async () => {
+    const indicatorTimer = createIndicatorTimer();
+    const sdk = indicatorSdk();
+    sdk.setDynamicIndicator.mockImplementation(async () => {
+      expect(indicatorTimer.running()).toBe(true);
+      return {};
+    });
+    expect(await setTimer(sdk, { minutes: 5 }, { indicatorTimer })).toEqual({ ok: true });
+    expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(1);
+  });
+
+  test('the arguments are exactly { minutes }, a whole number from 1 to 120', async () => {
+    const sdk = indicatorSdk();
+    const indicatorTimer = createIndicatorTimer();
+    const refused = [
+      {}, null, undefined, [], [5], 'minutes', 5,
+      { minutes: 0 }, { minutes: -5 }, { minutes: 121 }, { minutes: 5.5 }, { minutes: '5' }, { minutes: 'five' }, { minutes: NaN },
+      { minutes: Infinity }, { minutes: null }, { minutes: true }, { minutes: [5] },
+      { minutes: 5, text: 'Buy now' }, { minutes: 5, withSound: true }, { minutes: 5, timer: { start: 9 } }, { seconds: 300 },
+    ];
+    for (const args of refused) {
+      expect(await setTimer(sdk, args, { indicatorTimer }), JSON.stringify(args)).toEqual({ ok: false, code: 'unsupported' });
+    }
+    expect(sdk.setDynamicIndicator).not.toHaveBeenCalled();
+    expect(indicatorTimer.running()).toBe(false);
+  });
+
+  test('not without the API, the panel\'s timer, or while this panel may no longer act for Arlo', async () => {
+    const sdk = indicatorSdk();
+    expect(await setTimer({}, { minutes: 5 })).toEqual({ ok: false, code: 'unsupported' });
+    expect(await setTimer(sdk, { minutes: 5 }, { indicatorTimer: null })).toEqual({ ok: false, code: 'unsupported' });
+    expect(await setTimer(sdk, { minutes: 5 }, { stillAllowed: () => false })).toEqual({ ok: false, code: 'not_allowed' });
+    expect(await setTimer(sdk, { minutes: 5 }, { stillAllowed: null })).toEqual({ ok: false, code: 'not_allowed' });
+    expect(await stopTimer({}, {})).toEqual({ ok: false, code: 'unsupported' });
+    expect(await stopTimer(sdk, {}, { indicatorTimer: null })).toEqual({ ok: false, code: 'unsupported' });
+    expect(await stopTimer(sdk, {}, { stillAllowed: () => false })).toEqual({ ok: false, code: 'not_allowed' });
+    expect(sdk.setDynamicIndicator).not.toHaveBeenCalled();
+    expect(sdk.removeDynamicIndicator).not.toHaveBeenCalled();
+  });
+
+  test('Zoom refuses the timer: sdk_error, and the panel\'s timer is over, told as failed', async () => {
+    const sdk = indicatorSdk();
+    sdk.setDynamicIndicator.mockRejectedValue(Object.assign(new Error('no'), { code: '10001' }));
+    const indicatorTimer = createIndicatorTimer();
+    const ended = vi.fn();
+    indicatorTimer.onEnd(ended);
+    expect(await setTimer(sdk, { minutes: 5 }, { indicatorTimer })).toEqual({ ok: false, code: 'sdk_error' });
+    expect(indicatorTimer.running()).toBe(false);
+    expect(ended.mock.calls).toEqual([['failed']]);
+  });
+
+  test('stopping takes the indicator down and ends the panel\'s timer, told as stopped', async () => {
+    const sdk = indicatorSdk();
+    const indicatorTimer = createIndicatorTimer();
+    const ended = vi.fn();
+    indicatorTimer.onEnd(ended);
+    await setTimer(sdk, { minutes: 5 }, { indicatorTimer });
+    expect(await stopTimer(sdk, {}, { indicatorTimer })).toEqual({ ok: true });
+    expect(sdk.removeDynamicIndicator).toHaveBeenCalledTimes(1);
+    expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(1);
+    expect(indicatorTimer.running()).toBe(false);
+    expect(ended.mock.calls).toEqual([['stopped']]);
+    // also when this panel knows of no timer (another owner's, or from before a reload)
+    expect(await stopTimer(sdk, undefined, { indicatorTimer })).toEqual({ ok: true });
+    expect(ended).toHaveBeenCalledTimes(2);
+  });
+
+  test('stopping takes no arguments; Zoom refusing it is sdk_error and the timer is left as it is', async () => {
+    const sdk = indicatorSdk();
+    const indicatorTimer = createIndicatorTimer();
+    for (const args of [{ minutes: 5 }, { all: true }, [], 'now', 5]) {
+      expect(await stopTimer(sdk, args, { indicatorTimer }), JSON.stringify(args)).toEqual({ ok: false, code: 'unsupported' });
+    }
+    expect(sdk.removeDynamicIndicator).not.toHaveBeenCalled();
+    await setTimer(sdk, { minutes: 5 }, { indicatorTimer });
+    sdk.removeDynamicIndicator.mockRejectedValue(new Error('no'));
+    expect(await stopTimer(sdk, {}, { indicatorTimer })).toEqual({ ok: false, code: 'sdk_error' });
+    expect(indicatorTimer.running()).toBe(true);
+    indicatorTimer.end('closed');
+  });
 });

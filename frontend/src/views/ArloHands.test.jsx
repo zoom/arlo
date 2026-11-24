@@ -1,5 +1,7 @@
 import { screen, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
+import { indicatorTimer } from '../lib/indicatorTimer';
 import {
   createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage, serverMessagesFor,
   arloPath, ARLO_ABSENT,
@@ -13,8 +15,10 @@ const OWNER = { present: true, role: 'owner', ownerName: 'Ana', myStreamLive: tr
 const ANA_BROUGHT_ARLO = { present: true, role: 'participant', ownerName: 'Ana', whoCanAsk: 'anyone' };
 const A1 = 'aaaaaaaa-1111-4111-8111-111111111111';
 const A2 = 'aaaaaaaa-2222-4222-8222-222222222222';
-const HOST_HANDS = ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant'];
-const ATTENDEE_HANDS = ['post_to_chat', 'invite_everyone', 'send_reaction'];
+// A timer, to start and to stop: announced by every panel whose client took Zoom's indicator APIs
+const TIMERS = ['set_timer', 'stop_timer'];
+const HOST_HANDS = ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant', ...TIMERS];
+const ATTENDEE_HANDS = ['post_to_chat', 'invite_everyone', 'send_reaction', ...TIMERS];
 const CHAT = { tool: 'post_to_chat', args: { message: 'The beta moves to March 3.' } };
 
 const server = () => FakeWebSocket.last;
@@ -80,7 +84,7 @@ describe('what the panel says it can do', () => {
     const sdk = createZoomSdk({ waitingRoomApis: false });
     await openAsOwner({ sdk });
     // The tiers asked for after the waiting room (muting, reactions) go with it
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone'] }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone', ...TIMERS] }));
     // The rest of what the client accepts is kept: Zoom's indicator APIs are still asked for
     expect(sdk.config.mock.calls.at(-1)[0].capabilities).toContain('setDynamicIndicator');
     expect(sdk.config.mock.calls.at(-1)[0].capabilities).not.toContain('getWaitingRoomParticipants');
@@ -90,14 +94,14 @@ describe('what the panel says it can do', () => {
     const sdk = createZoomSdk({ waitingRoomRefused: true });
     expect(typeof sdk.admitParticipantFromWaitingRoom).toBe('function');
     await openAsOwner({ sdk });
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone'] }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone', ...TIMERS] }));
     await settle();
     expect(hands()).toHaveLength(1);
   });
 
   test.each([
-    ['the reaction APIs', ['setEmojiReaction'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'mute_participant']],
-    ['the participant-audio API', ['toggleParticipantMediaAudio'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone']],
+    ['the reaction APIs', ['setEmojiReaction'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'mute_participant', ...TIMERS]],
+    ['the participant-audio API', ['toggleParticipantMediaAudio'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', ...TIMERS]],
   ])('%s refused at config: what the client had before is still announced', async (_name, refusedApis, can) => {
     await openAsOwner({ sdk: createZoomSdk({ refusedApis }) });
     await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can }));
@@ -424,7 +428,7 @@ describe('an action from the server', () => {
 
     test('announced only when the deployment\'s settings name a Jira', async () => {
       await openAsOwner({ routes: withJira });
-      await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS, 'open_ticket'] }));
+      await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS.slice(0, 5), 'open_ticket', ...TIMERS] }));
     });
 
     test('not announced when the settings name none, one that is not https, or the client cannot open URLs', async () => {
@@ -557,5 +561,83 @@ describe('an action from the server', () => {
     await settle();
     expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
     expect(results(fetchMock)).toHaveLength(0);
+  });
+});
+
+describe('a timer on Zoom\'s indicator', () => {
+  const lastText = (sdk) => sdk.setDynamicIndicator.mock.calls.at(-1)?.[0]?.text;
+  const wait = (ms) => act(async () => { await new Promise((resolve) => { setTimeout(resolve, ms); }); });
+
+  afterEach(() => indicatorTimer.end('closed'));
+
+  /** This panel brought Arlo in, and the stream is confirmed: it owns the indicator. */
+  async function broughtInHere() {
+    const fetchMock = mockFetch();
+    const result = renderInMeeting();
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    await userEvent.click(await screen.findByRole('button', { name: 'Bring Arlo into this meeting' }));
+    await send(serverMessage.subscribed());
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.arloState(OWNER));
+    await screen.findByText('Arlo is in the meeting');
+    await waitFor(() => expect(lastText(result.sdk)).toBe('Arlo is transcribing'));
+    return { ...result, fetchMock };
+  }
+
+  test('started on the panel that owns the indicator: no status is sent over it; stopped: the status is back', async () => {
+    const { sdk, fetchMock } = await broughtInHere();
+    await send(serverMessage.action({ actionId: A1, tool: 'set_timer', args: { minutes: 5 } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(results(fetchMock)[0].body).toEqual({ ok: true });
+    expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({
+      text: 'Timer',
+      timer: {
+        action: 'start', direction: 'down', start: 300, showNotification: true, withSound: false,
+      },
+    });
+    const calls = sdk.setDynamicIndicator.mock.calls.length;
+
+    // Arlo thinks, and stops thinking: the indicator is left to the timer
+    await send(serverMessage.thinking(true));
+    await wait(350);
+    await send(serverMessage.thinking(false));
+    await wait(350);
+    expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(calls);
+    expect(sdk.removeDynamicIndicator).not.toHaveBeenCalled();
+
+    await send(serverMessage.action({ actionId: A2, tool: 'stop_timer', args: {} }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
+    expect(results(fetchMock)[1].body).toEqual({ ok: true });
+    expect(sdk.removeDynamicIndicator).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(calls + 1));
+    expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({ text: 'Arlo is transcribing' });
+  });
+
+  test('started on an owner\'s panel that does not own the indicator: it starts, and that panel sends no status of its own', async () => {
+    const { sdk, fetchMock } = await openAsOwner();
+    await send(serverMessage.action({ actionId: A1, tool: 'set_timer', args: { minutes: 1 } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(results(fetchMock)[0].body).toEqual({ ok: true });
+    expect(sdk.setDynamicIndicator.mock.calls.map((call) => call[0].text)).toEqual(['Timer']);
+    expect(indicatorTimer.running()).toBe(true);
+    await send(serverMessage.action({ actionId: A2, tool: 'stop_timer', args: {} }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
+    await wait(350);
+    expect(sdk.removeDynamicIndicator).toHaveBeenCalledTimes(1);
+    expect(sdk.setDynamicIndicator).toHaveBeenCalledTimes(1);
+    expect(indicatorTimer.running()).toBe(false);
+  });
+
+  test('minutes that are not a whole number from 1 to 120 start nothing', async () => {
+    const { sdk, fetchMock } = await openAsOwner();
+    await send(serverMessage.action({ actionId: A1, tool: 'set_timer', args: { minutes: 500 } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.setDynamicIndicator).not.toHaveBeenCalled();
+  });
+
+  test('a client without the indicator APIs announces no timer', async () => {
+    await openAsOwner({ sdk: createZoomSdk({ unsupportedApis: ['setDynamicIndicator'] }) });
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: HOST_HANDS.slice(0, 5) }));
   });
 });
