@@ -88,6 +88,8 @@
                     "removeDynamicIndicator",
                     "showNotification",
                     "sendMessageToChat",
+                    "getWaitingRoomParticipants",
+                    "admitParticipantFromWaitingRoom",
                     "openUrl",
                     "onRunningContextChange",
                     "onMyUserContextChange",

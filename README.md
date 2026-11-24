@@ -342,6 +342,7 @@ Add these OAuth scopes (granular):
 
 - Click **Add APIs** and enable required capabilities, including `startRTMS`, `stopRTMS`, `pauseRTMS`, `resumeRTMS`, and `getAppContext`
 - Optional: `setDynamicIndicator` and `removeDynamicIndicator`, to show Arlo's status ("Arlo is transcribing") in Zoom's meeting window for everyone in the meeting
+- Optional: `getWaitingRoomParticipants` and `admitParticipantFromWaitingRoom`, so Arlo can let someone in from the waiting room when asked (through the panel of someone using Arlo who is the host or a co-host)
 - Enable **In-client OAuth** and **Guest mode**
 
 </details>

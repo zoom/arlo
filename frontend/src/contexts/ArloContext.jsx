@@ -6,6 +6,7 @@ import { readMeetingMessage } from '../lib/meetingMessage';
 import { usableName } from '../lib/ownerName';
 import { identityReport } from '../lib/arloIdentity';
 import { parseApproval, approvalTimeLeft } from '../lib/approvalKinds';
+import { handsFor, runArloAction } from '../lib/arloActions';
 import { useZoomSdk } from './ZoomSdkContext';
 
 /**
@@ -66,6 +67,14 @@ import { useZoomSdk } from './ZoomSdkContext';
  *   where it stands. The outcome comes as `arlo.approval.closed` for the id
  *   the server gave it; it clears by itself two minutes after it ended, and at
  *   once when the notes are shared (they are on screen then).
+ *
+ * - Hands: an owner's panel tells the server over the socket what it can do
+ *   with the Zoom Apps SDK (`arlo.hands`: the Zoom role, and the tools from
+ *   lib/arloActions.js handsFor), once the server spoke on that socket, and
+ *   again when either changes; someone who stops being an owner clears it.
+ *   An `arlo.action` for this meeting is run once (a repeated `actionId` is
+ *   ignored) and its result reported to …/arlo/actions/<id>/result. Only an
+ *   owner's panel runs anything, and not after the meeting is over.
  *
  * Nothing here is logged: state, notes, questions and answers are meeting content.
  */
@@ -140,6 +149,12 @@ function parseState(data) {
 }
 
 const REFUSED = new Set([401, 403]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// The longest Zoom role the server takes in an announcement
+const MAX_ZOOM_ROLE_CHARS = 32;
+// The ids of the actions this panel was sent, so one that is sent again is not run again
+const MAX_ACTIONS_REMEMBERED = 200;
+const SOCKET_OPEN = 1;
 
 /** What the server's clock said when it answered (the `Date` header), in ms; null when it did not say. */
 function serverClock(res) {
@@ -166,7 +181,14 @@ export function ArloProvider({ children }) {
   // Over for this panel: Zoom said the meeting ended, or this person left it
   const meetingOver = meetingEnded === true || leftMeeting === true;
   const { isAuthenticated, user } = useAuth();
-  const { userContext } = useZoomSdk();
+  const { userContext, zoomSdk, chatSupported, waitingRoomSupported } = useZoomSdk();
+  // This person's role in the Zoom meeting, as Zoom reports it
+  const zoomRole = typeof userContext?.role === 'string' && userContext.role.length > 0
+    && userContext.role.length <= MAX_ZOOM_ROLE_CHARS ? userContext.role : 'attendee';
+  const zoomRoleRef = useRef(zoomRole);
+  zoomRoleRef.current = zoomRole;
+  const zoomSdkRef = useRef(zoomSdk);
+  zoomSdkRef.current = zoomSdk;
   // Who is signed in; null when nobody is
   const identity = isAuthenticated ? String(user?.id ?? '') : null;
   const signedInRef = useRef(isAuthenticated);
@@ -187,7 +209,12 @@ export function ArloProvider({ children }) {
   const [notesRequest, setNotesRequest] = useState(null);
   const [requestingNotes, setRequestingNotes] = useState(false);
 
+  // The socket the server has spoken on about this meeting: it is subscribed
+  const [liveSocket, setLiveSocket] = useState(null);
+
   // Read by the socket handler, which must not wait for a render
+  const ranActionsRef = useRef(new Set());
+  const handsSentRef = useRef({ socket: null, json: null });
   const stateRef = useRef(NOT_LOADED);
   const endedRef = useRef(false);
   const askingRef = useRef(false);
@@ -356,6 +383,29 @@ export function ArloProvider({ children }) {
     }
   }, [putNotesRequest, refreshState]);
 
+  // Something for this panel to do with the Zoom Apps SDK, once: only an
+  // owner's panel does, and not after the meeting is over. How it went is
+  // reported to the server; nothing of it is logged or kept.
+  const runAction = useCallback((data) => {
+    if (stateRef.current.role !== 'owner' || !signedInRef.current || endedRef.current) return;
+    const id = serverMeetingIdRef.current;
+    const { actionId } = data;
+    if (!id || typeof actionId !== 'string' || !UUID.test(actionId)) return;
+    const ran = ranActionsRef.current;
+    if (ran.has(actionId)) return;
+    if (ran.size >= MAX_ACTIONS_REMEMBERED) ran.delete(ran.values().next().value);
+    ran.add(actionId);
+    runArloAction(zoomSdkRef.current, { tool: data.tool, args: data.args }, { zoomRole: zoomRoleRef.current })
+      .then((result) => fetch(arloUrl(id, `actions/${encodeURIComponent(actionId)}/result`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(result.ok === true ? { ok: true } : { ok: false, code: result.code }),
+      }))
+      // The server stops waiting by itself
+      .catch(() => {});
+  }, []);
+
   // The state, once the server lets this panel ask. Again when the socket is
   // replaced (a reconnect) and when who is signed in changes (their role can change).
   useEffect(() => {
@@ -377,6 +427,8 @@ export function ArloProvider({ children }) {
       const message = readMeetingMessage(event, serverMeetingId);
       if (!message) return;
       const data = message.data;
+      // The server speaks about this meeting on this socket: it is subscribed
+      setLiveSocket(ws);
       switch (message.type) {
         case 'meeting.status':
           // Set here too, so the `arlo.state` that follows in the same turn is read correctly
@@ -402,6 +454,9 @@ export function ArloProvider({ children }) {
         case 'arlo.approval.closed':
           closeApproval(data.id, typeof data.outcome === 'string' ? data.outcome : null);
           break;
+        case 'arlo.action':
+          runAction(data);
+          break;
         default:
           break;
       }
@@ -411,7 +466,30 @@ export function ArloProvider({ children }) {
       ws.removeEventListener('message', onMessage);
       setAwaitingState(false);
     };
-  }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval]);
+  }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval, runAction]);
+
+  // What this panel can do for Arlo, said to the server on a subscribed socket:
+  // by an owner, and again when the Zoom role or the abilities change. Someone
+  // who announced and is no longer an owner (or whose meeting is over) clears it.
+  const hands = useMemo(
+    () => handsFor({ chatSupported, waitingRoomSupported, zoomRole }),
+    [chatSupported, waitingRoomSupported, zoomRole],
+  );
+  const hasHands = state.role === 'owner' && isAuthenticated && !meetingOver;
+  useEffect(() => {
+    if (!ws || liveSocket !== ws || ws.readyState !== SOCKET_OPEN) return;
+    const sent = handsSentRef.current.socket === ws ? handsSentRef.current.json : null;
+    if (!hasHands && sent === null) return;
+    const payload = { zoomRole, can: hasHands ? hands : [] };
+    const json = JSON.stringify(payload);
+    if (json === sent) return;
+    try {
+      ws.send(JSON.stringify({ type: 'arlo.hands', payload }));
+      handsSentRef.current = { socket: ws, json };
+    } catch {
+      // A socket that closed meanwhile: its replacement is told
+    }
+  }, [ws, liveSocket, hasHands, hands, zoomRole]);
 
   // Becoming someone who may see the notes (an owner, or anyone once they are
   // shared) fetches them; no longer being one clears them

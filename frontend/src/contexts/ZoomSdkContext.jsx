@@ -58,6 +58,15 @@ const DYNAMIC_INDICATOR_CAPABILITIES = [
   'removeDynamicIndicator',
 ];
 
+// The waiting room: who is in it, and letting one person in. Arlo does this when
+// asked ("Arlo, let James in"), through the panel of an owner who is the host or
+// a co-host (lib/arloActions.js). Requested on its own for the same reason.
+// Desktop 5.15.10+; Zoom allows both to the host and co-hosts only.
+const WAITING_ROOM_CAPABILITIES = [
+  'getWaitingRoomParticipants',
+  'admitParticipantFromWaitingRoom',
+];
+
 // Check if running outside Zoom - evaluated dynamically
 const checkIsTestMode = () => !window.zoomSdk || window.location.search.includes('test=true');
 
@@ -85,6 +94,8 @@ export function ZoomSdkProvider({ children }) {
   const [dynamicIndicatorSupported, setDynamicIndicatorSupported] = useState(false);
   // true once zoomSdk.config() accepted sendMessageToChat and the client has the method
   const [chatSupported, setChatSupported] = useState(false);
+  // true once zoomSdk.config() accepted the waiting-room APIs and the client has the methods
+  const [waitingRoomSupported, setWaitingRoomSupported] = useState(false);
   // null = SDK not loaded yet, true = guest, false = authorized user
   const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
 
@@ -112,6 +123,7 @@ export function ZoomSdkProvider({ children }) {
         // Some Zoom clients reject config when unsupported capabilities are requested.
         // Try the largest set first, then fall back step by step to the core set.
         const capabilitySets = [
+          [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES, ...DYNAMIC_INDICATOR_CAPABILITIES, ...WAITING_ROOM_CAPABILITIES],
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES, ...DYNAMIC_INDICATOR_CAPABILITIES],
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES],
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES],
@@ -130,7 +142,7 @@ export function ZoomSdkProvider({ children }) {
           } catch (configError) {
             if (i === capabilitySets.length - 1) throw configError;
             console.warn('Capability set rejected, retrying with a smaller set:', configError);
-            if (capabilitySets[i].includes('setDynamicIndicator')) {
+            if (capabilitySets[i].includes('setDynamicIndicator') && !capabilitySets[i].includes('getWaitingRoomParticipants')) {
               console.warn('[indicator] Zoom rejected the Dynamic Indicator APIs at config:', configError?.code, configError?.message);
             }
           }
@@ -152,6 +164,9 @@ export function ZoomSdkProvider({ children }) {
         setDynamicIndicatorSupported(indicatorAccepted);
         setChatSupported(acceptedCapabilities.includes('sendMessageToChat')
           && typeof zoomSdk.sendMessageToChat === 'function');
+        setWaitingRoomSupported(WAITING_ROOM_CAPABILITIES.every((name) => (
+          acceptedCapabilities.includes(name) && typeof zoomSdk[name] === 'function'
+        )));
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
@@ -290,8 +305,9 @@ export function ZoomSdkProvider({ children }) {
     rtmsStatusSupported,
     dynamicIndicatorSupported,
     chatSupported,
+    waitingRoomSupported,
     isTestMode: isTestModeState,
-  }), [zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
+  }), [waitingRoomSupported, zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
 
   return (
     <ZoomSdkContext.Provider value={contextValue}>

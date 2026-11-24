@@ -11,7 +11,7 @@ export const MEETING = 'MEETING-1==';
 
 /**
  * Arlo's routes for the test meeting: arloPath('state' | 'settings' | 'notes' | 'ask' |
- * 'notes-request' | 'approvals' | 'approvals/<id>').
+ * 'notes-request' | 'approvals' | 'approvals/<id>' | 'actions' | 'actions/<id>/result').
  * `meetingId`: the id the server knows the meeting by, when a test makes it
  * differ from the one the Zoom SDK reports (see mockFetch `serverMeetingId`).
  */
@@ -42,6 +42,10 @@ export function createZoomSdk({
   // The meeting id the SDK reports. The server may know the meeting by another
   // id (mockFetch `serverMeetingId`): the SDK path has fallbacks.
   meetingUUID = MEETING,
+  // The people in the waiting room, as Zoom lists them: [{ screenName, participantUUID }]
+  waitingRoom = [],
+  // false: a Zoom client without the waiting-room APIs (config refuses them, the methods are missing)
+  waitingRoomApis = true,
 } = {}) {
   const listeners = new Map();
   const on = (event) => (handler) => {
@@ -50,7 +54,12 @@ export function createZoomSdk({
   };
   const sdk = {
     rtmsStatus,
-    config: vi.fn(async ({ capabilities }) => ({ clientVersion: '6.6.0', capabilities })),
+    config: vi.fn(async ({ capabilities }) => {
+      if (!waitingRoomApis && capabilities.includes('getWaitingRoomParticipants')) {
+        throw new Error('getWaitingRoomParticipants is not supported by this client');
+      }
+      return { clientVersion: '6.6.0', capabilities };
+    }),
     getRunningContext: vi.fn(async () => ({ context: runningContext })),
     getUserContext: vi.fn(async () => {
       if (userContextFails) throw new Error('getUserContext is not available in this context');
@@ -84,6 +93,11 @@ export function createZoomSdk({
     // Dynamic Indicator: Arlo's status in Zoom's own meeting window
     setDynamicIndicator: vi.fn(async () => ({ message: 'Success' })),
     removeDynamicIndicator: vi.fn(async () => ({ message: 'Success' })),
+    // The waiting room: host and co-host only in Zoom
+    ...(waitingRoomApis ? {
+      getWaitingRoomParticipants: vi.fn(async () => ({ participants: waitingRoom })),
+      admitParticipantFromWaitingRoom: vi.fn(async () => ({ message: 'Success' })),
+    } : {}),
     callZoomApi: vi.fn(async (name, options) => sdk[name](options)),
     emit(event, payload) {
       [...(listeners.get(event) || [])].forEach((handler) => handler(payload));
@@ -190,6 +204,9 @@ export function mockFetch(routes = {}, { signedIn = true, serverMeetingId = MEET
     [`POST ${arloPath('notes-request', serverMeetingId)}`]: () => json({
       id: '11111111-1111-4111-8111-111111111111', expiresAt: Date.now() + 60000,
     }),
+    // What Arlo was asked and did: nothing yet; a panel's report of an action is taken
+    [arloPath('actions', serverMeetingId)]: () => json({ actions: [] }),
+    [`POST ${arloPath('actions/', serverMeetingId)}`]: () => json({ received: true }),
     ...routes,
   };
   const fetchMock = vi.fn(async (input, init = {}) => {
@@ -222,13 +239,24 @@ export const serverMessagesFor = (ofMeeting) => ({
   }),
   notes: (notes, meetingId = ofMeeting) => ({ type: 'notes.updated', data: { meetingId, notes } }),
   // A request for the owners' approval, as only their panels are told; it runs out in a minute unless given
-  approval: ({ id, kind = 'share_notes', askedBy = null, expiresAt = Date.now() + 60000 }, meetingId = ofMeeting) => ({
-    type: 'arlo.approval', data: { meetingId, id, kind, askedBy, expiresAt },
+  // `extra`: what an 'agent_action' carries besides ({ question, primaryLabel })
+  approval: ({ id, kind = 'share_notes', askedBy = null, expiresAt = Date.now() + 60000, ...extra }, meetingId = ofMeeting) => ({
+    type: 'arlo.approval', data: { meetingId, id, kind, askedBy, expiresAt, ...extra },
   }),
   // How it ended: 'approved' | 'declined' | 'failed' | 'expired'
   approvalClosed: (id, outcome, meetingId = ofMeeting) => ({
     type: 'arlo.approval.closed', data: { meetingId, id, outcome },
   }),
+  // The server confirms the subscription: from here on the socket is this meeting's
+  subscribed: (meetingId = ofMeeting) => ({ type: 'subscribed', data: { meetingId } }),
+  // Something for this owner's panel to do with the Zoom Apps SDK
+  action: ({ actionId, tool, args }, meetingId = ofMeeting) => ({
+    type: 'arlo.action', data: { meetingId, actionId, tool, args },
+  }),
+  // Arlo is handling a request (owners only), or stopped
+  thinking: (on, meetingId = ofMeeting) => ({ type: 'arlo.thinking', data: { meetingId, on } }),
+  // How something Arlo was asked stands: see arloAction below
+  did: (action, meetingId = ofMeeting) => ({ type: 'arlo.did', data: { meetingId, action } }),
   timelineEvent: (event) => ({ type: 'participant.event', data: { meetingId: ofMeeting, event } }),
   suggestion: (suggestion) => ({ type: 'ai.suggestion', data: { meetingId: ofMeeting, suggestion } }),
   segment: (seqNo, text, extra = {}) => ({
@@ -240,6 +268,14 @@ export const serverMessagesFor = (ofMeeting) => ({
       },
     },
   }),
+});
+
+/** An action as the server keeps it (GET …/arlo/actions, `arlo.did`): done, public, asked aloud, unless given. */
+export const arloAction = ({
+  id, at = Date.now(), tool = 'post_to_chat', label = 'Posted to the chat', askedBy = null, channel = 'voice',
+  status = 'done', isPublic = true,
+}) => ({
+  id, at, tool, label, askedBy, channel, status, public: isPublic,
 });
 
 /** The server's messages about the test meeting. */
