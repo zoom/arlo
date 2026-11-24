@@ -80,6 +80,11 @@ test('the minutes in what someone typed: digits or a number word, with the word 
     ['set a timer for an hour', [60]],
     ['set a timer for half an hour', [30]],
     ['a 5 minute timer and then a 10 minute timer', [5, 10]],
+    ['2 hours', [120]],
+    ['one hour', [60]],
+    ['a two hour timer', [120]],
+    ['a 1-hour timer', [60]],
+    ['1 hour 30 minutes', [60, 30]],
     // not read as an amount at all
     ['set a timer', []],
     ['set a timer for 5', []],
@@ -87,8 +92,8 @@ test('the minutes in what someone typed: digits or a number word, with the word 
   for (const [text, minutes] of read) assert.deepEqual(minutesIn(text), minutes, text);
   // an amount that cannot be read for sure is there, and equals no number
   for (const text of [
-    'twenty five minutes', 'twenty-five minute timer', 'a hundred and five minutes', '1.5 minutes', '1,5 minutes', '2 hours',
-    'one hour', 'an hour and a half', '90 seconds', 'thirty second timer', '5 minutes and 30 seconds', '2.5 hour timer',
+    'twenty five minutes', 'twenty-five minute timer', 'a hundred and five minutes', '1.5 minutes', '1,5 minutes', '3 hours', '5 hour timer',
+    'one hour and a half', '2 hours and a half', '1 hour and 5 minutes', 'timer 1 5 minutes', 'timer 1 2 hours', '2 hrs', 'an hour and a half', '90 seconds', 'thirty second timer', '5 minutes and 30 seconds', '2.5 hour timer',
     'set a timer for a minute', 'minute five of the timer', 'a few minutes',
   ]) {
     const got = minutesIn(text);
@@ -107,6 +112,17 @@ test('an owner\'s typed timer runs without a sheet only when the word and exactl
     ['half an hour timer', 30],
     ['set a 1 minute timer', 1],
     ['set a 120 minute timer', 120],
+    ['set a 2 hour timer', 120],
+    ['start a one hour timer', 60],
+    ['put a 5 minute timer up', 5],
+    ['give us a five minute timer', 5],
+    ['5 minute timer', 5],
+    ['a ten minute timer please', 10],
+    ['5 minutes timer', 5],
+    ['timer 5 minutes', 5],
+    ['Hey Arlo, timer for 5 minutes.', 5],
+    ['can you set a 5 minute timer?', 5],
+    ['could you 5 minute timer?', 5],
   ]) assert.equal(covers(typed, minutes), true, typed);
 
   for (const [typed, minutes] of [
@@ -119,8 +135,29 @@ test('an owner\'s typed timer runs without a sheet only when the word and exactl
     ['set a timer', 5], // no minutes
     ['set a timer for 5', 5],
     ['set a 5 hour timer', 5],
-    ['set a 2 hour timer', 120],
+    ['set a 2 hour timer', 2],
+    ['set a 3 hour timer', 120],
     ['set a 30 second timer', 30],
+    ['cancel the 5 minute timer', 5], // about a timer that runs, or not a start
+    ['add 5 minutes to the timer', 5],
+    ['extend the timer by 5 minutes', 5],
+    ['is there a 5 minute timer?', 5],
+    ['5 minute timer?', 5],
+    ['when does the 5 minute timer end?', 5],
+    ['start a timer when I stop talking', 5],
+    ['start a 5 minute timer when I stop talking', 5],
+    ['how much of the 5 minute timer is left', 5],
+    ['the 5 minute timer was great', 5],
+    ['5 minutes on the timer', 5],
+    ['pause the 5 minute timer', 5],
+    ['restart the 5 minute timer', 5],
+    ['remove the 5 minute timer', 5],
+    ['skip the 5 minute timer', 5],
+    ['dont set a 5 minute timer', 5],
+    ['shouldnt set a 5 minute timer', 5],
+    ['set a timer 1 5 minutes', 5],
+    ['timer 1 5 minutes', 5],
+    ['set a 5 minute timer unless Sam objects', 5],
     ['don\'t set a 5 minute timer', 5], // turned around
     ['no 5 minute timer', 5],
     ['stop the timer and set a 5 minute timer', 5],
@@ -136,12 +173,17 @@ test('an owner\'s typed timer runs without a sheet only when the word and exactl
   ]) assert.equal(covers(typed, minutes), false, `${typed} / ${minutes}`);
 });
 
-test('an owner\'s typed "stop the timer": "stop", "cancel" or "end" and "timer", each a word of its own', () => {
+test('an owner\'s typed "stop the timer": the plain request and nothing else', () => {
   const covers = (typed) => typedRequestCovers(typed, 'stop_timer', {});
-  for (const typed of ['stop the timer', 'Cancel the timer please', 'Arlo, end the timer', 'timer: stop']) assert.equal(covers(typed), true, typed);
+  for (const typed of [
+    'stop the timer', 'Cancel the timer please', 'Arlo, end the timer', 'stop timer', 'cancel timer.', 'end timer!', 'can you stop the timer?',
+    'Hey Arlo, could you please cancel the timer, please',
+  ]) assert.equal(covers(typed), true, typed);
   for (const typed of [
     'the timer', 'stop', 'pause the timer', 'unstop the timer', 'stop the timers', 'stopwatch timer', 'the timer ended',
-    'don\'t stop the timer', 'do not cancel the timer', 'never end the timer', 'what did we decide?',
+    'don\'t stop the timer', 'do not cancel the timer', 'never end the timer', 'what did we decide?', 'timer: stop',
+    'when does the timer end?', 'shouldnt cancel the timer', 'should I stop the timer?', 'stop the timer?', 'stop the timer in 5 minutes',
+    'stop the timer and start a new one', 'did Sam cancel the timer', 'end the timer when I say so', 'cancel the 5 minute timer',
   ]) assert.equal(covers(typed), false, typed);
   assert.equal(typedRequestCovers('stop the timer', 'stop_timer', null), false);
 });

@@ -18,7 +18,10 @@
  * names one of six reactions, and never writes the character that is shown.
  *
  * A ticket's key in a sentence is the one the tool table rebuilt (lib/jira.js);
- * anything else is "a ticket". Its URL is in no sentence.
+ * anything else is "a ticket". Its URL is in no sentence. The record, which
+ * everyone in the meeting reads, never has the key: it says "a ticket". The
+ * key is in what the owners see (the sheet, the step) and in what the asker's
+ * own panel is answered.
  *
  * Arlo posts no line of its own to the chat: not "I am busy", not "the host
  * declined". A line nobody approved is unapproved content; those outcomes are
@@ -183,7 +186,7 @@ const TOOL_TEXTS = Object.freeze({
     asked: () => 'Asked to open the notes for everyone',
     done: () => 'Opened the notes for everyone',
     // "Your Arlo view": Zoom shows the panel of the owner who agrees to people without the app
-    question: () => 'Open the notes for everyone in the meeting? Your Arlo view will be shared.',
+    question: () => 'Open the notes for everyone in the meeting? Your Arlo view will be shared, and the notes stay shared until you stop sharing.',
     primary: () => 'Open notes',
     reply: () => 'Done: opened the notes for everyone.',
   }),
@@ -218,8 +221,9 @@ const TOOL_TEXTS = Object.freeze({
     reply: () => 'Done: stopped the timer.',
   }),
   open_ticket: Object.freeze({
-    asked: (args) => `Asked to open ${ticketName(args)}`,
-    done: (args) => `Opened ${ticketName(args)}${sharesToo(args) ? ' and opened the share dialog' : ''}`,
+    // The record is read by everyone in the meeting: no key in it
+    asked: () => 'Asked to open a ticket',
+    done: (args) => `Opened a ticket${sharesToo(args) ? ' and opened the share dialog' : ''}`,
     // "your": it opens on the panel of the owner who agrees, and they pick what is shared
     question: (args) => `Open ${ticketName(args)} in your browser${sharesToo(args) ? ' and share your screen' : ''}?`,
     primary: (args) => (sharesToo(args) ? 'Open and share' : 'Open'),
@@ -283,12 +287,13 @@ function failedReply(toolName, code, args) {
 
 /**
  * Opening a ticket and sharing is two things: the browser opened the ticket,
- * and then Zoom's share dialog did not come up. The record and the asker's
- * panel say both halves.
+ * and then Zoom's share dialog did not come up. The asker's panel is told
+ * both halves with the key; the record says them without it.
  */
 function ticketShareFailed(args) {
   return `Opened ${ticketName(args)}. Couldn't open the share dialog.`;
 }
+const TICKET_SHARE_FAILED_LABEL = 'Opened a ticket. Couldn\'t open the share dialog.';
 
 /**
  * Inviting everyone is two things: the notes were shared, and then the
@@ -300,10 +305,8 @@ const INVITE_NOT_SENT = 'Shared the notes. Couldn\'t send the invitation.';
 /**
  * Opening the notes for everyone is two things as well: the notes were
  * shared, and then they were not opened as a shared document. Sharing stays
- * on. Either the panel sent the invitation to open Arlo instead (it reports
- * 'fell_back_invite'), or nothing more was done.
+ * on, and nothing else is done in its place: the sheet asked for nothing else.
  */
-const NOTES_OPENED_AS_INVITE = 'Shared the notes and invited everyone to open Arlo. Couldn\'t open them as a shared document.';
 const NOTES_NOT_OPENED = 'Shared the notes. Couldn\'t open them for everyone.';
 
 /**
@@ -403,9 +406,9 @@ module.exports = {
   noHands,
   failedReply,
   INVITE_NOT_SENT,
-  NOTES_OPENED_AS_INVITE,
   NOTES_NOT_OPENED,
   ticketShareFailed,
+  TICKET_SHARE_FAILED_LABEL,
   REACTIONS,
   REACTION_NAMES,
   TIMER_MIN_MINUTES,

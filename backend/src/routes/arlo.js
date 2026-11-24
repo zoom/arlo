@@ -341,7 +341,7 @@ router.get('/actions', optionalAuth, requireMeetingAccess, (req, res) => {
  * sent an action to (`arlo.action` on its socket, services/agent/hands.js)
  * reports whether it did it. `code`, only with `ok: false`, is one of
  * not_found, several_match, no_notes, sdk_error, unsupported, not_allowed,
- * share_failed, fell_back_invite (services/agent/hands.js RESULT_CODES).
+ * share_failed (services/agent/hands.js RESULT_CODES).
  * Owners only, and only the owner the action was sent to: 404 for an action
  * that is unknown, finished, or someone else's. The same result sent again by
  * the same owner within two minutes is answered { received: true } again (a

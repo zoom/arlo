@@ -22,7 +22,9 @@ const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/;
 // word "dash" or "hyphen" with spaces around it, or a run of spaces and underscores
 const BETWEEN = '(?: *- *| +(?:DASH|HYPHEN) +|[ _]+)';
 const WHOLE_KEY = new RegExp(`^([A-Z][A-Z0-9]{1,9})${BETWEEN}(\\d{1,7})$`);
-const KEY_IN_TEXT = new RegExp(`(?<![A-Z0-9])([A-Z][A-Z0-9]{1,9})${BETWEEN}(\\d{1,7})(?![A-Z0-9])`, 'g');
+// The same in a text someone typed, as it was typed: what stands between the
+// project and the number is kept, to tell "PROJ 123" from "version 2"
+const KEY_IN_TEXT = /(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9]{1,9})( *- *| +(?:dash|hyphen) +|[ _]+)(\d{1,7})(?![A-Za-z0-9])/gi;
 
 // Only a to z are made upper case: String.toUpperCase turns other letters
 // into these too ("ı" into "I", "ſ" into "S"), and a look-alike is not the letter
@@ -75,14 +77,20 @@ function normalizeTicketKey(value) {
 const isTicketKey = (value) => typeof value === 'string' && TICKET_KEY.test(value);
 
 /**
- * Every ticket key written in a text someone typed, read the same way as a
- * key a model gave: "open proj 123" and "open PROJ-123" both have PROJ-123.
+ * Every ticket key written in a text someone typed: "open PROJ-123", "open
+ * proj-123", "open proj_123" and "open proj dash 123" all have PROJ-123. With
+ * only a space between the two it is a key when the project is typed in upper
+ * case ("open PROJ 123"): "ticket 42", "in 5" and "version 2" are ordinary
+ * words and a number.
  */
 function ticketKeysIn(text) {
   if (typeof text !== 'string' || text.length > MAX_TYPED_CHARS) return [];
-  const upper = upperAscii(text.replace(/\s+/gu, ' '));
   const keys = new Set();
-  for (const found of upper.matchAll(KEY_IN_TEXT)) keys.add(`${found[1]}-${found[2]}`);
+  for (const found of text.replace(/\s+/gu, ' ').matchAll(KEY_IN_TEXT)) {
+    const [, project, between, number] = found;
+    if (/^ +$/.test(between) && /[a-z]/.test(project)) continue;
+    keys.add(`${upperAscii(project)}-${number}`);
+  }
   return [...keys];
 }
 

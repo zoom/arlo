@@ -20,7 +20,7 @@ const {
 } = require('../src/services/agent/tools');
 const { decide, typedRequestCovers } = require('../src/services/agent/policy');
 const {
-  TOOL_TEXTS, toolStep, noHands, failedReply, ticketShareFailed,
+  TOOL_TEXTS, toolStep, noHands, failedReply, ticketShareFailed, TICKET_SHARE_FAILED_LABEL,
 } = require('../src/services/agent/texts');
 const { RESULT_CODES } = require('../src/services/agent/hands');
 
@@ -159,7 +159,14 @@ test('a ticket key is rebuilt: letters, one dash, a number, or it is not a key',
 
 test('the keys in what someone typed are read the same way as a key a model gave', () => {
   assert.deepEqual(ticketKeysIn('open PROJ-123'), ['PROJ-123']);
-  assert.deepEqual(ticketKeysIn('open proj 123 and share it'), ['PROJ-123']);
+  assert.deepEqual(ticketKeysIn('open PROJ 123 and share it'), ['PROJ-123']);
+  assert.deepEqual(ticketKeysIn('open proj-123, Proj - 124, proj hyphen 125 and AB1 7'), ['PROJ-123', 'PROJ-124', 'PROJ-125', 'AB1-7']);
+  // with only a space between them, words and a number are not a key
+  for (const typed of ['open proj 123 and share it', 'open ticket 42', 'open PROJ-12 in 5 minutes', 'version 2', 'Proj 123', 'at 10 or by 11']) {
+    assert.deepEqual(ticketKeysIn(typed).filter((key) => key !== 'PROJ-12'), [], typed);
+  }
+  // a key a model gave is read as before
+  assert.equal(normalizeTicketKey('proj 123'), 'PROJ-123');
   assert.deepEqual(ticketKeysIn('pull up ticket ABC dash 42, please'), ['ABC-42']);
   assert.deepEqual(ticketKeysIn('Open  proj_123\nnow'), ['PROJ-123']);
   assert.deepEqual(ticketKeysIn('compare PROJ-1 with ops-22.'), ['PROJ-1', 'OPS-22']);
@@ -256,18 +263,18 @@ test('opening a ticket changes the meeting: a sheet for speech, and for a typed 
   const plain = { key: 'PROJ-123', share: false };
   const shared = { key: 'PROJ-123', share: true };
   // the key is in what was typed, however it was written
-  for (const typed of ['open PROJ-123', 'open proj 123', 'Open Proj-123 please', 'pull up PROJ dash 123', 'show me proj_123']) {
+  for (const typed of ['open PROJ-123', 'open PROJ 123', 'Open Proj-123 please', 'pull up PROJ dash 123', 'show me proj_123']) {
     assert.equal(covers(typed, plain), true, typed);
   }
   // no key, or another one
-  for (const typed of ['open the ticket', 'open the ticket we talked about', 'open PROJ-124', 'open PROJ-1234', 'open XPROJ-123', 'open PROJ', 'open 123', 'what did we decide?']) {
+  for (const typed of ['open the ticket', 'open the ticket we talked about', 'open PROJ-124', 'open PROJ-1234', 'open XPROJ-123', 'open PROJ', 'open 123', 'what did we decide?', 'open proj 123']) {
     assert.equal(covers(typed, plain), false, typed);
   }
   // sharing was asked for only when "share" was typed
-  for (const typed of ['open PROJ-123 and share it', 'Share proj 123', 'open PROJ-123 and SHARE my screen', 'open PROJ-123 and start sharing']) {
+  for (const typed of ['open PROJ-123 and share it', 'Open and share proj-123', 'open PROJ-123 and SHARE my screen', 'open PROJ-123 and start sharing']) {
     assert.equal(covers(typed, shared), true, typed);
   }
-  for (const typed of ['open PROJ-123', 'open proj 123 for me', 'open PROJ-123, the shareholders one', 'open PROJ-123 unshared']) {
+  for (const typed of ['open PROJ-123', 'open PROJ 123 for me', 'Share proj-123', 'open PROJ-123, the shareholders one', 'open PROJ-123 unshared']) {
     assert.equal(covers(typed, shared), false, typed);
   }
   // "share" typed and not asked of the tool: covered, less is done than was typed
@@ -288,10 +295,12 @@ test('what the record, the sheet and the asker\'s panel say about a ticket', () 
   const texts = TOOL_TEXTS.open_ticket;
   const plain = { key: 'PROJ-123', share: false };
   const shared = { key: 'PROJ-123', share: true };
-  assert.equal(texts.asked(plain), 'Asked to open PROJ-123');
-  assert.equal(texts.asked(shared), 'Asked to open PROJ-123');
-  assert.equal(texts.done(plain), 'Opened PROJ-123');
-  assert.equal(texts.done(shared), 'Opened PROJ-123 and opened the share dialog');
+  // the record is read by everyone in the meeting: no key in it
+  assert.equal(texts.asked(plain), 'Asked to open a ticket');
+  assert.equal(texts.asked(shared), 'Asked to open a ticket');
+  assert.equal(texts.done(plain), 'Opened a ticket');
+  assert.equal(texts.done(shared), 'Opened a ticket and opened the share dialog');
+  assert.equal(TICKET_SHARE_FAILED_LABEL, 'Opened a ticket. Couldn\'t open the share dialog.');
   assert.equal(texts.question(plain), 'Open PROJ-123 in your browser?');
   assert.equal(texts.question(shared), 'Open PROJ-123 in your browser and share your screen?');
   assert.equal(texts.primary(plain), 'Open');
@@ -315,14 +324,27 @@ test('what the record, the sheet and the asker\'s panel say about a ticket', () 
 
 // --- the settings --------------------------------------------------------------------
 
-test('the settings say which Jira the deployment has, so the panel can check the URL it is asked to open', async () => {
+test('the settings say which Jira the deployment has to someone who is signed in, and to nobody else', async () => {
   const srv = await h.startServer();
   try {
-    const res = await fetch(`${srv.base}/api/auth/settings`);
+    const { generateToken } = require('../src/services/auth');
+    const { userStore } = require('../src/lib/memoryStore');
+    const user = userStore.upsert('zoom-settings-ana', { email: 'ana@example.test', displayName: 'Ana Ruiz', avatarUrl: null });
+    const cookie = `sessionToken=${generateToken({ userId: user.id, zoomUserId: 'zoom-settings-ana' })}`;
+    const res = await fetch(`${srv.base}/api/auth/settings`, { headers: { cookie } });
     const body = await res.json();
     assert.equal(res.status, 200);
     // as the server uses it: no trailing slash
     assert.deepEqual(body.features.jira, { baseUrl: BASE });
+    // no session, or one that is not valid: the other settings, and no Jira host
+    for (const headers of [{}, { cookie: 'sessionToken=forged.token.value' }, { cookie: 'meetingAccess=anything' }]) {
+      const open = await fetch(`${srv.base}/api/auth/settings`, { headers });
+      const text = await open.text();
+      assert.equal(open.status, 200);
+      assert.deepEqual(JSON.parse(text).features.jira, { baseUrl: null });
+      assert.equal(typeof JSON.parse(text).demoMode, 'boolean');
+      assert.equal(text.includes('jira.example.test'), false);
+    }
   } finally {
     srv.server.closeAllConnections?.();
     srv.server.close();

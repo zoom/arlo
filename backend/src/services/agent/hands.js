@@ -65,9 +65,7 @@ const ZOOM_ROLES = new Set(['host', 'coHost', 'attendee', 'panelist']);
 const MAY_ADMIT = new Set(['host', 'coHost']);
 // What a panel may report when it did not do it
 // 'share_failed': a ticket was opened and the share dialog was not (open_ticket)
-// 'fell_back_invite': the notes were not opened as a shared document and the
-// invitation to open Arlo was sent instead (open_notes_for_everyone)
-const RESULT_CODES = Object.freeze(['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed', 'fell_back_invite']);
+const RESULT_CODES = Object.freeze(['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const isId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;

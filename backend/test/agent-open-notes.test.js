@@ -14,7 +14,7 @@ const {
 } = require('../src/services/agent/tools');
 const { decide, typedRequestCovers } = require('../src/services/agent/policy');
 const {
-  TOOL_TEXTS, toolStep, noHands, failedReply, NOTES_OPENED_AS_INVITE, NOTES_NOT_OPENED,
+  TOOL_TEXTS, toolStep, noHands, failedReply, NOTES_NOT_OPENED,
 } = require('../src/services/agent/texts');
 const { readHandsAnnouncement, RESULT_CODES } = require('../src/services/agent/hands');
 
@@ -66,22 +66,23 @@ test('what the record, the sheet and the asker\'s panel say about opening the no
     [
       'Asked to open the notes for everyone',
       'Opened the notes for everyone',
-      'Open the notes for everyone in the meeting? Your Arlo view will be shared.',
+      'Open the notes for everyone in the meeting? Your Arlo view will be shared, and the notes stay shared until you stop sharing.',
       'Open notes',
       'Done: opened the notes for everyone.',
     ],
   );
   assert.equal(toolStep(NAME, {}), 'Opening the notes for everyone');
   assert.equal(noHands(NAME), 'Open Arlo to let it do that.');
-  assert.equal(NOTES_OPENED_AS_INVITE, 'Shared the notes and invited everyone to open Arlo. Couldn\'t open them as a shared document.');
   assert.equal(NOTES_NOT_OPENED, 'Shared the notes. Couldn\'t open them for everyone.');
-  // the half-done sentences are picked where the run ends (agent.js), not by code alone
-  assert.equal(failedReply(NAME, 'fell_back_invite', {}), null);
+  // the half-done sentence is picked where the run ends (agent.js), not by code
+  assert.equal(failedReply(NAME, 'sdk_error', {}), null);
+  // nothing is sent in place of opening the notes: no sentence says an invitation went out
+  assert.equal(require('../src/services/agent/texts').NOTES_OPENED_AS_INVITE, undefined);
 });
 
-test('a panel may announce the tool and report that it fell back to an invitation', () => {
+test('a panel may announce the tool; there is no code for a fallback to an invitation', () => {
   assert.deepEqual(readHandsAnnouncement({ zoomRole: 'attendee', can: [NAME] }), { zoomRole: 'attendee', can: [NAME] });
-  assert.equal(RESULT_CODES.includes('fell_back_invite'), true);
+  assert.equal(RESULT_CODES.includes('fell_back_invite'), false);
   // every panel tool at once still fits in one announcement
   assert.deepEqual(readHandsAnnouncement({ zoomRole: 'host', can: [...PANEL_TOOL_NAMES] }), { zoomRole: 'host', can: [...PANEL_TOOL_NAMES] });
 });

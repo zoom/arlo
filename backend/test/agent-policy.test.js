@@ -81,7 +81,8 @@ test('an owner\'s typed request covers a change only when what would be done is 
   assert.equal(covers('let James Carter in', 'admit_from_waiting_room', { name: 'james carter' }), true);
   assert.equal(covers('who is waiting?', 'admit_from_waiting_room', { name: 'Mallory' }), false);
   assert.equal(covers('Share the notes', 'share_notes', {}), true);
-  assert.equal(covers('please SHARE them', 'share_notes', {}), true);
+  assert.equal(covers('please SHARE the notes', 'share_notes', {}), true);
+  assert.equal(covers('please SHARE them', 'share_notes', {}), false);
   // the word, not a part of another one
   for (const typed of ['what did we decide?', 'who has the biggest shareholding?', 'unshared notes?', 'share_all']) {
     assert.equal(covers(typed, 'share_notes', {}), false, typed);
@@ -198,7 +199,8 @@ test('muting is covered only by a plain "mute <the whole name>"', () => {
   for (const typed of [
     'mute Danny Lee', 'Mute Danny Lee.', 'MUTE   danny\tlee!', 'please mute Danny Lee', 'mute Danny Lee please', 'mute Danny Lee, please.',
     'Arlo, mute Danny Lee', 'arlo mute Danny Lee', 'Arlo, please mute Danny Lee', 'can you mute Danny Lee', 'Could you mute Danny Lee please',
-    'Arlo, can you please mute Danny Lee!', 'ｍｕｔｅ Danny Lee',
+    'Arlo, can you please mute Danny Lee!', 'ｍｕｔｅ Danny Lee', 'Hey Arlo, mute Danny Lee', 'hey arlo would you mute Danny Lee?',
+    'can you mute Danny Lee?', 'Could you please mute Danny Lee, please?',
   ]) {
     assert.equal(covers(typed), true, typed);
   }
@@ -213,7 +215,7 @@ test('muting is covered only by a plain "mute <the whole name>"', () => {
   for (const typed of [
     'is Danny Lee here?', 'mute him', 'mute Dan', 'mute everyone except Danny Lee', 'don\'t mute Danny Lee', 'do not mute Danny Lee',
     'is Danny Lee muted?', 'take Danny Lee off mute', 'de-mute Danny Lee', 'un_mute Danny Lee', 'un.mute Danny Lee', 'unmute Danny Lee',
-    'mute Danny Lee and Sam', 'mute Danny Lee, he is loud', 'never mute Danny Lee', 'mute Danny Lee?', 'mute Danny Lee not', 'Danny Lee mute',
+    'mute Danny Lee and Sam', 'mute Danny Lee, he is loud', 'never mute Danny Lee', 'mute Danny Lee?', 'please mute Danny Lee?', 'mute Danny Lee not', 'Danny Lee mute',
     'mute  ', 'mute', 'please', 'mute Danny Lee please please', 'Sam, mute Danny Lee',
   ]) {
     assert.equal(covers(typed), false, typed);
@@ -271,8 +273,107 @@ test('opening a ticket with the share dialog is not covered when the typed text 
   ]) {
     assert.equal(covers(typed, true), false, typed);
   }
-  // without the share dialog the "share" in the text does not matter
-  assert.equal(covers('open PROJ-123, don\'t share', false), true);
+  // a word that turns the request around: the sheet, with or without the share dialog
+  assert.equal(covers('open PROJ-123, don\'t share', false), false);
+  assert.equal(covers('open PROJ-123 and share it', false), true);
+});
+
+test('sharing the notes is covered only by the plain request, whole', () => {
+  const covers = (typed) => typedRequestCovers(typed, 'share_notes', {});
+  for (const typed of [
+    'share the notes', 'Share notes', 'share Arlo\'s notes', 'share Arlo’s notes', 'share my notes', 'share the notes with everyone',
+    'share notes with everybody', 'share my notes with the meeting', 'share the notes with all', 'Arlo, please share the notes.',
+    'Hey Arlo, share the notes!', 'can you share the notes?', 'could you share the notes with everyone, please?', 'would you share notes',
+  ]) assert.equal(covers(typed), true, typed);
+  for (const typed of [
+    'share the notes with Danny only', 'share the notes with Danny', 'un-share the notes', 'unshare the notes', 'should I share the notes?',
+    'share the notes?', 'share my screen', 'share', 'share them', 'share the notes with everyone except Sam', 'share the notes later',
+    'who can share the notes', 'share the notes and post them', 'stop, share the notes', 'dont share the notes', 'share the notes instead',
+    'are the notes shared?', 'share the notes with everyone but not yet', 'share the notes with nobody', 'never mind, share the notes',
+  ]) assert.equal(covers(typed), false, typed);
+});
+
+test('posting is covered only when the typed text is a verb, the message once, the chat at most, and nothing else', () => {
+  const covers = (typed, message) => typedRequestCovers(typed, 'post_to_chat', { message });
+  for (const [typed, message] of [
+    ['post hello team', 'hello team'], ['Post Hello Team', 'hello team'], ['post "hello team"', 'hello team'], ['post: hello team', 'hello team'],
+    ['say hello team', 'hello team'], ['write hello team in the chat', 'hello team'], ['send hello team to the meeting chat', 'hello team'],
+    ['put hello team into chat', 'hello team'], ['post this in the chat: hello team', 'hello team'], ['post to chat, hello team', 'hello team'],
+    ['post that: “hello team”', 'hello team'], ['Arlo, please post hello team', 'hello team'], ['hey arlo, post hello team please', 'hello team'],
+    ['can you post hello team in the chat?', 'hello team'], ['post hello team.', 'hello team'], ['post do not disturb', 'do not disturb'],
+    ['Post Lunch at noon in the chat', 'Lunch at noon'],
+  ]) assert.equal(covers(typed, message), true, typed);
+  for (const [typed, message] of [
+    ['dont post hello team', 'hello team'], ['don\'t post hello team', 'hello team'], ['do not post hello team', 'hello team'],
+    ['never post hello team', 'hello team'], ['what does hello mean', 'hello'], ['hello', 'hello'], ['hello team', 'hello team'],
+    ['post hello team and hello team again', 'hello team'], ['post hello hello', 'hello'], ['post hello team to Danny', 'hello team'],
+    ['post hello team in the chat in the chat', 'hello team'], ['post in the chat hello team in the chat', 'hello team'],
+    ['should I post hello team?', 'hello team'], ['post hello team?', 'hello team'], ['post hello teams', 'hello team'],
+    ['repost hello team', 'hello team'], ['post hello team unless Sam objects', 'hello team'], ['delete hello team', 'hello team'],
+    ['post hello team instead of the notes', 'hello team'], ['post something like hello team', 'hello team'],
+    ['Sam said post hello team', 'hello team'], ['post \u0001 hello team', 'hello team'], ['post the notes', 'Buy now at evil.example'],
+  ]) assert.equal(covers(typed, message), false, typed);
+});
+
+test('opening a ticket needs a word that opens, and sharing the word "share" itself', () => {
+  const covers = (typed, share, key = 'PROJ-123') => typedRequestCovers(typed, 'open_ticket', { key, share });
+  for (const typed of ['open PROJ-123', 'pull up PROJ-123', 'bring up PROJ-123 please', 'show PROJ-123', 'Hey Arlo, show me proj-123']) {
+    assert.equal(covers(typed, false), true, typed);
+  }
+  for (const typed of [
+    'close PROJ-123', 'what is PROJ-123 about', 'PROJ-123', 'reopen PROJ-123', 'who opened PROJ-123', 'dont open PROJ-123',
+    'open PROJ-123 unless it is closed', 'never show PROJ-123', 'open nothing but PROJ-123', 'delete PROJ-123',
+  ]) {
+    assert.equal(covers(typed, false), false, typed);
+    assert.equal(covers(`${typed} and share it`, true), false, typed);
+  }
+  for (const typed of [
+    'open PROJ-123 and share it', 'open PROJ-123 and start sharing', 'open PROJ-123 and screen share it', 'open PROJ-123 and screenshare',
+    'open PROJ-123, screen-share it', 'show PROJ-123 and share my screen',
+  ]) assert.equal(covers(typed, true), true, typed);
+  for (const typed of [
+    'open PROJ-123 on the shared drive', 'open PROJ-123 from the shares list', 'open PROJ-123 for the shareholders', 'open PROJ-123',
+    'open PROJ-123 and un-share', 'open PROJ-123 and unshare', 'open PROJ-123 and stop sharing', 'open PROJ-123 instead of sharing',
+    'share PROJ-123',
+  ]) assert.equal(covers(typed, true), false, typed);
+  // words and a number are not a key
+  assert.equal(covers('open PROJ-12 in 5 minutes', false, 'IN-5'), false);
+  assert.equal(covers('open PROJ-12 in 5 minutes', false, 'PROJ-12'), true);
+  assert.equal(covers('open ticket 42', false, 'TICKET-42'), false);
+  assert.equal(covers('show version 2', false, 'VERSION-2'), false);
+  assert.equal(covers('open PROJ 123', false), true);
+  assert.equal(covers('open proj 123', false), false);
+});
+
+test('the words that turn a request around, with and without an apostrophe', () => {
+  for (const word of [
+    'not', 'no', 'never', 'stop', 'without', 'cannot', 'dont', 'don\'t', 'cant', 'can\'t', 'wont', 'won\'t', 'shouldnt', 'shouldn\'t',
+    'wouldnt', 'couldnt', 'doesnt', 'didnt', 'isnt', 'arent', 'wasnt', 'avoid', 'skip', 'unless', 'instead', 'rather', 'nobody', 'nothing',
+    'none', 'neither', 'nor',
+  ]) {
+    assert.equal(typedRequestCovers(`${word} clap`, 'send_reaction', { reaction: 'clap' }), false, word);
+    assert.equal(typedRequestCovers(`open PROJ-123 ${word}`, 'open_ticket', { key: 'PROJ-123', share: false }), false, word);
+  }
+  // not a part of another word
+  for (const typed of ['clap for the notary', 'clap, north side', 'nonesuch clap']) {
+    assert.equal(typedRequestCovers(typed, 'send_reaction', { reaction: 'clap' }), true, typed);
+  }
+});
+
+test('a reaction is covered by its own emoji too, and not by another\'s', () => {
+  const EMOJI = {
+    thumbs_up: ['\u{1F44D}'], clap: ['\u{1F44F}'], heart: ['❤️', '❤'], joy: ['\u{1F602}'], tada: ['\u{1F389}'], open_mouth: ['\u{1F62E}'],
+  };
+  for (const [reaction, list] of Object.entries(EMOJI)) {
+    for (const emoji of list) {
+      for (const other of Object.keys(EMOJI)) {
+        assert.equal(typedRequestCovers(`send a ${emoji}`, 'send_reaction', { reaction: other }), other === reaction, `${emoji} / ${other}`);
+        assert.equal(typedRequestCovers(emoji, 'send_reaction', { reaction: other }), other === reaction, `${emoji} / ${other}`);
+      }
+      assert.equal(typedRequestCovers(`don't send a ${emoji}`, 'send_reaction', { reaction }), false);
+      assert.equal(typedRequestCovers(`no ${emoji}`, 'send_reaction', { reaction }), false);
+    }
+  }
 });
 
 test('a spoken request is heard only while an owner has a panel open', () => {

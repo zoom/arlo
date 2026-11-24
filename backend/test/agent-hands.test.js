@@ -83,7 +83,7 @@ test('an action goes to one panel, and its result is the outcome', async () => {
   assert.equal(s.live(), 0);
 
   // every code a panel may report is passed on; anything else is "the SDK failed"
-  assert.deepEqual([...RESULT_CODES], ['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed', 'fell_back_invite']);
+  assert.deepEqual([...RESULT_CODES], ['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed']);
   for (const [code, expected] of [...RESULT_CODES].map((one) => [one, one]).concat([[undefined, 'sdk_error'], ['rm -rf', 'sdk_error'], [5, 'sdk_error']])) {
     const again = s.hands.run(M, POST);
     s.hands.result(M, ana.got.at(-1).data.actionId, 'user-ana', { ok: false, code });
@@ -967,7 +967,7 @@ test('"open the notes for everyone" through the running server: the sheet, shari
   });
   const sheet = await sheetSent(ownerPanel);
   assert.deepEqual([sheet.question, sheet.primaryLabel, 'body' in sheet],
-    ['Open the notes for everyone in the meeting? Your Arlo view will be shared.', 'Open notes', false]);
+    ['Open the notes for everyone in the meeting? Your Arlo view will be shared, and the notes stay shared until you stop sharing.', 'Open notes', false]);
   await h.wait(50);
   assert.equal((await state(m)).body.notesShared, false);
   assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
@@ -980,14 +980,15 @@ test('"open the notes for everyone" through the running server: the sheet, shari
   const done = await didEnd(ownerPanel, asked.body.action.id);
   assert.deepEqual([done.status, done.label], ['done', 'Opened the notes for everyone']);
 
-  // Collaborate did not start and the panel sent the invitation instead: the record says all of it
+  // Collaborate did not start: the notes stay shared and nothing is sent in its place
   const again = await ask(m, 'open the notes for everyone again');
   assert.equal((await approveSheet(m, (await sheetSent(ownerPanel, 2)).id)).status, 200);
   const second = await actionSent(ownerPanel, 2);
-  assert.equal((await report(m, second.actionId, { ok: false, code: 'fell_back_invite' })).status, 200);
+  assert.equal((await report(m, second.actionId, { ok: false, code: 'fell_back_invite' })).status, 400);
+  assert.equal((await report(m, second.actionId, { ok: false, code: 'sdk_error' })).status, 200);
   const fellBack = await didEnd(ownerPanel, again.body.action.id);
   assert.deepEqual([fellBack.status, fellBack.label],
-    ['failed', 'Shared the notes and invited everyone to open Arlo. Couldn\'t open them as a shared document.']);
+    ['failed', 'Shared the notes. Couldn\'t open them for everyone.']);
   assert.equal((await state(m)).body.notesShared, true);
   closeAll(ownerPanel);
 });
