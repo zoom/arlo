@@ -1,6 +1,7 @@
 /**
  * What the server holds for a meeting while it runs: transcript segments,
- * timeline events, the notes written from them and a few facts about the
+ * timeline events, the notes written from them, what Arlo was asked and did,
+ * and a few facts about the
  * meeting (who brought Arlo in, who may ask, whether the notes are shared with
  * everyone in it), in memory only. Nothing here touches disk. A meeting's data
  * is removed by deleteMeeting() (see services/meetingLifecycle.js) or by
@@ -11,11 +12,14 @@
  * Never log what this module holds.
  */
 const crypto = require('crypto');
+const { cleanName } = require('../lib/displayName');
+const { ALL_TOOL_NAMES } = require('../services/agent/tools');
 
 const DEFAULTS = Object.freeze({
   maxMeetings: 500,
   maxSegmentsPerMeeting: 20000,
   maxEventsPerMeeting: 2000,
+  maxActionsPerMeeting: 500,
   maxAgeMs: 12 * 60 * 60 * 1000,
 });
 const MAX_ID_CHARS = 256;
@@ -35,6 +39,15 @@ const MAX_IDENTITIES = 20;
 const IDENTITY_FIELDS = Object.freeze(['participantUUID', 'participantId', 'screenName']);
 const IDENTITY_COUNTERS = Object.freeze(['lines', 'idEqualsParticipantId', 'idEqualsParticipantUUID', 'nameEqualsScreenName']);
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
+// What Arlo was asked and did (appendAction)
+const MAX_ACTION_LABEL_CHARS = 200;
+const ACTION_CHANNELS = new Set(['voice', 'panel']);
+const ACTION_STATUSES = new Set(['pending', 'waiting_approval', 'done', 'declined', 'failed', 'expired']);
+// How an action can end. One that ended is not changed again
+const ACTION_ENDED = new Set(['done', 'declined', 'failed', 'expired']);
+// Not shown as text: control and invisible format characters, private-use and
+// unassigned ones, lone surrogates, line and paragraph separators
+const NOT_SHOWN = /(?![\u200C\u200D])[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/gu;
 
 const MAX_SEQ_NO = 2 ** 31;
 
@@ -71,6 +84,16 @@ function readIdentity(raw) {
   }
   return IDENTITY_FIELDS.some((field) => identity[field] !== null) ? identity : null;
 }
+/**
+ * An action's label as it is kept: one line of plain text, at most 200
+ * characters; null when nothing is left of it.
+ */
+function readActionLabel(value) {
+  if (typeof value !== 'string') return null;
+  const oneLine = value.replace(NOT_SHOWN, ' ').replace(/\s+/gu, ' ').trim();
+  const label = bounded(oneLine, MAX_ACTION_LABEL_CHARS).trim();
+  return label.length > 0 ? label : null;
+}
 const copyNotes = (notes) => ({
   ...notes,
   decisions: [...notes.decisions],
@@ -103,6 +126,7 @@ function createMemoryMeetingStore(options = {}) {
         meta: defaultMeta(),
         identities: new Map(),
         identityCheck: zeroIdentityCheck(),
+        actions: [],
       };
     }
     meetings.set(meetingId, entry);
@@ -276,6 +300,67 @@ function createMemoryMeetingStore(options = {}) {
     return { ...(entry ? entry.identityCheck : zeroIdentityCheck()), identities: entry ? entry.identities.size : 0 };
   }
 
+  /**
+   * Record something Arlo was asked to do. Returns the stored copy (with an id
+   * and a time), or null if refused.
+   *
+   * Rebuilt from known fields: `tool` (a name from the tool table), `label`
+   * (what Arlo did, a sentence the server wrote from a template, never a
+   * model's text; cleaned to one line of at most 200 characters), `askedBy`
+   * (a name or null), `channel` ('voice' | 'panel'), `status` ('pending' when
+   * not given), `public` (shown to participants: only `true` is), `at` (now
+   * when not given). What a tool was called with is not kept.
+   *
+   * Only for a meeting already held, like setNotes: an action that ends after
+   * the flush must not bring the meeting back. At most 500 per meeting; more
+   * are refused, so the record never loses an action it took.
+   */
+  function appendAction(meetingId, raw) {
+    const entry = meetings.get(meetingId);
+    if (!entry || !isPlainObject(raw) || entry.actions.length >= limits.maxActionsPerMeeting) return null;
+    const label = readActionLabel(raw.label);
+    const status = hasOwn(raw, 'status') ? raw.status : 'pending';
+    if (typeof raw.tool !== 'string' || !ALL_TOOL_NAMES.includes(raw.tool) || label === null
+        || !ACTION_CHANNELS.has(raw.channel) || !ACTION_STATUSES.has(status)) {
+      return null;
+    }
+    const action = {
+      id: crypto.randomUUID(),
+      at: isTime(raw.at) ? raw.at : now(),
+      tool: raw.tool,
+      label,
+      askedBy: cleanName(raw.askedBy, MAX_NAME_CHARS) || null,
+      channel: raw.channel,
+      status,
+      public: raw.public === true,
+    };
+    entry.actions.push(action);
+    return { ...action };
+  }
+
+  /**
+   * Change an action's `status`, its `label`, or both; nothing else of it can
+   * change. Returns the stored copy, or null when refused: an unknown meeting
+   * or id, a value that is not allowed (then nothing is changed), nothing to
+   * change, or an action that already ended (done, declined, failed, expired).
+   */
+  function updateAction(meetingId, id, patch) {
+    const action = meetings.get(meetingId)?.actions.find((one) => one.id === id);
+    if (!action || !isPlainObject(patch) || ACTION_ENDED.has(action.status)) return null;
+    const hasStatus = hasOwn(patch, 'status');
+    const hasLabel = hasOwn(patch, 'label');
+    const label = hasLabel ? readActionLabel(patch.label) : null;
+    if ((!hasStatus && !hasLabel) || (hasStatus && !ACTION_STATUSES.has(patch.status)) || (hasLabel && label === null)) {
+      return null;
+    }
+    if (hasStatus) action.status = patch.status;
+    if (hasLabel) action.label = label;
+    return { ...action };
+  }
+
+  /** The meeting's actions, oldest first, as copies. */
+  const listActions = (meetingId) => (meetings.get(meetingId)?.actions || []).map((action) => ({ ...action }));
+
   const listSegments = (meetingId) => (meetings.get(meetingId)?.segments || []).map((s) => ({ ...s }));
   const listEvents = (meetingId) => (meetings.get(meetingId)?.events || []).map((e) => ({ ...e }));
   const has = (meetingId) => meetings.has(meetingId);
@@ -303,6 +388,7 @@ function createMemoryMeetingStore(options = {}) {
     appendSegment, appendEvent, listSegments, listEvents,
     setNotes, getNotes, setMeta, getMeta,
     setIdentity, listIdentities, addIdentityCheck, getIdentityCheck,
+    appendAction, updateAction, listActions,
     has, deleteMeeting, sweep, size,
   };
 }

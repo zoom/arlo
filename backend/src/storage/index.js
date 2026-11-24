@@ -24,15 +24,25 @@
  *   addIdentityCheck(meetingId, { lines?, idEqualsParticipantId?, idEqualsParticipantUUID?, nameEqualsScreenName? })
  *                                     -> boolean; adds whole numbers to the meeting's counters
  *   getIdentityCheck(meetingId)       -> those four counters and `identities` (how many are held)
+ *   appendAction(meetingId, action)   -> stored action with id | null; what Arlo was asked and did:
+ *                                        { id, at, tool, label, askedBy, channel, status, public }, with
+ *                                        tool a name from services/agent/tools.js, label one line of at
+ *                                        most 200 characters, askedBy a name or null, channel 'voice' |
+ *                                        'panel', status 'pending' | 'waiting_approval' | 'done' |
+ *                                        'declined' | 'failed' | 'expired', public a boolean (shown to
+ *                                        participants). At most 500 per meeting; more are refused
+ *   updateAction(meetingId, id, patch) -> stored action | null; `status` and `label` only, and not for
+ *                                        an action that ended (done, declined, failed, expired)
+ *   listActions(meetingId)            -> action[], oldest first
  *   has(meetingId)                    -> boolean
  *   deleteMeeting(meetingId)          -> boolean
  *   sweep()                           -> number of meetings deleted
  *   size()                            -> number of meetings held
  *
- * setNotes, setMeta, setIdentity and addIdentityCheck only work for a meeting already held (a segment or event
+ * setNotes, setMeta, setIdentity, addIdentityCheck, appendAction and updateAction only work for a meeting already held (a segment or event
  * was stored) and return null otherwise, so a late write cannot bring back a
- * meeting that was flushed. deleteMeeting and sweep remove notes, meta, identities
- * and counters too.
+ * meeting that was flushed. deleteMeeting and sweep remove notes, meta, identities,
+ * counters and actions too.
  *
  * Today there is one implementation: memory. In demo mode that is the design:
  * a meeting's data is held only while the meeting runs and is flushed when it
