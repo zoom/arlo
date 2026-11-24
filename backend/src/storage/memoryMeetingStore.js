@@ -13,7 +13,7 @@
  */
 const crypto = require('crypto');
 const { cleanName } = require('../lib/displayName');
-const { ALL_TOOL_NAMES } = require('../services/agent/tools');
+const { ALL_TOOL_NAMES, NO_TOOL_NAME } = require('../services/agent/tools');
 
 const DEFAULTS = Object.freeze({
   maxMeetings: 500,
@@ -304,7 +304,8 @@ function createMemoryMeetingStore(options = {}) {
    * Record something Arlo was asked to do. Returns the stored copy (with an id
    * and a time), or null if refused.
    *
-   * Rebuilt from known fields: `tool` (a name from the tool table), `label`
+   * Rebuilt from known fields: `tool` (a name from the tool table, or 'none'
+   * for a request no tool was found for), `label`
    * (what Arlo did, a sentence the server wrote from a template, never a
    * model's text; cleaned to one line of at most 200 characters), `askedBy`
    * (a name or null), `channel` ('voice' | 'panel'), `status` ('pending' when
@@ -320,7 +321,8 @@ function createMemoryMeetingStore(options = {}) {
     if (!entry || !isPlainObject(raw) || entry.actions.length >= limits.maxActionsPerMeeting) return null;
     const label = readActionLabel(raw.label);
     const status = hasOwn(raw, 'status') ? raw.status : 'pending';
-    if (typeof raw.tool !== 'string' || !ALL_TOOL_NAMES.includes(raw.tool) || label === null
+    const knownTool = typeof raw.tool === 'string' && (ALL_TOOL_NAMES.includes(raw.tool) || raw.tool === NO_TOOL_NAME);
+    if (!knownTool || label === null
         || !ACTION_CHANNELS.has(raw.channel) || !ACTION_STATUSES.has(status)) {
       return null;
     }

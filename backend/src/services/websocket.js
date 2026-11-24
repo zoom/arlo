@@ -488,6 +488,35 @@ function sendApprovalClosed(meetingId, ownerUserIds, askedByUserId, data) {
 }
 
 /**
+ * Tell these people's panels (the meeting's owners), each verified to be in
+ * this meeting, that Arlo is handling a request, or that it stopped.
+ */
+function sendArloThinking(meetingId, userIds, on) {
+  const told = userIdSet(userIds);
+  if (told.size === 0) return 0;
+  return sendToMeetingSockets(meetingId, (ws) => (
+    isOwnerPanel(ws, meetingId, told) ? { type: 'arlo.thinking', data: { meetingId, on: on === true } } : null
+  ));
+}
+
+/**
+ * Tell how something Arlo was asked ended (services/agent/agent.js decides who
+ * may know): with `everyone`, every socket whose verified meeting access names
+ * this meeting, signed in or a guest; otherwise the panels of `userIds` only.
+ * Never a socket verified for another meeting. `action` is the stored action:
+ * a tool name, a label the server wrote, the asker's name, a status.
+ */
+function sendArloDid(meetingId, action, { everyone = false, userIds = [] } = {}) {
+  const told = userIdSet(userIds);
+  if (everyone !== true && told.size === 0) return 0;
+  return sendToMeetingSockets(meetingId, (ws) => (
+    ws.allowedMeetingId === meetingId && (everyone === true || told.has(ws.userId))
+      ? { type: 'arlo.did', data: { meetingId, action } }
+      : null
+  ));
+}
+
+/**
  * Whether a panel that may see this meeting's notes is open in it: an owner's
  * (one of `ownerUserIds`), or anyone's while the notes are shared. The same
  * sockets sendNotesUpdated() would send to. The notes engine asks before it
@@ -739,6 +768,8 @@ module.exports = {
   sendNotesUpdated,
   sendApprovalOpened,
   sendApprovalClosed,
+  sendArloThinking,
+  sendArloDid,
   hasNotesReaderPanel,
   currentStreamStatus,
   broadcastRtmsRequestStatus,

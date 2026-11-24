@@ -61,9 +61,11 @@ const TABLE = deepFreeze([
   },
   {
     name: 'share_notes',
-    description: 'Post Arlo\'s notes of this meeting to the meeting chat. Use when asked to share, send or post the notes.',
+    // Turns "notes shared with everyone" on (the same switch as the owner's
+    // setting): the server does it, no panel is needed
+    description: 'Share Arlo\'s notes of this meeting with everyone in the meeting. Use when asked to share, send or show the notes.',
     parameters: parameters(),
-    runs: 'panel',
+    runs: 'server',
     changesMeeting: true,
   },
   {
@@ -77,6 +79,10 @@ const TABLE = deepFreeze([
 
 /** Every tool name there is, also the ones a deployment has turned off. */
 const ALL_TOOL_NAMES = Object.freeze(TABLE.map((tool) => tool.name));
+/** What a request is recorded under when no tool was found for it. Never a tool. */
+const NO_TOOL_NAME = 'none';
+/** The tools an owner's open panel does with the Zoom Apps SDK. */
+const PANEL_TOOL_NAMES = Object.freeze(TABLE.filter((tool) => tool.runs === 'panel').map((tool) => tool.name));
 
 /** Whether this deployment has web search on (WEB_SEARCH_ENABLED=true). Read when asked: config needs the environment. */
 function webSearchOn(options) {
@@ -137,5 +143,5 @@ function validateToolCall(name, args, options) {
 }
 
 module.exports = {
-  listTools, toolNames, getTool, validateToolCall, ALL_TOOL_NAMES,
+  listTools, toolNames, getTool, validateToolCall, ALL_TOOL_NAMES, NO_TOOL_NAME, PANEL_TOOL_NAMES,
 };

@@ -2,9 +2,16 @@
  * Approvals: a question put to the people who brought Arlo into a meeting,
  * which one of them answers in their panel, or which runs out.
  *
- * Today there is one kind, 'share_notes': a participant asks for the notes and
- * an owner agrees to share them with everyone in the meeting. More kinds are
- * added to APPROVAL_KINDS; nothing else here depends on the kind.
+ * Two kinds:
+ *   'share_notes'   a participant asks for the notes and an owner agrees to
+ *                   share them with everyone in the meeting. One per person
+ *                   every ASK_AGAIN_MS.
+ *   'agent_action'  someone asked Arlo for something that an owner has to
+ *                   agree to first (services/agent/agent.js decides when). It
+ *                   carries the sheet's texts, `question` and `primaryLabel`:
+ *                   sentences the server wrote. The asker may have no user id
+ *                   (a request spoken in the meeting); how often someone may
+ *                   ask is the agent's limit, not this module's.
  *
  * What an answer means: whoever calls answer() does the work first (for
  * 'share_notes' the route turns sharing on, routes/arlo.js), then reports.
@@ -13,15 +20,26 @@
  * work did not happen). The first valid answer closes the
  * approval; an unanswered one closes as 'expired' after `expiryMs`.
  *
+ * Whoever opens an approval can pass `onOutcome(outcome, { byUserId })`: it is
+ * called once when the approval ends, with 'approved' | 'declined' | 'failed'
+ * | 'expired', or 'forgotten' when the meeting's data went first. That is how
+ * the agent waits for the owners' answer.
+ *
  * Kept in memory per meeting and gone with the meeting (`forget`, called from
  * the meeting lifecycle). Bounded: at most `maxPerMeeting` open at once, one
- * per person per kind every ASK_AGAIN_MS, and a bounded memory of who asked.
+ * 'share_notes' per person every ASK_AGAIN_MS, and a bounded memory of who asked.
  * The asker's name is held only while the approval is open. Nothing is logged
  * here: not a name, not a user id.
  */
 const crypto = require('node:crypto');
 
-const APPROVAL_KINDS = new Set(['share_notes']);
+const APPROVAL_KINDS = new Set(['share_notes', 'agent_action']);
+// Kinds a person asks for themselves: one each per ASK_AGAIN_MS, and they must be signed in
+const ONE_PER_ASKER = new Set(['share_notes']);
+// Kinds whose sheet texts come with the approval
+const WITH_TEXTS = new Set(['agent_action']);
+const MAX_QUESTION_CHARS = 500;
+const MAX_PRIMARY_LABEL_CHARS = 120;
 // One request per person, per kind, per meeting in this long
 const ASK_AGAIN_MS = 2 * 60 * 1000;
 const MAX_ID_CHARS = 256;
@@ -30,6 +48,8 @@ const MAX_MEETINGS = 5000;
 
 const isId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
 const isKind = (value) => typeof value === 'string' && APPROVAL_KINDS.has(value);
+/** A sentence for the sheet: a string with something in it, at most `max` characters. */
+const isSheetText = (value, max) => typeof value === 'string' && value.trim().length > 0 && value.length <= max;
 
 const defaultSchedule = (fn, ms) => {
   const timer = setTimeout(fn, ms);
@@ -56,13 +76,17 @@ function createApprovals({
     askedByUserId: entry.askedByUserId,
     askedByName: entry.askedByName,
     expiresAt: entry.expiresAt,
+    ...(WITH_TEXTS.has(entry.kind) && { question: entry.question, primaryLabel: entry.primaryLabel }),
   });
 
   const askerKey = (kind, userId) => `${kind}:${userId}`;
 
   /** Whether this person may open an approval of this kind in this meeting now. */
   function mayOpen(meetingId, kind, userId) {
-    if (!isId(meetingId) || !isKind(kind) || !isId(userId)) return false;
+    if (!isId(meetingId) || !isKind(kind)) return false;
+    // The agent's limits are its own; a request spoken in the meeting has no user
+    if (!ONE_PER_ASKER.has(kind)) return userId === null || userId === undefined || isId(userId);
+    if (!isId(userId)) return false;
     const meeting = meetings.get(meetingId);
     if (!meeting) return true;
     for (const entry of meeting.open.values()) {
@@ -81,7 +105,19 @@ function createApprovals({
     return meeting.askedAt.size < maxAskersPerMeeting;
   }
 
-  function close(meetingId, meeting, entry, outcome) {
+  /** Tell whoever opened it how it ended. Once: the entry is closed or forgotten by then. */
+  function tellOpener(entry, outcome, byUserId) {
+    const { onOutcome } = entry;
+    entry.onOutcome = null;
+    if (typeof onOutcome !== 'function') return;
+    try {
+      onOutcome(outcome, { byUserId });
+    } catch {
+      // The opener's failure is its own
+    }
+  }
+
+  function close(meetingId, meeting, entry, outcome, byUserId = null) {
     meeting.open.delete(entry.id);
     if (entry.cancel) entry.cancel();
     entry.cancel = null;
@@ -90,33 +126,46 @@ function createApprovals({
     } catch {
       // Telling the panels must never undo a close or crash a timer
     }
+    tellOpener(entry, outcome, byUserId);
   }
 
   /**
    * Open an approval. { id, expiresAt } or null when it is refused: an unknown
-   * kind, this person asked a moment ago or has one open, or the meeting has
-   * as many open as it takes.
+   * kind, this person asked a moment ago or has one open, the meeting has
+   * as many open as it takes, or (for 'agent_action') the sheet's texts are
+   * missing or too long.
    */
-  function open(meetingId, { kind, askedByUserId, askedByName } = {}) {
+  function open(meetingId, {
+    kind, askedByUserId, askedByName, question, primaryLabel, onOutcome,
+  } = {}) {
     if (!mayOpen(meetingId, kind, askedByUserId)) return null;
+    if (onOutcome !== undefined && typeof onOutcome !== 'function') return null;
+    const withTexts = WITH_TEXTS.has(kind);
+    if (withTexts && (!isSheetText(question, MAX_QUESTION_CHARS) || !isSheetText(primaryLabel, MAX_PRIMARY_LABEL_CHARS))) {
+      return null;
+    }
+    const perAsker = ONE_PER_ASKER.has(kind);
     let meeting = meetings.get(meetingId);
     if (!meeting) {
       if (meetings.size >= MAX_MEETINGS) return null;
       meeting = { open: new Map(), askedAt: new Map() };
     }
     const key = askerKey(kind, askedByUserId);
-    if (meeting.open.size >= maxPerMeeting || !roomForAsker(meeting, key)) return null;
+    if (meeting.open.size >= maxPerMeeting || (perAsker && !roomForAsker(meeting, key))) return null;
     meetings.set(meetingId, meeting);
 
     const entry = {
       id: crypto.randomUUID(),
       kind,
-      askedByUserId,
+      askedByUserId: isId(askedByUserId) ? askedByUserId : null,
       askedByName: typeof askedByName === 'string' && askedByName.length > 0 ? askedByName.slice(0, MAX_NAME_CHARS) : null,
       expiresAt: now() + expiryMs,
       cancel: null,
+      question: withTexts ? question.trim() : null,
+      primaryLabel: withTexts ? primaryLabel.trim() : null,
+      onOutcome: typeof onOutcome === 'function' ? onOutcome : null,
     };
-    meeting.askedAt.set(key, now());
+    if (perAsker) meeting.askedAt.set(key, now());
     meeting.open.set(entry.id, entry);
     entry.cancel = schedule(() => {
       entry.cancel = null;
@@ -156,21 +205,26 @@ function createApprovals({
     const entry = openEntry(meetingId, id);
     if (!entry) return null;
     const outcome = approve ? (done === true ? 'approved' : 'failed') : 'declined';
-    close(meetingId, meetings.get(meetingId), entry, outcome);
+    close(meetingId, meetings.get(meetingId), entry, outcome, byUserId);
     return outcome;
   }
 
-  /** The meeting's data is gone: so is everything here about it. Nobody is told. */
+  /**
+   * The meeting's data is gone: so is everything here about it. No panel is
+   * told; whoever opened an approval and waits for it hears 'forgotten'.
+   */
   function forget(meetingId) {
     const meeting = meetings.get(meetingId);
     if (!meeting) return;
-    for (const entry of meeting.open.values()) {
+    const waiting = [...meeting.open.values()];
+    for (const entry of waiting) {
       if (entry.cancel) entry.cancel();
       entry.cancel = null;
     }
     meeting.open.clear();
     meeting.askedAt.clear();
     meetings.delete(meetingId);
+    for (const entry of waiting) tellOpener(entry, 'forgotten', null);
   }
 
   /** Counts only, for tests and housekeeping. */
@@ -189,13 +243,18 @@ function createApprovals({
 
 let instance = null;
 
-/** What the panels are told about an open approval: the asker's name, never their id. */
+/**
+ * What the panels are told about an open approval: the asker's name, never
+ * their id. For 'agent_action' also the sheet's texts (`question`,
+ * `primaryLabel`), which the server wrote.
+ */
 const approvalMessageData = (meetingId, approval) => ({
   meetingId,
   id: approval.id,
   kind: approval.kind,
   askedBy: approval.askedByName,
   expiresAt: approval.expiresAt,
+  ...(WITH_TEXTS.has(approval.kind) && { question: approval.question, primaryLabel: approval.primaryLabel }),
 });
 
 /** The one the running server uses: a close is told to the owners and to the person who asked. */

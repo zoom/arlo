@@ -48,6 +48,8 @@ test('every tool in the table can be recorded, also one a deployment has turned 
     assert.equal(store.appendAction(M, { ...ACTION, tool }), null, JSON.stringify(tool));
   }
   assert.equal(store.listActions(M).length, ALL_TOOL_NAMES.length);
+  // a request no tool was found for (the model that picks failed) is recorded under 'none'
+  assert.equal(store.appendAction(M, { ...ACTION, tool: 'none' }).tool, 'none');
 });
 
 test('an action with a bad channel, status or label, or one that is not an object, is refused', () => {

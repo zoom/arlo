@@ -292,6 +292,19 @@ module.exports = {
   // The model that picks a tool when someone asks Arlo for something: one of
   // the allowed models, else the default. Chosen with scripts/agent-eval.js
   agentModel: allowedModelOrDefault(process.env.AGENT_MODEL, defaultOpenRouterModel),
+  // How a spoken "Arlo, …" is taken to come from an owner, so it runs without
+  // the owners' approval (services/agent/speakerMatch.js):
+  //   none              (default) never: every spoken request is someone else's
+  //   participant_id    the line's speaker id equals the participantId an owner's panel reported
+  //   participant_uuid  the line's speaker id equals a reported participantUUID
+  // Set it only after GET …/arlo/identity-check showed which one matches in
+  // real meetings. A name is never used. Anything else is 'none', with a warning.
+  agentSpeakerMatch: (() => {
+    // eslint-disable-next-line global-require
+    const { mode, known } = require('./services/agent/speakerMatch').readSpeakerMatchMode(process.env.AGENT_SPEAKER_MATCH);
+    if (!known) console.warn('AGENT_SPEAKER_MATCH must be none, participant_id or participant_uuid; using none.');
+    return mode;
+  })(),
   // Whether Arlo's tool table has web search (services/agent/tools.js). Off
   // unless WEB_SEARCH_ENABLED is exactly "true": it needs a paid model plugin
   webSearchEnabled: process.env.WEB_SEARCH_ENABLED === 'true',

@@ -2,7 +2,7 @@
 // one of them answers, or that runs out. Time and timers are the test's.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createApprovals, APPROVAL_KINDS } = require('../src/services/approvals');
+const { createApprovals, approvalMessageData, APPROVAL_KINDS } = require('../src/services/approvals');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const M = 'MEETING-APPROVALS==';
@@ -39,8 +39,8 @@ const ask = (approvals, userId = 'user-ben', name = 'Ben Okafor', meetingId = M)
   meetingId, { kind: 'share_notes', askedByUserId: userId, askedByName: name },
 );
 
-test('only "share_notes" is a kind for now', () => {
-  assert.deepEqual([...APPROVAL_KINDS], ['share_notes']);
+test('the kinds: a request for the notes, and something Arlo was asked to do', () => {
+  assert.deepEqual([...APPROVAL_KINDS], ['share_notes', 'agent_action']);
 });
 
 test('open gives an id and when it runs out; get and listOpen show it', () => {
@@ -61,7 +61,7 @@ test('open gives an id and when it runs out; get and listOpen show it', () => {
 
 test('open refuses what is not a known kind, a user id or a meeting id', () => {
   const { approvals, live } = setup();
-  for (const kind of ['agent_action', '', null, undefined, 42, 'constructor', '__proto__', ['share_notes']]) {
+  for (const kind of ['agent', 'post_to_chat', '', null, undefined, 42, 'constructor', '__proto__', ['share_notes']]) {
     assert.equal(approvals.open(M, { kind, askedByUserId: 'user-ben', askedByName: null }), null, String(kind));
   }
   for (const userId of ['', null, undefined, 42, {}]) {
@@ -229,4 +229,106 @@ test('the default timer does not keep the process alive, and nothing is logged',
   }
   assert.equal(lines.join('\n').includes('Ben Okafor'), false);
   assert.equal(lines.join('\n').includes('Cy Young'), false);
+});
+
+const agentAsk = (approvals, extra = {}, meetingId = M) => approvals.open(meetingId, {
+  kind: 'agent_action',
+  askedByUserId: null,
+  askedByName: 'James',
+  question: 'Admit James from the waiting room?',
+  primaryLabel: 'Admit James',
+  ...extra,
+});
+
+test('agent_action: carries the sheet\'s texts, needs no user id, and is not limited per asker', () => {
+  const { approvals } = setup();
+  const first = agentAsk(approvals);
+  assert.match(first.id, UUID);
+  assert.deepEqual(approvals.get(M, first.id), {
+    id: first.id,
+    kind: 'agent_action',
+    askedByUserId: null,
+    askedByName: 'James',
+    expiresAt: first.expiresAt,
+    question: 'Admit James from the waiting room?',
+    primaryLabel: 'Admit James',
+  });
+  // spoken requests have no user; the same person may have several open
+  assert.notEqual(agentAsk(approvals), null);
+  assert.notEqual(agentAsk(approvals, { askedByUserId: 'user-ben' }), null);
+  assert.notEqual(agentAsk(approvals, { askedByUserId: 'user-ben' }), null);
+  assert.equal(approvals.size().open, 4);
+  assert.equal(approvals.size().askers, 0);
+  // and a request for the notes by the same person is still its own thing
+  assert.notEqual(ask(approvals, 'user-ben'), null);
+  assert.equal(ask(approvals, 'user-ben'), null);
+
+  assert.deepEqual(approvalMessageData(M, approvals.get(M, first.id)), {
+    meetingId: M,
+    id: first.id,
+    kind: 'agent_action',
+    askedBy: 'James',
+    expiresAt: first.expiresAt,
+    question: 'Admit James from the waiting room?',
+    primaryLabel: 'Admit James',
+  });
+});
+
+test('agent_action: refused without its texts, with texts that are too long, or with a bad asker', () => {
+  const { approvals } = setup();
+  for (const extra of [
+    { question: undefined }, { question: '' }, { question: '   ' }, { question: 5 }, { question: 'q'.repeat(501) },
+    { primaryLabel: undefined }, { primaryLabel: '' }, { primaryLabel: {} }, { primaryLabel: 'p'.repeat(121) },
+    { askedByUserId: '' }, { askedByUserId: 5 }, { askedByUserId: {} }, { askedByUserId: 'x'.repeat(257) },
+    { onOutcome: 'call me' },
+  ]) {
+    assert.equal(agentAsk(approvals, extra), null, JSON.stringify(extra));
+  }
+  assert.equal(approvals.size().open, 0);
+});
+
+test('share_notes keeps its shape: texts given to it are not kept', () => {
+  const { approvals } = setup();
+  const opened = approvals.open(M, {
+    kind: 'share_notes', askedByUserId: 'user-ben', askedByName: 'Ben', question: 'Do anything?', primaryLabel: 'Yes',
+  });
+  assert.deepEqual(Object.keys(approvals.get(M, opened.id)), ['id', 'kind', 'askedByUserId', 'askedByName', 'expiresAt']);
+  assert.deepEqual(Object.keys(approvalMessageData(M, approvals.get(M, opened.id))), ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt']);
+});
+
+test('whoever opened an approval is told once how it ended, and by whom', () => {
+  const { approvals, advance, closed } = setup();
+  const heard = [];
+  const open = (name) => agentAsk(approvals, { onOutcome: (outcome, by) => heard.push([name, outcome, by]) });
+
+  const a = open('a');
+  assert.equal(approvals.answer(M, a.id, { byUserId: 'user-ana', approve: true, done: true }), 'approved');
+  assert.deepEqual(heard, [['a', 'approved', { byUserId: 'user-ana' }]]);
+  // the second owner is too late: nothing more is heard
+  assert.equal(approvals.answer(M, a.id, { byUserId: 'user-cy', approve: false }), null);
+  assert.equal(heard.length, 1);
+
+  const b = open('b');
+  assert.equal(approvals.answer(M, b.id, { byUserId: 'user-cy', approve: false }), 'declined');
+  assert.deepEqual(heard[1], ['b', 'declined', { byUserId: 'user-cy' }]);
+
+  open('c');
+  advance(60000);
+  assert.deepEqual(heard[2], ['c', 'expired', { byUserId: null }]);
+  // the panels were told about all three, as for any approval
+  assert.deepEqual(closed.map((one) => one.outcome), ['approved', 'declined', 'expired']);
+
+  open('d');
+  approvals.forget(M);
+  assert.deepEqual(heard[3], ['d', 'forgotten', { byUserId: null }]);
+  assert.equal(closed.length, 3); // nobody is left to tell
+  assert.equal(heard.length, 4);
+});
+
+test('a listener that throws does not undo a close', () => {
+  const { approvals, closed } = setup();
+  const opened = agentAsk(approvals, { onOutcome: () => { throw new Error('listener'); } });
+  assert.equal(approvals.answer(M, opened.id, { byUserId: 'user-ana', approve: false }), 'declined');
+  assert.equal(approvals.get(M, opened.id), null);
+  assert.equal(closed.length, 1);
 });

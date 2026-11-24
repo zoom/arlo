@@ -13,7 +13,7 @@ const { generateToken } = require('../src/services/auth');
 const { getMeetingStore } = require('../src/storage');
 
 let srv;
-const real = { notes: openrouter.generateLiveNotes, ask: openrouter.answerFromTranscript };
+const real = { notes: openrouter.generateLiveNotes, ask: openrouter.answerFromTranscript, choose: openrouter.chooseTool };
 let asked;
 let answer;
 test.before(async () => { srv = await h.startServer(); });
@@ -28,10 +28,14 @@ test.beforeEach(() => {
   answer = async () => 'On Friday.';
   openrouter.generateLiveNotes = async () => ({ summary: 'They ship Friday.', decisions: ['Ship Friday'], actionItems: [{ text: 'Release notes', owner: 'Ben' }] });
   openrouter.answerFromTranscript = async (input) => { asked.push(input); return answer(input); };
+  // The model that picks a tool is not reachable in these tests: a typed
+  // question is then answered as typed (test/agent-routes.test.js has the rest)
+  openrouter.chooseTool = async () => { throw Object.assign(new Error('no models'), { code: 'no_models' }); };
 });
 test.after(() => {
   openrouter.generateLiveNotes = real.notes;
   openrouter.answerFromTranscript = real.ask;
+  openrouter.chooseTool = real.choose;
   srv.server.closeAllConnections?.();
   srv.server.close();
 });

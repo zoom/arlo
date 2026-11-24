@@ -26,7 +26,8 @@
  *   getIdentityCheck(meetingId)       -> those four counters and `identities` (how many are held)
  *   appendAction(meetingId, action)   -> stored action with id | null; what Arlo was asked and did:
  *                                        { id, at, tool, label, askedBy, channel, status, public }, with
- *                                        tool a name from services/agent/tools.js, label one line of at
+ *                                        tool a name from services/agent/tools.js (or 'none': no tool
+ *                                        was found for the request), label one line of at
  *                                        most 200 characters, askedBy a name or null, channel 'voice' |
  *                                        'panel', status 'pending' | 'waiting_approval' | 'done' |
  *                                        'declined' | 'failed' | 'expired', public a boolean (shown to

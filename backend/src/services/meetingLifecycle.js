@@ -229,6 +229,10 @@ function getMeetingLifecycle() {
         // Open requests to the owners, and who asked a moment ago
         // eslint-disable-next-line global-require
         require('./approvals').getApprovals().forget(meetingId);
+        // What Arlo's agent holds for the meeting: a request being heard, its
+        // queue and counters, actions waiting for a panel
+        // eslint-disable-next-line global-require
+        require('./agent').getAgentRuntime().forget(meetingId);
       },
     });
     setInterval(() => {

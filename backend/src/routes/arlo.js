@@ -5,9 +5,12 @@
  *   GET  /state     what this panel is told: is Arlo here, and what is this person to it
  *   PUT  /settings  { whoCanAsk?: 'owner' | 'anyone', displayName?: string, shareNotes?: boolean }, owners only
  *   GET  /notes     the live notes: owners, and everyone in the meeting while the notes are shared
- *   POST /ask       { question }: an answer from the stored transcript, private to the asker
+ *   POST /ask       { question }: a typed request to Arlo; a question is answered from the stored
+ *                   transcript, private to the asker
+ *   GET  /actions   what Arlo was asked and did in this meeting, as far as this person may see it
  *   POST /notes-request          {}: a participant asks the owners to share the notes with everyone
- *   POST /approvals/:approvalId  { approve }: an owner's answer, owners only; approving turns sharing on
+ *   POST /approvals/:approvalId  { approve }: an owner's answer, owners only; approving a request for
+ *                                the notes turns sharing on, approving something Arlo was asked lets it run
  *   GET  /approvals              the open requests, owners only
  *   POST /identity               { participantUUID?, participantId?, screenName? }: who Zoom tells an
  *                                owner's panel they are in the meeting, owners only (a measurement)
@@ -22,8 +25,9 @@
  * - Request bodies are JSON objects with exactly the known fields. Anything
  *   else is refused, not cleaned up. In particular /ask takes no transcript
  *   and no model from the client: the transcript is the one the server stored.
- * - Nothing is cached, and nothing about a question or an answer is stored or
- *   logged. Log lines carry an error code at most.
+ * - Nothing is cached. What was asked and what was answered is never stored
+ *   or logged: the meeting's record keeps a tool name and a label the server
+ *   wrote (services/agent/agent.js). Log lines carry an error code at most.
  */
 const express = require('express');
 const config = require('../config');
@@ -32,13 +36,13 @@ const { aiLimiter } = require('../middleware/aiLimiter');
 const { getMeetingStore } = require('../storage');
 const { getArloPresence } = require('../services/arloPresence');
 const { getApprovals, approvalMessageData } = require('../services/approvals');
-const { broadcastArloState, sendApprovalOpened, sendNotesUpdated } = require('../services/websocket');
-const { getNotesEngine } = require('../services/notesEngine');
+const { broadcastArloState, sendApprovalOpened } = require('../services/websocket');
+const { shareNotes } = require('../services/notesSharing');
+const { getAgentRuntime } = require('../services/agent');
+const { REPLIES, couldNot } = require('../services/agent/texts');
 const { userStore } = require('../lib/memoryStore');
 const { newestLines } = require('../lib/transcriptLines');
 const { showableName, cleanName } = require('../lib/displayName');
-// Through the module object, so tests can replace the model call
-const openrouter = require('../services/openrouter');
 
 const router = express.Router({ mergeParams: true });
 
@@ -52,7 +56,6 @@ const MAX_IDENTITY_CHARS = 200;
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 const MAX_TRANSCRIPT_CHARS = 12000;
-const MAX_ANSWER_CHARS = 4000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const RATE_LIMITED_MESSAGE = 'The free AI models are rate limited right now. Try again in a minute.';
 
@@ -99,37 +102,6 @@ const forbidden = (res, message) => res.status(403).json({ error: 'Forbidden', m
 const invalid = (res, message) => res.status(400).json({ error: 'Invalid request', message });
 
 const NOT_AN_OWNER = 'Only the person who brought Arlo in can change this.';
-
-/**
- * Share the meeting's notes with everyone in it who has Arlo open, or stop:
- * the one way it happens, for the setting and for an approved request alike.
- * 'refused' when this person is not an owner of the meeting (or its data is
- * gone), 'unchanged' when it was so already, 'changed' otherwise.
- *
- * On a change every panel is told the new state first, so a panel knows the
- * notes are shared before any arrive, and that they are not the moment
- * sharing stops (from then on sendNotesUpdated() reaches owners only). Turned
- * on, the notes so far go to everyone who may now see them, the requests for
- * them that were still open are answered, and the notes engine looks again:
- * a participant's panel may be the reader it was waiting for.
- */
-function shareNotes(meetingId, userId, value) {
-  const presence = getArloPresence();
-  const outcome = presence.setNotesShared(meetingId, userId, value);
-  if (outcome !== 'changed') return outcome;
-  // That it happened: never who did it
-  console.log(`Arlo setting changed: notes sharing ${value ? 'on' : 'off'}`);
-  broadcastArloState(meetingId);
-  if (!value) return outcome;
-  const notes = getMeetingStore().getNotes(meetingId);
-  if (notes) sendNotesUpdated(meetingId, presence.ownerUserIds(meetingId), notes);
-  const approvals = getApprovals();
-  for (const approval of approvals.listOpen(meetingId)) {
-    if (approval.kind === 'share_notes') approvals.answer(meetingId, approval.id, { byUserId: userId, approve: true, done: true });
-  }
-  getNotesEngine().ownerPanelConnected(meetingId);
-  return outcome;
-}
 
 /**
  * GET /state
@@ -222,19 +194,52 @@ router.get('/notes', optionalAuth, requireMeetingAccess, (req, res) => {
 });
 
 /**
+ * The account's own display name, as the presence service reads it for an
+ * owner: null when the account has none. Never logged.
+ */
+function accountName(userId) {
+  let user = null;
+  try {
+    user = userStore.findById(userId);
+  } catch {
+    return null;
+  }
+  return cleanName(user?.displayName) || null;
+}
+
+/** What a response says about an action: never its id, who asked, or when. */
+const actionSummary = (action) => (action ? { action: { tool: action.tool, status: action.status, label: action.label } } : {});
+// A request that only reads: when its model fails, the answer is an error, as before there were tools
+const ANSWER_TOOLS = new Set(['answer_from_meeting', 'summarize_so_far', 'web_search']);
+const BUSY_MESSAGE = 'Arlo is busy right now. Try again in a moment.';
+
+/**
  * POST /ask
- * { question } -> { answer }. For an owner, and for other signed-in people in
- * the meeting only when the meeting's setting is "anyone". The answer goes to
- * the asker alone.
+ * { question } -> { answer } and, when Arlo did more than answer a question,
+ * { answer, action: { tool, status, label } }. For an owner, and for other
+ * signed-in people in the meeting only when the meeting's setting is "anyone".
+ *
+ * The request goes through the agent (services/agent/agent.js) as a typed
+ * one: a model picks a tool from the table, the server checks the pick and
+ * decides whether it runs, needs an owner's approval, or is refused.
+ *   - A question about the meeting: `answer` is the answer, for the asker alone.
+ *   - A summary: `answer` is the summary, `action.status` 'done'.
+ *   - Something done ("post … to the chat", "share the notes"): `answer` is a
+ *     sentence of the server ("Done: …" / "I couldn't do that: …") and
+ *     `action.status` is 'done' or 'failed'.
+ *   - Something an owner has to approve first: `answer` says so and
+ *     `action.status` is 'waiting_approval'; how it ends arrives as `arlo.did`.
+ *   - Nothing Arlo can do: `answer` is "I didn't catch a request."
+ * When the model that picks a tool cannot be asked, the question is answered
+ * from the transcript as typed.
  */
 router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, async (req, res) => {
   const meetingId = req.params.zoomMeetingId;
   const store = getMeetingStore();
+  const cannotAsk = 'Only the person who brought Arlo in can ask Arlo in this meeting.';
   const mayAsk = getArloPresence().isOwner(meetingId, req.user.id)
     || store.getMeta(meetingId).whoCanAsk === 'anyone';
-  if (!mayAsk) {
-    return forbidden(res, 'Only the person who brought Arlo in can ask Arlo in this meeting.');
-  }
+  if (!mayAsk) return forbidden(res, cannotAsk);
   if (!hasExactly(req.body, ['question']) || typeof req.body.question !== 'string') {
     return invalid(res, 'question is required');
   }
@@ -250,39 +255,57 @@ router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, a
     return res.status(409).json({ error: 'no_transcript', message: 'Nothing has been said since Arlo joined.' });
   }
 
-  try {
-    const answer = await openrouter.answerFromTranscript({ question, lines, model: config.notesModel });
-    // The model's answer is untrusted: text only, and bounded
-    if (typeof answer !== 'string' || answer.trim().length === 0) {
-      throw Object.assign(new Error('empty answer'), { code: 'empty_response' });
+  const result = await getAgentRuntime().agent.handle(meetingId, {
+    text: question, channel: 'panel', askedBy: { userId: req.user.id, name: accountName(req.user.id) },
+  });
+  switch (result.status) {
+    case 'answered':
+      // A plain answer is the answer and nothing else, as it always was
+      return res.json({ answer: result.answer, ...(result.tool === 'answer_from_meeting' ? {} : actionSummary(result.action)) });
+    case 'done':
+      return res.json({ answer: result.reply, ...actionSummary(result.action) });
+    case 'waiting_approval':
+      return res.json({ answer: REPLIES.waitingApproval, ...actionSummary(result.action) });
+    case 'none':
+      return res.json({ answer: REPLIES.none });
+    case 'failed': {
+      // The code only: an error message can quote the model or the transcript
+      console.error(`Arlo ask failed (${typeof result.code === 'string' ? result.code : 'error'})`);
+      if (!ANSWER_TOOLS.has(result.tool) || result.code === 'unsupported') {
+        return res.json({ answer: couldNot(result.code), ...actionSummary(result.action) });
+      }
+      if (result.code === 'model_rate_limited') return res.status(429).json({ error: RATE_LIMITED_MESSAGE });
+      if (result.code === 'no_transcript') {
+        return res.status(409).json({ error: 'no_transcript', message: 'Nothing has been said since Arlo joined.' });
+      }
+      return res.status(502).json({ error: 'The AI service could not answer right now.' });
     }
-    // Flushed while the model was answering: the answer is about a transcript
-    // that is deleted, and what is deleted is not handed out afterwards
-    if (!store.has(meetingId)) {
-      return res.status(409).json({ error: 'no_transcript', message: 'The meeting has ended.' });
-    }
-    return res.json({ answer: answer.trim().slice(0, MAX_ANSWER_CHARS) });
-  } catch (error) {
-    // The code only: an error message can quote the model or the transcript
-    console.error(`Arlo ask failed (${error && typeof error.code === 'string' ? error.code : 'error'})`);
-    if (error && error.code === 'rate_limited') return res.status(429).json({ error: RATE_LIMITED_MESSAGE });
-    return res.status(502).json({ error: 'The AI service could not answer right now.' });
+    default:
+      // Refused
+      if (result.reason === 'gone') {
+        // Flushed while a model was working: what is deleted is not handed out afterwards
+        return res.status(409).json({ error: 'no_transcript', message: 'The meeting has ended.' });
+      }
+      if (result.reason === 'busy' || result.reason === 'rate_limited') {
+        return res.status(429).json({ error: BUSY_MESSAGE });
+      }
+      if (result.reason === 'invalid') return invalid(res, 'question is required');
+      return forbidden(res, cannotAsk);
   }
 });
 
 /**
- * The account's own display name, as the presence service reads it for an
- * owner: null when the account has none. Never logged.
+ * GET /actions
+ * { actions: [{ id, at, tool, label, askedBy, channel, status, public }] },
+ * oldest first: what Arlo was asked and did in this meeting. Everyone in the
+ * meeting (the meeting-access cookie is the proof, so a guest too) gets the
+ * public ones. An owner also gets their own private answers (never another
+ * owner's) and the spoken requests that were not understood.
  */
-function accountName(userId) {
-  let user = null;
-  try {
-    user = userStore.findById(userId);
-  } catch {
-    return null;
-  }
-  return cleanName(user?.displayName) || null;
-}
+router.get('/actions', optionalAuth, requireMeetingAccess, (req, res) => {
+  const meetingId = req.params.zoomMeetingId;
+  return res.json({ actions: getAgentRuntime().agent.actionsFor(meetingId, req.user?.id ?? null) });
+});
 
 /**
  * POST /notes-request
@@ -322,9 +345,12 @@ router.post('/notes-request', requireAuth, requireMeetingAccess, requireJson, (r
 
 /**
  * POST /approvals/:approvalId
- * { approve: false } declined | { approve: true } approved: the server turns
- * sharing the notes on, as PUT /settings { shareNotes: true } does
- * -> { id, outcome }. A boolean `done` is still accepted and ignored (panels
+ * { approve: false } declined | { approve: true } approved -> { id, outcome }.
+ * For a request for the notes ('share_notes') the server turns sharing the
+ * notes on, as PUT /settings { shareNotes: true } does. For something Arlo
+ * was asked to do ('agent_action') the answer is all that happens here: the
+ * agent, which waits for it, then runs what was approved and records how it
+ * ended (`arlo.did`). A boolean `done` is still accepted and ignored (panels
  * that posted the notes to the chat sent it). The first answer wins; 404 for
  * an id nothing is open under. The owners and the person who asked are told
  * over their sockets (services/approvals.js).
@@ -348,10 +374,16 @@ router.post('/approvals/:approvalId', requireAuth, requireMeetingAccess, require
 
   const approvals = getApprovals();
   // Looked up before anything is changed: an answer to nothing shares nothing
-  if (approvals.get(meetingId, id) === null) return notFound();
+  const open = approvals.get(meetingId, id);
+  if (open === null) return notFound();
   if (!body.approve) {
     const declined = approvals.answer(meetingId, id, { byUserId: req.user.id, approve: false });
     return declined === null ? notFound() : res.json({ id, outcome: declined });
+  }
+  if (open.kind === 'agent_action') {
+    // Agreeing is the whole answer: the agent runs what was asked, as this owner
+    const outcome = approvals.answer(meetingId, id, { byUserId: req.user.id, approve: true, done: true });
+    return outcome === null ? notFound() : res.json({ id, outcome });
   }
   // The work is done here, not in the panel. Turning sharing on answers the
   // open requests itself; one is still open only when the notes were shared
@@ -366,7 +398,8 @@ router.post('/approvals/:approvalId', requireAuth, requireMeetingAccess, require
 /**
  * GET /approvals
  * { approvals: [{ meetingId, id, kind, askedBy, expiresAt }] }, oldest first:
- * what an owner's panel that reloads still has to answer.
+ * what an owner's panel that reloads still has to answer. One of kind
+ * 'agent_action' also has `question` and `primaryLabel`, the sheet's texts.
  */
 router.get('/approvals', requireAuth, requireMeetingAccess, (req, res) => {
   const meetingId = req.params.zoomMeetingId;

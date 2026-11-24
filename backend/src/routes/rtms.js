@@ -42,6 +42,7 @@ const { getMeetingLifecycle } = require('../services/meetingLifecycle');
 const { getMeetingStreams } = require('../services/meetingStreams');
 const { getArloPresence } = require('../services/arloPresence');
 const { getNotesEngine } = require('../services/notesEngine');
+const { getAgentRuntime } = require('../services/agent');
 
 // RTMS stop reason 6: the stream ended because the meeting did
 const RTMS_STOP_MEETING_ENDED = 6;
@@ -712,6 +713,8 @@ router.post('/broadcast', requireInternal, async (req, res) => {
   getNotesEngine().segmentStored(meetingId);
   // A measurement (can a speaker be matched to an Arlo user?): counters only
   getArloPresence().lineStored(meetingId, stored);
+  // Someone may have said "Arlo, …": the agent listens to the stored lines
+  getAgentRuntime().lineStored(meetingId, stored);
 
   res.status(200).json({ received: true, broadcast: sentCount });
 });

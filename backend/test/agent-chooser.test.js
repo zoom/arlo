@@ -65,7 +65,7 @@ test('the tool table is the five tools, and web search only when it is turned on
     summarize_so_far: ['server', false],
     post_to_chat: ['panel', true],
     admit_from_waiting_room: ['panel', true],
-    share_notes: ['panel', true],
+    share_notes: ['server', true],
     web_search: ['server', false],
   });
   for (const tool of listTools({ webSearch: true })) {
