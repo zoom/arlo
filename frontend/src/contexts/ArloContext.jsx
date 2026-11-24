@@ -5,7 +5,8 @@ import { cleanNotes } from '../lib/notesText';
 import { readMeetingMessage } from '../lib/meetingMessage';
 import { usableName } from '../lib/ownerName';
 import { identityReport } from '../lib/arloIdentity';
-import { parseApproval, approvalTimeLeft } from '../lib/approvalKinds';
+import { parseApproval, approvalTimeLeft, approvalTexts } from '../lib/approvalKinds';
+import { createApprovalNotifier } from '../lib/approvalNotice';
 import { handsFor, runArloAction } from '../lib/arloActions';
 import { parseAction, mergeActions } from '../lib/arloDid';
 import { readThinkingStep, readThinkingChannel } from '../lib/thinkingStep';
@@ -58,7 +59,9 @@ import { useZoomSdk } from './ZoomSdkContext';
  *   notes with everyone in the meeting; the server does it when an owner agrees). An owner's panel reads the open ones from
  *   GET …/arlo/approvals when it learns it is an owner, and keeps them in step
  *   from `arlo.approval` / `arlo.approval.closed`: `approvals`, oldest first,
- *   without duplicates and without those past their time. Only an owner holds
+ *   without duplicates and without those past their time. One that arrives
+ *   on the socket while the panel is not on screen is also said through Zoom's
+ *   notification, in fixed words (lib/approvalNotice.js). Only an owner holds
  *   any. `answerApproval` reports the owner's answer. An approval's
  *   `expiresAt` here is by this panel's clock, counted from when it was
  *   received (lib/approvalKinds.js approvalTimeLeft): the server's clock and
@@ -216,7 +219,9 @@ export function ArloProvider({ children }) {
   // Over for this panel: Zoom said the meeting ended, or this person left it
   const meetingOver = meetingEnded === true || leftMeeting === true;
   const { isAuthenticated, user } = useAuth();
-  const { userContext, zoomSdk, chatSupported, waitingRoomSupported } = useZoomSdk();
+  const {
+    userContext, zoomSdk, chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported,
+  } = useZoomSdk();
   // This person's role in the Zoom meeting, as Zoom reports it
   const zoomRole = typeof userContext?.role === 'string' && userContext.role.length > 0
     && userContext.role.length <= MAX_ZOOM_ROLE_CHARS ? userContext.role : 'attendee';
@@ -224,6 +229,12 @@ export function ArloProvider({ children }) {
   zoomRoleRef.current = zoomRole;
   const zoomSdkRef = useRef(zoomSdk);
   zoomSdkRef.current = zoomSdk;
+  // Who this person is in the Zoom meeting, when Zoom said: Arlo cannot mute them through their own panel
+  const selfParticipantUUIDRef = useRef(null);
+  selfParticipantUUIDRef.current = typeof userContext?.participantUUID === 'string' && userContext.participantUUID.length > 0
+    ? userContext.participantUUID : null;
+  // Zoom's notification for a sheet that arrives while the panel is not on screen, once per approval
+  const [notifyApproval] = useState(createApprovalNotifier);
   // Who is signed in; null when nobody is
   const identity = isAuthenticated ? String(user?.id ?? '') : null;
   const signedInRef = useRef(isAuthenticated);
@@ -387,7 +398,9 @@ export function ArloProvider({ children }) {
   // `fetched`: read from the server (an older one), not just announced on the
   // socket; `serverNow`: the server's clock when it answered, if it said.
   // Held with `expiresAt` by this panel's clock, counted from now.
-  const addApprovals = useCallback((values, { fetched = false, serverNow = null } = {}) => {
+  // `announce`: it just arrived, so one this panel shows is also said through
+  // Zoom when the panel is not on screen (lib/approvalNotice.js).
+  const addApprovals = useCallback((values, { fetched = false, serverNow = null, announce = false } = {}) => {
     if (stateRef.current.role !== 'owner' || !signedInRef.current) return;
     const now = Date.now();
     const fresh = (Array.isArray(values) ? values : []).map(parseApproval)
@@ -408,6 +421,9 @@ export function ArloProvider({ children }) {
       }))
       .filter((one) => one.expiresAt > now);
     if (fresh.length === 0) return;
+    if (announce) {
+      fresh.filter((one) => approvalTexts(one) !== null).forEach((one) => notifyApproval(zoomSdkRef.current, one.id));
+    }
     setApprovals((prev) => {
       const next = [...prev];
       fresh.forEach((one) => {
@@ -416,7 +432,7 @@ export function ArloProvider({ children }) {
       // They all wait equally long, so the one the server closes first was asked first
       return next.length === prev.length ? prev : next.sort((a, b) => a.serverExpiresAt - b.serverExpiresAt);
     });
-  }, []);
+  }, [notifyApproval]);
 
   /** An approval ended (answered here or elsewhere, or it ran out): it leaves the line. */
   const closeApproval = useCallback((id, outcome) => {
@@ -485,7 +501,9 @@ export function ArloProvider({ children }) {
       }, RESULT_RETRY_MS[attempt]);
       timers.add(timer);
     };
-    runArloAction(zoomSdkRef.current, { tool: data.tool, args: data.args }, { zoomRole: zoomRoleRef.current, stillAllowed })
+    runArloAction(zoomSdkRef.current, { tool: data.tool, args: data.args }, {
+      zoomRole: zoomRoleRef.current, stillAllowed, selfParticipantUUID: selfParticipantUUIDRef.current,
+    })
       .then((result) => report(JSON.stringify(result.ok === true ? { ok: true } : { ok: false, code: result.code }), 0));
   }, []);
 
@@ -541,7 +559,7 @@ export function ArloProvider({ children }) {
           applyNotes(data.notes);
           break;
         case 'arlo.approval':
-          addApprovals([data]);
+          addApprovals([data], { announce: true });
           break;
         case 'arlo.approval.closed':
           closeApproval(data.id, typeof data.outcome === 'string' ? data.outcome : null);
@@ -605,8 +623,10 @@ export function ArloProvider({ children }) {
   // by an owner, and again when the Zoom role or the abilities change. Someone
   // who announced and is no longer an owner (or whose meeting is over) clears it.
   const hands = useMemo(
-    () => handsFor({ chatSupported, waitingRoomSupported, zoomRole }),
-    [chatSupported, waitingRoomSupported, zoomRole],
+    () => handsFor({
+      chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, zoomRole,
+    }),
+    [chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, zoomRole],
   );
   const hasHands = state.role === 'owner' && isAuthenticated && !meetingOver;
   useEffect(() => {

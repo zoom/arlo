@@ -50,6 +50,11 @@ export function createZoomSdk({
   waitingRoomRefused = false,
   // APIs Zoom accepts at config and then lists as not supported (`unsupportedApis` in its answer)
   unsupportedApis = [],
+  // APIs whose presence in the capabilities makes config fail (an older client, or
+  // a Marketplace configuration that does not list them); the methods stay
+  refusedApis = [],
+  // The people in the meeting, as Zoom lists them for a host: [{ screenName, participantUUID, role }]
+  participants = [],
 } = {}) {
   const listeners = new Map();
   const on = (event) => (handler) => {
@@ -61,6 +66,9 @@ export function createZoomSdk({
     config: vi.fn(async ({ capabilities }) => {
       if ((!waitingRoomApis || waitingRoomRefused) && capabilities.includes('getWaitingRoomParticipants')) {
         throw new Error('getWaitingRoomParticipants is not supported by this client');
+      }
+      if (refusedApis.some((name) => capabilities.includes(name))) {
+        throw new Error('An API in the capabilities is not supported by this client');
       }
       // The shape of the SDK's ConfigResponse: the APIs asked for that this client does not have
       return { clientVersion: '6.6.0', unsupportedApis: unsupportedApis.filter((name) => capabilities.includes(name)) };
@@ -74,7 +82,11 @@ export function createZoomSdk({
     getMeetingContext: vi.fn(async () => ({ meetingTopic: 'Planning', meetingID: '123456' })),
     getAppContext: vi.fn(async () => ({ context: 'signed-app-context' })),
     getRTMSStatus: vi.fn(async () => ({ rtmsStatus: sdk.rtmsStatus })),
-    getMeetingParticipants: vi.fn(async () => ({ participants: [] })),
+    getMeetingParticipants: vi.fn(async () => ({ participants })),
+    // Mute (audio: false) or unmute people; host and co-host only in Zoom
+    toggleParticipantMediaAudio: vi.fn(async () => ({ message: 'Success' })),
+    setEmojiReaction: vi.fn(async () => ({ message: 'Success' })),
+    getEmojiConfiguration: vi.fn(async () => ({})),
     onRunningContextChange: on('onRunningContextChange'),
     onMyUserContextChange: on('onMyUserContextChange'),
     onSendAppInvitation: on('onSendAppInvitation'),

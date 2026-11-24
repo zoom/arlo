@@ -67,6 +67,22 @@ const WAITING_ROOM_CAPABILITIES = [
   'admitParticipantFromWaitingRoom',
 ];
 
+// Muting someone: Arlo does it when asked ("Arlo, mute Danny Lee"), through the
+// panel of an owner who is the host or a co-host (lib/arloActions.js), with
+// getMeetingParticipants from the optional set above to find the person.
+// Desktop 5.10.3+; Zoom allows both to the host and co-hosts only.
+const PARTICIPANT_AUDIO_CAPABILITIES = [
+  'toggleParticipantMediaAudio',
+];
+
+// Reactions: Arlo sends one as the owner whose panel it is. Only
+// setEmojiReaction is called; getEmojiConfiguration (the emoji a client
+// accepts) is asked for with it and not used yet. Desktop 5.14.5+.
+const REACTION_CAPABILITIES = [
+  'setEmojiReaction',
+  'getEmojiConfiguration',
+];
+
 // Check if running outside Zoom - evaluated dynamically
 const checkIsTestMode = () => !window.zoomSdk || window.location.search.includes('test=true');
 
@@ -97,6 +113,11 @@ export function ZoomSdkProvider({ children }) {
   const [chatSupported, setChatSupported] = useState(false);
   // true once zoomSdk.config() accepted the waiting-room APIs and the client has the methods
   const [waitingRoomSupported, setWaitingRoomSupported] = useState(false);
+  // The same for sendAppInvitationToAllParticipants, for setEmojiReaction, and for
+  // toggleParticipantMediaAudio with getMeetingParticipants
+  const [invitationSupported, setInvitationSupported] = useState(false);
+  const [reactionSupported, setReactionSupported] = useState(false);
+  const [muteSupported, setMuteSupported] = useState(false);
   // null = SDK not loaded yet, true = guest, false = authorized user
   const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
 
@@ -123,8 +144,14 @@ export function ZoomSdkProvider({ children }) {
       try {
         // Some Zoom clients reject config when unsupported capabilities are requested.
         // Try the largest set first, then fall back step by step to the core set.
+        // Each step drops the tier added last, so a client (or a Marketplace
+        // configuration) that lacks the newest keeps everything it had before.
+        // Every step is one more config attempt: seven at most.
+        const upToWaitingRoom = [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES, ...DYNAMIC_INDICATOR_CAPABILITIES, ...WAITING_ROOM_CAPABILITIES];
         const capabilitySets = [
-          [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES, ...DYNAMIC_INDICATOR_CAPABILITIES, ...WAITING_ROOM_CAPABILITIES],
+          [...upToWaitingRoom, ...PARTICIPANT_AUDIO_CAPABILITIES, ...REACTION_CAPABILITIES],
+          [...upToWaitingRoom, ...PARTICIPANT_AUDIO_CAPABILITIES],
+          upToWaitingRoom,
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES, ...DYNAMIC_INDICATOR_CAPABILITIES],
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES],
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES],
@@ -177,6 +204,11 @@ export function ZoomSdkProvider({ children }) {
         setWaitingRoomSupported(WAITING_ROOM_CAPABILITIES.every((name) => (
           granted(name) && typeof zoomSdk[name] === 'function'
         )));
+        /** Granted, and the client object has the method. */
+        const usable = (name) => granted(name) && typeof zoomSdk[name] === 'function';
+        setInvitationSupported(usable('sendAppInvitationToAllParticipants'));
+        setReactionSupported(usable('setEmojiReaction'));
+        setMuteSupported(usable('toggleParticipantMediaAudio') && usable('getMeetingParticipants'));
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
@@ -316,8 +348,11 @@ export function ZoomSdkProvider({ children }) {
     dynamicIndicatorSupported,
     chatSupported,
     waitingRoomSupported,
+    invitationSupported,
+    reactionSupported,
+    muteSupported,
     isTestMode: isTestModeState,
-  }), [waitingRoomSupported, zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
+  }), [invitationSupported, reactionSupported, muteSupported, waitingRoomSupported, zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
 
   return (
     <ZoomSdkContext.Provider value={contextValue}>

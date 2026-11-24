@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { runArloAction, handsFor } from './arloActions';
+import { runArloAction, handsFor, REACTIONS } from './arloActions';
 
 const sdkWith = (participants = []) => ({
   sendMessageToChat: vi.fn(async () => ({})),
@@ -8,6 +8,17 @@ const sdkWith = (participants = []) => ({
 });
 const waiting = (screenName, participantUUID) => ({ screenName, participantUUID, role: 'attendee' });
 const yes = () => true;
+const meetingSdk = (participants = []) => ({
+  sendAppInvitationToAllParticipants: vi.fn(async () => ({ invitationUUID: 'i-1' })),
+  setEmojiReaction: vi.fn(async () => ({ message: 'Success' })),
+  getMeetingParticipants: vi.fn(async () => ({ participants })),
+  toggleParticipantMediaAudio: vi.fn(async () => ({ message: 'Success' })),
+});
+const person = (screenName, participantUUID, role = 'attendee') => ({ screenName, participantUUID, participantId: '1', role });
+const mute = (sdk, name, zoomRole = 'host', stillAllowed = yes, extra = {}) => (
+  runArloAction(sdk, { tool: 'mute_participant', args: { name } }, { zoomRole, stillAllowed, ...extra })
+);
+const react = (sdk, reaction) => runArloAction(sdk, { tool: 'send_reaction', args: { reaction } });
 const admit = (sdk, name, zoomRole = 'host', stillAllowed = yes) => (
   runArloAction(sdk, { tool: 'admit_from_waiting_room', args: { name } }, { zoomRole, stillAllowed })
 );
@@ -19,6 +30,33 @@ describe('handsFor: what a panel announces', () => {
     expect(handsFor({ chatSupported: true, waitingRoomSupported: true, zoomRole: 'attendee' })).toEqual(['post_to_chat']);
     expect(handsFor({ chatSupported: true, waitingRoomSupported: false, zoomRole: 'host' })).toEqual(['post_to_chat']);
     expect(handsFor({ chatSupported: false, waitingRoomSupported: false, zoomRole: 'host' })).toEqual([]);
+  });
+
+  test('inviting and reacting for anyone whose client has them; muting only for a host or co-host', () => {
+    const all = {
+      chatSupported: true, waitingRoomSupported: true, invitationSupported: true, reactionSupported: true, muteSupported: true,
+    };
+    expect(handsFor({ ...all, zoomRole: 'host' }))
+      .toEqual(['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant']);
+    expect(handsFor({ ...all, zoomRole: 'coHost' }))
+      .toEqual(['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant']);
+    expect(handsFor({ ...all, zoomRole: 'attendee' })).toEqual(['post_to_chat', 'invite_everyone', 'send_reaction']);
+    expect(handsFor({ ...all, muteSupported: false, zoomRole: 'host' }))
+      .toEqual(['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction']);
+    expect(handsFor({ ...all, invitationSupported: false, zoomRole: 'attendee' })).toEqual(['post_to_chat', 'send_reaction']);
+    expect(handsFor({ ...all, reactionSupported: false, zoomRole: 'attendee' })).toEqual(['post_to_chat', 'invite_everyone']);
+    expect(handsFor({ invitationSupported: true, zoomRole: 'attendee' })).toEqual(['invite_everyone']);
+    expect(handsFor({ reactionSupported: true, zoomRole: null })).toEqual(['send_reaction']);
+    expect(handsFor({ muteSupported: true, zoomRole: 'host' })).toEqual(['mute_participant']);
+    // Only exactly `true` counts
+    expect(handsFor({ invitationSupported: 'yes', reactionSupported: 1, muteSupported: {}, zoomRole: 'host' })).toEqual([]);
+  });
+
+  test('never more names than the server takes', () => {
+    const all = {
+      chatSupported: true, waitingRoomSupported: true, invitationSupported: true, reactionSupported: true, muteSupported: true,
+    };
+    expect(handsFor({ ...all, zoomRole: 'host' }).length).toBeLessThanOrEqual(10);
   });
 });
 
@@ -161,6 +199,261 @@ describe('admit_from_waiting_room', () => {
     expect(await admit(noAdmit, 'James')).toEqual({ ok: false, code: 'sdk_error' });
     const noId = sdkWith([waiting('James', undefined)]);
     expect(await admit(noId, 'James')).toEqual({ ok: false, code: 'sdk_error' });
+  });
+});
+
+describe('invite_everyone', () => {
+  test('sends the app invitation to everyone, once, with no arguments', async () => {
+    const sdk = meetingSdk();
+    expect(await runArloAction(sdk, { tool: 'invite_everyone', args: {} })).toEqual({ ok: true });
+    expect(sdk.sendAppInvitationToAllParticipants).toHaveBeenCalledTimes(1);
+    expect(sdk.sendAppInvitationToAllParticipants).toHaveBeenCalledWith();
+  });
+
+  test('any Zoom role may: an attendee too', async () => {
+    const sdk = meetingSdk();
+    expect(await runArloAction(sdk, { tool: 'invite_everyone', args: {} }, { zoomRole: 'attendee' })).toEqual({ ok: true });
+    expect(await runArloAction(sdk, { tool: 'invite_everyone' })).toEqual({ ok: true });
+  });
+
+  test('a client without the API: unsupported', async () => {
+    expect(await runArloAction({}, { tool: 'invite_everyone', args: {} })).toEqual({ ok: false, code: 'unsupported' });
+    expect(await runArloAction(undefined, { tool: 'invite_everyone', args: {} })).toEqual({ ok: false, code: 'unsupported' });
+  });
+
+  test.each([
+    ['an argument', { name: 'James' }],
+    ['arguments that are a list', []],
+    ['arguments that are text', 'everyone'],
+  ])('%s is not what was approved: unsupported, nobody invited', async (_name, args) => {
+    const sdk = meetingSdk();
+    expect(await runArloAction(sdk, { tool: 'invite_everyone', args })).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
+  });
+
+  test('an SDK that rejects, or throws at once, is sdk_error', async () => {
+    const rejects = meetingSdk();
+    rejects.sendAppInvitationToAllParticipants = vi.fn(async () => { throw new Error('chat is off'); });
+    expect(await runArloAction(rejects, { tool: 'invite_everyone', args: {} })).toEqual({ ok: false, code: 'sdk_error' });
+    const throws = meetingSdk();
+    throws.sendAppInvitationToAllParticipants = vi.fn(() => { throw new Error('no'); });
+    expect(await runArloAction(throws, { tool: 'invite_everyone', args: {} })).toEqual({ ok: false, code: 'sdk_error' });
+  });
+});
+
+describe('send_reaction', () => {
+  test('the table is fixed: six reactions, these emoji, and it cannot be changed', () => {
+    expect(REACTIONS).toEqual({
+      thumbs_up: '👍', clap: '👏', heart: '❤️', joy: '😂', tada: '🎉', open_mouth: '😮',
+    });
+    expect(Object.isFrozen(REACTIONS)).toBe(true);
+  });
+
+  test.each([
+    ['thumbs_up', '\u{1F44D}'],
+    ['clap', '\u{1F44F}'],
+    ['heart', '\u2764\uFE0F'],
+    ['joy', '\u{1F602}'],
+    ['tada', '\u{1F389}'],
+    ['open_mouth', '\u{1F62E}'],
+  ])('%s sends its emoji, once, and nothing else', async (reaction, emoji) => {
+    const sdk = meetingSdk();
+    expect(await react(sdk, reaction)).toEqual({ ok: true });
+    expect(sdk.setEmojiReaction).toHaveBeenCalledTimes(1);
+    expect(sdk.setEmojiReaction).toHaveBeenCalledWith({ emoji });
+  });
+
+  test.each([
+    ['a reaction that is not in the table', 'fire'],
+    ['an emoji instead of its name', '\u{1F44D}'],
+    ['another case', 'Thumbs_Up'],
+    ['a name every object has', 'constructor'],
+    ['another', '__proto__'],
+    ['a number', 1],
+    ['a list', ['clap']],
+    ['nothing', undefined],
+    ['an empty text', ''],
+  ])('%s: unsupported, no reaction sent', async (_name, reaction) => {
+    const sdk = meetingSdk();
+    expect(await react(sdk, reaction)).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.setEmojiReaction).not.toHaveBeenCalled();
+  });
+
+  test('no arguments: unsupported', async () => {
+    const sdk = meetingSdk();
+    expect(await runArloAction(sdk, { tool: 'send_reaction' })).toEqual({ ok: false, code: 'unsupported' });
+    expect(await runArloAction(sdk, { tool: 'send_reaction', args: null })).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.setEmojiReaction).not.toHaveBeenCalled();
+  });
+
+  test('a client without the API: unsupported', async () => {
+    expect(await react({}, 'clap')).toEqual({ ok: false, code: 'unsupported' });
+  });
+
+  test('Zoom refuses (reactions are off in this meeting), or throws at once: sdk_error', async () => {
+    const rejects = meetingSdk();
+    rejects.setEmojiReaction = vi.fn(async () => { throw new Error('10153'); });
+    expect(await react(rejects, 'clap')).toEqual({ ok: false, code: 'sdk_error' });
+    const throws = meetingSdk();
+    throws.setEmojiReaction = vi.fn(() => { throw new Error('no'); });
+    expect(await react(throws, 'clap')).toEqual({ ok: false, code: 'sdk_error' });
+  });
+});
+
+describe('mute_participant', () => {
+  test('the full name, whatever the case: that one person is muted', async () => {
+    const sdk = meetingSdk([person('Danny Lee', 'u-1'), person('Danny Park', 'u-2'), person('Ana', 'u-me', 'host')]);
+    expect(await mute(sdk, '  danny   LEE ')).toEqual({ ok: true });
+    expect(sdk.toggleParticipantMediaAudio).toHaveBeenCalledTimes(1);
+    expect(sdk.toggleParticipantMediaAudio).toHaveBeenCalledWith({ participantUUIDs: ['u-1'], audio: false });
+  });
+
+  test('a co-host may too; the same name written another way is still that person', async () => {
+    const sdk = meetingSdk([person('Jose\u0301  Nu\u0301n\u0303ez', 'u-1'), person('Bo Lee', 'u-2')]);
+    expect(await mute(sdk, 'jos\u00e9 n\u00fa\u00f1ez', 'coHost')).toEqual({ ok: true });
+    expect(sdk.toggleParticipantMediaAudio).toHaveBeenCalledWith({ participantUUIDs: ['u-1'], audio: false });
+  });
+
+  test('whatever is asked, the call is only ever "mute" for exactly one person', async () => {
+    const people = [person('Danny Lee', 'u-1'), person('Danny Park', 'u-2'), person('Bo', 'u-3'), person('Bo', 'u-4'), person('Cy', '')];
+    const sdk = meetingSdk(people);
+    const asks = [
+      { name: 'Danny Lee' }, { name: 'Danny' }, { name: 'Bo' }, { name: 'Cy' }, { name: 'Nobody' }, { name: '' },
+      { name: 'Danny Lee', audio: true }, { name: 'Danny Park', unmute: true, participantUUIDs: [] },
+      { name: 'Danny Lee', participantUUIDs: ['u-2', 'u-3'] }, {}, null,
+    ];
+    for (const args of asks) {
+      await runArloAction(sdk, { tool: 'mute_participant', args }, { zoomRole: 'host', stillAllowed: yes });
+    }
+    expect(sdk.toggleParticipantMediaAudio.mock.calls.length).toBeGreaterThan(0);
+    sdk.toggleParticipantMediaAudio.mock.calls.forEach((call) => {
+      expect(call).toHaveLength(1);
+      expect(Object.keys(call[0]).sort()).toEqual(['audio', 'participantUUIDs']);
+      expect(call[0].audio).toBe(false);
+      expect(call[0].participantUUIDs).toHaveLength(1);
+      expect(['u-1', 'u-2']).toContain(call[0].participantUUIDs[0]);
+    });
+  });
+
+  test('arguments besides the name are not what was approved: unsupported, the list is not read', async () => {
+    const sdk = meetingSdk([person('Danny Lee', 'u-1')]);
+    expect(await runArloAction(sdk, { tool: 'mute_participant', args: { name: 'Danny Lee', audio: true } }, { zoomRole: 'host', stillAllowed: yes }))
+      .toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.getMeetingParticipants).not.toHaveBeenCalled();
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('someone who is not the host or a co-host: not_allowed, the participants are not read', async () => {
+    const sdk = meetingSdk([person('Danny Lee', 'u-1')]);
+    expect(await mute(sdk, 'Danny Lee', 'attendee')).toEqual({ ok: false, code: 'not_allowed' });
+    expect(await runArloAction(sdk, { tool: 'mute_participant', args: { name: 'Danny Lee' } })).toEqual({ ok: false, code: 'not_allowed' });
+    expect(sdk.getMeetingParticipants).not.toHaveBeenCalled();
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('nobody by that name: not_found, nobody muted', async () => {
+    const sdk = meetingSdk([person('Bo Lee', 'u-2')]);
+    expect(await mute(sdk, 'Danny Lee')).toEqual({ ok: false, code: 'not_found' });
+    expect(await mute(sdk, 'Lee')).toEqual({ ok: false, code: 'not_found' });
+    expect(await mute(meetingSdk([]), 'Danny Lee')).toEqual({ ok: false, code: 'not_found' });
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('two people with the name: several_match, nobody muted', async () => {
+    const sdk = meetingSdk([person('Danny Lee', 'u-1'), person('danny  lee', 'u-2')]);
+    expect(await mute(sdk, 'Danny Lee')).toEqual({ ok: false, code: 'several_match' });
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('a first name alone mutes nobody, even when only one person has it: several_match', async () => {
+    const sdk = meetingSdk([person('Danny Lee', 'u-1'), person('Bo Lee', 'u-2')]);
+    expect(await mute(sdk, 'Danny')).toEqual({ ok: false, code: 'several_match' });
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('someone whose whole name it is, beside someone it is the first name of: the one whose name it is', async () => {
+    const sdk = meetingSdk([person('Danny', 'u-1'), person('Danny Lee', 'u-2')]);
+    expect(await mute(sdk, 'Danny')).toEqual({ ok: true });
+    expect(sdk.toggleParticipantMediaAudio).toHaveBeenCalledWith({ participantUUIDs: ['u-1'], audio: false });
+  });
+
+  test('the panel may no longer act once the list is back: not_allowed, nobody muted', async () => {
+    const sdk = meetingSdk();
+    let allowed = true;
+    sdk.getMeetingParticipants = vi.fn(async () => { allowed = false; return { participants: [person('Danny Lee', 'u-1')] }; });
+    expect(await mute(sdk, 'Danny Lee', 'host', () => allowed)).toEqual({ ok: false, code: 'not_allowed' });
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+    // Nothing to ask whether it still may: nobody is muted
+    const unasked = meetingSdk([person('Danny Lee', 'u-1')]);
+    expect(await runArloAction(unasked, { tool: 'mute_participant', args: { name: 'Danny Lee' } }, { zoomRole: 'host' }))
+      .toEqual({ ok: false, code: 'not_allowed' });
+    expect(await mute(unasked, 'Danny Lee', 'host', () => 'yes')).toEqual({ ok: false, code: 'not_allowed' });
+    expect(unasked.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('a participant without a UUID: sdk_error, and never a call without one (an empty list would mute everyone)', async () => {
+    for (const uuid of [undefined, '', null, 7]) {
+      const sdk = meetingSdk([person('Danny Lee', uuid)]);
+      expect(await mute(sdk, 'Danny Lee')).toEqual({ ok: false, code: 'sdk_error' });
+      expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+    }
+  });
+
+  test('listing or muting fails, or Zoom answers with no list: sdk_error', async () => {
+    const noList = meetingSdk();
+    noList.getMeetingParticipants = vi.fn(async () => { throw new Error('not the host'); });
+    expect(await mute(noList, 'Danny Lee')).toEqual({ ok: false, code: 'sdk_error' });
+    const odd = meetingSdk();
+    odd.getMeetingParticipants = vi.fn(async () => ({}));
+    expect(await mute(odd, 'Danny Lee')).toEqual({ ok: false, code: 'sdk_error' });
+    const noMute = meetingSdk([person('Danny Lee', 'u-1')]);
+    noMute.toggleParticipantMediaAudio = vi.fn(async () => { throw new Error('10109'); });
+    expect(await mute(noMute, 'Danny Lee')).toEqual({ ok: false, code: 'sdk_error' });
+    const throws = meetingSdk([person('Danny Lee', 'u-1')]);
+    throws.toggleParticipantMediaAudio = vi.fn(() => { throw new Error('no'); });
+    expect(await mute(throws, 'Danny Lee')).toEqual({ ok: false, code: 'sdk_error' });
+  });
+
+  test('a client without either API: unsupported', async () => {
+    const noToggle = meetingSdk([person('Danny Lee', 'u-1')]);
+    delete noToggle.toggleParticipantMediaAudio;
+    expect(await mute(noToggle, 'Danny Lee')).toEqual({ ok: false, code: 'unsupported' });
+    expect(noToggle.getMeetingParticipants).not.toHaveBeenCalled();
+    const noList = meetingSdk();
+    delete noList.getMeetingParticipants;
+    expect(await mute(noList, 'Danny Lee')).toEqual({ ok: false, code: 'unsupported' });
+    expect(noList.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('no usable name: unsupported', async () => {
+    const sdk = meetingSdk([person('Danny Lee', 'u-1')]);
+    expect(await mute(sdk, '  ')).toEqual({ ok: false, code: 'unsupported' });
+    expect(await mute(sdk, 'x'.repeat(101))).toEqual({ ok: false, code: 'unsupported' });
+    expect(await mute(sdk, 5)).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.getMeetingParticipants).not.toHaveBeenCalled();
+  });
+
+  test('a name of 100 characters is looked for', async () => {
+    const name = 'x'.repeat(100);
+    const sdk = meetingSdk([person(name, 'u-1')]);
+    expect(await mute(sdk, name)).toEqual({ ok: true });
+  });
+
+  test('people beyond the first 1000 are not looked through', async () => {
+    const many = Array.from({ length: 1000 }, (_, i) => person(`Guest ${i}`, `g-${i}`));
+    const sdk = meetingSdk([...many, person('Danny Lee', 'u-1')]);
+    expect(await mute(sdk, 'Danny Lee')).toEqual({ ok: false, code: 'not_found' });
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('the person asking is the one named: Zoom does not mute the caller this way, so unsupported and no call', async () => {
+    const sdk = meetingSdk([person('Ana', 'u-me', 'host'), person('Danny Lee', 'u-1')]);
+    expect(await mute(sdk, 'Ana', 'host', yes, { selfParticipantUUID: 'u-me' })).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+    // Someone else is muted as usual, and without knowing who the caller is Zoom decides
+    expect(await mute(sdk, 'Danny Lee', 'host', yes, { selfParticipantUUID: 'u-me' })).toEqual({ ok: true });
+    expect(await mute(sdk, 'Ana')).toEqual({ ok: true });
+    expect(sdk.toggleParticipantMediaAudio).toHaveBeenLastCalledWith({ participantUUIDs: ['u-me'], audio: false });
   });
 });
 

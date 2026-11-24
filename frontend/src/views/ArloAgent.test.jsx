@@ -111,6 +111,78 @@ describe('the sheet for something Arlo was asked to do', () => {
     expect(dialog).toHaveFocus();
   });
 
+  test.each([
+    ['muting someone', { question: 'Mute Danny Lee?', primaryLabel: 'Mute' }],
+    ['a reaction', { question: 'Send a 👍 reaction as you?', primaryLabel: 'Send 👍' }],
+    ['a heart, which is two code points', { question: 'Send a ❤️ reaction as you?', primaryLabel: 'Send ❤️' }],
+    ['inviting everyone', { question: 'Invite everyone in the meeting to open Arlo?', primaryLabel: 'Invite everyone' }],
+  ])('the sheet for %s shows the server\'s texts whole, emoji included, and posts nothing', async (_name, texts) => {
+    await openAsOwner();
+    await send(serverMessage.approval({ id: ID1, kind: 'agent_action', askedBy: 'Ben', askerVerified: true, channel: 'panel', ...texts }));
+    const dialog = await screen.findByRole('dialog', { name: texts.question });
+    expect(within(dialog).getByRole('heading', { name: texts.question }).textContent).toBe(texts.question);
+    expect(within(dialog).getByRole('button', { name: texts.primaryLabel }).textContent).toBe(texts.primaryLabel);
+    expect(within(dialog).getByRole('button', { name: texts.primaryLabel })).toBeEnabled();
+    expect(within(dialog).queryByRole('region')).not.toBeInTheDocument();
+  });
+
+  describe('a notification when a sheet arrives and the panel is not on screen', () => {
+    const NOTICE = { type: 'info', title: 'Arlo', message: 'Arlo needs your OK' };
+    const notices = (sdk) => sdk.showNotification.mock.calls.filter(([options]) => options?.message === NOTICE.message);
+    const panelIs = (state) => vi.spyOn(document, 'visibilityState', 'get').mockReturnValue(state);
+
+    test('the panel is visible: none', async () => {
+      const { sdk } = await openAsOwner();
+      await send(serverMessage.approval({ ...POST, askedBy: 'Danny Lee' }));
+      await screen.findByRole('dialog');
+      expect(notices(sdk)).toHaveLength(0);
+    });
+
+    test('the panel is hidden: one, with fixed words and nothing of the request; the same approval again adds none', async () => {
+      const { sdk } = await openAsOwner();
+      panelIs('hidden');
+      await send(serverMessage.approval({ ...POST, askedBy: 'Danny Lee' }));
+      await screen.findByRole('dialog');
+      expect(notices(sdk)).toHaveLength(1);
+      expect(notices(sdk)[0]).toEqual([NOTICE]);
+      await send(serverMessage.approval({ ...POST, askedBy: 'Danny Lee' }));
+      await send(serverMessage.approval({ id: ID2, kind: 'share_notes', askedBy: 'Ben' }));
+      expect(notices(sdk)).toHaveLength(2);
+    });
+
+    test('nothing for a request this panel does not show: not an owner, another meeting, a kind it does not know, texts it may not show', async () => {
+      const { sdk } = await openAsOwner();
+      panelIs('hidden');
+      await send(OTHER.approval(POST));
+      await send(serverMessage.approval({ id: ID1, kind: 'something_new' }));
+      await send(serverMessage.approval({ ...POST, id: ID2, question: 'x'.repeat(201) }));
+      await nothingShows();
+      expect(notices(sdk)).toHaveLength(0);
+    });
+
+    test('a participant\'s panel shows none', async () => {
+      const { sdk } = await openAsParticipant();
+      panelIs('hidden');
+      await send(serverMessage.approval(POST));
+      await nothingShows();
+      expect(notices(sdk)).toHaveLength(0);
+    });
+
+    test('Zoom refuses the notification: the sheet is there all the same and nothing is logged', async () => {
+      const sdk = createZoomSdk();
+      sdk.showNotification = vi.fn(async () => { throw new Error('10042 Danny Lee'); });
+      const error = vi.spyOn(console, 'error');
+      const warn = vi.spyOn(console, 'warn');
+      await openAsOwner({ sdk });
+      panelIs('hidden');
+      await send(serverMessage.approval(POST));
+      await screen.findByRole('dialog');
+      expect(sdk.showNotification).toHaveBeenCalledWith(NOTICE);
+      const said = [...error.mock.calls, ...warn.mock.calls].flat().map(String).join(' ');
+      expect(said).not.toMatch(/10042|Danny/);
+    });
+  });
+
   test('no button text from the server: "Do it"', async () => {
     await openAsOwner();
     await send(serverMessage.approval({ id: ID1, kind: 'agent_action', question: 'Post this in the meeting chat?' }));

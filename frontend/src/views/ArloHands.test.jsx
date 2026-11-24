@@ -13,6 +13,8 @@ const OWNER = { present: true, role: 'owner', ownerName: 'Ana', myStreamLive: tr
 const ANA_BROUGHT_ARLO = { present: true, role: 'participant', ownerName: 'Ana', whoCanAsk: 'anyone' };
 const A1 = 'aaaaaaaa-1111-4111-8111-111111111111';
 const A2 = 'aaaaaaaa-2222-4222-8222-222222222222';
+const HOST_HANDS = ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant'];
+const ATTENDEE_HANDS = ['post_to_chat', 'invite_everyone', 'send_reaction'];
 const CHAT = { tool: 'post_to_chat', args: { message: 'The beta moves to March 3.' } };
 
 const server = () => FakeWebSocket.last;
@@ -47,10 +49,10 @@ afterEach(() => {
 });
 
 describe('what the panel says it can do', () => {
-  test('an owner who is the host: the chat and the waiting room, after the subscription', async () => {
+  test('an owner who is the host: everything this panel can do, after the subscription', async () => {
     await openAsOwner();
     await waitFor(() => expect(hands()).toHaveLength(1));
-    expect(hands()[0]).toEqual({ type: 'arlo.hands', payload: { zoomRole: 'host', can: ['post_to_chat', 'admit_from_waiting_room'] } });
+    expect(hands()[0]).toEqual({ type: 'arlo.hands', payload: { zoomRole: 'host', can: HOST_HANDS } });
     const sent = server().sent.map((message) => message.type);
     expect(sent.indexOf('subscribe')).toBeLessThan(sent.indexOf('arlo.hands'));
   });
@@ -67,8 +69,8 @@ describe('what the panel says it can do', () => {
   });
 
   test.each([
-    ['a co-host announces the waiting room too', 'coHost', ['post_to_chat', 'admit_from_waiting_room']],
-    ['an attendee who owns a stream announces only the chat', 'attendee', ['post_to_chat']],
+    ['a co-host announces the waiting room and muting too', 'coHost', HOST_HANDS],
+    ['an attendee who owns a stream announces the chat, the invitation and a reaction', 'attendee', ATTENDEE_HANDS],
   ])('%s', async (_name, role, can) => {
     await openAsOwner({ sdk: createZoomSdk({ role }) });
     await waitFor(() => expect(lastHands()).toEqual({ zoomRole: role, can }));
@@ -77,7 +79,8 @@ describe('what the panel says it can do', () => {
   test('a host whose Zoom client has no waiting-room APIs does not announce that tool', async () => {
     const sdk = createZoomSdk({ waitingRoomApis: false });
     await openAsOwner({ sdk });
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat'] }));
+    // The tiers asked for after the waiting room (muting, reactions) go with it
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone'] }));
     // The rest of what the client accepts is kept: Zoom's indicator APIs are still asked for
     expect(sdk.config.mock.calls.at(-1)[0].capabilities).toContain('setDynamicIndicator');
     expect(sdk.config.mock.calls.at(-1)[0].capabilities).not.toContain('getWaitingRoomParticipants');
@@ -87,15 +90,29 @@ describe('what the panel says it can do', () => {
     const sdk = createZoomSdk({ waitingRoomRefused: true });
     expect(typeof sdk.admitParticipantFromWaitingRoom).toBe('function');
     await openAsOwner({ sdk });
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat'] }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone'] }));
     await settle();
     expect(hands()).toHaveLength(1);
   });
 
   test.each([
-    ['the waiting-room list', 'getWaitingRoomParticipants', ['post_to_chat']],
-    ['admitting', 'admitParticipantFromWaitingRoom', ['post_to_chat']],
-    ['the chat', 'sendMessageToChat', ['admit_from_waiting_room']],
+    ['the reaction APIs', ['setEmojiReaction'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'mute_participant']],
+    ['the participant-audio API', ['toggleParticipantMediaAudio'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone']],
+  ])('%s refused at config: what the client had before is still announced', async (_name, refusedApis, can) => {
+    await openAsOwner({ sdk: createZoomSdk({ refusedApis }) });
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can }));
+    await settle();
+    expect(hands()).toHaveLength(1);
+  });
+
+  test.each([
+    ['the waiting-room list', 'getWaitingRoomParticipants', HOST_HANDS.filter((tool) => tool !== 'admit_from_waiting_room')],
+    ['admitting', 'admitParticipantFromWaitingRoom', HOST_HANDS.filter((tool) => tool !== 'admit_from_waiting_room')],
+    ['the chat', 'sendMessageToChat', HOST_HANDS.filter((tool) => tool !== 'post_to_chat')],
+    ['the invitation', 'sendAppInvitationToAllParticipants', HOST_HANDS.filter((tool) => tool !== 'invite_everyone')],
+    ['a reaction', 'setEmojiReaction', HOST_HANDS.filter((tool) => tool !== 'send_reaction')],
+    ['muting', 'toggleParticipantMediaAudio', HOST_HANDS.filter((tool) => tool !== 'mute_participant')],
+    ['the list of participants', 'getMeetingParticipants', HOST_HANDS.filter((tool) => tool !== 'mute_participant')],
   ])('Zoom accepts the configuration and says it lacks %s: that tool is not announced', async (_name, api, can) => {
     await openAsOwner({ sdk: createZoomSdk({ unsupportedApis: [api] }) });
     await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can }));
@@ -105,9 +122,9 @@ describe('what the panel says it can do', () => {
 
   test('the Zoom role changes: the announcement follows', async () => {
     const { sdk } = await openAsOwner({ sdk: createZoomSdk({ role: 'attendee' }) });
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'attendee', can: ['post_to_chat'] }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'attendee', can: ATTENDEE_HANDS }));
     await act(async () => { sdk.emit('onMyUserContextChange', { role: 'coHost' }); });
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'coHost', can: ['post_to_chat', 'admit_from_waiting_room'] }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'coHost', can: HOST_HANDS }));
     expect(hands()).toHaveLength(2);
   });
 
@@ -118,7 +135,7 @@ describe('what the panel says it can do', () => {
     expect(hands()).toHaveLength(0);
 
     await send(serverMessage.arloState(OWNER));
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'attendee', can: ['post_to_chat'] }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'attendee', can: ATTENDEE_HANDS }));
 
     await send(serverMessage.arloState(ANA_BROUGHT_ARLO));
     await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'attendee', can: [] }));
@@ -143,7 +160,7 @@ describe('what the panel says it can do', () => {
     expect(hands()).toHaveLength(0);
     await send(serverMessage.subscribed());
     await waitFor(() => expect(hands()).toHaveLength(1));
-    expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'admit_from_waiting_room'] });
+    expect(lastHands()).toEqual({ zoomRole: 'host', can: HOST_HANDS });
   }, 12000);
 });
 
@@ -377,6 +394,64 @@ describe('an action from the server', () => {
       await settle();
       expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
     });
+  });
+
+  test('invite everyone: the app invitation goes out once and the result is reported', async () => {
+    const { sdk, fetchMock } = await openAsOwner();
+    await send(serverMessage.action({ actionId: A1, tool: 'invite_everyone', args: {} }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(sdk.sendAppInvitationToAllParticipants).toHaveBeenCalledTimes(1);
+    expect(results(fetchMock)[0].body).toEqual({ ok: true });
+  });
+
+  test('send a reaction: the emoji of the panel\'s own table, and an unknown one is not sent', async () => {
+    const { sdk, fetchMock } = await openAsOwner({ sdk: createZoomSdk({ role: 'attendee' }) });
+    await send(serverMessage.action({ actionId: A1, tool: 'send_reaction', args: { reaction: 'thumbs_up' } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(sdk.setEmojiReaction).toHaveBeenCalledTimes(1);
+    expect(sdk.setEmojiReaction).toHaveBeenCalledWith({ emoji: '👍' });
+    expect(results(fetchMock)[0].body).toEqual({ ok: true });
+    await send(serverMessage.action({ actionId: A2, tool: 'send_reaction', args: { reaction: '💩' } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
+    expect(results(fetchMock)[1].body).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.setEmojiReaction).toHaveBeenCalledTimes(1);
+  });
+
+  test('mute someone: the one person by that whole name is muted, never unmuted', async () => {
+    const sdk = createZoomSdk({
+      participants: [
+        { screenName: 'Danny Lee', participantUUID: 'u-1', role: 'attendee' },
+        { screenName: 'Danny Park', participantUUID: 'u-2', role: 'attendee' },
+        { screenName: 'Ana', participantUUID: 'PARTICIPANT-UUID-1', role: 'host' },
+      ],
+    });
+    const { fetchMock } = await openAsOwner({ sdk });
+    await send(serverMessage.action({ actionId: A1, tool: 'mute_participant', args: { name: 'danny lee' } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(sdk.toggleParticipantMediaAudio).toHaveBeenCalledTimes(1);
+    expect(sdk.toggleParticipantMediaAudio).toHaveBeenCalledWith({ participantUUIDs: ['u-1'], audio: false });
+    expect(results(fetchMock)[0].body).toEqual({ ok: true });
+  });
+
+  test('asked to mute the person whose panel this is: Zoom\'s call does not act on its caller, so nothing is tried', async () => {
+    const sdk = createZoomSdk({
+      participants: [{ screenName: 'Ana', participantUUID: 'PARTICIPANT-UUID-1', role: 'host' }],
+    });
+    const { fetchMock } = await openAsOwner({ sdk });
+    await send(serverMessage.action({ actionId: A1, tool: 'mute_participant', args: { name: 'Ana' } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
+  });
+
+  test('an owner who is an attendee in Zoom is asked to mute someone: "not_allowed", the participants are not read', async () => {
+    const sdk = createZoomSdk({ role: 'attendee', participants: [{ screenName: 'Danny Lee', participantUUID: 'u-1' }] });
+    const { fetchMock } = await openAsOwner({ sdk });
+    await send(serverMessage.action({ actionId: A1, tool: 'mute_participant', args: { name: 'Danny Lee' } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'not_allowed' });
+    expect(sdk.getMeetingParticipants).not.toHaveBeenCalled();
+    expect(sdk.toggleParticipantMediaAudio).not.toHaveBeenCalled();
   });
 
   test('an owner who is an attendee in Zoom is asked to admit someone: "not_allowed"', async () => {
