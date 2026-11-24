@@ -12,8 +12,9 @@
  *   setMeta(meetingId, { ownerNameFor: { userId, name } })
  *                                     -> the same; keeps the display name one owner's panel supplied
  *                                        for this meeting (name null removes it), at most 20 per meeting
- *   getMeta(meetingId)                -> { ownerUserId, ownerName, whoCanAsk, ownerNames }
- *                                        (defaults: null, null, 'owner', an empty Map);
+ *   getMeta(meetingId)                -> { ownerUserId, ownerName, whoCanAsk, ownerNames, notesShared }
+ *                                        (defaults: null, null, 'owner', an empty Map, false);
+ *                                        notesShared takes true or false only;
  *                                        ownerNames is a Map of Arlo user id -> supplied name, a copy
  *   has(meetingId)                    -> boolean
  *   deleteMeeting(meetingId)          -> boolean

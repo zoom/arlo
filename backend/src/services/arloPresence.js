@@ -2,7 +2,9 @@
  * Who brought Arlo into a meeting, and what one panel is told about Arlo there.
  *
  * An "owner" is an Arlo user who ran a stream of their own in the meeting. The
- * notes are theirs to see; everyone else gets the participant view. Owners are
+ * notes are theirs to see, and theirs to share with everyone in the meeting
+ * who has Arlo open (`notesShared`, off until an owner turns it on); everyone
+ * else gets the participant view. Owners are
  * not stored here: they are worked out each time from the meeting's streams
  * (services/meetingStreams.js keeps each stream's operator, a Zoom user id)
  * looked up among the users who signed in to Arlo. An operator who never
@@ -15,7 +17,8 @@
  * then it is the name that owner's own panel supplied for this meeting (their
  * Zoom screen name), and null when there is neither. Never a blank.
  *
- * What is kept per meeting, who may ask Arlo and those supplied names, lives
+ * What is kept per meeting, who may ask Arlo, whether the notes are shared and
+ * those supplied names, lives
  * in the meeting store with the transcript and is deleted with it. Nothing
  * here is logged.
  */
@@ -72,6 +75,7 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
     const status = streamStatus(meetingId) || null;
     const list = owners(meetingId);
     const owner = isUserId(userId) && list.some((one) => one.id === userId);
+    const meta = store.getMeta(meetingId);
     // operators() lists the primary stream's operator first, so the first owner
     // is that person when they are an Arlo user, and the next owner otherwise
     return {
@@ -88,7 +92,9 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
       }),
       role: owner ? 'owner' : 'participant',
       ownerName: list.length > 0 ? list[0].name : null,
-      whoCanAsk: store.getMeta(meetingId).whoCanAsk,
+      whoCanAsk: meta.whoCanAsk,
+      // Whether the owners share the notes with everyone in the meeting
+      notesShared: meta.notesShared === true,
     };
   }
 
@@ -112,6 +118,20 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
     return store.setMeta(meetingId, { whoCanAsk: value }) !== null;
   }
 
+  /** Whether the meeting's notes are shared with everyone in it. False once its data is gone. */
+  const notesShared = (meetingId) => store.getMeta(meetingId).notesShared === true;
+
+  /**
+   * Share the notes with everyone in the meeting, or stop. Any owner may.
+   * 'refused' for anyone else or for a value that is not true or false;
+   * 'unchanged' when it was so already; 'changed' otherwise.
+   */
+  function setNotesShared(meetingId, userId, value) {
+    if (typeof value !== 'boolean' || !isOwner(meetingId, userId)) return 'refused';
+    if (notesShared(meetingId) === value) return 'unchanged';
+    return store.setMeta(meetingId, { notesShared: value }) !== null ? 'changed' : 'refused';
+  }
+
   /**
    * Keep the display name an owner's panel supplied for this meeting. The
    * caller validates what a name may be; here it must be a non-blank string.
@@ -131,7 +151,9 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
     return meta.ownerNames.get(userId) === name ? 'stored' : 'unchanged';
   }
 
-  return { stateFor, setWhoCanAsk, setDisplayName, isOwner, ownerUserIds, liveStreamOperator };
+  return {
+    stateFor, setWhoCanAsk, setDisplayName, setNotesShared, notesShared, isOwner, ownerUserIds, liveStreamOperator,
+  };
 }
 
 let instance = null;

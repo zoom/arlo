@@ -1,7 +1,8 @@
 /**
  * What the server holds for a meeting while it runs: transcript segments,
  * timeline events, the notes written from them and a few facts about the
- * meeting (who brought Arlo in, who may ask), in memory only. Nothing here touches disk. A meeting's data
+ * meeting (who brought Arlo in, who may ask, whether the notes are shared with
+ * everyone in it), in memory only. Nothing here touches disk. A meeting's data
  * is removed by deleteMeeting() (see services/meetingLifecycle.js) or by
  * sweep() once it is older than the age limit.
  *
@@ -47,7 +48,7 @@ const isPlainObject = (value) => value !== null && typeof value === 'object' && 
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 const defaultMeta = () => ({
-  ownerUserId: null, ownerName: null, whoCanAsk: 'owner', ownerNames: new Map(),
+  ownerUserId: null, ownerName: null, whoCanAsk: 'owner', ownerNames: new Map(), notesShared: false,
 });
 /** A copy to hand out: the Map inside is copied too. */
 const copyMeta = (meta) => ({ ...meta, ownerNames: new Map(meta.ownerNames) });
@@ -188,6 +189,10 @@ function createMemoryMeetingStore(options = {}) {
       }
       if (hasOwn(patch, 'whoCanAsk') && WHO_CAN_ASK.has(patch.whoCanAsk)) {
         meta.whoCanAsk = patch.whoCanAsk;
+      }
+      // Whether the notes are shared with everyone in the meeting: true or false, nothing else
+      if (hasOwn(patch, 'notesShared') && typeof patch.notesShared === 'boolean') {
+        meta.notesShared = patch.notesShared;
       }
       if (hasOwn(patch, 'ownerNameFor') && isPlainObject(patch.ownerNameFor)) {
         const { userId, name } = patch.ownerNameFor;

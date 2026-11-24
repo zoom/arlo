@@ -3,11 +3,11 @@
  * /api/meetings/by-zoom-id/:zoomMeetingId/arlo
  *
  *   GET  /state     what this panel is told: is Arlo here, and what is this person to it
- *   PUT  /settings  { whoCanAsk?: 'owner' | 'anyone', displayName?: string }, owners only
- *   GET  /notes     the live notes, owners only
+ *   PUT  /settings  { whoCanAsk?: 'owner' | 'anyone', displayName?: string, shareNotes?: boolean }, owners only
+ *   GET  /notes     the live notes: owners, and everyone in the meeting while the notes are shared
  *   POST /ask       { question }: an answer from the stored transcript, private to the asker
- *   POST /notes-request          {}: a participant asks the owners to share the notes
- *   POST /approvals/:approvalId  { approve, done? }: an owner's answer, owners only
+ *   POST /notes-request          {}: a participant asks the owners to share the notes with everyone
+ *   POST /approvals/:approvalId  { approve }: an owner's answer, owners only; approving turns sharing on
  *   GET  /approvals              the open requests, owners only
  *
  * SECURITY
@@ -29,7 +29,8 @@ const { aiLimiter } = require('../middleware/aiLimiter');
 const { getMeetingStore } = require('../storage');
 const { getArloPresence } = require('../services/arloPresence');
 const { getApprovals, approvalMessageData } = require('../services/approvals');
-const { broadcastArloState, sendApprovalOpened } = require('../services/websocket');
+const { broadcastArloState, sendApprovalOpened, sendNotesUpdated } = require('../services/websocket');
+const { getNotesEngine } = require('../services/notesEngine');
 const { userStore } = require('../lib/memoryStore');
 const { newestLines } = require('../lib/transcriptLines');
 const { showableName, cleanName } = require('../lib/displayName');
@@ -41,7 +42,7 @@ const router = express.Router({ mergeParams: true });
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 const MAX_QUESTION_CHARS = 500;
 const MAX_DISPLAY_NAME_CHARS = 100;
-const SETTINGS_FIELDS = ['whoCanAsk', 'displayName'];
+const SETTINGS_FIELDS = ['whoCanAsk', 'displayName', 'shareNotes'];
 const MAX_TRANSCRIPT_CHARS = 12000;
 const MAX_ANSWER_CHARS = 4000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -89,9 +90,42 @@ function requireJson(req, res, next) {
 const forbidden = (res, message) => res.status(403).json({ error: 'Forbidden', message });
 const invalid = (res, message) => res.status(400).json({ error: 'Invalid request', message });
 
+const NOT_AN_OWNER = 'Only the person who brought Arlo in can change this.';
+
+/**
+ * Share the meeting's notes with everyone in it who has Arlo open, or stop:
+ * the one way it happens, for the setting and for an approved request alike.
+ * 'refused' when this person is not an owner of the meeting (or its data is
+ * gone), 'unchanged' when it was so already, 'changed' otherwise.
+ *
+ * On a change every panel is told the new state first, so a panel knows the
+ * notes are shared before any arrive, and that they are not the moment
+ * sharing stops (from then on sendNotesUpdated() reaches owners only). Turned
+ * on, the notes so far go to everyone who may now see them, the requests for
+ * them that were still open are answered, and the notes engine looks again:
+ * a participant's panel may be the reader it was waiting for.
+ */
+function shareNotes(meetingId, userId, value) {
+  const presence = getArloPresence();
+  const outcome = presence.setNotesShared(meetingId, userId, value);
+  if (outcome !== 'changed') return outcome;
+  // That it happened: never who did it
+  console.log(`Arlo setting changed: notes sharing ${value ? 'on' : 'off'}`);
+  broadcastArloState(meetingId);
+  if (!value) return outcome;
+  const notes = getMeetingStore().getNotes(meetingId);
+  if (notes) sendNotesUpdated(meetingId, presence.ownerUserIds(meetingId), notes);
+  const approvals = getApprovals();
+  for (const approval of approvals.listOpen(meetingId)) {
+    if (approval.kind === 'share_notes') approvals.answer(meetingId, approval.id, { byUserId: userId, approve: true, done: true });
+  }
+  getNotesEngine().ownerPanelConnected(meetingId);
+  return outcome;
+}
+
 /**
  * GET /state
- * { present, paused, role: 'owner' | 'participant', ownerName, whoCanAsk }
+ * { present, paused, role: 'owner' | 'participant', ownerName, whoCanAsk, notesShared }
  * Open to guests in the meeting: a guest is a participant.
  */
 router.get('/state', optionalAuth, requireMeetingAccess, (req, res) => {
@@ -100,8 +134,10 @@ router.get('/state', optionalAuth, requireMeetingAccess, (req, res) => {
 
 /**
  * PUT /settings
- * { whoCanAsk?, displayName? }: at least one, nothing else.
- * `whoCanAsk` changes who may ask Arlo. `displayName` is the caller's own name
+ * { whoCanAsk?, displayName?, shareNotes? }: at least one, nothing else.
+ * `whoCanAsk` changes who may ask Arlo. `shareNotes` (true or false) shares the
+ * live notes with everyone in the meeting who has Arlo open, or stops; see
+ * shareNotes() above. `displayName` is the caller's own name
  * for this meeting (their panel sends their Zoom screen name): it is shown as
  * the owner's name only when their account has no name, and is deleted with
  * the meeting. Answers the caller's new state; every panel of the meeting is
@@ -115,7 +151,7 @@ router.put('/settings', requireAuth, requireMeetingAccess, requireJson, (req, re
   }
   // Everything is validated before anything is changed
   if (!hasOnlySomeOf(req.body, SETTINGS_FIELDS)) {
-    return invalid(res, 'Send whoCanAsk, displayName, or both, and nothing else');
+    return invalid(res, 'Send whoCanAsk, displayName, shareNotes, or several of them, and nothing else');
   }
   const hasOwn = (key) => Object.prototype.hasOwnProperty.call(req.body, key);
   const whoCanAsk = hasOwn('whoCanAsk') ? req.body.whoCanAsk : undefined;
@@ -125,6 +161,10 @@ router.put('/settings', requireAuth, requireMeetingAccess, requireJson, (req, re
   const displayName = hasOwn('displayName') ? readDisplayName(req.body.displayName) : undefined;
   if (displayName === null) {
     return invalid(res, `displayName must be 1 to ${MAX_DISPLAY_NAME_CHARS} characters with a letter or digit, without control or invisible characters`);
+  }
+  const sharing = hasOwn('shareNotes') ? req.body.shareNotes : undefined;
+  if (sharing !== undefined && typeof sharing !== 'boolean') {
+    return invalid(res, 'shareNotes must be true or false');
   }
 
   let changed = false;
@@ -148,17 +188,27 @@ router.put('/settings', requireAuth, requireMeetingAccess, requireJson, (req, re
     }
   }
   if (changed) broadcastArloState(meetingId);
+  // Last, and it tells the panels itself: the state they get has the other changes too
+  if (sharing !== undefined && shareNotes(meetingId, req.user.id, sharing) === 'refused') {
+    return forbidden(res, NOT_AN_OWNER);
+  }
   return res.json(presence.stateFor(meetingId, req.user.id));
 });
 
 /**
  * GET /notes
  * { notes: { summary, decisions, actionItems, updatedAt, throughSeqNo } | null }
+ * For an owner always. For everyone else in the meeting (the meeting-access
+ * cookie is the proof, so a guest too) only while an owner shares the notes;
+ * 403 otherwise. Decided on each request: nothing is handed out after sharing
+ * stopped.
  */
-router.get('/notes', requireAuth, requireMeetingAccess, (req, res) => {
+router.get('/notes', optionalAuth, requireMeetingAccess, (req, res) => {
   const meetingId = req.params.zoomMeetingId;
-  if (!getArloPresence().isOwner(meetingId, req.user.id)) {
-    return forbidden(res, 'The notes are for the person who brought Arlo in.');
+  const presence = getArloPresence();
+  const mayRead = presence.isOwner(meetingId, req.user?.id ?? null) || presence.notesShared(meetingId);
+  if (!mayRead) {
+    return forbidden(res, 'The notes are for the person who brought Arlo in, until they share them.');
   }
   return res.json({ notes: getMeetingStore().getNotes(meetingId) });
 });
@@ -229,9 +279,10 @@ function accountName(userId) {
 /**
  * POST /notes-request
  * {} -> { id, expiresAt }. A signed-in participant asks the people who brought
- * Arlo in to share the notes. Their panels are asked (`arlo.approval`); the
- * one that agrees posts the notes to the meeting chat itself. The server posts
- * nothing and sends the asker no notes: only how it ended, over their socket.
+ * Arlo in to share the notes with everyone in the meeting. Their panels are
+ * asked (`arlo.approval`); when one agrees the server turns sharing on, and
+ * the notes then reach the asker like everyone else. 409 `already_shared`
+ * when they are shared already.
  */
 router.post('/notes-request', requireAuth, requireMeetingAccess, requireJson, (req, res) => {
   const meetingId = req.params.zoomMeetingId;
@@ -241,6 +292,9 @@ router.post('/notes-request', requireAuth, requireMeetingAccess, requireJson, (r
   if (owners.includes(req.user.id)) return invalid(res, 'You have the notes already.');
   if (owners.length === 0) {
     return res.status(409).json({ error: 'no_owner', message: 'Nobody brought Arlo into this meeting.' });
+  }
+  if (presence.notesShared(meetingId)) {
+    return res.status(409).json({ error: 'already_shared', message: 'The notes are shared with everyone already.' });
   }
   if (presence.stateFor(meetingId, req.user.id).present !== true) {
     return res.status(409).json({ error: 'arlo_absent', message: 'Arlo is not in the meeting right now.' });
@@ -260,9 +314,10 @@ router.post('/notes-request', requireAuth, requireMeetingAccess, requireJson, (r
 
 /**
  * POST /approvals/:approvalId
- * { approve: false } declined | { approve: true, done: true } approved (the
- * owner's panel posted the notes) | { approve: true, done: false } failed
- * (the post did not work) -> { id, outcome }. The first answer wins; 404 for
+ * { approve: false } declined | { approve: true } approved: the server turns
+ * sharing the notes on, as PUT /settings { shareNotes: true } does
+ * -> { id, outcome }. A boolean `done` is still accepted and ignored (panels
+ * that posted the notes to the chat sent it). The first answer wins; 404 for
  * an id nothing is open under. The owners and the person who asked are told
  * over their sockets (services/approvals.js).
  */
@@ -279,17 +334,25 @@ router.post('/approvals/:approvalId', requireAuth, requireMeetingAccess, require
   if (typeof id !== 'string' || !UUID.test(id)) return invalid(res, 'Not an approval id');
   const body = req.body;
   const shape = hasExactly(body, ['approve']) || hasExactly(body, ['approve', 'done']);
-  if (!shape || typeof body.approve !== 'boolean') return invalid(res, 'Send { approve: boolean, done?: boolean } and nothing else');
+  if (!shape || typeof body.approve !== 'boolean') return invalid(res, 'Send { approve: boolean } and nothing else');
   const hasDone = Object.prototype.hasOwnProperty.call(body, 'done');
   if (hasDone && typeof body.done !== 'boolean') return invalid(res, 'done must be true or false');
-  // Approving says whether the work was done; declining cannot have done it
-  if (body.approve ? !hasDone : body.done === true) return invalid(res, 'Send done with approve: true, and not done: true with approve: false');
 
-  const outcome = getApprovals().answer(meetingId, id, {
-    byUserId: req.user.id, approve: body.approve, ...(hasDone && { done: body.done }),
-  });
-  if (outcome === null) return notFound();
-  return res.json({ id, outcome });
+  const approvals = getApprovals();
+  // Looked up before anything is changed: an answer to nothing shares nothing
+  if (approvals.get(meetingId, id) === null) return notFound();
+  if (!body.approve) {
+    const declined = approvals.answer(meetingId, id, { byUserId: req.user.id, approve: false });
+    return declined === null ? notFound() : res.json({ id, outcome: declined });
+  }
+  // The work is done here, not in the panel. Turning sharing on answers the
+  // open requests itself; one is still open only when the notes were shared
+  // already, or when they could not be (then it closes as 'failed')
+  const shared = shareNotes(meetingId, req.user.id, true) !== 'refused';
+  if (approvals.get(meetingId, id) !== null) {
+    approvals.answer(meetingId, id, { byUserId: req.user.id, approve: true, done: shared });
+  }
+  return res.json({ id, outcome: shared ? 'approved' : 'failed' });
 });
 
 /**

@@ -179,7 +179,7 @@ test('the user whose stream started is told they are the owner, everyone else th
   // before anything started: Arlo is not in the meeting
   assert.deepEqual(
     { ...lastState(guest) },
-    { meetingId: meeting, present: false, paused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner' },
+    { meetingId: meeting, present: false, paused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner', notesShared: false },
   );
 
   await statusFor(meeting, { status: 'rtms_started', streamId: 's1', operatorId: ana.zoomUserId });
@@ -187,7 +187,7 @@ test('the user whose stream started is told they are the owner, everyone else th
   for (const ws of [owner, other, guest]) ws.socket.close();
 
   assert.deepEqual(lastState(owner), {
-    meetingId: meeting, present: true, paused: false, myStreamPaused: false, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner',
+    meetingId: meeting, present: true, paused: false, myStreamPaused: false, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner', notesShared: false,
   });
   assert.equal(lastState(other).role, 'participant');
   assert.equal(lastState(guest).role, 'participant');

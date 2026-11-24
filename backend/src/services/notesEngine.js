@@ -1,13 +1,16 @@
 /**
  * Writes a meeting's live notes from its stored transcript, on a timer, for
- * the people who brought Arlo in (the meeting's owners, services/arloPresence.js).
+ * the people who may see them: those who brought Arlo in (the meeting's owners,
+ * services/arloPresence.js) and, while an owner shares the notes, everyone in
+ * the meeting who has Arlo open.
  *
  * The notes are one document per meeting, kept in the meeting store with the
  * transcript and deleted with it. Each run gives the model the notes so far
  * and the lines stored since, and replaces the notes with its answer:
- *   - nothing runs for a meeting without an owner, or while no owner has a
- *     panel open in it: nobody would see the notes. The lines wait, and a run
- *     follows when an owner's panel connects;
+ *   - nothing runs for a meeting without an owner, or while no panel that may
+ *     see the notes is open in it (an owner's, or anyone's while the notes are
+ *     shared): nobody would see them. The lines wait, and a run follows when
+ *     such a panel connects or the notes become shared;
  *   - the first run happens when `firstRunSegments` lines are stored, or one
  *     interval after the first line, whichever is first;
  *   - after that at most one run per interval, and only when there are new lines;
@@ -83,8 +86,9 @@ function createNotesEngine({
   generate,
   presence,
   send = () => {},
-  // (meetingId, ownerUserIds) => whether one of them has a panel open in that
-  // meeting. Injected: this module knows nothing about sockets.
+  // (meetingId, ownerUserIds) => whether a panel that may see the notes is
+  // open in that meeting: one of theirs, or anyone's while the notes are
+  // shared. Injected: this module knows nothing about sockets or sharing.
   hasOwnerPanel = () => true,
   schedule = defaultSchedule,
   now = () => Date.now(),
@@ -136,7 +140,7 @@ function createNotesEngine({
     }
   }
 
-  /** Whether one of the owners has a panel open in the meeting. A lookup that fails finds none. */
+  /** Whether a panel that may see the notes is open in the meeting. A lookup that fails finds none. */
   function panelOpen(meetingId, ownerUserIds) {
     try {
       return hasOwnerPanel(meetingId, ownerUserIds) === true;
@@ -145,7 +149,7 @@ function createNotesEngine({
     }
   }
 
-  /** Whether notes written now would have a reader: an owner with a panel open. */
+  /** Whether notes written now would have a reader: a panel open that may see them. */
   function hasReader(meetingId) {
     const owners = ownersOf(meetingId);
     return owners.length > 0 && panelOpen(meetingId, owners);
@@ -232,7 +236,7 @@ function createNotesEngine({
       try {
         send(meetingId, ownersOf(meetingId), stored);
       } catch {
-        // The notes are stored: an owner's panel reads them when it next asks
+        // The notes are stored: a panel that may see them reads them when it next asks
       }
     }
     if (meetings.get(meetingId) === state) consider(meetingId);
@@ -280,8 +284,9 @@ function createNotesEngine({
   }
 
   /**
-   * A signed-in person's panel connected or subscribed to this meeting. If
-   * lines are waiting for a reader, a run follows as soon as one is due.
+   * A panel connected or subscribed to this meeting, or the notes became
+   * shared: there may be a reader now. If lines are waiting for one, a run
+   * follows as soon as one is due.
    * Starts nothing for a meeting without stored lines. Never throws.
    */
   function ownerPanelConnected(meetingId) {
@@ -309,7 +314,7 @@ function getNotesEngine() {
     const config = require('../config');
     const { getMeetingStore } = require('../storage');
     const { getArloPresence } = require('./arloPresence');
-    const { sendNotesUpdated, hasOwnerPanel } = require('./websocket');
+    const { sendNotesUpdated, hasNotesReaderPanel } = require('./websocket');
     const openrouter = require('./openrouter');
     /* eslint-enable global-require */
     instance = createNotesEngine({
@@ -318,7 +323,7 @@ function getNotesEngine() {
       // Through the module object, so tests can replace the model call
       generate: (input) => openrouter.generateLiveNotes({ ...input, model: config.notesModel }),
       send: sendNotesUpdated,
-      hasOwnerPanel,
+      hasOwnerPanel: hasNotesReaderPanel,
       intervalMs: config.notesIntervalMs,
       enabled: config.aiEnabled,
     });

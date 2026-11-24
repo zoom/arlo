@@ -1,6 +1,6 @@
 // A participant asks the owner to share the notes; an owner answers. The
-// server opens and closes the approval and tells the right panels: it never
-// posts to the chat and never sends notes to the person who asked.
+// server opens and closes the approval and tells the right panels. Approving
+// turns sharing the notes on for everyone (test/arlo-share-notes.test.js).
 const h = require('./helpers');
 
 h.setTestEnv({ RTMS_SERVICE_URL: 'http://127.0.0.1:9' });
@@ -257,7 +257,7 @@ test('one request per person per meeting: 429 while it is open and for two minut
   assert.equal((await call('POST', other.meetingId, 'notes-request', { headers: cookies(other.pass, m.ben.session), body: {} })).status, 200);
 });
 
-test('only an owner answers; the answer is { approve, done? } for a UUID', async () => {
+test('only an owner answers; the answer is { approve } for a UUID, and a boolean done is ignored', async () => {
   const m = await meetingWith('NR-ANSWER-GUARD==');
   const { id } = (await requestNotes(m)).body;
 
@@ -270,8 +270,8 @@ test('only an owner answers; the answer is { approve, done? } for a UUID', async
     assert.equal((await answer(m, notAnId, { approve: false })).status, 400, notAnId);
   }
   const bad = [
-    {}, { approve: 'true' }, { approve: 1 }, { approve: null }, { done: true }, { approve: true }, { approve: true, done: 'yes' },
-    { approve: true, done: null }, { approve: false, done: true }, { approve: true, done: true, message: 'the notes' },
+    {}, { approve: 'true' }, { approve: 1 }, { approve: null }, { done: true }, { approve: true, done: 'yes' },
+    { approve: true, done: null }, { approve: false, done: 'no' }, { approve: true, done: true, message: 'the notes' },
     { approve: true, done: true, byUserId: m.ana.user.id }, { approve: false, outcome: 'approved' }, [true], 'yes', true,
   ];
   for (const body of bad) {
@@ -300,7 +300,7 @@ test('each outcome is told to the owners and to the person who asked, and to nob
   const cases = [
     [{ approve: false }, 'declined'],
     [{ approve: true, done: true }, 'approved'],
-    [{ approve: true, done: false }, 'failed'],
+    [{ approve: true }, 'approved'],
   ];
   let n = 0;
   for (const [body, outcome] of cases) {
@@ -320,10 +320,12 @@ test('each outcome is told to the owners and to the person who asked, and to nob
     assert.deepEqual(approvalMessages(ownerPanel).map((msg) => msg.type), ['arlo.approval', 'arlo.approval.closed']);
     assert.deepEqual(approvalMessages(ownerPanel)[1], closed);
     assert.deepEqual(approvalMessages(owner2Panel)[1], closed);
-    // the asker gets the outcome and nothing else: no request details, no notes
+    // the asker gets the outcome and no request details; notes only when the owner agreed to share them
     assert.deepEqual(approvalMessages(askerPanel), [closed]);
-    assert.equal(askerPanel.messages.some((msg) => msg.type === 'notes.updated'), false);
-    assert.equal(JSON.stringify(askerPanel.messages).includes('Friday'), false);
+    if (outcome === 'declined') {
+      assert.equal(askerPanel.messages.some((msg) => msg.type === 'notes.updated'), false);
+      assert.equal(JSON.stringify(askerPanel.messages).includes('Friday'), false);
+    }
     assert.deepEqual(approvalMessages(thirdPanel), []);
     assert.deepEqual(approvalMessages(guestPanel), []);
     closeAll(ownerPanel, owner2Panel, askerPanel, thirdPanel, guestPanel);
@@ -412,9 +414,8 @@ test('no name and no user id is logged, whatever happens', async () => {
     await requestNotes(m); // 429
     await answer(m, first.id, { approve: true, done: true });
     await answer(m, first.id, { approve: false }); // 404
-    const second = (await requestNotes(m, m.third)).body;
-    await answer(m, second.id, { approve: true, done: false });
-    await answer(m, second.id, { approve: true, done: true }, m.participant); // 403
+    await requestNotes(m, m.third); // 409: shared already
+    await answer(m, first.id, { approve: true, done: true }, m.participant); // 403
     await requestNotes(m, m.owner); // 400
     await call('GET', m.meetingId, 'approvals', { headers: m.owner });
     await h.wait(50);

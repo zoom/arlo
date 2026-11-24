@@ -417,28 +417,49 @@ function broadcastArloState(meetingId) {
   return sendToMeetingSockets(meetingId, (ws) => arloStateMessage(ws, meetingId));
 }
 
+const userIdSet = (ids) => new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string' && id.length > 0));
+
 /**
- * Send a meeting's notes to the people who brought Arlo in, and to nobody
- * else: only the sockets whose signed-in user is one of `ownerUserIds` and
- * whose verified meeting access names this meeting. A guest's socket (no user)
- * never matches. Nor does an owner's panel in another meeting, which
- * crossRegisterUser() lists under this meeting too: notes are shown only
- * where the person was verified to be.
+ * A panel of one of these people, verified to be in this meeting. A guest's
+ * socket (no user) never matches. Nor does an owner's panel in another
+ * meeting, which crossRegisterUser() lists under this meeting too.
+ */
+const isOwnerPanel = (ws, meetingId, owners) => owners.has(ws.userId) && ws.allowedMeetingId === meetingId;
+
+/** Whether the meeting's owners share its notes with everyone, read now. A lookup that fails says no. */
+function notesSharedIn(meetingId) {
+  try {
+    return getArloPresence().notesShared(meetingId) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Who may see a meeting's notes: an owner's panel, and while the notes are
+ * shared every socket whose verified meeting access names this meeting,
+ * signed in or a guest. Never a socket verified for another meeting, though it
+ * may be listed under this one: notes are shown only where the person was
+ * verified to be.
+ */
+const mayReadNotes = (ws, meetingId, owners, shared) => ws.allowedMeetingId === meetingId
+  && (shared === true || isOwnerPanel(ws, meetingId, owners));
+
+/**
+ * Send a meeting's notes to the people who may see them (mayReadNotes), and to
+ * nobody else. Whether the notes are shared is read here, at the time of
+ * sending: the moment an owner stops sharing, only owners get them.
  */
 function sendNotesUpdated(meetingId, ownerUserIds, notes) {
-  const owners = new Set((Array.isArray(ownerUserIds) ? ownerUserIds : []).filter((id) => typeof id === 'string' && id.length > 0));
-  if (owners.size === 0) return 0;
+  const owners = userIdSet(ownerUserIds);
+  const shared = notesSharedIn(meetingId);
+  if (owners.size === 0 && !shared) return 0;
   return sendToMeetingSockets(meetingId, (ws) => (
-    isOwnerPanel(ws, meetingId, owners)
+    mayReadNotes(ws, meetingId, owners, shared)
       ? { type: 'notes.updated', data: { meetingId, notes } }
       : null
   ));
 }
-
-/** The sockets notes for this meeting may go to: see sendNotesUpdated(). */
-const isOwnerPanel = (ws, meetingId, owners) => owners.has(ws.userId) && ws.allowedMeetingId === meetingId;
-
-const userIdSet = (ids) => new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string' && id.length > 0));
 
 /**
  * Tell the owners' panels that someone asks for their approval
@@ -467,27 +488,29 @@ function sendApprovalClosed(meetingId, ownerUserIds, askedByUserId, data) {
 }
 
 /**
- * Whether one of `ownerUserIds` has a panel open in this meeting: the same
+ * Whether a panel that may see this meeting's notes is open in it: an owner's
+ * (one of `ownerUserIds`), or anyone's while the notes are shared. The same
  * sockets sendNotesUpdated() would send to. The notes engine asks before it
  * writes notes, so none are written (and no transcript goes to the AI
  * provider for them) while nobody could read them.
  */
-function hasOwnerPanel(meetingId, ownerUserIds) {
-  const owners = new Set((Array.isArray(ownerUserIds) ? ownerUserIds : []).filter((id) => typeof id === 'string' && id.length > 0));
+function hasNotesReaderPanel(meetingId, ownerUserIds) {
+  const owners = userIdSet(ownerUserIds);
+  const shared = notesSharedIn(meetingId);
   const clients = connections.get(meetingId);
-  if (!clients || owners.size === 0) return false;
+  if (!clients || (owners.size === 0 && !shared)) return false;
   for (const ws of clients) {
-    if (ws.readyState === WebSocket.OPEN && isOwnerPanel(ws, meetingId, owners)) return true;
+    if (ws.readyState === WebSocket.OPEN && mayReadNotes(ws, meetingId, owners, shared)) return true;
   }
   return false;
 }
 
 /**
- * A signed-in person's panel connected or subscribed: if it is an owner's and
- * lines are waiting to be written up, the notes engine takes it from here.
+ * A panel connected or subscribed: if it may see the notes (an owner's, or
+ * anyone's while they are shared) and lines are waiting to be written up, the
+ * notes engine takes it from here. The engine decides; this only wakes it.
  */
 function notesReaderConnected(ws, meetingId) {
-  if (!ws.userId) return;
   try {
     // Required here: the notes engine's neighbours require this module
     // eslint-disable-next-line global-require
@@ -716,7 +739,7 @@ module.exports = {
   sendNotesUpdated,
   sendApprovalOpened,
   sendApprovalClosed,
-  hasOwnerPanel,
+  hasNotesReaderPanel,
   currentStreamStatus,
   broadcastRtmsRequestStatus,
   disconnectUser,

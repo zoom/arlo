@@ -104,7 +104,7 @@ test('a timeline event is enough for a meeting to exist', () => {
 
 test('meta has defaults, for a meeting that is held and for one that is not', () => {
   const store = withMeeting();
-  const defaults = { ownerUserId: null, ownerName: null, whoCanAsk: 'owner', ownerNames: new Map() };
+  const defaults = { ownerUserId: null, ownerName: null, whoCanAsk: 'owner', ownerNames: new Map(), notesShared: false };
   assert.deepEqual(store.getMeta('M1'), defaults);
   assert.deepEqual(store.getMeta('unknown'), defaults);
 });
@@ -113,15 +113,15 @@ test('meta is changed one known field at a time', () => {
   const store = withMeeting();
   assert.deepEqual(
     store.setMeta('M1', { ownerUserId: 'u1', ownerName: 'Ana' }),
-    { ownerUserId: 'u1', ownerName: 'Ana', whoCanAsk: 'owner', ownerNames: new Map() },
+    { ownerUserId: 'u1', ownerName: 'Ana', whoCanAsk: 'owner', ownerNames: new Map(), notesShared: false },
   );
   assert.deepEqual(
     store.setMeta('M1', { whoCanAsk: 'anyone' }),
-    { ownerUserId: 'u1', ownerName: 'Ana', whoCanAsk: 'anyone', ownerNames: new Map() },
+    { ownerUserId: 'u1', ownerName: 'Ana', whoCanAsk: 'anyone', ownerNames: new Map(), notesShared: false },
   );
   assert.deepEqual(
     store.setMeta('M1', { ownerUserId: null, ownerName: null }),
-    { ownerUserId: null, ownerName: null, whoCanAsk: 'anyone', ownerNames: new Map() },
+    { ownerUserId: null, ownerName: null, whoCanAsk: 'anyone', ownerNames: new Map(), notesShared: false },
   );
   assert.equal(store.setMeta('M1', { ownerName: 'n'.repeat(500) }).ownerName.length, 200);
 });
@@ -132,7 +132,7 @@ test('meta ignores unknown keys and bad values instead of storing them', () => {
   const raw = JSON.parse('{"whoCanAsk":"everyone","ownerUserId":7,"ownerName":{"a":1},"admin":true,"__proto__":{"polluted":true}}');
   const meta = store.setMeta('M1', raw);
 
-  assert.deepEqual(meta, { ownerUserId: 'u1', ownerName: 'Ana', whoCanAsk: 'anyone', ownerNames: new Map() });
+  assert.deepEqual(meta, { ownerUserId: 'u1', ownerName: 'Ana', whoCanAsk: 'anyone', ownerNames: new Map(), notesShared: false });
   assert.equal(meta.polluted, undefined);
   assert.deepEqual(store.setMeta('M1', { ownerUserId: 'x'.repeat(257) }), meta); // an id is never cut: too long is not that id
   assert.deepEqual(store.setMeta('M1', { ownerUserId: '' }), meta);
@@ -146,7 +146,7 @@ test('deleting a meeting removes its notes and meta', () => {
 
   assert.equal(store.deleteMeeting('M1'), true);
   assert.equal(store.getNotes('M1'), null);
-  assert.deepEqual(store.getMeta('M1'), { ownerUserId: null, ownerName: null, whoCanAsk: 'owner', ownerNames: new Map() });
+  assert.deepEqual(store.getMeta('M1'), { ownerUserId: null, ownerName: null, whoCanAsk: 'owner', ownerNames: new Map(), notesShared: false });
 
   // The same meeting id again starts clean
   store.appendSegment('M1', { text: 'A new stream.' });
@@ -186,7 +186,7 @@ test('everything returned is a copy: callers cannot change the stored notes or m
   const meta = store.setMeta('M1', { ownerName: 'Ana' });
   meta.ownerName = 'changed through the result';
   store.getMeta('M1').whoCanAsk = 'anyone';
-  assert.deepEqual(store.getMeta('M1'), { ownerUserId: null, ownerName: 'Ana', whoCanAsk: 'owner', ownerNames: new Map() });
+  assert.deepEqual(store.getMeta('M1'), { ownerUserId: null, ownerName: 'Ana', whoCanAsk: 'owner', ownerNames: new Map(), notesShared: false });
 });
 
 test('writing notes does not count as the meeting being written to', () => {

@@ -3,13 +3,14 @@
  * which one of them answers in their panel, or which runs out.
  *
  * Today there is one kind, 'share_notes': a participant asks for the notes and
- * an owner agrees to post them to the meeting chat. More kinds are added to
- * APPROVAL_KINDS; nothing else here depends on the kind.
+ * an owner agrees to share them with everyone in the meeting. More kinds are
+ * added to APPROVAL_KINDS; nothing else here depends on the kind.
  *
- * What an answer means: the owner's panel does the work (it posts the notes),
- * then reports. `approve: false` is 'declined'; `approve: true, done: true`
- * is 'approved'; `approve: true` without `done: true` is 'failed' (the owner
- * agreed, the work did not happen). The first valid answer closes the
+ * What an answer means: whoever calls answer() does the work first (for
+ * 'share_notes' the route turns sharing on, routes/arlo.js), then reports.
+ * `approve: false` is 'declined'; `approve: true, done: true` is 'approved';
+ * `approve: true` without `done: true` is 'failed' (the owner agreed, the
+ * work did not happen). The first valid answer closes the
  * approval; an unanswered one closes as 'expired' after `expiryMs`.
  *
  * Kept in memory per meeting and gone with the meeting (`forget`, called from

@@ -122,15 +122,16 @@ test('every route needs the meeting-access cookie for exactly that meeting, and 
   assert.equal(asked.length, 1); // only the owner's own question reached the model
 });
 
-test('settings, notes and ask need a signed-in user; state does not', async () => {
+test('settings and ask need a signed-in user; state does not, and the notes are refused to a guest while they are not shared', async () => {
   const m = await meetingWith('ARLO-SIGNIN==');
   assert.equal((await call('GET', m.meetingId, 'state', { headers: m.guest })).status, 200);
   assert.equal((await call('PUT', m.meetingId, 'settings', { headers: m.guest, body: BODIES.settings })).status, 401);
-  assert.equal((await call('GET', m.meetingId, 'notes', { headers: m.guest })).status, 401);
+  // in the meeting, not an owner, notes not shared (test/arlo-share-notes.test.js has the shared case)
+  assert.equal((await call('GET', m.meetingId, 'notes', { headers: m.guest })).status, 403);
   assert.equal((await call('POST', m.meetingId, 'ask', { headers: m.guest, body: BODIES.ask })).status, 401);
   // a session cookie that does not verify is not a user
   const bad = cookies(m.pass, 'sessionToken=forged.token.value');
-  assert.equal((await call('GET', m.meetingId, 'notes', { headers: bad })).status, 401);
+  assert.equal((await call('GET', m.meetingId, 'notes', { headers: bad })).status, 403);
   assert.equal((await call('GET', m.meetingId, 'state', { headers: bad })).body.role, 'participant');
   assert.equal(asked.length, 0);
 });
@@ -138,16 +139,16 @@ test('settings, notes and ask need a signed-in user; state does not', async () =
 test('state tells each person what they are to Arlo', async () => {
   const m = await meetingWith('ARLO-STATE==');
   const owner = await call('GET', m.meetingId, 'state', { headers: m.owner });
-  assert.deepEqual(owner.body, { present: true, paused: false, myStreamPaused: false, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner' });
+  assert.deepEqual(owner.body, { present: true, paused: false, myStreamPaused: false, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'owner', notesShared: false });
   const participant = await call('GET', m.meetingId, 'state', { headers: m.participant });
-  assert.deepEqual(participant.body, { present: true, paused: false, role: 'participant', ownerName: 'Ana Ruiz', whoCanAsk: 'owner' });
+  assert.deepEqual(participant.body, { present: true, paused: false, role: 'participant', ownerName: 'Ana Ruiz', whoCanAsk: 'owner', notesShared: false });
   const guest = await call('GET', m.meetingId, 'state', { headers: m.guest });
   assert.deepEqual(guest.body, participant.body);
 
   // a meeting Arlo is not in
   const quietPass = await access('ARLO-STATE-QUIET==');
   const quiet = await call('GET', 'ARLO-STATE-QUIET==', 'state', { headers: cookies(quietPass, m.ana.session) });
-  assert.deepEqual(quiet.body, { present: false, paused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner' });
+  assert.deepEqual(quiet.body, { present: false, paused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner', notesShared: false });
 });
 
 test('only an owner changes who can ask; every panel is told', async () => {
@@ -161,13 +162,13 @@ test('only an owner changes who can ask; every panel is told', async () => {
 
   const changed = await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: { whoCanAsk: 'anyone' } });
   assert.equal(changed.status, 200);
-  assert.deepEqual(changed.body, { present: true, paused: false, myStreamPaused: false, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'anyone' });
+  assert.deepEqual(changed.body, { present: true, paused: false, myStreamPaused: false, myStreamLive: true, role: 'owner', ownerName: 'Ana Ruiz', whoCanAsk: 'anyone', notesShared: false });
   assert.equal(getMeetingStore().getMeta(m.meetingId).whoCanAsk, 'anyone');
   await h.wait(100);
   ws.socket.close();
   const told = ws.messages.filter((msg) => msg.type === 'arlo.state').map((msg) => msg.data);
   assert.deepEqual(told.at(-1), {
-    meetingId: m.meetingId, present: true, paused: false, role: 'participant', ownerName: 'Ana Ruiz', whoCanAsk: 'anyone',
+    meetingId: m.meetingId, present: true, paused: false, role: 'participant', ownerName: 'Ana Ruiz', whoCanAsk: 'anyone', notesShared: false,
   });
 });
 
@@ -325,7 +326,7 @@ test('after the meeting ended there is no owner, no notes and nothing to ask abo
 
   assert.deepEqual(
     (await call('GET', m.meetingId, 'state', { headers: m.owner })).body,
-    { present: false, paused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner' },
+    { present: false, paused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner', notesShared: false },
   );
   assert.equal((await call('GET', m.meetingId, 'notes', { headers: m.owner })).status, 403);
   assert.equal((await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: BODIES.settings })).status, 403);
