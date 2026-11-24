@@ -264,7 +264,7 @@ describe('ask Arlo', () => {
       },
     });
     const input = screen.getByRole('textbox', { name: 'Ask Arlo' });
-    expect(input).toHaveAttribute('placeholder', 'Ask Arlo');
+    expect(input).toHaveAttribute('placeholder', 'Ask Arlo, or say “Arlo, …”');
     await userEvent.type(input, 'What did Ben commit to?{Enter}');
 
     expect(await screen.findByText('Ben will confirm the date.')).toBeInTheDocument();

@@ -128,6 +128,8 @@ export function MeetingProvider({ children }) {
   // The owner's notes are held (ArloContext): the transcript and timeline are
   // kept with them after the meeting, so the meeting record still opens.
   const [recordRetained, setRecordRetained] = useState(false);
+  // Arlo is handling a request, as the server told this owner's panel (ArloContext reports it)
+  const [arloThinking, setArloThinking] = useState(false);
 
   const meetingStartTimeRef = useRef(null);
   const autoStartAttemptedRef = useRef(false);
@@ -829,6 +831,7 @@ export function MeetingProvider({ children }) {
       guest: isGuest,
       voiceEnabled: voiceState.enabled,
       voiceProcessing: voiceState.processing,
+      thinking: arloThinking,
     }),
   });
   // Why the indicator is or is not shown, on every change (status only, no content)
@@ -1230,6 +1233,7 @@ export function MeetingProvider({ children }) {
     segments: shownSegments,
     participantEvents: shownParticipantEvents,
     setRecordRetained,
+    setArloThinking,
     meetingAccess,
     verifyMeetingAccess,
     startRTMS,

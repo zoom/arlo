@@ -7,6 +7,7 @@ import { usableName } from '../lib/ownerName';
 import { identityReport } from '../lib/arloIdentity';
 import { parseApproval, approvalTimeLeft } from '../lib/approvalKinds';
 import { handsFor, runArloAction } from '../lib/arloActions';
+import { parseAction, mergeActions } from '../lib/arloDid';
 import { useZoomSdk } from './ZoomSdkContext';
 
 /**
@@ -76,6 +77,19 @@ import { useZoomSdk } from './ZoomSdkContext';
  *   ignored) and its result reported to …/arlo/actions/<id>/result. Only an
  *   owner's panel runs anything, and not after the meeting is over.
  *
+ * - `actions`: what Arlo was asked and did in this meeting, oldest first
+ *   (lib/arloDid.js). Read from GET …/arlo/actions once access is verified
+ *   and the state is known, kept in step by `arlo.did`; one entry per id. The
+ *   server gives everyone the public ones and an owner their own private ones
+ *   too; a private one is not kept by a panel that is not an owner's. Cleared
+ *   with the meeting like the notes, and kept after the meeting only by
+ *   someone who holds notes (the meeting record is kept on the same rule).
+ * - `thinking`: Arlo is handling a request (`arlo.thinking`, to owners). Off
+ *   when the server says so, and by itself THINKING_MS after the last "on".
+ *   MeetingContext is told, for Zoom's indicator.
+ * - `ask` answers { answer } or { answer, action: { tool, status } } when the
+ *   request was something to do: status 'done', 'failed' or 'waiting_approval'.
+ *
  * Nothing here is logged: state, notes, questions and answers are meeting content.
  */
 const ArloContext = createContext();
@@ -125,7 +139,7 @@ const ASK_MESSAGES = {
   401: 'Sign in to ask Arlo.',
   403: 'You can\'t ask Arlo in this meeting.',
   409: 'Nothing has been said since Arlo joined.',
-  429: 'Arlo is busy right now. Try again in a minute.',
+  429: 'Arlo is busy. Try again in a moment.',
   failed: 'Arlo could not answer right now.',
 };
 
@@ -155,6 +169,12 @@ const MAX_ZOOM_ROLE_CHARS = 32;
 // The ids of the actions this panel was sent, so one that is sent again is not run again
 const MAX_ACTIONS_REMEMBERED = 200;
 const SOCKET_OPEN = 1;
+// "Arlo is thinking…" ends by itself this long after the last "on"
+const THINKING_MS = 30 * 1000;
+const NO_ACTIONS = Object.freeze([]);
+// How a typed request for something to do can stand when the server answers
+const ASK_ACTION_STATUSES = new Set(['done', 'failed', 'waiting_approval']);
+const MAX_TOOL_CHARS = 64;
 
 /** What the server's clock said when it answered (the `Date` header), in ms; null when it did not say. */
 function serverClock(res) {
@@ -173,7 +193,7 @@ const arloUrl = (meetingId, name) => `/api/meetings/by-zoom-id/${encodeURICompon
 export function ArloProvider({ children }) {
   const {
     ws, meetingId, verifiedMeetingId, meetingAccess, meetingEnded, leftMeeting, lastMeetingId, switchingMeeting,
-    setRecordRetained,
+    setRecordRetained, setArloThinking,
   } = useMeeting();
   // The id for everything asked of the server and accepted from it; none before
   // access is verified or out of the meeting
@@ -209,6 +229,10 @@ export function ArloProvider({ children }) {
   const [notesRequest, setNotesRequest] = useState(null);
   const [requestingNotes, setRequestingNotes] = useState(false);
 
+  // What Arlo was asked and did in this meeting, oldest first
+  const [actions, setActions] = useState(NO_ACTIONS);
+  // Arlo is handling a request: { since } counts the "on"s, so each restarts the wait
+  const [thinkingSince, setThinkingSince] = useState(null);
   // The socket the server has spoken on about this meeting: it is subscribed
   const [liveSocket, setLiveSocket] = useState(null);
 
@@ -251,6 +275,9 @@ export function ArloProvider({ children }) {
     setNotes(null);
     setNotesAnswered(false);
     setAwaitingState(false);
+    setActions(NO_ACTIONS);
+    setThinkingSince(null);
+    ranActionsRef.current = new Set();
     dropApprovals();
   }, [meetingId, dropApprovals]);
 
@@ -268,6 +295,8 @@ export function ArloProvider({ children }) {
     setNotes(null);
     setNotesAnswered(false);
     setAwaitingState(false);
+    setActions(NO_ACTIONS);
+    setThinkingSince(null);
     dropApprovals();
   }, [identity, dropApprovals]);
 
@@ -350,6 +379,8 @@ export function ArloProvider({ children }) {
         id: one.id,
         kind: one.kind,
         askedBy: one.askedBy,
+        question: one.question,
+        primaryLabel: one.primaryLabel,
         expiresAt: now + approvalTimeLeft(one, { now, fetched, serverNow }),
         serverExpiresAt: one.expiresAt,
       }))
@@ -382,6 +413,15 @@ export function ArloProvider({ children }) {
       if (outcome === 'approved' && stateRef.current.notesShared !== true) refreshState();
     }
   }, [putNotesRequest, refreshState]);
+
+  // What Arlo was asked and did, put with what is held. A private action is
+  // for its owner alone: a panel that is not an owner's does not keep one.
+  const addActions = useCallback((values) => {
+    const asOwner = stateRef.current.role === 'owner' && signedInRef.current;
+    const fresh = (Array.isArray(values) ? values : []).map(parseAction)
+      .filter((one) => one !== null && (one.public || asOwner));
+    if (fresh.length > 0) setActions((prev) => mergeActions(prev, fresh));
+  }, []);
 
   // Something for this panel to do with the Zoom Apps SDK, once: only an
   // owner's panel does, and not after the meeting is over. How it went is
@@ -457,6 +497,17 @@ export function ArloProvider({ children }) {
         case 'arlo.action':
           runAction(data);
           break;
+        case 'arlo.did':
+          addActions([data.action]);
+          break;
+        case 'arlo.thinking':
+          // For owners; anything but `true` is "off"
+          if (data.on === true && stateRef.current.role === 'owner' && signedInRef.current && !endedRef.current) {
+            setThinkingSince(Date.now());
+          } else if (data.on === false) {
+            setThinkingSince(null);
+          }
+          break;
         default:
           break;
       }
@@ -466,7 +517,37 @@ export function ArloProvider({ children }) {
       ws.removeEventListener('message', onMessage);
       setAwaitingState(false);
     };
-  }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval, runAction]);
+  }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval, runAction, addActions]);
+
+  // What Arlo did so far, once the server lets this panel ask and its state is
+  // known. Again when the role changes (an owner gets their private ones),
+  // when who is signed in changes, and when the socket is replaced.
+  const stateLoaded = state.loaded;
+  useEffect(() => {
+    if (!serverMeetingId || !accessVerified || !stateLoaded || meetingOver) return undefined;
+    let cancelled = false;
+    fetch(arloUrl(serverMeetingId, 'actions'), { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data) addActions(data.actions); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [serverMeetingId, accessVerified, stateLoaded, state.role, identity, ws, meetingOver, addActions]);
+
+  // No longer an owner (or no longer signed in): the private ones go
+  const keepsPrivate = state.role === 'owner' && isAuthenticated;
+  useEffect(() => {
+    if (keepsPrivate) return;
+    setActions((prev) => (prev.some((one) => !one.public) ? prev.filter((one) => one.public) : prev));
+  }, [keepsPrivate]);
+
+  // "Thinking" without an "off" ends by itself; a socket that is replaced may
+  // have missed the "off"
+  useEffect(() => {
+    if (thinkingSince === null) return undefined;
+    const timer = setTimeout(() => setThinkingSince(null), THINKING_MS);
+    return () => clearTimeout(timer);
+  }, [thinkingSince]);
+  useEffect(() => () => setThinkingSince(null), [ws]);
 
   // What this panel can do for Arlo, said to the server on a subscribed socket:
   // by an owner, and again when the Zoom role or the abilities change. Someone
@@ -661,7 +742,12 @@ export function ArloProvider({ children }) {
       if (typeof data?.answer !== 'string' || data.answer.trim().length === 0) {
         return { error: ASK_MESSAGES.failed };
       }
-      return { answer: data.answer.trim().slice(0, MAX_ANSWER_CHARS) };
+      const answer = data.answer.trim().slice(0, MAX_ANSWER_CHARS);
+      // The request was something to do: how it stands
+      const { tool, status } = data.action ?? {};
+      const known = typeof tool === 'string' && tool.length > 0 && tool.length <= MAX_TOOL_CHARS
+        && ASK_ACTION_STATUSES.has(status);
+      return known ? { answer, action: { tool, status } } : { answer };
     } catch {
       return { error: ASK_MESSAGES.failed };
     } finally {
@@ -748,6 +834,20 @@ export function ArloProvider({ children }) {
     setRecordRetained(holdsNotes);
   }, [holdsNotes, setRecordRetained]);
 
+  // Out of the meeting, what Arlo did stays only with notes that are held: the
+  // meeting record is kept on the same rule (MeetingContext `setRecordRetained`)
+  useEffect(() => {
+    if (meetingId || holdsNotes) return;
+    setActions((prev) => (prev.length > 0 ? NO_ACTIONS : prev));
+  }, [meetingId, holdsNotes]);
+
+  // Only an owner is told, and not about a meeting that is over
+  const thinking = thinkingSince !== null && role === 'owner' && isAuthenticated && !meetingOver && !switchingMeeting;
+  useEffect(() => {
+    setArloThinking(thinking);
+  }, [thinking, setArloThinking]);
+  const shownActions = switchingMeeting ? NO_ACTIONS : actions;
+
   // The render between Zoom reporting another meeting and the reset above
   // already shows nothing of the previous one
   const shown = switchingMeeting ? NOT_LOADED : state;
@@ -790,7 +890,9 @@ export function ArloProvider({ children }) {
     notesRequest: shownNotesRequest,
     requestNotes,
     requestingNotes,
-  }), [shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, ask, asking,
+    actions: shownActions,
+    thinking,
+  }), [shownActions, thinking, shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, ask, asking,
     shownApprovals, answerApproval, shownNotesRequest, requestNotes, requestingNotes]);
 
   return (

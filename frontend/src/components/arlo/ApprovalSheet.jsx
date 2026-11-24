@@ -1,7 +1,7 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useToast } from '../../contexts/ToastContext';
 import useSecondsLeft from '../../hooks/useSecondsLeft';
-import { approvalKind } from '../../lib/approvalKinds';
+import { approvalTexts } from '../../lib/approvalKinds';
 import { makeOutsideInert } from '../../lib/outsideInert';
 import Button from '../ui/Button';
 
@@ -15,8 +15,10 @@ export const SHEET_GUARD_MS = 700;
  *
  * Agreeing reports the answer; the server does the work (for 'share_notes':
  * it shares the notes with everyone in the meeting who has Arlo open), and
- * the owner is told whether it did. The texts come from lib/approvalKinds.js;
- * a kind that is not there renders nothing.
+ * the owner is told whether it did. For something Arlo was asked to do
+ * ('agent_action') the question and the primary button's text are the
+ * server's, and agreeing is all the panel does: the server runs it. The texts
+ * come from lib/approvalKinds.js; an approval it has none for renders nothing.
  *
  * Nothing is ever agreed to without a deliberate act. The sheet can open
  * while the owner is typing or clicking somewhere else, so:
@@ -50,7 +52,7 @@ export default function ApprovalSheet({ approval, onAnswer }) {
   // screen behind it inert can take the focus away from there
   const [focusBefore] = useState(() => document.activeElement);
   const secondsLeft = useSecondsLeft(approval.expiresAt);
-  const kind = approvalKind(approval.kind);
+  const kind = approvalTexts(approval);
 
   /** True when an answer may be given now: past the guard, and none on its way. */
   const takesAnswer = () => armedRef.current && !busyRef.current;
@@ -74,7 +76,8 @@ export default function ApprovalSheet({ approval, onAnswer }) {
     } catch {
       // Not logged: an error may quote meeting content
     }
-    addToast(done ? kind.doneToast : kind.failedToast, done ? 'success' : 'error');
+    const toast = done ? kind.doneToast : kind.failedToast;
+    if (toast) addToast(toast, done ? 'success' : 'error');
   };
 
   useEffect(() => {
@@ -157,7 +160,7 @@ export default function ApprovalSheet({ approval, onAnswer }) {
       ref={sheetRef}
     >
       <p className="arlo-sheet-question" id={questionId}>{kind.question}</p>
-      <p className="arlo-sheet-detail" id={detailId}>{kind.detail(approval.askedBy)}</p>
+      <p className="arlo-sheet-detail" id={detailId}>{kind.detail}</p>
       <Button className="arlo-sheet-button" ref={primaryRef} onClick={agree} disabled={busy}>
         {kind.primary}
       </Button>

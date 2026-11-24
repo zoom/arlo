@@ -9,8 +9,26 @@ import { usableName } from './ownerName';
  *
  *   question, primary, secondary   the sheet's texts
  *   detail(askedBy)                who asked; `askedBy` is a usable name or null
- *   doneToast, failedToast         what the owner is told after agreeing
+ *   doneToast, failedToast         what the owner is told after agreeing (null: nothing)
+ *
+ * 'agent_action' is something Arlo was asked to do ("Arlo, let James in") by
+ * someone whose request needs an owner's approval. Its question and the text
+ * of its primary button are the server's (templates it fills with checked
+ * arguments), shown as text and cut to MAX_QUESTION_CHARS / MAX_PRIMARY_CHARS;
+ * one without a question is not an approval. When the owner agrees the server
+ * runs it and says how it ended (`arlo.did`), so no toast says "done" here.
  */
+export const AGENT_ACTION = 'agent_action';
+const MAX_QUESTION_CHARS = 300;
+const MAX_PRIMARY_CHARS = 60;
+const AGENT_TEXTS = Object.freeze({
+  detail: (askedBy) => (askedBy ? `${askedBy} asked Arlo to do this.` : 'Someone asked Arlo to do this.'),
+  primary: 'Do it',
+  secondary: 'Not now',
+  doneToast: null,
+  failedToast: 'Arlo didn\'t get your answer.',
+});
+
 export const APPROVAL_KINDS = Object.freeze({
   share_notes: Object.freeze({
     question: 'Share the notes with everyone in the meeting?',
@@ -32,14 +50,24 @@ const MAX_TIME_LEFT_MS = 10 * 60 * 1000;
 // A response's `Date` header is in whole seconds
 const SERVER_CLOCK_SLACK_MS = 1000;
 
+/** A text of the server's, cut to `max` characters; null when it is not text or is empty. */
+function serverText(value, max) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim().slice(0, max).trim();
+  return text.length > 0 ? text : null;
+}
+
 /**
  * An approval as the server sends it (`arlo.approval`, GET …/arlo/approvals),
- * rebuilt from known fields: { id, kind, askedBy, expiresAt, expiresInMs }.
+ * rebuilt from known fields: { id, kind, askedBy, expiresAt, expiresInMs,
+ * question, primaryLabel } (the last two for an 'agent_action', else null).
  * `expiresAt` is by the server's clock; `expiresInMs` is the time left as the
  * server gave it, or null (it does not today). null when it is not one.
  */
 export function parseApproval(data) {
   if (data === null || typeof data !== 'object') return null;
+  const question = serverText(data.question, MAX_QUESTION_CHARS);
+  if (data.kind === AGENT_ACTION && question === null) return null;
   const { id, kind, expiresAt, expiresInMs } = data;
   if (typeof id !== 'string' || id.length === 0 || id.length > MAX_ID_CHARS) return null;
   if (typeof kind !== 'string' || kind.length === 0 || kind.length > MAX_KIND_CHARS) return null;
@@ -47,7 +75,16 @@ export function parseApproval(data) {
   const timeLeft = typeof expiresInMs === 'number' && Number.isFinite(expiresInMs)
     ? Math.min(Math.max(0, expiresInMs), MAX_TIME_LEFT_MS)
     : null;
-  return { id, kind, askedBy: usableName(data.askedBy), expiresAt, expiresInMs: timeLeft };
+  return {
+    id,
+    kind,
+    askedBy: usableName(data.askedBy),
+    expiresAt,
+    expiresInMs: timeLeft,
+    // The server's texts, for an 'agent_action' only
+    question: kind === AGENT_ACTION ? question : null,
+    primaryLabel: kind === AGENT_ACTION ? serverText(data.primaryLabel, MAX_PRIMARY_CHARS) : null,
+  };
 }
 
 /**
@@ -82,7 +119,28 @@ export const approvalKind = (kind) => (
   typeof kind === 'string' && Object.prototype.hasOwnProperty.call(APPROVAL_KINDS, kind) ? APPROVAL_KINDS[kind] : null
 );
 
+/**
+ * The sheet's texts for one approval: { question, detail, primary, secondary,
+ * doneToast, failedToast }, or null for one this panel cannot show (a kind it
+ * does not know, or an 'agent_action' without a question).
+ */
+export function approvalTexts(approval) {
+  if (approval === null || typeof approval !== 'object') return null;
+  if (approval.kind === AGENT_ACTION) {
+    const question = serverText(approval.question, MAX_QUESTION_CHARS);
+    if (question === null) return null;
+    return {
+      ...AGENT_TEXTS,
+      question,
+      detail: AGENT_TEXTS.detail(approval.askedBy),
+      primary: serverText(approval.primaryLabel, MAX_PRIMARY_CHARS) ?? AGENT_TEXTS.primary,
+    };
+  }
+  const kind = approvalKind(approval.kind);
+  return kind ? { ...kind, detail: kind.detail(approval.askedBy) } : null;
+}
+
 /** The oldest approval this panel can show, or null. */
 export const firstShowableApproval = (approvals) => (
-  (Array.isArray(approvals) ? approvals : []).find((approval) => approvalKind(approval?.kind) !== null) ?? null
+  (Array.isArray(approvals) ? approvals : []).find((approval) => approvalTexts(approval) !== null) ?? null
 );

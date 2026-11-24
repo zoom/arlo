@@ -20,7 +20,9 @@ const NO_SEGMENTS = [];
 /**
  * The meeting record: what was said and what happened since Arlo joined, in
  * time order. Open to everyone in the meeting: the owner, participants and
- * guests. One toggle narrows it to what Arlo itself did.
+ * guests. One toggle narrows it to what Arlo itself did. What Arlo was asked
+ * and did is in it by its time, with how it ended when it was not done; the
+ * server gives everyone the public ones and an owner their own private ones.
  */
 export default function MeetingRecordView({ isGuestMode = false }) {
   const { id: routeId } = useParams();
@@ -28,7 +30,7 @@ export default function MeetingRecordView({ isGuestMode = false }) {
   const {
     ws, meetingId, meetingAccess, connectWebSocket, segments, participantEvents,
   } = useMeeting();
-  const { meetingOver, afterNotesMeetingId } = useArlo();
+  const { meetingOver, afterNotesMeetingId, actions } = useArlo();
   // The owner's notes of a meeting that is over are still held, and its record with them
   const afterMeeting = afterNotesMeetingId !== null;
   const { isAuthenticated } = useAuth();
@@ -40,8 +42,8 @@ export default function MeetingRecordView({ isGuestMode = false }) {
     () => (onlyArlo ? participantEvents.filter((event) => event.participantName === ARLO) : participantEvents),
     [onlyArlo, participantEvents],
   );
-  const hasAnything = useMemo(() => buildTimeline(segments, participantEvents).length > 0, [segments, participantEvents]);
-  const hasShown = useMemo(() => buildTimeline(shownSegments, shownEvents).length > 0, [shownSegments, shownEvents]);
+  const hasAnything = useMemo(() => buildTimeline(segments, participantEvents, actions).length > 0, [segments, participantEvents, actions]);
+  const hasShown = useMemo(() => buildTimeline(shownSegments, shownEvents, actions).length > 0, [shownSegments, shownEvents, actions]);
 
   // Out of a meeting there is no record to read, except the one kept with the owner's notes
   const outsideMeeting = !isTestMode && runningContext !== null && runningContext !== 'inMeeting';
@@ -85,7 +87,7 @@ export default function MeetingRecordView({ isGuestMode = false }) {
         </label>
         {hasShown ? (
           <div className="record-list">
-            <TranscriptTimeline segments={shownSegments} participantEvents={shownEvents} />
+            <TranscriptTimeline segments={shownSegments} participantEvents={shownEvents} actions={actions} />
           </div>
         ) : (
           <p className="arlo-muted record-empty">{empty}</p>

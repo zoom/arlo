@@ -14,6 +14,9 @@ const LABELS = {
   // Here through another person's stream; this owner's own has stopped
   others: 'Arlo is in the meeting',
 };
+const THINKING = 'Arlo is thinking…';
+// Arlo is in the meeting: the statuses in which it can be handling a request
+const CAN_THINK = new Set(['live', 'paused', 'reconnecting', 'others']);
 const OTHERS_LINE = 'Your own Arlo has stopped. Notes continue from another person\'s.';
 // A stream that exists: the only statuses with Pause, Resume or Remove
 const IN_MEETING = new Set(['live', 'paused', 'reconnecting']);
@@ -58,9 +61,11 @@ function arloStatus({ phase, present, paused, myStreamPaused, ownLive, canContro
  * person's own stream is. `myStreamLive`: the server's word on whether this
  * person's own stream runs; when it did not say (null), this panel's phase
  * decides. Pause, Resume and Remove are for a stream of one's own that runs.
+ * `thinking`: Arlo is handling a request (ArloContext `thinking`): the label
+ * says "Arlo is thinking…" until it is done.
  */
 export default function StatusLine({
-  present, paused, myStreamPaused = false, myStreamLive = null, canControl,
+  present, paused, myStreamPaused = false, myStreamLive = null, canControl, thinking = false,
 }) {
   const {
     rtmsPhase, rtmsActive, rtmsPaused, rtmsLoading, rtmsError, rtmsWaitingLong,
@@ -76,6 +81,8 @@ export default function StatusLine({
     phase: rtmsPhase, present, paused, myStreamPaused, ownLive, canControl, waitingOnHost,
   });
   const inMeeting = IN_MEETING.has(status);
+  // While Arlo handles a request the line says so; the actions stay those of the status
+  const showThinking = thinking === true && CAN_THINK.has(status);
   // Why a control failed or the stream ended, in this screen's words
   const { message } = getTransportView({
     phase: rtmsPhase, active: rtmsActive, paused: rtmsPaused, hasContent: true, error: rtmsError, guest: !canControl,
@@ -107,7 +114,7 @@ export default function StatusLine({
       <div className="arlo-status-row">
         <div className="arlo-status-label" role="status" aria-live="polite">
           <span className="arlo-dot" aria-hidden="true" />
-          <span>{LABELS[status]}</span>
+          <span>{showThinking ? THINKING : LABELS[status]}</span>
         </div>
         {canControl && (
           <div className="arlo-status-actions">

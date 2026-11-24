@@ -50,4 +50,19 @@ describe('indicatorText', () => {
     expect(text({ startedHere: false })).toBeNull();
     expect(text({ guest: true })).toBeNull();
   });
+
+  test('while Arlo handles a request (the server says so): "Arlo is thinking…", voice commands or not', () => {
+    expect(text({ thinking: true })).toBe('Arlo is thinking…');
+    expect(text({ thinking: true, voiceEnabled: true })).toBe('Arlo is thinking…');
+    expect(text({ thinking: false })).toBe('Arlo is transcribing');
+    expect(text({ thinking: 'yes' })).toBe('Arlo is transcribing');
+  });
+
+  test('thinking changes nothing about who sets the indicator, or when; paused wins', () => {
+    expect(text({ thinking: true, startedHere: false })).toBeNull();
+    expect(text({ thinking: true, guest: true })).toBeNull();
+    expect(text({ thinking: true, phase: 'interrupted' })).toBeNull();
+    expect(text({ thinking: true, phase: 'paused' })).toBe('Arlo is paused');
+    expect(text({ thinking: true, pausedOnServer: true })).toBe('Arlo is paused');
+  });
 });

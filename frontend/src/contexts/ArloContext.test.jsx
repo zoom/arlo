@@ -221,7 +221,7 @@ describe('ask', () => {
     [401, { error: 'Authentication required' }, /sign in/i],
     [403, { error: 'Forbidden', message: 'server text' }, /can't ask Arlo/i],
     [409, { error: 'no_transcript' }, /nothing has been said/i],
-    [429, { error: 'rate limited' }, /try again in a minute/i],
+    [429, { error: 'rate limited' }, /Arlo is busy\. Try again in a moment\./],
     [502, { error: 'bad gateway' }, /could not answer/i],
     [503, { error: 'AI features are disabled' }, /could not answer/i],
     [200, { answer: 42 }, /could not answer/i],

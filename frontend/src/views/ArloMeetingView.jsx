@@ -252,6 +252,8 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           onAnswerApproval={arlo.answerApproval}
           notesShared={arlo.notesShared}
           onShareNotesChange={saveShareNotes}
+          actions={arlo.actions}
+          thinking={arlo.thinking}
         />
       );
       break;
@@ -264,6 +266,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           notes={arlo.notes}
           demoMode={demoMode}
           recordPath={recordPath}
+          actions={arlo.actions}
         />
       );
       break;
@@ -311,6 +314,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           requestingNotes={arlo.requestingNotes}
           notesShared={arlo.notesShared}
           notes={sharedNotes}
+          actions={arlo.actions}
           bringIn={{
             label: canBringArloIn(zoomRole) ? 'Bring Arlo into this meeting' : 'Ask the host to bring Arlo in',
             start: ownStart,

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { ScrollArea } from '@base-ui/react';
-import { LogIn, LogOut, Mic, MicOff, Pause, Play } from 'lucide-react';
+import { LogIn, LogOut, Mic, MicOff, Pause, Play, Sparkles } from 'lucide-react';
+import { endedActions, recordLine } from '../../lib/arloDid';
 
 function formatTimestamp(ms) {
   const date = new Date(ms);
@@ -33,13 +34,16 @@ function eventLabel(eventType, name) {
  * Speech and join/leave events merged into one chronological list.
  * `initial_roster` events are the stream reporting who was already there, not
  * real joins, so they are left out. Exported for the view's "has content" check.
+ * `actions`: what Arlo was asked and did (ArloContext `actions`); the ones
+ * that ended are placed by their time.
  */
-export function buildTimeline(segments, participantEvents) {
+export function buildTimeline(segments, participantEvents, actions = null) {
   const items = [
     ...segments.map((segment, i) => ({ type: 'transcript', ...segment, _ts: segment.tStartMs, _key: `seg-${i}` })),
     ...participantEvents
       .filter((event) => event.eventType !== 'initial_roster')
       .map((event, i) => ({ type: 'participant-event', ...event, _ts: event.timestamp, _key: `evt-${i}` })),
+    ...endedActions(actions).map((action) => ({ type: 'arlo-action', action, _ts: action.at, _key: `act-${action.id}` })),
   ];
   return items.sort((a, b) => a._ts - b._ts);
 }
@@ -48,8 +52,8 @@ export function buildTimeline(segments, participantEvents) {
  * The scrolling live transcript. `renderText` lets a vertical decorate the
  * spoken text (healthcare highlights medical terms).
  */
-export default function TranscriptTimeline({ segments, participantEvents, viewportRef, onScroll, renderText }) {
-  const items = useMemo(() => buildTimeline(segments, participantEvents), [segments, participantEvents]);
+export default function TranscriptTimeline({ segments, participantEvents, viewportRef, onScroll, renderText, actions = null }) {
+  const items = useMemo(() => buildTimeline(segments, participantEvents, actions), [segments, participantEvents, actions]);
 
   return (
     <ScrollArea.Root className="transcript-scroll-root">
@@ -62,6 +66,17 @@ export default function TranscriptTimeline({ segments, participantEvents, viewpo
         aria-live="polite"
       >
         {items.map((item) => {
+          if (item.type === 'arlo-action') {
+            // Styled like Arlo's other events; the label and the name are text
+            return (
+              <div key={item._key} className="transcript-participant-event timeline-event-animate" data-status={item.action.status}>
+                <Sparkles size={14} className="transcript-event-icon" aria-hidden="true" />
+                <span className="transcript-event-text text-sans text-sm">{recordLine(item.action)}</span>
+                <span className="transcript-event-time text-mono text-xs">{formatTimestamp(item.action.at)}</span>
+              </div>
+            );
+          }
+
           if (item.type === 'participant-event') {
             const Icon = EVENT_ICONS[item.eventType] || Mic;
             return (

@@ -95,7 +95,8 @@ function AskToShareNotes({ ownerName, request, onAsk, disabled }) {
  * The notes are here only while an owner shares them with everyone
  * (`notesShared`): then the heading says who shares them and the same notes
  * document follows, read-only, for a signed-in participant and a guest alike.
- * `notes` is null until the first ones are written.
+ * `notes` is null until the first ones are written. With the notes comes what
+ * Arlo did (`actions`: the public ones, which is all the server gives here).
  *
  * A signed-in participant has two choices while Arlo is here, two secondary
  * buttons of equal weight: ask the owner to share the notes with everyone
@@ -119,6 +120,7 @@ export default function ParticipantView({
   present, paused = false, ownerName, whoCanAsk, guest, canBringIn = false, meetingEnded, showRecord, recordPath,
   onSignIn, signingIn, signInError, ownStart = null, onUseArlo, useArloDisabled = false,
   notesRequest = null, onRequestNotes, requestingNotes = false, notesShared = false, notes = null, bringIn = null,
+  actions = null,
 }) {
   const wording = ownerWording(ownerName);
   // The notes show only while an owner shares them: live while Arlo is here,
@@ -137,12 +139,12 @@ export default function ParticipantView({
       <div className="arlo-scroll arlo-participant">
         <h1 className="arlo-title" tabIndex={-1} data-arlo-focus>{heading}</h1>
         {present && paused && <p className="arlo-muted" role="status">Arlo is paused</p>}
-        {sharing && (notes ? <NotesDocument notes={notes} /> : <p className="arlo-muted">Notes appear after the first minute or so.</p>)}
+        {sharing && (notes ? <NotesDocument notes={notes} actions={actions} /> : <p className="arlo-muted">Notes appear after the first minute or so.</p>)}
         {present && !sharing && <p className="arlo-muted">{wording.body}</p>}
         {keptNotes && (
           <>
             <p className="arlo-muted" role="status">Arlo has left the meeting. These are the notes so far.</p>
-            <NotesDocument notes={notes} />
+            <NotesDocument notes={notes} actions={actions} />
           </>
         )}
         {!present && !keptNotes && (
