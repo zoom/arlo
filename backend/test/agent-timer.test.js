@@ -172,7 +172,7 @@ test('what the record, the sheet and the asker\'s panel say about a timer', () =
 });
 
 test('a host\'s panel can announce every panel tool there is at once', () => {
-  // eight today; the server takes ten names
-  assert.equal(PANEL_TOOL_NAMES.length, 8);
+  // nine today; the server takes ten names
+  assert.equal(PANEL_TOOL_NAMES.length, 9);
   assert.deepEqual(readHandsAnnouncement({ zoomRole: 'host', can: [...PANEL_TOOL_NAMES] }), { zoomRole: 'host', can: [...PANEL_TOOL_NAMES] });
 });

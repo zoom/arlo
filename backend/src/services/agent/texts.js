@@ -179,6 +179,14 @@ const TOOL_TEXTS = Object.freeze({
     primary: () => 'Share and invite',
     reply: () => 'Done: shared the notes and invited everyone to open Arlo.',
   }),
+  open_notes_for_everyone: Object.freeze({
+    asked: () => 'Asked to open the notes for everyone',
+    done: () => 'Opened the notes for everyone',
+    // "Your Arlo view": Zoom shows the panel of the owner who agrees to people without the app
+    question: () => 'Open the notes for everyone in the meeting? Your Arlo view will be shared.',
+    primary: () => 'Open notes',
+    reply: () => 'Done: opened the notes for everyone.',
+  }),
   send_reaction: Object.freeze({
     asked: (args) => `Asked to send ${aReaction(args)}`,
     done: (args) => `Sent ${aReaction(args)}`,
@@ -290,6 +298,15 @@ function ticketShareFailed(args) {
 const INVITE_NOT_SENT = 'Shared the notes. Couldn\'t send the invitation.';
 
 /**
+ * Opening the notes for everyone is two things as well: the notes were
+ * shared, and then they were not opened as a shared document. Sharing stays
+ * on. Either the panel sent the invitation to open Arlo instead (it reports
+ * 'fell_back_invite'), or nothing more was done.
+ */
+const NOTES_OPENED_AS_INVITE = 'Shared the notes and invited everyone to open Arlo. Couldn\'t open them as a shared document.';
+const NOTES_NOT_OPENED = 'Shared the notes. Couldn\'t open them for everyone.';
+
+/**
  * No panel of the owner who typed or approved it can do it: what the record
  * and the asker's panel say. An action runs only on that owner's own panel.
  */
@@ -302,7 +319,7 @@ const NO_HANDS = Object.freeze({
 // table; a test holds the two lists together), and the ones any panel of the
 // owner runs that post nothing to the chat
 const NEEDS_HOST_PANEL = new Set(['admit_from_waiting_room', 'mute_participant']);
-const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'send_reaction', 'open_ticket', 'set_timer', 'stop_timer']);
+const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'open_notes_for_everyone', 'send_reaction', 'open_ticket', 'set_timer', 'stop_timer']);
 function noHands(toolName) {
   if (NEEDS_HOST_PANEL.has(toolName)) return NO_HANDS.host;
   return NEEDS_OWN_PANEL.has(toolName) ? NO_HANDS.panel : NO_HANDS.chat;
@@ -335,6 +352,7 @@ const STEPS = Object.freeze({
   sharing: 'Sharing the notes with everyone',
   admittingSomeone: 'Admitting someone from the waiting room',
   inviting: 'Inviting everyone to open Arlo',
+  openingNotes: 'Opening the notes for everyone',
   reacting: 'Sending a reaction',
   mutingSomeone: 'Muting someone',
   openingTicket: 'Opening a ticket',
@@ -352,6 +370,7 @@ const TOOL_STEPS = Object.freeze({
     return name.length > 0 ? `Admitting ${name} from the waiting room` : STEPS.admittingSomeone;
   },
   invite_everyone: () => STEPS.inviting,
+  open_notes_for_everyone: () => STEPS.openingNotes,
   // Which reaction is not part of the step
   send_reaction: () => STEPS.reacting,
   mute_participant: (args) => {
@@ -384,6 +403,8 @@ module.exports = {
   noHands,
   failedReply,
   INVITE_NOT_SENT,
+  NOTES_OPENED_AS_INVITE,
+  NOTES_NOT_OPENED,
   ticketShareFailed,
   REACTIONS,
   REACTION_NAMES,

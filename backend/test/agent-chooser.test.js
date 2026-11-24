@@ -52,10 +52,10 @@ const choose = (extra = {}) => openrouter.chooseTool({ request: 'what did we dec
 
 // --- the tool table ---------------------------------------------------------------
 
-test('the tool table is the ten tools, and web search only when it is turned on', () => {
+test('the tool table is the eleven tools, and web search only when it is turned on', () => {
   assert.deepEqual(toolNames(), [
     'answer_from_meeting', 'summarize_so_far', 'post_to_chat', 'admit_from_waiting_room', 'share_notes',
-    'invite_everyone', 'send_reaction', 'mute_participant', 'set_timer', 'stop_timer',
+    'invite_everyone', 'open_notes_for_everyone', 'send_reaction', 'mute_participant', 'set_timer', 'stop_timer',
   ]);
   assert.deepEqual(toolNames({ webSearch: true }).at(-1), 'web_search');
   // a ticket only when the deployment has a Jira base URL (test/agent-ticket.test.js)
@@ -74,6 +74,7 @@ test('the tool table is the ten tools, and web search only when it is turned on'
     admit_from_waiting_room: ['panel', true],
     share_notes: ['server', true],
     invite_everyone: ['panel', true],
+    open_notes_for_everyone: ['panel', true],
     send_reaction: ['panel', true],
     mute_participant: ['panel', true],
     set_timer: ['panel', true],
@@ -81,7 +82,7 @@ test('the tool table is the ten tools, and web search only when it is turned on'
     web_search: ['server', false],
   });
   // what an owner's panel does, and what only a host's or co-host's panel may
-  assert.deepEqual(PANEL_TOOL_NAMES, ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant', 'set_timer', 'stop_timer', 'open_ticket']);
+  assert.deepEqual(PANEL_TOOL_NAMES, ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'open_notes_for_everyone', 'send_reaction', 'mute_participant', 'set_timer', 'stop_timer', 'open_ticket']);
   assert.deepEqual(HOST_TOOL_NAMES, ['admit_from_waiting_room', 'mute_participant']);
   // a description says what the tool does not do
   assert.match(getTool('mute_participant').description, /never unmute/i);
@@ -358,8 +359,8 @@ test('the reason for a failure never quotes the request or the model', async () 
 
 // --- the fixed test set -----------------------------------------------------------
 
-test('the test set is 65 synthetic cases: each tool three to five times (stopping the timer once), non-requests, injections, ambiguous ones', () => {
-  assert.equal(cases.length, 65);
+test('the test set is 70 synthetic cases: each tool three to six times (stopping the timer once), non-requests, injections, ambiguous ones', () => {
+  assert.equal(cases.length, 70);
   const known = new Set([...toolNames(WITH_TICKETS), 'none']);
   const kinds = {};
   for (const one of cases) {
@@ -370,11 +371,13 @@ test('the test set is 65 synthetic cases: each tool three to five times (stoppin
     kinds[one.kind] = (kinds[one.kind] || 0) + 1;
     if (one.context) assert.ok(Array.isArray(one.context) && one.context.every((line) => typeof line === 'string'));
   }
-  assert.deepEqual(kinds, { tool: 41, non_request: 13, injection: 4, ambiguous: 6, no_tool: 1 });
+  assert.deepEqual(kinds, { tool: 46, non_request: 13, injection: 4, ambiguous: 6, no_tool: 1 });
   for (const name of toolNames(WITH_TICKETS)) {
     const count = cases.filter((one) => one.kind === 'tool' && one.expectTool === name).length;
-    const few = ['invite_everyone', 'send_reaction', 'mute_participant', 'open_ticket', 'set_timer'].includes(name) ? 3 : 5;
-    assert.equal(count, name === 'stop_timer' ? 1 : few, name);
+    const few = ['open_notes_for_everyone', 'send_reaction', 'mute_participant', 'open_ticket', 'set_timer'].includes(name) ? 3 : 5;
+    // one more each for the two that opening the notes must not be taken for
+    const expected = { stop_timer: 1, share_notes: 6, invite_everyone: 4 };
+    assert.equal(count, expected[name] ?? few, name);
   }
   // a timer: the minutes as a number; talk about time is not a request
   const timers = cases.filter((one) => one.expectTool === 'set_timer');
@@ -499,7 +502,7 @@ test('the script asks every case twice per model, one model at a time, and print
   });
   assert.equal(code, 0);
   // this table has no open_ticket (no Jira base URL): its three cases are left out, and that is said
-  assert.equal(asked.length, 124);
+  assert.equal(asked.length, 134);
   assert.equal(asked.some((input) => /PROJ-123 and share|ABC dash 42|OPS-7/.test(input.request)), false);
   assert.match(out.join('\n'), /3 case\(s\) skipped: they need a tool that is not in this table \(open_ticket\)/);
   assert.ok(asked.every((input) => input.model === 'b/two:free' && input.fallback === false && Array.isArray(input.tools)));
@@ -530,7 +533,7 @@ test('with a table that has every tool, every case is asked, and a ticket call i
     },
   });
   assert.equal(code, 0);
-  assert.equal(asked.length, 65);
+  assert.equal(asked.length, 70);
   assert.equal(asked.every((input) => input.tools.some((tool) => tool.name === 'open_ticket')), true);
   const text = out.join('\n');
   assert.equal(/skipped/.test(text), false);

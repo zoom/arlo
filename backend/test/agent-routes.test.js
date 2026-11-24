@@ -123,7 +123,7 @@ test('a typed question is answered as before; the picking model gets the request
   assert.equal(JSON.stringify(chosen[0]).includes('Friday'), false);
   // and it can be stopped: when the request's time is up, or the meeting's data goes
   assert.ok(chosen[0].signal instanceof AbortSignal);
-  assert.deepEqual(chosen[0].tools.map((tool) => tool.name), ['answer_from_meeting', 'summarize_so_far', 'post_to_chat', 'admit_from_waiting_room', 'share_notes', 'invite_everyone', 'send_reaction', 'mute_participant', 'set_timer', 'stop_timer']);
+  assert.deepEqual(chosen[0].tools.map((tool) => tool.name), ['answer_from_meeting', 'summarize_so_far', 'post_to_chat', 'admit_from_waiting_room', 'share_notes', 'invite_everyone', 'open_notes_for_everyone', 'send_reaction', 'mute_participant', 'set_timer', 'stop_timer']);
   assert.equal(typeof chosen[0].model, 'string');
 
   // recorded as the owner's own, private action

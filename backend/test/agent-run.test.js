@@ -1376,6 +1376,121 @@ test('inviting everyone, typed by an owner: the sheet all the same, then the not
   assert.deepEqual(s.t.steps.slice(-2), [[true, 'Inviting everyone to open Arlo', 'panel'], [false]]);
 });
 
+// --- "open the notes for everyone" ----------------------------------------------------
+
+const OPEN_NOTES = 'open_notes_for_everyone';
+const NOTES_OPENED_AS_INVITE = 'Shared the notes and invited everyone to open Arlo. Couldn\'t open them as a shared document.';
+const NOTES_NOT_OPENED = 'Shared the notes. Couldn\'t open them for everyone.';
+/** "open the notes for everyone", typed by Ana and approved by her: [what handle() resolved the approved run to is not seen; the action as it ended]. */
+async function openNotesApproved(s, by = 'user-ana') {
+  assert.equal((await s.typed('open the notes for everyone')).status, 'waiting_approval');
+  await s.approve(by);
+  return lastAction(s);
+}
+
+test('opening the notes for everyone: always the sheet, spoken or typed, then hands check, share, panel, in that order', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  s.picks(OPEN_NOTES);
+  const order = [];
+  s.t.canDo = (tool) => { order.push(`can:${tool}`); return ['user-ana', 'user-cy']; };
+  s.t.share = () => { order.push('share'); return true; };
+  s.t.hands = async (call) => { order.push(`panel:${call.tool}`); return { ok: true }; };
+  const asks = [
+    () => s.said('open the notes for everyone'),
+    () => s.said('open the notes for everyone', ANA_SPEAKING),
+    () => s.typed('open the notes for everyone'), // an owner, in their own words: the sheet all the same
+    () => s.typed('what did we decide?'),
+    () => s.typed('open the notes for everyone', BEN),
+  ];
+  for (const ask of asks) {
+    order.length = 0;
+    const before = [s.t.shared.length, s.t.handed.length];
+    const res = await ask();
+    assert.deepEqual([res.status, res.tool], ['waiting_approval', OPEN_NOTES]);
+    assert.equal(res.action.label, 'Asked to open the notes for everyone');
+    assert.deepEqual([s.t.shared.length, s.t.handed.length], before);
+    assert.deepEqual(order.filter((step) => !step.startsWith('can:')), []);
+    assert.deepEqual([s.sheet().question, s.sheet().primaryLabel, 'body' in s.sheet()],
+      ['Open the notes for everyone in the meeting? Your Arlo view will be shared.', 'Open notes', false]);
+    // no host is needed: the sheet goes to every owner
+    assert.deepEqual(s.t.approval.at(-1).userIds, ['user-ana', 'user-cy']);
+    order.length = 0;
+    await s.approve('user-cy');
+    assert.deepEqual(order, [`can:${OPEN_NOTES}`, 'share', `panel:${OPEN_NOTES}`]);
+    assert.deepEqual(s.t.shared.at(-1), [M, 'user-cy']);
+    assert.deepEqual(s.t.handed.at(-1), { meetingId: M, tool: OPEN_NOTES, args: {}, userId: 'user-cy' });
+    assert.deepEqual([lastAction(s).status, lastAction(s).label, lastAction(s).public], ['done', 'Opened the notes for everyone', true]);
+    assert.deepEqual(s.t.steps.slice(-2), [[true, 'Opening the notes for everyone', s.t.steps.at(-2)[2]], [false]]);
+  }
+  // "not now": nothing is shared and nothing is opened
+  await s.typed('open the notes for everyone');
+  const before = [s.t.shared.length, s.t.handed.length];
+  s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+  await s.agent.whenIdle(M);
+  assert.deepEqual([s.t.shared.length, s.t.handed.length], before);
+  assert.equal(lastAction(s).status, 'declined');
+});
+
+test('opening the notes when the owner who agreed has no panel that can: nothing is shared, and they are told to open Arlo', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.picks(OPEN_NOTES);
+  for (const canDo of [() => [], () => ['user-cy'], () => { throw new Error('down'); }, () => 'user-ana', () => ['user-ben']]) {
+    s.t.canDo = canDo;
+    const failed = await openNotesApproved(s);
+    assert.deepEqual([failed.status, failed.label, failed.public], ['failed', NO_OWN_PANEL, true]);
+  }
+  assert.deepEqual([s.t.shared, s.t.handed], [[], []]);
+  assert.equal(s.store.getMeta(M).notesShared, false);
+});
+
+test('opening the notes: each thing the panel can report, and its sentence; sharing stays on', async () => {
+  const s = setup();
+  s.picks(OPEN_NOTES);
+  // Collaborate did not start and the invitation went out instead
+  s.t.hands = async () => ({ ok: false, code: 'fell_back_invite' });
+  let shared = s.t.shared.length;
+  const fellBack = await openNotesApproved(s);
+  assert.deepEqual([fellBack.status, fellBack.label, fellBack.public], ['failed', NOTES_OPENED_AS_INVITE, true]);
+  assert.deepEqual(s.t.shared.slice(shared), [[M, 'user-ana']]);
+  // anything else: shared, not opened
+  for (const code of ['no_hands', 'sdk_error', 'unsupported', 'not_allowed', 'timeout', 'busy', 'share_failed']) {
+    s.t.hands = async () => ({ ok: false, code });
+    shared = s.t.shared.length;
+    const failed = await openNotesApproved(s);
+    assert.deepEqual([failed.status, failed.label, failed.public], ['failed', NOTES_NOT_OPENED, true], code);
+    assert.deepEqual(s.t.shared.slice(shared), [[M, 'user-ana']], code);
+  }
+  for (const hands of [async () => null, async () => { throw new Error('socket'); }]) {
+    s.t.hands = hands;
+    assert.deepEqual([(await openNotesApproved(s)).label], [NOTES_NOT_OPENED]);
+  }
+  // sharing cannot be turned on: nothing goes to a panel, and the record does not claim the notes were shared
+  s.t.hands = async () => ({ ok: true });
+  const handed = s.t.handed.length;
+  for (const share of [() => false, () => 'yes', () => { throw new Error('down'); }]) {
+    s.t.share = share;
+    const refused = await openNotesApproved(s);
+    assert.deepEqual([refused.status, refused.label], ['failed', 'Asked to open the notes for everyone']);
+  }
+  assert.equal(s.t.handed.length, handed);
+});
+
+test('opening the notes, approved by someone who is not an owner and typed it: what their panel is answered', async () => {
+  // the reply of the approved run goes to the record; a typed owner's answer comes with the sheet.
+  // What handle() resolves an approved run to is told through `arlo.did`: the label is the sentence
+  const lines = [];
+  const s = setup({ agent: { log: { log: (line) => lines.push(line), warn: (line) => lines.push(line) } } });
+  s.picks(OPEN_NOTES);
+  s.t.hands = async () => ({ ok: false, code: 'fell_back_invite' });
+  await openNotesApproved(s);
+  assert.equal(s.t.did.at(-1).action.label, NOTES_OPENED_AS_INVITE);
+  assert.equal(lines.includes(`Arlo agent: ${OPEN_NOTES} failed (fell_back_invite) (panel)`), true);
+  assert.equal(/ana|ruiz|user-/i.test(lines.join('\n')), false);
+});
+
 /** "invite everyone", typed by Ana and approved by her: the action as it ended. */
 async function inviteApproved(s) {
   assert.equal((await s.typed('invite everyone')).status, 'waiting_approval');

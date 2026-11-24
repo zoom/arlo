@@ -231,6 +231,9 @@ function isPlainRequest(text, forms) {
  *                            that turns it around ("don't stop the timer")
  *   invite_everyone          never: it shares the notes and sends an
  *                            invitation, and only the sheet says both
+ *   open_notes_for_everyone  never: it shares the notes and shows the owner's
+ *                            Arlo view to the whole meeting, and only the
+ *                            sheet says so
  * Any other tool, or anything that is not text: false.
  */
 function typedRequestCovers(typed, toolName, args) {

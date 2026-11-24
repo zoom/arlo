@@ -92,7 +92,7 @@ const TABLE = deepFreeze([
     name: 'share_notes',
     // Turns "notes shared with everyone" on (the same switch as the owner's
     // setting): the server does it, no panel is needed
-    description: 'Share Arlo\'s notes of this meeting with everyone in the meeting. Use when asked to share, send or show the notes.',
+    description: 'Share Arlo\'s notes of this meeting with everyone in the meeting: they become visible in Arlo for people who have it open. Use when asked to share, send or show the notes. Not for opening the notes on everyone\'s screen.',
     parameters: parameters(),
     runs: 'server',
     changesMeeting: true,
@@ -101,7 +101,18 @@ const TABLE = deepFreeze([
     name: 'invite_everyone',
     // Two things in this order: the server shares the notes (as share_notes
     // does), then an owner's panel sends Zoom's invitation to open the app
-    description: 'Share Arlo\'s notes with everyone and send everyone in the meeting an invitation to open Arlo. Use only when asked to invite people to Arlo or to the notes. Not for only sharing the notes, not for inviting someone to the meeting, and not for inviting one person.',
+    description: 'Share Arlo\'s notes with everyone and send everyone in the meeting an invitation to open Arlo. Use only when asked to invite people to Arlo or to the notes. Not for only sharing the notes, not for opening the notes for everyone, not for inviting someone to the meeting, and not for inviting one person.',
+    parameters: parameters(),
+    runs: 'panel',
+    changesMeeting: true,
+  },
+  {
+    name: 'open_notes_for_everyone',
+    // Two things in this order, like invite_everyone: the server shares the
+    // notes, then the panel of the owner who agreed starts Zoom's Collaborate
+    // mode, which opens Arlo for everyone in the meeting (and shows that
+    // owner's Arlo view as a screen share to people without the app)
+    description: 'Open Arlo\'s notes for everyone in the meeting as a shared document that everyone looks at together. Use when asked to open, put up, bring up or show the notes for everyone, for the whole meeting, or to look at the notes together. Not for only making the notes visible in Arlo (that is sharing the notes), and not for sending an invitation to open Arlo.',
     parameters: parameters(),
     runs: 'panel',
     changesMeeting: true,

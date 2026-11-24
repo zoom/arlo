@@ -14,6 +14,7 @@ test('the steps are a fixed table of short sentences', () => {
     sharing: 'Sharing the notes with everyone',
     admittingSomeone: 'Admitting someone from the waiting room',
     inviting: 'Inviting everyone to open Arlo',
+    openingNotes: 'Opening the notes for everyone',
     reacting: 'Sending a reaction',
     mutingSomeone: 'Muting someone',
     openingTicket: 'Opening a ticket',
@@ -30,6 +31,7 @@ test('each tool has its step; a tool without one, or something that is not a too
   assert.equal(toolStep('share_notes', {}), 'Sharing the notes with everyone');
   assert.equal(toolStep('admit_from_waiting_room', { name: 'James' }), 'Admitting James from the waiting room');
   assert.equal(toolStep('invite_everyone', {}), 'Inviting everyone to open Arlo');
+  assert.equal(toolStep('open_notes_for_everyone', {}), 'Opening the notes for everyone');
   // which reaction is never part of the step
   assert.equal(toolStep('send_reaction', { reaction: 'thumbs_up' }), 'Sending a reaction');
   assert.equal(toolStep('send_reaction', { reaction: 'Deleting everything' }), 'Sending a reaction');

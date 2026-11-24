@@ -71,7 +71,10 @@
  *      nothing is shared; otherwise the server shares the notes first (the
  *      same way as for share_notes), then that owner's panel sends the
  *      invitation; when the panel does not, the notes stay shared and the
- *      action ends as failed, saying both. Opening a ticket
+ *      action ends as failed, saying both. Opening the notes for
+ *      everyone goes the same way with that owner's panel starting Zoom's
+ *      Collaborate mode; a panel that could not and sent the invitation
+ *      instead reports 'fell_back_invite'. Opening a ticket
  *      sends that owner's panel one URL, built here from the deployment's
  *      Jira base URL and the key the tool table rebuilt (lib/jira.js); when
  *      the panel opened it and could not bring up the share dialog
@@ -138,7 +141,7 @@ const {
 const { approvalMessageData } = require('../approvals');
 const {
   TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, isTimerMinutes, chatText, cleanLine, noHands, TOO_MANY_WAITING_LABEL,
-  failedReply, INVITE_NOT_SENT,
+  failedReply, INVITE_NOT_SENT, NOTES_OPENED_AS_INVITE, NOTES_NOT_OPENED,
   MAX_CHAT_ANSWER_CHARS, MAX_CHAT_MESSAGE_CHARS, MAX_SHEET_REQUEST_CHARS, MAX_SHEET_NAME_CHARS,
   STEPS, toolStep,
 } = require('./texts');
@@ -156,7 +159,7 @@ const MAX_PRIVATE_ANSWERS = 500;
 const NOTES_FRESH_WITHIN_LINES = 10;
 const SUMMARY_QUESTION = 'Summarize the meeting so far in a few sentences: what was discussed, what was decided, and what is still open.';
 // What the hands can report (services/agent/hands.js); anything else is 'error'
-const HANDS_CODES = new Set(['no_hands', 'timeout', 'gone', 'busy', 'not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed']);
+const HANDS_CODES = new Set(['no_hands', 'timeout', 'gone', 'busy', 'not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed', 'fell_back_invite']);
 // The name the store gives a line without a speaker name: nobody's name
 const NO_SPEAKER_NAME = 'Speaker';
 
@@ -536,6 +539,19 @@ function createAgent({
           // The invitation was not sent: the notes stay shared, and the outcome says both
           return invited.ok ? invited : { ok: false, code: invited.code, sharedOnly: true };
         }
+        case 'open_notes_for_everyone': {
+          // The same two steps and the same order as inviting, and only after
+          // an owner agreed on the sheet: a panel of that owner must have
+          // announced that it can start Collaborate, or nothing is shared
+          if (!isId(actorUserId)) return { ok: false, code: 'not_allowed' };
+          if (!hostsAmong(meetingId, tool.name).includes(actorUserId)) return { ok: false, code: 'no_hands' };
+          if (shareNotes(meetingId, actorUserId) !== true) return { ok: false, code: 'not_allowed' };
+          // Nothing is asked with it: the panel gets no arguments
+          const opened = await viaHands(meetingId, { tool: tool.name, args: {} }, actorUserId);
+          // Not opened as a shared document: the notes stay shared, and the
+          // outcome says both ('fell_back_invite': the invitation went out instead)
+          return opened.ok ? opened : { ok: false, code: opened.code, sharedOnly: true };
+        }
         case 'open_ticket': {
           // The one URL there is: the deployment's base, "/browse/", the key
           // the tool table rebuilt. Nothing a model or a speaker gave is in it
@@ -576,8 +592,10 @@ function createAgent({
     let reply = outcome.ok ? null : failedReply(tool.name, outcome.code, args);
     if (!outcome.ok && outcome.sharedOnly === true) {
       // Half of it was done: the record must not read as if nothing happened
-      failedLabel = INVITE_NOT_SENT;
-      reply = INVITE_NOT_SENT;
+      let half = INVITE_NOT_SENT;
+      if (tool.name === 'open_notes_for_everyone') half = outcome.code === 'fell_back_invite' ? NOTES_OPENED_AS_INVITE : NOTES_NOT_OPENED;
+      failedLabel = half;
+      reply = half;
     }
     if (!outcome.ok && tool.name === 'open_ticket' && outcome.code === 'share_failed' && reply !== null) {
       // The ticket is open and the share dialog is not: the record says both, like the answer

@@ -10,6 +10,8 @@
  *   GET  /actions   what Arlo was asked and did in this meeting, as far as this person may see it
  *   POST /actions/:actionId/result  { ok, code? }: an owner's panel reports an action Arlo sent it
  *                                (the same result again within two minutes is answered again)
+ *   POST /open-notes             {}: an owner is about to open the notes for everyone (Zoom's
+ *                                Collaborate mode, started by their own panel): turns sharing the notes on
  *   POST /notes-request          {}: a participant asks the owners to share the notes with everyone
  *   POST /approvals/:approvalId  { approve }: an owner's answer, owners only; approving a request for
  *                                the notes turns sharing on, approving something Arlo was asked lets it run
@@ -338,7 +340,8 @@ router.get('/actions', optionalAuth, requireMeetingAccess, (req, res) => {
  * { ok: true } | { ok: false, code? } -> { received: true }. The panel Arlo
  * sent an action to (`arlo.action` on its socket, services/agent/hands.js)
  * reports whether it did it. `code`, only with `ok: false`, is one of
- * not_found, several_match, no_notes, sdk_error, unsupported, not_allowed.
+ * not_found, several_match, no_notes, sdk_error, unsupported, not_allowed,
+ * share_failed, fell_back_invite (services/agent/hands.js RESULT_CODES).
  * Owners only, and only the owner the action was sent to: 404 for an action
  * that is unknown, finished, or someone else's. The same result sent again by
  * the same owner within two minutes is answered { received: true } again (a
@@ -362,6 +365,25 @@ router.post('/actions/:actionId/result', requireAuth, requireMeetingAccess, requ
   const report = body.ok ? { ok: true } : { ok: false, ...(hasCode && { code: body.code }) };
   if (!getAgentRuntime().hands.result(meetingId, id, req.user.id, report)) return notFound();
   return res.json({ received: true });
+});
+
+/**
+ * POST /open-notes
+ * {} -> { shared: true }. Owners only. The owner pressed "Open notes for
+ * everyone" on their own panel and confirmed it there; the panel then starts
+ * Zoom's Collaborate mode itself (the server cannot). What the server does is
+ * the half it owns: sharing the notes is turned on, the one way it ever is
+ * (shareNotes(), as PUT /settings { shareNotes: true } does), so the panels
+ * Zoom opens for everyone have notes to show. Shared already: the same
+ * answer. Nothing is opened, posted or sent from here, and no model is asked.
+ */
+router.post('/open-notes', requireAuth, requireMeetingAccess, requireJson, (req, res) => {
+  const meetingId = req.params.zoomMeetingId;
+  if (!getArloPresence().isOwner(meetingId, req.user.id)) return forbidden(res, NOT_AN_OWNER);
+  if (!hasExactly(req.body, [])) return invalid(res, 'Send an empty JSON object');
+  // The meeting's data went between the two checks
+  if (shareNotes(meetingId, req.user.id, true) === 'refused') return forbidden(res, NOT_AN_OWNER);
+  return res.json({ shared: true });
 });
 
 /**

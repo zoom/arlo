@@ -83,7 +83,7 @@ test('an action goes to one panel, and its result is the outcome', async () => {
   assert.equal(s.live(), 0);
 
   // every code a panel may report is passed on; anything else is "the SDK failed"
-  assert.deepEqual([...RESULT_CODES], ['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed']);
+  assert.deepEqual([...RESULT_CODES], ['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed', 'fell_back_invite']);
   for (const [code, expected] of [...RESULT_CODES].map((one) => [one, one]).concat([[undefined, 'sdk_error'], ['rm -rf', 'sdk_error'], [5, 'sdk_error']])) {
     const again = s.hands.run(M, POST);
     s.hands.result(M, ana.got.at(-1).data.actionId, 'user-ana', { ok: false, code });
@@ -952,6 +952,44 @@ test('"invite everyone", typed by the owner: the sheet first, then the notes are
   assert.deepEqual([failed.status, failed.label], ['failed', 'Shared the notes. Couldn\'t send the invitation.']);
   assert.equal((await state(m)).body.notesShared, true);
   closeAll(ownerPanel, benPanel);
+});
+
+test('"open the notes for everyone" through the running server: the sheet, sharing on, the panel asked with no arguments, and its report of a fallback', async () => {
+  const m = await meetingWith('AH-OPEN-NOTES==');
+  const CAN_OPEN = { zoomRole: 'attendee', can: ['post_to_chat', 'open_notes_for_everyone'] };
+  const ownerPanel = await panel(m.meetingId, m.owner, CAN_OPEN);
+  pick = async () => ({ tool: 'open_notes_for_everyone', args: {} });
+
+  const asked = await ask(m, 'open the notes for everyone');
+  assert.deepEqual(asked.body, {
+    answer: OWN_SHEET,
+    action: { id: asked.body.action.id, tool: 'open_notes_for_everyone', status: 'waiting_approval', label: 'Asked to open the notes for everyone' },
+  });
+  const sheet = await sheetSent(ownerPanel);
+  assert.deepEqual([sheet.question, sheet.primaryLabel, 'body' in sheet],
+    ['Open the notes for everyone in the meeting? Your Arlo view will be shared.', 'Open notes', false]);
+  await h.wait(50);
+  assert.equal((await state(m)).body.notesShared, false);
+  assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
+
+  assert.equal((await approveSheet(m, sheet.id)).status, 200);
+  const sent = await actionSent(ownerPanel);
+  assert.deepEqual(sent, { meetingId: m.meetingId, actionId: sent.actionId, tool: 'open_notes_for_everyone', args: {} });
+  assert.equal((await state(m, m.participant)).body.notesShared, true);
+  assert.equal((await report(m, sent.actionId, { ok: true })).status, 200);
+  const done = await didEnd(ownerPanel, asked.body.action.id);
+  assert.deepEqual([done.status, done.label], ['done', 'Opened the notes for everyone']);
+
+  // Collaborate did not start and the panel sent the invitation instead: the record says all of it
+  const again = await ask(m, 'open the notes for everyone again');
+  assert.equal((await approveSheet(m, (await sheetSent(ownerPanel, 2)).id)).status, 200);
+  const second = await actionSent(ownerPanel, 2);
+  assert.equal((await report(m, second.actionId, { ok: false, code: 'fell_back_invite' })).status, 200);
+  const fellBack = await didEnd(ownerPanel, again.body.action.id);
+  assert.deepEqual([fellBack.status, fellBack.label],
+    ['failed', 'Shared the notes and invited everyone to open Arlo. Couldn\'t open them as a shared document.']);
+  assert.equal((await state(m)).body.notesShared, true);
+  closeAll(ownerPanel);
 });
 
 test('"invite everyone" with no panel that can: nothing is shared, and the record says to open Arlo', async () => {

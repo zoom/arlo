@@ -153,6 +153,38 @@ test('shareNotes is a boolean and only an owner changes it', async () => {
   assert.equal(both.body.whoCanAsk, 'anyone');
 });
 
+test('POST /open-notes: an owner turns sharing on with an empty JSON body, and nobody else does', async () => {
+  const m = await meetingWith('SN-OPEN==');
+  const open = (headers, body = {}) => call('POST', m.meetingId, 'open-notes', { headers, body });
+  const benPanel = await panel(m.meetingId, m.participant);
+  // a participant, a guest, an owner with another meeting's access
+  assert.equal((await open(m.participant)).status, 403);
+  assert.equal((await open(m.guest)).status, 401);
+  const otherPass = await access('SN-OPEN-OTHER==');
+  assert.equal((await open(cookies(otherPass, m.ana.session))).status, 403);
+  assert.equal((await open(cookies(m.ana.session))).status, 401);
+  // exactly an empty object
+  for (const body of [{ shareScreen: true }, { shared: true }, { shareNotes: true }, [], [1], 'open', null, 5]) {
+    assert.equal((await open(m.owner, body)).status, 400, JSON.stringify(body));
+  }
+  // JSON only: a form post from another site is refused
+  const form = await fetch(url(m.meetingId, 'open-notes'), {
+    method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded', ...m.owner }, body: '',
+  });
+  assert.equal(form.status, 415);
+  assert.equal(getMeetingStore().getMeta(m.meetingId).notesShared, false);
+
+  const done = await open(m.owner);
+  assert.deepEqual([done.status, done.body, done.cache], [200, { shared: true }, 'no-store']);
+  assert.equal(getMeetingStore().getMeta(m.meetingId).notesShared, true);
+  await h.wait(50);
+  assert.equal(lastState(benPanel).notesShared, true);
+  // shared already: the same answer, and it stays on
+  assert.deepEqual((await open(m.owner)).body, { shared: true });
+  assert.equal(getMeetingStore().getMeta(m.meetingId).notesShared, true);
+  closeAll(benPanel);
+});
+
 test('the state carries notesShared for everyone, over GET and over the socket', async () => {
   const m = await meetingWith('SN-STATE==');
   await say(m.meetingId, 'Hello.');

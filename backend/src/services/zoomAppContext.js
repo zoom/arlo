@@ -18,6 +18,22 @@ const { generateToken, verifyToken } = require('./auth');
 const MAX_CONTEXT_CHARS = 8192;
 const ACCESS_TOKEN_KIND = 'meeting-access';
 const ACCESS_TOKEN_TTL_MS = 4 * 60 * 60 * 1000; // 4h; the frontend refreshes on every WS (re)connect
+// The context types a meeting-access token is issued for. Zoom's app context
+// page lists `typ` as 'panel', 'meeting', 'webinar' or 'chat', and `mid` as
+// "only returned when value of typ is 'meeting'".
+//
+// NOT SETTLED, Collaborate mode: the Collaborate guide says "When participants
+// join Collaborate mode, the Collaborate UUID is included in the context
+// header" and "The app can use app context header to get the verified meeting
+// id or collaboration id", but no page names the `typ` of a context made while
+// the app runs in Collaborate, the field that holds the Collaborate UUID, or
+// whether `mid` is still there. So nothing is accepted here that was not
+// before: a Collaborate context is taken only when it reads as a meeting's
+// (`typ` 'meeting' or 'webinar', with a `mid`). If Zoom gives it another
+// `typ`, or leaves `mid` out, POST /api/auth/meeting-access answers 403 in
+// Collaborate and the panel shows its access notice. Check it in a real
+// meeting before adding a value here, and add exactly that value, still
+// requiring `mid`.
 const MEETING_TYPES = new Set(['meeting', 'webinar']);
 
 class AppContextError extends Error {}

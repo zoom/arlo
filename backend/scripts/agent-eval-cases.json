@@ -238,6 +238,31 @@
   },
   {
     "kind": "tool",
+    "said": "open the notes for everyone",
+    "expectTool": "open_notes_for_everyone"
+  },
+  {
+    "kind": "tool",
+    "said": "put the notes up for the whole meeting",
+    "expectTool": "open_notes_for_everyone"
+  },
+  {
+    "kind": "tool",
+    "said": "let's all look at the notes together",
+    "expectTool": "open_notes_for_everyone"
+  },
+  {
+    "kind": "tool",
+    "said": "share the notes with everyone so they can read them in Arlo",
+    "expectTool": "share_notes"
+  },
+  {
+    "kind": "tool",
+    "said": "send everyone an invitation to open Arlo",
+    "expectTool": "invite_everyone"
+  },
+  {
+    "kind": "tool",
     "said": "send a thumbs up",
     "expectTool": "send_reaction",
     "expectArgs": {
