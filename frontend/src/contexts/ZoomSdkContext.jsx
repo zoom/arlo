@@ -88,6 +88,7 @@ export function ZoomSdkProvider({ children }) {
   const [runningContext, setRunningContext] = useState(initialTestMode ? 'test' : null);
   const [meetingContext, setMeetingContext] = useState(null);
   const [userContext, setUserContext] = useState(null);
+  // "Accepted" below: asked for in the set Zoom took, and not in the answer's `unsupportedApis`
   // true once zoomSdk.config() accepted getRTMSStatus + onRTMSStatusChange
   const [rtmsStatusSupported, setRtmsStatusSupported] = useState(false);
   // true once zoomSdk.config() accepted setDynamicIndicator + removeDynamicIndicator
@@ -149,23 +150,32 @@ export function ZoomSdkProvider({ children }) {
         }
 
         console.log('SDK Configured:', configResponse);
-        const rtmsApisAccepted = acceptedCapabilities.includes('onRTMSStatusChange');
+        // Zoom can accept the configuration and still say it lacks some of the
+        // APIs asked for (ConfigResponse `unsupportedApis`, a list of API
+        // names): those are not there, whatever the client object has.
+        const unsupportedApis = new Set(
+          (Array.isArray(configResponse?.unsupportedApis) ? configResponse.unsupportedApis : [])
+            .filter((name) => typeof name === 'string'),
+        );
+        /** Asked for, accepted, and not listed as unsupported. */
+        const granted = (name) => acceptedCapabilities.includes(name) && !unsupportedApis.has(name);
+        const rtmsApisAccepted = granted('onRTMSStatusChange') && granted('getRTMSStatus');
         // If this prints false, the client sends Arlo no RTMS status at all
         console.log('RTMS SDK APIs (start/stop/pause/resume/status) accepted by this client:', rtmsApisAccepted);
         setRtmsStatusSupported(rtmsApisAccepted);
-        const indicatorAccepted = acceptedCapabilities.includes('setDynamicIndicator')
+        const indicatorAccepted = granted('setDynamicIndicator') && granted('removeDynamicIndicator')
           && typeof zoomSdk.setDynamicIndicator === 'function'
           && typeof zoomSdk.removeDynamicIndicator === 'function';
         console.log('[indicator] APIs accepted by this client:', indicatorAccepted, {
           requested: acceptedCapabilities.includes('setDynamicIndicator'),
+          granted: granted('setDynamicIndicator') && granted('removeDynamicIndicator'),
           setMethod: typeof zoomSdk.setDynamicIndicator,
           removeMethod: typeof zoomSdk.removeDynamicIndicator,
         });
         setDynamicIndicatorSupported(indicatorAccepted);
-        setChatSupported(acceptedCapabilities.includes('sendMessageToChat')
-          && typeof zoomSdk.sendMessageToChat === 'function');
+        setChatSupported(granted('sendMessageToChat') && typeof zoomSdk.sendMessageToChat === 'function');
         setWaitingRoomSupported(WAITING_ROOM_CAPABILITIES.every((name) => (
-          acceptedCapabilities.includes(name) && typeof zoomSdk[name] === 'function'
+          granted(name) && typeof zoomSdk[name] === 'function'
         )));
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured

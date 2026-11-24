@@ -74,8 +74,10 @@ import { useZoomSdk } from './ZoomSdkContext';
  *   lib/arloActions.js handsFor), once the server spoke on that socket, and
  *   again when either changes; someone who stops being an owner clears it.
  *   An `arlo.action` for this meeting is run once (a repeated `actionId` is
- *   ignored) and its result reported to …/arlo/actions/<id>/result. Only an
- *   owner's panel runs anything, and not after the meeting is over.
+ *   ignored) and its result reported to …/arlo/actions/<id>/result. A report
+ *   that does not reach the server is sent again (RESULT_RETRY_MS) while this
+ *   panel may still act; Zoom is never asked twice. Only an owner's panel
+ *   runs anything, and not after the meeting is over.
  *
  * - `actions`: what Arlo was asked and did in this meeting, oldest first
  *   (lib/arloDid.js). Read from GET …/arlo/actions once access is verified
@@ -87,8 +89,9 @@ import { useZoomSdk } from './ZoomSdkContext';
  * - `thinking`: Arlo is handling a request (`arlo.thinking`, to owners). Off
  *   when the server says so, and by itself THINKING_MS after the last "on".
  *   MeetingContext is told, for Zoom's indicator.
- * - `ask` answers { answer } or { answer, action: { tool, status } } when the
- *   request was something to do: status 'done', 'failed' or 'waiting_approval'.
+ * - `ask` answers { answer } or { answer, action: { id, tool, status } } when
+ *   the request was something to do: status 'done', 'failed' or
+ *   'waiting_approval'. `id` is the action's, as in `actions`.
  *
  * Nothing here is logged: state, notes, questions and answers are meeting content.
  */
@@ -175,6 +178,12 @@ const NO_ACTIONS = Object.freeze([]);
 // How a typed request for something to do can stand when the server answers
 const ASK_ACTION_STATUSES = new Set(['done', 'failed', 'waiting_approval']);
 const MAX_TOOL_CHARS = 64;
+const MAX_ACTION_ID_CHARS = 64;
+// A result the server did not take is reported again after these waits, then given up
+const RESULT_RETRY_MS = [1000, 3000, 7000];
+// The server may take it next time: it failed, was busy, or timed out. Any
+// other refusal is its answer.
+const reportAgainAfter = (status) => status >= 500 || status === 429 || status === 408;
 
 /** What the server's clock said when it answered (the `Date` header), in ms; null when it did not say. */
 function serverClock(res) {
@@ -238,6 +247,7 @@ export function ArloProvider({ children }) {
 
   // Read by the socket handler, which must not wait for a render
   const ranActionsRef = useRef(new Set());
+  const resultTimersRef = useRef(new Set());
   const handsSentRef = useRef({ socket: null, json: null });
   const stateRef = useRef(NOT_LOADED);
   const endedRef = useRef(false);
@@ -443,15 +453,42 @@ export function ArloProvider({ children }) {
     // Asked again before Zoom acts on something that took time to prepare
     const stillAllowed = () => stateRef.current.role === 'owner' && signedInRef.current && !endedRef.current
       && serverMeetingIdRef.current === id;
+    // The result, until the server has it: without it the server records a
+    // failure although Zoom acted, and asking again would act twice. The same
+    // result is sent each time (the server takes a repeat); Zoom is not asked again.
+    const report = async (body, attempt) => {
+      let again = false;
+      try {
+        const res = await fetch(arloUrl(id, `actions/${encodeURIComponent(actionId)}/result`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body,
+        });
+        again = reportAgainAfter(res.status);
+      } catch {
+        again = true;
+      }
+      // Given up: the server stops waiting by itself
+      if (!again || attempt >= RESULT_RETRY_MS.length) return;
+      const timers = resultTimersRef.current;
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        if (stillAllowed()) report(body, attempt + 1);
+      }, RESULT_RETRY_MS[attempt]);
+      timers.add(timer);
+    };
     runArloAction(zoomSdkRef.current, { tool: data.tool, args: data.args }, { zoomRole: zoomRoleRef.current, stillAllowed })
-      .then((result) => fetch(arloUrl(id, `actions/${encodeURIComponent(actionId)}/result`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(result.ok === true ? { ok: true } : { ok: false, code: result.code }),
-      }))
-      // The server stops waiting by itself
-      .catch(() => {});
+      .then((result) => report(JSON.stringify(result.ok === true ? { ok: true } : { ok: false, code: result.code }), 0));
+  }, []);
+
+  // A panel that goes away reports nothing more
+  useEffect(() => {
+    const timers = resultTimersRef.current;
+    return () => {
+      timers.forEach((timer) => clearTimeout(timer));
+      timers.clear();
+    };
   }, []);
 
   // The state, once the server lets this panel ask. Again when the socket is
@@ -665,25 +702,27 @@ export function ArloProvider({ children }) {
   }, [role, nameless, screenName, serverMeetingId, accessVerified]);
 
   // A measurement: the owner's panel tells the server who Zoom says they are
-  // in this meeting, once per meeting, so the server can count how often a
-  // transcript line's speaker equals that. The answer is not read and a
-  // failure is silent.
+  // in this meeting, once per meeting for each person who signs in on this
+  // panel, so the server can count how often a transcript line's speaker
+  // equals that. The answer is not read and a failure is silent.
   const identityJson = useMemo(() => {
     const report = identityReport(userContext);
     return report ? JSON.stringify(report) : null;
   }, [userContext]);
-  const identitySentForRef = useRef(null);
+  const identitySentForRef = useRef(new Set());
   useEffect(() => {
-    if (role !== 'owner' || !identityJson || !serverMeetingId || !accessVerified) return;
-    if (identitySentForRef.current === serverMeetingId) return;
-    identitySentForRef.current = serverMeetingId;
+    if (role !== 'owner' || identity === null || !identityJson || !serverMeetingId || !accessVerified) return;
+    // By meeting and person: neither can hold the separator
+    const sentFor = JSON.stringify([serverMeetingId, identity]);
+    if (identitySentForRef.current.has(sentFor)) return;
+    identitySentForRef.current.add(sentFor);
     fetch(arloUrl(serverMeetingId, 'identity'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
       body: identityJson,
     }).catch(() => {});
-  }, [role, identityJson, serverMeetingId, accessVerified]);
+  }, [role, identity, identityJson, serverMeetingId, accessVerified]);
 
   const setWhoCanAsk = useCallback(async (value) => {
     const id = serverMeetingIdRef.current;
@@ -752,10 +791,11 @@ export function ArloProvider({ children }) {
       }
       const answer = data.answer.trim().slice(0, MAX_ANSWER_CHARS);
       // The request was something to do: how it stands
-      const { tool, status } = data.action ?? {};
-      const known = typeof tool === 'string' && tool.length > 0 && tool.length <= MAX_TOOL_CHARS
+      const { id: actionId, tool, status } = data.action ?? {};
+      const known = typeof actionId === 'string' && actionId.length > 0 && actionId.length <= MAX_ACTION_ID_CHARS
+        && typeof tool === 'string' && tool.length > 0 && tool.length <= MAX_TOOL_CHARS
         && ASK_ACTION_STATUSES.has(status);
-      return known ? { answer, action: { tool, status } } : { answer };
+      return known ? { answer, action: { id: actionId, tool, status } } : { answer };
     } catch {
       return { error: ASK_MESSAGES.failed };
     } finally {
@@ -766,15 +806,18 @@ export function ArloProvider({ children }) {
 
   /**
    * The owner's answer: { approve: true | false }. Agreeing is all the panel
-   * does: the server does what was asked (it shares the notes). Resolves true
-   * when the server took the answer and, for an agreement, did it. Either way
-   * the request leaves this panel's line: it is answered, or no longer open.
+   * does: the server does what was asked (it shares the notes, or runs what
+   * Arlo was asked to do). Only `approve` is sent, whatever else is passed.
+   * Resolves how it went: 'taken' (the server has the answer and, for an
+   * agreement, did it), 'failed' (it has the answer and could not do it) or
+   * 'unsent' (the answer did not reach it, or it refused it). Either way the
+   * request leaves this panel's line: it is answered, or no longer open.
    */
   const answerApproval = useCallback(async (approvalId, answer) => {
     const id = serverMeetingIdRef.current;
-    if (!id || typeof approvalId !== 'string' || typeof answer?.approve !== 'boolean') return false;
+    if (!id || typeof approvalId !== 'string' || typeof answer?.approve !== 'boolean') return 'unsent';
     const body = { approve: answer.approve };
-    let taken = false;
+    let went = 'unsent';
     try {
       const res = await fetch(arloUrl(id, `approvals/${encodeURIComponent(approvalId)}`), {
         method: 'POST',
@@ -784,12 +827,12 @@ export function ArloProvider({ children }) {
       });
       const data = res.ok ? await res.json().catch(() => null) : null;
       // 'failed': the owner agreed and the server could not do it
-      taken = res.ok && data?.outcome !== 'failed';
+      if (res.ok) went = data?.outcome === 'failed' ? 'failed' : 'taken';
     } catch {
       // The server lets it run out
     }
     if (serverMeetingIdRef.current === id) closeApproval(approvalId, null);
-    return taken;
+    return went;
   }, [closeApproval]);
 
   /** A participant asks the owners to share the notes with everyone in the meeting. */

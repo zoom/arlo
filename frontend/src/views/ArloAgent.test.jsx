@@ -43,6 +43,7 @@ function layOutBody({ box, text }) {
 }
 const THINKING = 'Arlo is thinking…';
 const WAITING = 'Waiting for approval…';
+const NO_ANSWER = 'No answer to that request.';
 const PLACEHOLDER = 'Ask Arlo, or say “Arlo, …”';
 
 const server = () => FakeWebSocket.last;
@@ -353,6 +354,55 @@ describe('the sheet for something Arlo was asked to do', () => {
     await screen.findByRole('dialog', { name: 'Share the notes with everyone in the meeting?' });
     await send(serverMessage.approvalClosed(ID2, 'declined'));
     expect(await screen.findByRole('dialog', { name: 'Admit James from the waiting room?' })).toBeInTheDocument();
+  });
+
+  describe('what the owner is told after pressing the primary button', () => {
+    const NOT_DONE = 'Arlo couldn\'t do that.';
+    const NOT_SENT = 'Arlo didn\'t get your answer. Try again.';
+    async function agreeWith(answer) {
+      const opened = await openAsOwner({ routes: { [`POST ${arloPath('approvals/')}`]: answer } });
+      await send(serverMessage.approval(ADMIT));
+      const dialog = await screen.findByRole('dialog');
+      await pastSheetGuard();
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Admit James' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      return opened;
+    }
+
+    test('the server took the answer and could not do it: "Arlo couldn\'t do that."', async () => {
+      await agreeWith(({ url }) => json({ id: url.split('/').pop(), outcome: 'failed' }));
+      expect(await screen.findByText(NOT_DONE)).toBeInTheDocument();
+      expect(screen.queryByText(/didn't get your answer/)).not.toBeInTheDocument();
+    });
+
+    test.each([
+      ['the request never reaches the server', () => { throw new TypeError('Failed to fetch'); }],
+      ['the server refuses the answer', () => json({ error: 'not_found', message: 'server words' }, 404)],
+      ['the server fails', () => json({ error: 'boom' }, 500)],
+    ])('%s: "Arlo didn\'t get your answer. Try again."', async (_name, answer) => {
+      await agreeWith(answer);
+      expect(await screen.findByText(NOT_SENT)).toBeInTheDocument();
+      expect(screen.queryByText(NOT_DONE)).not.toBeInTheDocument();
+      expect(screen.queryByText('server words')).not.toBeInTheDocument();
+    });
+
+    test('done: nothing is said here, the server says how it ended', async () => {
+      await agreeWith(({ url }) => json({ id: url.split('/').pop(), outcome: 'approved' }));
+      await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
+      expect(screen.queryByText(NOT_DONE)).not.toBeInTheDocument();
+      expect(screen.queryByText(NOT_SENT)).not.toBeInTheDocument();
+    });
+
+    test('"Not now" that does not reach the server says nothing', async () => {
+      await openAsOwner({ routes: { [`POST ${arloPath('approvals/')}`]: () => { throw new TypeError('Failed to fetch'); } } });
+      await send(serverMessage.approval(ADMIT));
+      await screen.findByRole('dialog');
+      await pastSheetGuard();
+      await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      expect(screen.queryByText(NOT_SENT)).not.toBeInTheDocument();
+      expect(screen.queryByText(NOT_DONE)).not.toBeInTheDocument();
+    });
   });
 
   test('after two sheets in a row the focus is back where it was before the first', async () => {
@@ -668,6 +718,20 @@ describe('"Arlo did" at the end of the notes', () => {
     expect(screen.queryByText(THINKING)).not.toBeInTheDocument();
   });
 
+  test('a participant who holds no notes keeps nothing of it once out of the meeting', async () => {
+    mockFetch({ [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...ANA_BROUGHT_ARLO }) });
+    const { sdk } = renderInMeeting({ sdk: attendee(), page: 'record' });
+    await screen.findByRole('heading', { name: 'Meeting record' });
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    await send(serverMessage.did(done));
+    expect(await screen.findByText(/Admitted James from the waiting room/)).toBeInTheDocument();
+
+    await leaveMeeting(sdk);
+    // Nothing is left to show: the record gives way to Home
+    await waitFor(() => expect(window.location.hash).toBe('#/home'));
+    expect(screen.queryByText(/Admitted James from the waiting room/)).not.toBeInTheDocument();
+  });
+
   test('when the session ends, what Arlo did is gone with the notes', async () => {
     let sessionValid = true;
     const { sdk } = await openAsOwner({
@@ -702,52 +766,73 @@ describe('asking Arlo to do something', () => {
 
   test('something done at once: the server\'s sentence, and no waiting', async () => {
     await openAsOwner({
-      routes: askWith(json({ answer: 'Done: posted to the chat.', action: { tool: 'post_to_chat', status: 'done', label: 'Posted to the chat' } })),
+      routes: askWith(json({ answer: 'Done: posted to the chat.', action: { id: ID1, tool: 'post_to_chat', status: 'done', label: 'Posted to the chat' } })),
     });
     await type('post the date to the chat');
     expect(await screen.findByText('Done: posted to the chat.')).toBeInTheDocument();
     expect(screen.queryByText(WAITING)).not.toBeInTheDocument();
   });
 
-  test('something that needs approval: "Waiting for approval…" until it ends', async () => {
+  test('something that needs approval: "Waiting for approval…" until that request ends', async () => {
     await openAsParticipant({
       state: { ...ANA_BROUGHT_ARLO, whoCanAsk: 'anyone' },
       routes: askWith(json({
         answer: 'I asked Ana to approve that.',
-        action: { tool: 'admit_from_waiting_room', status: 'waiting_approval', label: 'Admit James from the waiting room' },
+        action: { id: ID1, tool: 'admit_from_waiting_room', status: 'waiting_approval', label: 'Admit James from the waiting room' },
       })),
     });
     await type('let James in');
     expect(await screen.findByText('I asked Ana to approve that.')).toBeInTheDocument();
     expect(screen.getByText(WAITING)).toHaveAttribute('role', 'status');
 
-    // Another tool's action ending says nothing about this one
-    await send(serverMessage.did(arloAction({ id: ID2, tool: 'post_to_chat' })));
+    // Someone else's request for the same thing ending says nothing about this one
+    await send(serverMessage.did(arloAction({ id: ID2, tool: 'admit_from_waiting_room', label: 'Admitted Noor from the waiting room' })));
+    await send(serverMessage.did(arloAction({ id: '33333333-3333-4333-8333-333333333333', tool: 'admit_from_waiting_room', status: 'declined' })));
+    // Nor does this one's own word that it is still waiting
     await send(serverMessage.did(arloAction({ id: ID1, tool: 'admit_from_waiting_room', status: 'waiting_approval' })));
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 30); }); });
     expect(screen.getByText(WAITING)).toBeInTheDocument();
 
     await send(serverMessage.did(arloAction({ id: ID1, tool: 'admit_from_waiting_room', status: 'declined' })));
     await waitFor(() => expect(screen.queryByText(WAITING)).not.toBeInTheDocument());
     expect(screen.getByText('I asked Ana to approve that.')).toBeInTheDocument();
+    expect(screen.queryByText(NO_ANSWER)).not.toBeInTheDocument();
   });
 
-  test('with no word of how it ended, the waiting line goes after 70 seconds', async () => {
+  test('a request that had already ended when the answer arrived does not wait', async () => {
+    await openAsOwner({
+      routes: askWith(json({ answer: 'I asked for approval.', action: { id: ID1, tool: 'post_to_chat', status: 'waiting_approval', label: 'Post' } })),
+    });
+    await send(serverMessage.did(arloAction({ id: ID1, tool: 'post_to_chat', status: 'done' })));
+    await type('post it');
+    expect(await screen.findByText('I asked for approval.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(WAITING)).not.toBeInTheDocument());
+  });
+
+  test('with no word of how it ended, after 70 seconds it says "No answer to that request."', async () => {
     const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
     await openAsOwner({
-      routes: askWith(json({ answer: 'I asked for approval.', action: { tool: 'post_to_chat', status: 'waiting_approval', label: 'Post to the chat' } })),
+      routes: askWith(json({ answer: 'I asked for approval.', action: { id: ID1, tool: 'post_to_chat', status: 'waiting_approval', label: 'Post to the chat' } })),
     });
     vi.useFakeTimers({ shouldAdvanceTime: true });
     await user.type(screen.getByRole('textbox', { name: 'Ask Arlo' }), 'post it{Enter}');
     await screen.findByText(WAITING);
+    expect(screen.queryByText(NO_ANSWER)).not.toBeInTheDocument();
     await act(async () => { vi.advanceTimersByTime(69000); });
     expect(screen.getByText(WAITING)).toBeInTheDocument();
     await act(async () => { vi.advanceTimersByTime(1500); });
     expect(screen.queryByText(WAITING)).not.toBeInTheDocument();
+    expect(screen.getByText(NO_ANSWER)).toHaveAttribute('role', 'status');
+    // It stays until the answer is cleared
+    await act(async () => { vi.advanceTimersByTime(60000); });
+    expect(screen.getByText(NO_ANSWER)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.queryByText(NO_ANSWER)).not.toBeInTheDocument();
   });
 
   test('Clear takes the waiting line away with the answer', async () => {
     await openAsOwner({
-      routes: askWith(json({ answer: 'I asked for approval.', action: { tool: 'post_to_chat', status: 'waiting_approval', label: 'Post' } })),
+      routes: askWith(json({ answer: 'I asked for approval.', action: { id: ID1, tool: 'post_to_chat', status: 'waiting_approval', label: 'Post' } })),
     });
     await type('post it');
     await screen.findByText(WAITING);
@@ -759,6 +844,13 @@ describe('asking Arlo to do something', () => {
     await openAsOwner({ routes: askWith(json({ answer: 'Ben will confirm.', action: { tool: 7, status: 'waiting_approval' } })) });
     await type('what did Ben say');
     expect(await screen.findByText('Ben will confirm.')).toBeInTheDocument();
+    expect(screen.queryByText(WAITING)).not.toBeInTheDocument();
+  });
+
+  test('an action without an id cannot be followed: no waiting line', async () => {
+    await openAsOwner({ routes: askWith(json({ answer: 'I asked for approval.', action: { tool: 'post_to_chat', status: 'waiting_approval' } })) });
+    await type('post it');
+    expect(await screen.findByText('I asked for approval.')).toBeInTheDocument();
     expect(screen.queryByText(WAITING)).not.toBeInTheDocument();
   });
 

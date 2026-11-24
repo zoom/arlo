@@ -14,8 +14,10 @@ const WAITING_MS = 70 * 1000;
  * One input for a private question or request. The answer comes from the
  * server and is shown to the asker only, above the input. When what was asked
  * needs an owner's approval first, a line under the answer says so until the
- * server says how it ended (an `arlo.did` for that tool, in ArloContext
- * `actions`) or WAITING_MS passed.
+ * server says how that request ended (an `arlo.did` for the action's id, in
+ * ArloContext `actions`; another person's request for the same thing is
+ * another id). When WAITING_MS pass without that word, the line says there
+ * was no answer, until the answer is cleared or something else is asked.
  */
 export default function AskArlo() {
   const { ask, asking, actions } = useArlo();
@@ -23,13 +25,16 @@ export default function AskArlo() {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState(null);
   const [error, setError] = useState(null);
-  // null, or { tool, known }: `known` are the actions of that tool that had ended before
+  // null, or { id }: the action whose outcome is waited for
   const [waiting, setWaiting] = useState(null);
+  // The wait ran out without word of how it ended
+  const [unanswered, setUnanswered] = useState(false);
 
   const submit = async (event) => {
     event.preventDefault();
     if (asking) return;
     setError(null);
+    setUnanswered(false);
     const result = await ask(question);
     if (result.error) {
       setError(result.error);
@@ -37,30 +42,28 @@ export default function AskArlo() {
     }
     setAnswer(result.answer);
     setQuestion('');
-    setWaiting(result.action?.status === 'waiting_approval'
-      ? {
-        tool: result.action.tool,
-        known: new Set(actions.filter((one) => one.tool === result.action.tool && ENDED.has(one.status)).map((one) => one.id)),
-      }
-      : null);
+    setWaiting(result.action?.status === 'waiting_approval' ? { id: result.action.id } : null);
   };
 
   useEffect(() => {
     if (!waiting) return undefined;
-    const timer = setTimeout(() => setWaiting(null), WAITING_MS);
+    const timer = setTimeout(() => {
+      setWaiting(null);
+      setUnanswered(true);
+    }, WAITING_MS);
     return () => clearTimeout(timer);
   }, [waiting]);
 
-  // An action of that tool ended since: the wait is over
+  // That action ended: the wait is over
   useEffect(() => {
     if (!waiting) return;
-    const ended = actions.some((one) => one.tool === waiting.tool && ENDED.has(one.status) && !waiting.known.has(one.id));
-    if (ended) setWaiting(null);
+    if (actions.some((one) => one.id === waiting.id && ENDED.has(one.status))) setWaiting(null);
   }, [waiting, actions]);
 
   const clear = () => {
     setAnswer(null);
     setWaiting(null);
+    setUnanswered(false);
   };
 
   return (
@@ -75,6 +78,7 @@ export default function AskArlo() {
         </div>
       )}
       {waiting && <p className="arlo-muted" role="status">Waiting for approval…</p>}
+      {unanswered && <p className="arlo-muted" role="status">No answer to that request.</p>}
       {error && <p className="arlo-error" role="alert">{error}</p>}
       <form className="arlo-ask-form" onSubmit={submit}>
         <label className="arlo-sr-only" htmlFor={inputId}>Ask Arlo</label>

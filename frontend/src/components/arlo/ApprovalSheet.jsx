@@ -45,8 +45,8 @@ const END_SLACK_PX = 2;
  * posted, then the buttons), focus that lands outside comes back, and a click
  * outside does nothing.
  *
- * `onAnswer(id, { approve })` reports the answer and resolves true when the
- * server took it. Mount one per approval (`key={approval.id}`). Where the
+ * `onAnswer(id, { approve })` reports the answer and resolves how it went:
+ * 'taken', 'failed' (the server could not do it) or 'unsent'. Mount one per approval (`key={approval.id}`). Where the
  * focus goes when the last sheet closes is ApprovalHost's business.
  */
 export default function ApprovalSheet({ approval, onAnswer }) {
@@ -103,13 +103,14 @@ export default function ApprovalSheet({ approval, onAnswer }) {
     if (!takesAnswer() || !kind || !bodySeenRef.current) return;
     busyRef.current = true;
     setBusy(true);
-    let done = false;
+    let went = 'unsent';
     try {
-      done = (await onAnswer(approval.id, { approve: true })) === true;
+      went = await onAnswer(approval.id, { approve: true });
     } catch {
       // Not logged: an error may quote meeting content
     }
-    const toast = done ? kind.doneToast : kind.failedToast;
+    const done = went === 'taken';
+    const toast = done ? kind.doneToast : (went === 'failed' ? kind.failedToast : kind.unsentToast);
     if (toast) addToast(toast, done ? 'success' : 'error');
   };
 

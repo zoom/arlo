@@ -41,6 +41,7 @@ async function openAsOwner(options = {}) {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   resetHarness();
 });
@@ -80,6 +81,26 @@ describe('what the panel says it can do', () => {
     // The rest of what the client accepts is kept: Zoom's indicator APIs are still asked for
     expect(sdk.config.mock.calls.at(-1)[0].capabilities).toContain('setDynamicIndicator');
     expect(sdk.config.mock.calls.at(-1)[0].capabilities).not.toContain('getWaitingRoomParticipants');
+  });
+
+  test('the waiting-room APIs refused at config, though the client object has the methods: that tool is not announced', async () => {
+    const sdk = createZoomSdk({ waitingRoomRefused: true });
+    expect(typeof sdk.admitParticipantFromWaitingRoom).toBe('function');
+    await openAsOwner({ sdk });
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat'] }));
+    await settle();
+    expect(hands()).toHaveLength(1);
+  });
+
+  test.each([
+    ['the waiting-room list', 'getWaitingRoomParticipants', ['post_to_chat']],
+    ['admitting', 'admitParticipantFromWaitingRoom', ['post_to_chat']],
+    ['the chat', 'sendMessageToChat', ['admit_from_waiting_room']],
+  ])('Zoom accepts the configuration and says it lacks %s: that tool is not announced', async (_name, api, can) => {
+    await openAsOwner({ sdk: createZoomSdk({ unsupportedApis: [api] }) });
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can }));
+    await settle();
+    expect(hands()).toHaveLength(1);
   });
 
   test('the Zoom role changes: the announcement follows', async () => {
@@ -153,6 +174,98 @@ describe('an action from the server', () => {
     await send(serverMessage.action({ actionId: A2, ...CHAT }));
     await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
     expect(sdk.sendMessageToChat).toHaveBeenCalledTimes(2);
+  });
+
+  describe('the report of a result that does not reach the server', () => {
+    const tick = (ms) => act(async () => { vi.advanceTimersByTime(ms); });
+    /** The result route answers with each of `answers` in turn, then takes the report. */
+    const resultRoute = (answers) => {
+      const left = [...answers];
+      return {
+        [`POST ${arloPath('actions/')}`]: () => {
+          const next = left.shift();
+          if (next === 'network') throw new TypeError('Failed to fetch');
+          return next === undefined ? json({ received: true }) : json({ error: 'x' }, next);
+        },
+      };
+    };
+    async function reported(answers, options = {}) {
+      const opened = await openAsOwner({ routes: resultRoute(answers), ...options });
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      await send(serverMessage.action({ actionId: A1, ...CHAT }));
+      await waitFor(() => expect(results(opened.fetchMock)).toHaveLength(1));
+      return opened;
+    }
+
+    test('is sent again after 1, 3 and 7 seconds, with the same result, and Zoom is not asked again', async () => {
+      const { sdk, fetchMock } = await reported(['network', 503, 500]);
+      await tick(900);
+      expect(results(fetchMock)).toHaveLength(1);
+      await tick(200);
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
+      await tick(2900);
+      expect(results(fetchMock)).toHaveLength(2);
+      await tick(200);
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(3));
+      await tick(6900);
+      expect(results(fetchMock)).toHaveLength(3);
+      await tick(200);
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(4));
+      expect(results(fetchMock).map((one) => one.body)).toEqual([{ ok: true }, { ok: true }, { ok: true }, { ok: true }]);
+      expect(results(fetchMock).every((one) => one.actionId === A1)).toBe(true);
+      expect(sdk.sendMessageToChat).toHaveBeenCalledTimes(1);
+    });
+
+    test('stops once the server took it', async () => {
+      const { sdk, fetchMock } = await reported([500]);
+      await tick(1100);
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
+      await tick(30000);
+      expect(results(fetchMock)).toHaveLength(2);
+      expect(sdk.sendMessageToChat).toHaveBeenCalledTimes(1);
+    });
+
+    test('is given up after three more tries', async () => {
+      const { sdk, fetchMock } = await reported([500, 500, 500, 500, 500, 500]);
+      await tick(1100);
+      await tick(3100);
+      await tick(7100);
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(4));
+      await tick(60000);
+      expect(results(fetchMock)).toHaveLength(4);
+      expect(sdk.sendMessageToChat).toHaveBeenCalledTimes(1);
+    });
+
+    test('a failed result is reported again as it was', async () => {
+      const sdk = createZoomSdk();
+      sdk.sendMessageToChat.mockRejectedValue(new Error('chat is off'));
+      const { fetchMock } = await reported([502], { sdk });
+      await tick(1100);
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
+      expect(results(fetchMock).map((one) => one.body)).toEqual([{ ok: false, code: 'sdk_error' }, { ok: false, code: 'sdk_error' }]);
+      expect(sdk.sendMessageToChat).toHaveBeenCalledTimes(1);
+    });
+
+    test.each([400, 403, 404, 409])('a refusal (%i) is the server\'s answer: not sent again', async (status) => {
+      const { fetchMock } = await reported([status]);
+      await tick(30000);
+      expect(results(fetchMock)).toHaveLength(1);
+    });
+
+    test('is not sent again by a panel that is no longer an owner\'s', async () => {
+      const { fetchMock } = await reported([500, 500]);
+      await send(serverMessage.arloState(ANA_BROUGHT_ARLO));
+      await tick(30000);
+      expect(results(fetchMock)).toHaveLength(1);
+    });
+
+    test('the same action sent again while its report is retried is still not run again', async () => {
+      const { sdk, fetchMock } = await reported([500]);
+      await send(serverMessage.action({ actionId: A1, ...CHAT }));
+      await tick(1100);
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
+      expect(sdk.sendMessageToChat).toHaveBeenCalledTimes(1);
+    });
   });
 
   test('Zoom refuses: { ok: false, code: "sdk_error" }, and nothing about it is logged', async () => {

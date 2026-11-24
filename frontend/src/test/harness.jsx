@@ -46,6 +46,10 @@ export function createZoomSdk({
   waitingRoom = [],
   // false: a Zoom client without the waiting-room APIs (config refuses them, the methods are missing)
   waitingRoomApis = true,
+  // true: config refuses the waiting-room APIs although the client object has the methods
+  waitingRoomRefused = false,
+  // APIs Zoom accepts at config and then lists as not supported (`unsupportedApis` in its answer)
+  unsupportedApis = [],
 } = {}) {
   const listeners = new Map();
   const on = (event) => (handler) => {
@@ -55,10 +59,11 @@ export function createZoomSdk({
   const sdk = {
     rtmsStatus,
     config: vi.fn(async ({ capabilities }) => {
-      if (!waitingRoomApis && capabilities.includes('getWaitingRoomParticipants')) {
+      if ((!waitingRoomApis || waitingRoomRefused) && capabilities.includes('getWaitingRoomParticipants')) {
         throw new Error('getWaitingRoomParticipants is not supported by this client');
       }
-      return { clientVersion: '6.6.0', capabilities };
+      // The shape of the SDK's ConfigResponse: the APIs asked for that this client does not have
+      return { clientVersion: '6.6.0', unsupportedApis: unsupportedApis.filter((name) => capabilities.includes(name)) };
     }),
     getRunningContext: vi.fn(async () => ({ context: runningContext })),
     getUserContext: vi.fn(async () => {

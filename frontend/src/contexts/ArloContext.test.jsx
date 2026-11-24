@@ -562,3 +562,98 @@ describe('myStreamLive', () => {
     expect(arlo.myStreamLive).toBeNull();
   });
 });
+
+describe('what is held belongs to the person signed in, and what is sent is exactly what was meant', () => {
+  const ID1 = '11111111-1111-4111-8111-111111111111';
+  const did = (id, isPublic = true) => serverMessage.did({
+    id, at: 1000, tool: 'post_to_chat', label: 'Posted to the chat', askedBy: null, channel: 'voice', status: 'done', public: isPublic,
+  });
+  const identityReports = (fetchMock) => callsTo(fetchMock, arloPath('identity'));
+
+  test('someone else signs in on this panel: what Arlo did, public or not, is no longer held', async () => {
+    await asOwner();
+    await send(did(ID1));
+    await send(did('22222222-2222-4222-8222-222222222222', false));
+    expect(arlo.actions).toHaveLength(2);
+
+    await act(async () => { auth.login({ id: 'user-2', displayName: 'Bo' }); });
+    // The server lists none for the new person (the harness's answer): none are held
+    await waitFor(() => expect(arlo.role).toBe('owner'));
+    expect(arlo.actions).toEqual([]);
+  });
+
+  test('the report of who Zoom says this is: once for each person in a meeting, not once for the panel', async () => {
+    const fetchMock = await asOwner();
+    await waitFor(() => expect(identityReports(fetchMock)).toHaveLength(1));
+
+    await act(async () => { auth.login({ id: 'user-2', displayName: 'Bo' }); });
+    await waitFor(() => expect(identityReports(fetchMock)).toHaveLength(2));
+    // The first person again, and a role that comes and goes: nothing more
+    await act(async () => { auth.login({ id: 'user-1', displayName: 'Ana' }); });
+    await waitFor(() => expect(arlo.role).toBe('owner'));
+    await send(serverMessage.arloState({ ...OWNER, role: 'participant' }));
+    await send(serverMessage.arloState(OWNER));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(identityReports(fetchMock)).toHaveLength(2);
+  });
+
+  test('the answer to a request is exactly { approve }, whatever else the caller passes', async () => {
+    const fetchMock = await asOwner();
+    const answers = () => callsTo(fetchMock, arloPath(`approvals/${ID1}`)).map(([, init]) => init);
+    await act(async () => {
+      await arlo.answerApproval(ID1, { approve: true, shareNotes: true, id: 'another', meetingId: 'OTHER==', toString: 'x' });
+    });
+    expect(answers()).toHaveLength(1);
+    expect(answers()[0].method).toBe('POST');
+    expect(answers()[0].body).toBe('{"approve":true}');
+
+    await act(async () => { await arlo.answerApproval(ID1, { approve: false, approveAll: true }); });
+    expect(answers()[1].body).toBe('{"approve":false}');
+
+    // Anything but a boolean is no answer: nothing is sent
+    for (const notAnAnswer of [{ approve: 'true' }, { approve: 1 }, {}, null, undefined, true]) {
+      await act(async () => { await arlo.answerApproval(ID1, notAnAnswer); });
+    }
+    expect(answers()).toHaveLength(2);
+  });
+
+  test('how an answer went: taken, failed (the server could not do it), or unsent', async () => {
+    let answer = () => json({ id: ID1, outcome: 'approved' });
+    await open({
+      [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...OWNER }),
+      [`POST ${arloPath('approvals/')}`]: () => answer(),
+    });
+    const went = async () => {
+      let result;
+      await act(async () => { result = await arlo.answerApproval(ID1, { approve: true }); });
+      return result;
+    };
+    expect(await went()).toBe('taken');
+    answer = () => json({ id: ID1, outcome: 'failed' });
+    expect(await went()).toBe('failed');
+    answer = () => json({ error: 'not_found' }, 404);
+    expect(await went()).toBe('unsent');
+    answer = () => { throw new TypeError('Failed to fetch'); };
+    expect(await went()).toBe('unsent');
+  });
+
+  test('ask: an action comes back with its id, so its outcome can be followed', async () => {
+    await open({
+      [`POST ${arloPath('ask')}`]: () => json({ answer: 'I asked Ana.', action: { id: ID1, tool: 'post_to_chat', status: 'waiting_approval', label: 'Post' } }),
+    });
+    let result;
+    await act(async () => { result = await arlo.ask('post it'); });
+    expect(result).toEqual({ answer: 'I asked Ana.', action: { id: ID1, tool: 'post_to_chat', status: 'waiting_approval' } });
+  });
+
+  test.each([
+    ['no id', { tool: 'post_to_chat', status: 'waiting_approval' }],
+    ['an id that is not text', { id: 7, tool: 'post_to_chat', status: 'waiting_approval' }],
+    ['an id that is too long', { id: 'x'.repeat(65), tool: 'post_to_chat', status: 'waiting_approval' }],
+  ])('ask: an action with %s is an answer without an action', async (_name, action) => {
+    await open({ [`POST ${arloPath('ask')}`]: () => json({ answer: 'I asked Ana.', action }) });
+    let result;
+    await act(async () => { result = await arlo.ask('post it'); });
+    expect(result).toEqual({ answer: 'I asked Ana.' });
+  });
+});
