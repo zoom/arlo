@@ -417,6 +417,65 @@ describe('an action from the server', () => {
     expect(sdk.setEmojiReaction).toHaveBeenCalledTimes(1);
   });
 
+  describe('a ticket', () => {
+    const BASE = 'https://jira.example.test';
+    const withJira = { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true, jira: { baseUrl: BASE } } }) };
+    const TICKET = { url: `${BASE}/browse/PROJ-123`, key: 'PROJ-123', share: true };
+
+    test('announced only when the deployment\'s settings name a Jira', async () => {
+      await openAsOwner({ routes: withJira });
+      await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS, 'open_ticket'] }));
+    });
+
+    test('not announced when the settings name none, one that is not https, or the client cannot open URLs', async () => {
+      for (const [jira, sdkOptions] of [[{ baseUrl: null }, {}], [{ baseUrl: 'http://jira.example.test' }, {}], [{ baseUrl: BASE }, { unsupportedApis: ['openUrl'] }]]) {
+        const routes = { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true, jira } }) };
+        const view = await openAsOwner({ sdk: createZoomSdk(sdkOptions), routes });
+        await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: HOST_HANDS }));
+        await settle();
+        expect(hands()).toHaveLength(1);
+        view.unmount();
+        resetHarness();
+      }
+    });
+
+    test('open and share: the ticket at the deployment\'s Jira opens in the browser, then Zoom\'s share dialog', async () => {
+      const { sdk, fetchMock } = await openAsOwner({ sdk: createZoomSdk({ role: 'attendee' }), routes: withJira });
+      await waitFor(() => expect(lastHands()?.can).toContain('open_ticket'));
+      await send(serverMessage.action({ actionId: A1, tool: 'open_ticket', args: TICKET }));
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+      expect(sdk.openUrl).toHaveBeenCalledTimes(1);
+      expect(sdk.openUrl).toHaveBeenCalledWith({ url: `${BASE}/browse/PROJ-123` });
+      expect(sdk.promptShareScreen).toHaveBeenCalledTimes(1);
+      expect(sdk.promptShareScreen).toHaveBeenCalledWith();
+      expect(results(fetchMock)[0].body).toEqual({ ok: true });
+    });
+
+    test('a URL that is not that Jira\'s is not opened; a share dialog that fails is reported as share_failed', async () => {
+      const { sdk, fetchMock } = await openAsOwner({ routes: withJira });
+      await waitFor(() => expect(lastHands()?.can).toContain('open_ticket'));
+      await send(serverMessage.action({ actionId: A1, tool: 'open_ticket', args: { ...TICKET, url: 'https://evil.example/browse/PROJ-123' } }));
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+      expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'unsupported' });
+      expect(sdk.openUrl).not.toHaveBeenCalled();
+      expect(sdk.promptShareScreen).not.toHaveBeenCalled();
+
+      sdk.promptShareScreen.mockRejectedValueOnce(new Error('Failed to prompt share screen'));
+      await send(serverMessage.action({ actionId: A2, tool: 'open_ticket', args: TICKET }));
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
+      expect(sdk.openUrl).toHaveBeenCalledTimes(1);
+      expect(results(fetchMock)[1].body).toEqual({ ok: false, code: 'share_failed' });
+    });
+
+    test('a deployment without a Jira opens nothing, whatever the server sends', async () => {
+      const { sdk, fetchMock } = await openAsOwner();
+      await send(serverMessage.action({ actionId: A1, tool: 'open_ticket', args: TICKET }));
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+      expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'unsupported' });
+      expect(sdk.openUrl).not.toHaveBeenCalled();
+    });
+  });
+
   test('mute someone: the one person by that whole name is muted, never unmuted', async () => {
     const sdk = createZoomSdk({
       participants: [

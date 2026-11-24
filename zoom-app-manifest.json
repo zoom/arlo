@@ -94,6 +94,8 @@
                     "setEmojiReaction",
                     "getEmojiConfiguration",
                     "openUrl",
+                    "promptShareScreen",
+                    "stopShareScreen",
                     "onRunningContextChange",
                     "onMyUserContextChange",
                     "sendAppInvitationToAllParticipants",

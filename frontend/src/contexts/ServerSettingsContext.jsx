@@ -16,6 +16,8 @@ const defaultFeatures = {
   aiChat: false,
   autoStart: false,
   ownStream: false,
+  // The deployment's Jira (JIRA_BASE_URL on the server), where Arlo opens a ticket; none by default
+  jira: { baseUrl: null },
 };
 
 export function ServerSettingsProvider({ children }) {

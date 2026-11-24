@@ -9,6 +9,8 @@
  *   invite_everyone          {}            the app invitation, to everyone in the meeting
  *   send_reaction            { reaction }  one of REACTIONS, as this person's own reaction
  *   mute_participant         { name }      host or co-host only; mutes, never unmutes
+ *   open_ticket              { url, key, share }  the ticket in the system browser, then
+ *                                          Zoom's share dialog when `share` is true
  *
  * Codes: 'unsupported' (not a tool of this panel, arguments it cannot use, a
  * Zoom client without the API, or muting the person whose panel this is:
@@ -16,7 +18,14 @@
  * role may not, or this panel may no longer act for Arlo), 'not_found' (nobody
  * there by that name), 'several_match' (more than one person has that exact
  * name, or the name is only the first word of someone's: Arlo then asks for
- * the full name), 'sdk_error' (Zoom refused or failed).
+ * the full name), 'sdk_error' (Zoom refused or failed), 'share_failed' (the
+ * ticket was opened in the browser and the share dialog was not).
+ *
+ * A ticket's URL is never taken as it comes: this panel builds it again from
+ * the deployment's Jira base URL (the server's settings, given as
+ * `jiraBaseUrl`), "/browse/" and the key, and opens it only when the two are
+ * the same text. Zoom's SDK cannot pick the window that is shared: the share
+ * dialog opens and this person picks the browser.
  *
  * Only the person the owner approved is admitted or muted: the sheet named
  * them, so the name must be someone's whole name, and exactly one person's.
@@ -31,6 +40,7 @@ export const HAND_TOOLS = Object.freeze({
   invite: 'invite_everyone',
   reaction: 'send_reaction',
   mute: 'mute_participant',
+  ticket: 'open_ticket',
 });
 
 /**
@@ -69,18 +79,51 @@ const MAX_NAME_CHARS = 100;
 const MAX_WAITING = 1000;
 const MAX_PARTICIPANTS = 1000;
 
+// A ticket key as the server rebuilds it (backend lib/jira.js): a project of
+// 2 to 10 letters and digits that starts with a letter, a dash, a number
+const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/;
+const MAX_TICKET_URL_CHARS = 300;
+const MAX_JIRA_BASE_CHARS = 200;
+
 const ok = Object.freeze({ ok: true });
 const fail = (code) => ({ ok: false, code });
 const has = (zoomSdk, method) => typeof zoomSdk?.[method] === 'function';
+
+/** An https URL without user name or password, or null: parsed, never matched by eye. */
+function httpsUrl(value) {
+  let parsed;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+  return parsed.protocol === 'https:' && parsed.username === '' && parsed.password === '' && parsed.hostname !== '' ? parsed : null;
+}
+
+/**
+ * The deployment's Jira base URL as the server's settings give it
+ * (`features.jira.baseUrl`), or null when it is not one in exactly the form
+ * the server keeps: https, a host, an optional path, no trailing slash, no
+ * user name, password, query or fragment.
+ */
+export function jiraBaseOf(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_JIRA_BASE_CHARS) return null;
+  if (!/^[\x21-\x7E]+$/.test(value) || /[\\?#@]/.test(value)) return null;
+  const parsed = httpsUrl(value);
+  if (parsed === null || parsed.search !== '' || parsed.hash !== '') return null;
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}` === value ? value : null;
+}
 
 /**
  * What this panel tells the server it can do (`arlo.hands`): the chat, the
  * invitation and a reaction when the client accepted each; the waiting room
  * and muting when the client accepted their APIs and Zoom says this person is
- * the host or a co-host. At most five names (the server takes ten).
+ * the host or a co-host; a ticket when the client opens URLs and the
+ * deployment has a Jira (the share dialog is not needed to announce it: a
+ * ticket can be opened without it). At most six names (the server takes ten).
  */
 export function handsFor({
-  chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, zoomRole,
+  chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl, zoomRole,
 }) {
   const can = [];
   if (chatSupported === true) can.push(HAND_TOOLS.chat);
@@ -88,6 +131,7 @@ export function handsFor({
   if (invitationSupported === true) can.push(HAND_TOOLS.invite);
   if (reactionSupported === true) can.push(HAND_TOOLS.reaction);
   if (muteSupported === true && MAY_MUTE.has(zoomRole)) can.push(HAND_TOOLS.mute);
+  if (openUrlSupported === true && jiraBaseOf(jiraBaseUrl) !== null) can.push(HAND_TOOLS.ticket);
   return can;
 }
 
@@ -187,16 +231,54 @@ async function muteParticipant(zoomSdk, args, zoomRole, stillAllowed, selfPartic
   return ok;
 }
 
+async function openTicket(zoomSdk, args, stillAllowed, jiraBaseUrl) {
+  // Exactly these three: anything else is something nobody approved
+  if (args === null || typeof args !== 'object' || Array.isArray(args)) return fail('unsupported');
+  const keys = Object.keys(args);
+  if (keys.length !== 3 || !['url', 'key', 'share'].every((name) => keys.includes(name))) return fail('unsupported');
+  const { url, key, share } = args;
+  if (typeof share !== 'boolean' || typeof key !== 'string' || !TICKET_KEY.test(key)) return fail('unsupported');
+  if (typeof url !== 'string' || url.length > MAX_TICKET_URL_CHARS) return fail('unsupported');
+  // The one URL this panel opens: the deployment's base, "/browse/", the key.
+  // Built here again and compared as text; it must also parse as plain https
+  const base = jiraBaseOf(jiraBaseUrl);
+  if (base === null || httpsUrl(url) === null || url !== `${base}/browse/${key}`) return fail('unsupported');
+  if (!has(zoomSdk, 'openUrl')) return fail('unsupported');
+  if (typeof stillAllowed !== 'function' || stillAllowed() !== true) return fail('not_allowed');
+
+  // OpenUrlOptions is { url } and nothing else. Zoom opens it in the system
+  // browser; a domain that is not on the app's Marketplace allowlist is
+  // refused (10015), which is 'sdk_error' here
+  await zoomSdk.openUrl({ url });
+  if (!share) return ok;
+
+  // From here the ticket is open: whatever keeps the share dialog from
+  // coming up is 'share_failed', never a plain failure
+  if (!has(zoomSdk, 'promptShareScreen') || stillAllowed() !== true) return fail('share_failed');
+  try {
+    // No options: PromptShareScreenOptions has only shareToBreakoutRooms,
+    // shareSound and optimizeForVideoClip, all false by default. The person
+    // picks what is shared in Zoom's dialog; the SDK cannot pick a window
+    await zoomSdk.promptShareScreen();
+  } catch {
+    return fail('share_failed');
+  }
+  return ok;
+}
+
 /**
  * Run one action with the Zoom Apps SDK. `zoomRole`: this person's role in
  * the Zoom meeting, as Zoom reports it. `stillAllowed()`: true while this
  * panel may still act for Arlo (an owner's, signed in, in the same meeting,
  * which is not over); asked again after anything that takes time and before
- * Zoom acts. Without it nobody is admitted or muted. `selfParticipantUUID`:
- * this person's participant UUID in the meeting, when Zoom gave one. Never
- * rejects.
+ * Zoom acts. Without it nobody is admitted or muted and nothing is opened. `selfParticipantUUID`:
+ * this person's participant UUID in the meeting, when Zoom gave one.
+ * `jiraBaseUrl`: the deployment's Jira base URL from the server's settings;
+ * without it no ticket is opened. Never rejects.
  */
-export async function runArloAction(zoomSdk, action, { zoomRole = null, stillAllowed = null, selfParticipantUUID = null } = {}) {
+export async function runArloAction(zoomSdk, action, {
+  zoomRole = null, stillAllowed = null, selfParticipantUUID = null, jiraBaseUrl = null,
+} = {}) {
   try {
     switch (action?.tool) {
       case HAND_TOOLS.chat:
@@ -209,6 +291,8 @@ export async function runArloAction(zoomSdk, action, { zoomRole = null, stillAll
         return await sendReaction(zoomSdk, action.args);
       case HAND_TOOLS.mute:
         return await muteParticipant(zoomSdk, action.args, zoomRole, stillAllowed, selfParticipantUUID);
+      case HAND_TOOLS.ticket:
+        return await openTicket(zoomSdk, action.args, stillAllowed, jiraBaseUrl);
       default:
         return fail('unsupported');
     }

@@ -97,6 +97,10 @@ export function createZoomSdk({
     authorize: vi.fn(async () => ({ message: 'Success' })),
     showNotification: vi.fn(async () => ({})),
     sendMessageToChat: vi.fn(async () => ({})),
+    // The system browser, and Zoom's share dialog
+    openUrl: vi.fn(async () => ({ message: 'Success' })),
+    promptShareScreen: vi.fn(async () => ({ message: 'Success' })),
+    stopShareScreen: vi.fn(async () => ({ message: 'Success' })),
     sendAppInvitationToAllParticipants: vi.fn(async () => ({})),
     showAppInvitationDialog: vi.fn(async () => ({})),
     startCollaborate: vi.fn(async () => ({})),

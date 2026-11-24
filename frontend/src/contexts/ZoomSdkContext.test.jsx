@@ -25,10 +25,12 @@ async function configured(options) {
     invitation: zoom.invitationSupported,
     reaction: zoom.reactionSupported,
     mute: zoom.muteSupported,
+    openUrl: zoom.openUrlSupported,
+    shareScreen: zoom.shareScreenSupported,
   };
 }
 const ALL = {
-  chat: true, waitingRoom: true, indicator: true, rtmsStatus: true, invitation: true, reaction: true, mute: true,
+  chat: true, waitingRoom: true, indicator: true, rtmsStatus: true, invitation: true, reaction: true, mute: true, openUrl: true, shareScreen: true,
 };
 const lastCapabilities = () => window.zoomSdk.config.mock.calls.at(-1)[0].capabilities;
 
@@ -50,6 +52,8 @@ test.each([
   ['setEmojiReaction', { reaction: false }],
   ['toggleParticipantMediaAudio', { mute: false }],
   ['getMeetingParticipants', { mute: false }],
+  ['openUrl', { openUrl: false }],
+  ['promptShareScreen', { shareScreen: false }],
 ])('%s accepted at config but listed in unsupportedApis is not supported', async (api, lost) => {
   expect(await configured({ unsupportedApis: [api] })).toEqual({ ...ALL, ...lost });
   // Zoom accepted the first, largest set: nothing was asked again
@@ -77,8 +81,25 @@ test('the waiting-room APIs refused at config: a smaller set is asked for, and t
   const flags = await configured({ waitingRoomRefused: true });
   expect(typeof window.zoomSdk.getWaitingRoomParticipants).toBe('function');
   // The tiers added after the waiting room are in every set that has it, so they go too
-  expect(flags).toEqual({ ...ALL, waitingRoom: false, reaction: false, mute: false });
+  expect(flags).toEqual({ ...ALL, waitingRoom: false, reaction: false, mute: false, shareScreen: false });
   expect(window.zoomSdk.config).toHaveBeenCalledTimes(4);
+});
+
+test('the share-screen APIs are asked for with the reactions, in the first set only: no set more than before', async () => {
+  await configured();
+  expect(lastCapabilities()).toEqual(expect.arrayContaining(['openUrl', 'promptShareScreen', 'stopShareScreen', 'setEmojiReaction']));
+  resetHarness();
+  // Refused: one smaller set, the reactions go with them, everything before stays
+  const flags = await configured({ refusedApis: ['promptShareScreen'] });
+  expect(typeof window.zoomSdk.promptShareScreen).toBe('function');
+  expect(flags).toEqual({ ...ALL, reaction: false, shareScreen: false });
+  expect(window.zoomSdk.config).toHaveBeenCalledTimes(2);
+  expect(lastCapabilities()).toContain('toggleParticipantMediaAudio');
+  expect(lastCapabilities()).not.toContain('stopShareScreen');
+});
+
+test('stopShareScreen listed as unsupported takes the share dialog away from nobody: only promptShareScreen is called', async () => {
+  expect(await configured({ unsupportedApis: ['stopShareScreen'] })).toEqual(ALL);
 });
 
 test('the first set asked for has the reaction and participant-audio APIs', async () => {
@@ -97,7 +118,7 @@ test('getEmojiConfiguration listed as unsupported takes no reaction away: only s
 test('the reaction APIs refused at config: one smaller set, and everything else stays, muting too', async () => {
   const flags = await configured({ refusedApis: ['setEmojiReaction'] });
   expect(typeof window.zoomSdk.setEmojiReaction).toBe('function');
-  expect(flags).toEqual({ ...ALL, reaction: false });
+  expect(flags).toEqual({ ...ALL, reaction: false, shareScreen: false });
   expect(window.zoomSdk.config).toHaveBeenCalledTimes(2);
   expect(lastCapabilities()).toContain('toggleParticipantMediaAudio');
   expect(lastCapabilities()).not.toContain('getEmojiConfiguration');
@@ -106,14 +127,14 @@ test('the reaction APIs refused at config: one smaller set, and everything else 
 test('the participant-audio API refused at config: two smaller sets, reactions go with it, the waiting room stays', async () => {
   const flags = await configured({ refusedApis: ['toggleParticipantMediaAudio'] });
   expect(typeof window.zoomSdk.toggleParticipantMediaAudio).toBe('function');
-  expect(flags).toEqual({ ...ALL, reaction: false, mute: false });
+  expect(flags).toEqual({ ...ALL, reaction: false, mute: false, shareScreen: false });
   expect(window.zoomSdk.config).toHaveBeenCalledTimes(3);
   expect(lastCapabilities()).toContain('getWaitingRoomParticipants');
 });
 
 test('both new tiers and the waiting room refused: what the client had before is kept', async () => {
   const flags = await configured({ refusedApis: ['setEmojiReaction', 'toggleParticipantMediaAudio'], waitingRoomRefused: true });
-  expect(flags).toEqual({ ...ALL, reaction: false, mute: false, waitingRoom: false });
+  expect(flags).toEqual({ ...ALL, reaction: false, mute: false, waitingRoom: false, shareScreen: false });
   expect(window.zoomSdk.config).toHaveBeenCalledTimes(4);
 });
 
@@ -121,6 +142,7 @@ test('a client that takes the core set only: every set is tried once, largest fi
   const flags = await configured({ refusedApis: ['getMeetingParticipants'] });
   expect(flags).toEqual({
     chat: true, waitingRoom: false, indicator: false, rtmsStatus: false, invitation: false, reaction: false, mute: false,
+    openUrl: true, shareScreen: false,
   });
   const sizes = window.zoomSdk.config.mock.calls.map(([options]) => options.capabilities.length);
   expect(sizes).toHaveLength(7);
@@ -132,9 +154,13 @@ test('a client object without the methods does not support them, whatever config
   delete window.zoomSdk.setEmojiReaction;
   delete window.zoomSdk.toggleParticipantMediaAudio;
   delete window.zoomSdk.sendAppInvitationToAllParticipants;
+  delete window.zoomSdk.openUrl;
+  delete window.zoomSdk.promptShareScreen;
   render(<ZoomSdkProvider><Probe /></ZoomSdkProvider>);
   await waitFor(() => expect(zoom.sdkConfigured).toBe(true));
   expect(zoom.reactionSupported).toBe(false);
   expect(zoom.muteSupported).toBe(false);
   expect(zoom.invitationSupported).toBe(false);
+  expect(zoom.openUrlSupported).toBe(false);
+  expect(zoom.shareScreenSupported).toBe(false);
 });

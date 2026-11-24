@@ -11,6 +11,7 @@ import { handsFor, runArloAction } from '../lib/arloActions';
 import { parseAction, mergeActions } from '../lib/arloDid';
 import { readThinkingStep, readThinkingChannel } from '../lib/thinkingStep';
 import { useZoomSdk } from './ZoomSdkContext';
+import { useServerSettings } from './ServerSettingsContext';
 
 /**
  * What this panel knows about Arlo in the current meeting: is it here, what is
@@ -220,8 +221,14 @@ export function ArloProvider({ children }) {
   const meetingOver = meetingEnded === true || leftMeeting === true;
   const { isAuthenticated, user } = useAuth();
   const {
-    userContext, zoomSdk, chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported,
+    userContext, zoomSdk, chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported,
   } = useZoomSdk();
+  // The deployment's Jira, from the server's settings: a ticket is opened only
+  // there (lib/arloActions.js checks the value and the URL the server sends)
+  const { features } = useServerSettings();
+  const jiraBaseUrl = typeof features?.jira?.baseUrl === 'string' ? features.jira.baseUrl : null;
+  const jiraBaseUrlRef = useRef(jiraBaseUrl);
+  jiraBaseUrlRef.current = jiraBaseUrl;
   // This person's role in the Zoom meeting, as Zoom reports it
   const zoomRole = typeof userContext?.role === 'string' && userContext.role.length > 0
     && userContext.role.length <= MAX_ZOOM_ROLE_CHARS ? userContext.role : 'attendee';
@@ -502,7 +509,10 @@ export function ArloProvider({ children }) {
       timers.add(timer);
     };
     runArloAction(zoomSdkRef.current, { tool: data.tool, args: data.args }, {
-      zoomRole: zoomRoleRef.current, stillAllowed, selfParticipantUUID: selfParticipantUUIDRef.current,
+      zoomRole: zoomRoleRef.current,
+      stillAllowed,
+      selfParticipantUUID: selfParticipantUUIDRef.current,
+      jiraBaseUrl: jiraBaseUrlRef.current,
     })
       .then((result) => report(JSON.stringify(result.ok === true ? { ok: true } : { ok: false, code: result.code }), 0));
   }, []);
@@ -624,9 +634,9 @@ export function ArloProvider({ children }) {
   // who announced and is no longer an owner (or whose meeting is over) clears it.
   const hands = useMemo(
     () => handsFor({
-      chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, zoomRole,
+      chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl, zoomRole,
     }),
-    [chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, zoomRole],
+    [chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl, zoomRole],
   );
   const hasHands = state.role === 'owner' && isAuthenticated && !meetingOver;
   useEffect(() => {

@@ -83,6 +83,17 @@ const REACTION_CAPABILITIES = [
   'getEmojiConfiguration',
 ];
 
+// The share dialog: after Arlo opened a ticket in the browser ("Arlo, open
+// PROJ-123 and share it"), the owner's panel brings up Zoom's share dialog and
+// the owner picks the window (lib/arloActions.js). Only promptShareScreen is
+// called; stopShareScreen is asked for with it and not used yet. Desktop
+// 5.13.5 and 5.14.0, older than the reactions (5.14.5), so they are asked for
+// in the reactions' tier and not in one of their own: no config attempt more.
+const SHARE_SCREEN_CAPABILITIES = [
+  'promptShareScreen',
+  'stopShareScreen',
+];
+
 // Check if running outside Zoom - evaluated dynamically
 const checkIsTestMode = () => !window.zoomSdk || window.location.search.includes('test=true');
 
@@ -118,6 +129,9 @@ export function ZoomSdkProvider({ children }) {
   const [invitationSupported, setInvitationSupported] = useState(false);
   const [reactionSupported, setReactionSupported] = useState(false);
   const [muteSupported, setMuteSupported] = useState(false);
+  // The same for openUrl (in the core set) and for promptShareScreen
+  const [openUrlSupported, setOpenUrlSupported] = useState(false);
+  const [shareScreenSupported, setShareScreenSupported] = useState(false);
   // null = SDK not loaded yet, true = guest, false = authorized user
   const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
 
@@ -149,7 +163,7 @@ export function ZoomSdkProvider({ children }) {
         // Every step is one more config attempt: seven at most.
         const upToWaitingRoom = [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES, ...DYNAMIC_INDICATOR_CAPABILITIES, ...WAITING_ROOM_CAPABILITIES];
         const capabilitySets = [
-          [...upToWaitingRoom, ...PARTICIPANT_AUDIO_CAPABILITIES, ...REACTION_CAPABILITIES],
+          [...upToWaitingRoom, ...PARTICIPANT_AUDIO_CAPABILITIES, ...REACTION_CAPABILITIES, ...SHARE_SCREEN_CAPABILITIES],
           [...upToWaitingRoom, ...PARTICIPANT_AUDIO_CAPABILITIES],
           upToWaitingRoom,
           [...CORE_CAPABILITIES, ...OPTIONAL_CAPABILITIES, ...RTMS_STATUS_CAPABILITIES, ...DYNAMIC_INDICATOR_CAPABILITIES],
@@ -209,6 +223,8 @@ export function ZoomSdkProvider({ children }) {
         setInvitationSupported(usable('sendAppInvitationToAllParticipants'));
         setReactionSupported(usable('setEmojiReaction'));
         setMuteSupported(usable('toggleParticipantMediaAudio') && usable('getMeetingParticipants'));
+        setOpenUrlSupported(usable('openUrl'));
+        setShareScreenSupported(usable('promptShareScreen'));
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
@@ -351,8 +367,10 @@ export function ZoomSdkProvider({ children }) {
     invitationSupported,
     reactionSupported,
     muteSupported,
+    openUrlSupported,
+    shareScreenSupported,
     isTestMode: isTestModeState,
-  }), [invitationSupported, reactionSupported, muteSupported, waitingRoomSupported, zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
+  }), [openUrlSupported, shareScreenSupported, invitationSupported, reactionSupported, muteSupported, waitingRoomSupported, zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
 
   return (
     <ZoomSdkContext.Provider value={contextValue}>
