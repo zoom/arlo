@@ -157,11 +157,18 @@ test('typed requests that are not a plain question: the answer is a sentence of 
     answer: 'On Friday.', action: { tool: 'summarize_so_far', status: 'done', label: 'Summarized the meeting so far' },
   });
 
+  // no tool fits: the Ask input answers from the transcript, with the text as typed, as it always did
+  const asked = [];
+  answer = async (input) => { asked.push(input.question); return 'Nothing about that yet.'; };
   pick = async () => ({ tool: 'none' });
-  assert.deepEqual((await ask(m, 'hello')).body, { answer: 'I didn\'t catch a request.' });
-  // whatever a model writes that is not a tool call from the table is no request either
+  const plain = await ask(m, 'hello, what about the budget');
+  assert.equal(plain.status, 200);
+  assert.deepEqual(plain.body, { answer: 'Nothing about that yet.' });
+  // whatever a model writes that is not a tool call from the table is no tool either
   pick = async () => ({ tool: 'post_to_chat', args: { message: 'x', also: 'this' } });
-  assert.deepEqual((await ask(m, 'hello')).body, { answer: 'I didn\'t catch a request.' });
+  assert.deepEqual((await ask(m, 'hello again')).body, { answer: 'Nothing about that yet.' });
+  assert.deepEqual(asked, ['hello, what about the budget', 'hello again']);
+  answer = async () => 'On Friday.';
 
   // no panel has announced that it can post to the chat
   pick = async () => ({ tool: 'post_to_chat', args: { message: 'Back in five.' } });
@@ -188,7 +195,8 @@ test('typed requests that are not a plain question: the answer is a sentence of 
   const all = await actions(m, m.owner);
   assert.equal(JSON.stringify(all.body).includes('Back in five'), false);
   assert.deepEqual(all.body.actions.map((action) => [action.tool, action.status, action.public]), [
-    ['summarize_so_far', 'done', false], ['post_to_chat', 'failed', true], ['share_notes', 'done', true],
+    ['summarize_so_far', 'done', false], ['answer_from_meeting', 'done', false], ['answer_from_meeting', 'done', false],
+    ['post_to_chat', 'failed', true], ['share_notes', 'done', true],
   ]);
 });
 
@@ -426,4 +434,28 @@ test('when the meeting ends nothing of the agent is left, and a model that answe
   assert.equal(ownerPanel.messages.filter((msg) => msg.type.startsWith('arlo.did') || msg.type === 'arlo.thinking').length,
     ownerPanel.messages.slice(0, told).filter((msg) => msg.type.startsWith('arlo.did') || msg.type === 'arlo.thinking').length);
   closeAll(ownerPanel);
+});
+
+test('a spoken request reaches a model only while an owner has a panel open in the meeting', async () => {
+  const m = await meetingWith('AG-VOICE-NOBODY==');
+  // nobody has Arlo open
+  await say(m.meetingId, 'Arlo, when do we ship?');
+  await h.wait(150);
+  assert.equal(chosen.length, 0);
+  // a participant and a guest have, and the notes are shared with them: still no owner to deliver or approve
+  assert.equal((await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: { shareNotes: true, whoCanAsk: 'anyone' } })).status, 200);
+  const [benPanel, guestPanel] = await Promise.all([panel(m.meetingId, m.participant), panel(m.meetingId, m.guest)]);
+  await say(m.meetingId, 'Arlo, when do we ship now?');
+  await h.wait(150);
+  assert.equal(chosen.length, 0);
+  assert.deepEqual((await actions(m, m.owner)).body.actions, []);
+  // a typed question does not need a panel on a socket
+  assert.equal((await ask(m, 'When do we ship?')).status, 200);
+  assert.equal(chosen.length, 1);
+  // an owner opens Arlo: heard
+  const ownerPanel = await panel(m.meetingId, m.owner);
+  await say(m.meetingId, 'Arlo, when do we really ship?');
+  await h.wait(150);
+  assert.equal(chosen.length, 2);
+  closeAll(benPanel, guestPanel, ownerPanel);
 });

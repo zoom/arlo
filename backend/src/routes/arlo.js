@@ -231,9 +231,10 @@ const BUSY_MESSAGE = 'Arlo is busy right now. Try again in a moment.';
  *     `action.status` is 'done' or 'failed'.
  *   - Something an owner has to approve first: `answer` says so and
  *     `action.status` is 'waiting_approval'; how it ends arrives as `arlo.did`.
- *   - Nothing Arlo can do: `answer` is "I didn't catch a request."
- * When the model that picks a tool cannot be asked, the question is answered
- * from the transcript as typed.
+ * When no tool fits what was typed, or the model that picks a tool cannot be
+ * asked, the text is answered from the transcript as typed: the Ask input
+ * always answers a question about the meeting. A typed request waits ahead of
+ * spoken ones in the meeting's queue.
  */
 router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, async (req, res) => {
   const meetingId = req.params.zoomMeetingId;
@@ -269,6 +270,7 @@ router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, a
     case 'waiting_approval':
       return res.json({ answer: REPLIES.waitingApproval, ...actionSummary(result.action) });
     case 'none':
+      // Not reached for text that passed the checks above; kept as the answer to nothing
       return res.json({ answer: REPLIES.none });
     case 'failed': {
       // The code only: an error message can quote the model or the transcript

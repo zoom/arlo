@@ -8,7 +8,6 @@
  * (services/agent/tools.js), shortened where the place is small. A model's own
  * words are never a label, a question or a button.
  */
-const SHEET_QUOTE_CHARS = 300;
 const SHEET_QUESTION_QUOTE_CHARS = 140;
 
 /** One line, cut to `max` characters with an ellipsis, never ending in half an emoji. */
@@ -44,7 +43,9 @@ const TOOL_TEXTS = Object.freeze({
   post_to_chat: Object.freeze({
     asked: () => 'Asked to post to chat',
     done: () => 'Posted to chat',
-    question: (args) => `Post “${short(args.message, SHEET_QUOTE_CHARS)}” to the meeting chat?`,
+    // The whole message, line breaks and all (at most 300 characters,
+    // services/agent/tools.js): what the owner approves is what is posted
+    question: (args) => `Post “${args.message}” to the meeting chat?`,
     primary: () => 'Post to chat',
     reply: () => 'Done: posted to chat.',
   }),

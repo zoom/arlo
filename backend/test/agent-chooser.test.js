@@ -107,8 +107,10 @@ test('a tool call is valid only with exactly the arguments in the table, inside 
   assert.deepEqual(validateToolCall('admit_from_waiting_room', { name: ' Priya ' }), { ok: true, args: { name: 'Priya' } });
   assert.deepEqual(validateToolCall('web_search', { query: 'weather' }, { webSearch: true }), { ok: true, args: { query: 'weather' } });
 
-  // the limits: 500, 1000, 100, 200
-  for (const [name, arg, max] of [['answer_from_meeting', 'question', 500], ['post_to_chat', 'message', 1000], ['admit_from_waiting_room', 'name', 100], ['web_search', 'query', 200]]) {
+  // the limits: 500, 300, 100, 200. A chat message is as long as the approval
+  // sheet can quote in full: what an owner approves is what is posted
+  assert.equal(listTools().find((tool) => tool.name === 'post_to_chat').parameters.properties.message.maxLength, 300);
+  for (const [name, arg, max] of [['answer_from_meeting', 'question', 500], ['post_to_chat', 'message', 300], ['admit_from_waiting_room', 'name', 100], ['web_search', 'query', 200]]) {
     assert.equal(validateToolCall(name, { [arg]: 'x'.repeat(max) }, { webSearch: true }).ok, true, `${name} at ${max}`);
     assert.deepEqual(validateToolCall(name, { [arg]: 'x'.repeat(max + 1) }, { webSearch: true }), { ok: false }, `${name} over ${max}`);
   }

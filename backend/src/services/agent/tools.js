@@ -48,7 +48,9 @@ const TABLE = deepFreeze([
   {
     name: 'post_to_chat',
     description: 'Post a short message, given by the asker, to the meeting chat. Use only when asked to post, write, send or tell something in the chat. Not for sharing the notes.',
-    parameters: parameters({ message: text('The message to post, as the asker gave it.', 1000) }),
+    // 300: the approval sheet quotes the whole message, so what an owner
+    // approves is what is posted
+    parameters: parameters({ message: text('The message to post, as the asker gave it. At most 300 characters.', 300) }),
     runs: 'panel',
     changesMeeting: true,
   },

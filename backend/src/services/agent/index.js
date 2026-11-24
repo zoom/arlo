@@ -28,7 +28,9 @@ function getAgentRuntime() {
     const { getMeetingStore } = require('../../storage');
     const { getArloPresence } = require('../arloPresence');
     const { getApprovals } = require('../approvals');
-    const { sendApprovalOpened, sendArloThinking, sendArloDid } = require('../websocket');
+    const {
+      sendApprovalOpened, sendArloThinking, sendArloDid, hasOwnerPanel,
+    } = require('../websocket');
     const { shareNotes } = require('../notesSharing');
     const openrouter = require('../openrouter');
     /* eslint-enable global-require */
@@ -46,6 +48,8 @@ function getAgentRuntime() {
       answer: ({ question, lines }) => openrouter.answerFromTranscript({ question, lines, model: config.notesModel }),
       shareNotes: (meetingId, userId) => typeof userId === 'string' && shareNotes(meetingId, userId, true) !== 'refused',
       isVerifiedOwnerSpeaker: createSpeakerMatch({ mode: config.agentSpeakerMatch, store }),
+      // A spoken request is looked at only while an owner's panel is open
+      hasOwnerPanel,
       send: { thinking: sendArloThinking, did: sendArloDid, approval: sendApprovalOpened },
     });
 

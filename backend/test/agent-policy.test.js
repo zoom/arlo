@@ -2,26 +2,29 @@
 // speaker is (or is not) taken to be an owner.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { decide, panelMayAsk } = require('../src/services/agent/policy');
+const { decide, panelMayAsk, voiceIsHeard } = require('../src/services/agent/policy');
 const { createSpeakerMatch, readSpeakerMatchMode, SPEAKER_MATCH_MODES } = require('../src/services/agent/speakerMatch');
 const { createMemoryMeetingStore } = require('../src/storage/memoryMeetingStore');
 
 // channel, asker, whoCanAsk, toolKind -> outcome. Every combination is here.
 // asker 'owner': typed by an owner in their panel, or spoken by a speaker
 // verified to be an owner. 'other': anyone else.
+// A typed request no tool fits is answered from the transcript as typed
+// ('answer'), for whoever may type at all. The spoken rows hold while an
+// owner has a panel open; without one every spoken row is 'silent' (below).
 const TABLE = [
   ['panel', 'owner', 'owner', 'read', 'run'],
   ['panel', 'owner', 'owner', 'change', 'run'],
-  ['panel', 'owner', 'owner', 'none', 'refuse'],
+  ['panel', 'owner', 'owner', 'none', 'answer'],
   ['panel', 'owner', 'anyone', 'read', 'run'],
   ['panel', 'owner', 'anyone', 'change', 'run'],
-  ['panel', 'owner', 'anyone', 'none', 'refuse'],
+  ['panel', 'owner', 'anyone', 'none', 'answer'],
   ['panel', 'other', 'owner', 'read', 'refuse'],
   ['panel', 'other', 'owner', 'change', 'refuse'],
   ['panel', 'other', 'owner', 'none', 'refuse'],
   ['panel', 'other', 'anyone', 'read', 'run'],
   ['panel', 'other', 'anyone', 'change', 'sheet'],
-  ['panel', 'other', 'anyone', 'none', 'refuse'],
+  ['panel', 'other', 'anyone', 'none', 'answer'],
   ['voice', 'owner', 'owner', 'read', 'run'],
   ['voice', 'owner', 'owner', 'change', 'run'],
   ['voice', 'owner', 'owner', 'none', 'silent'],
@@ -40,8 +43,22 @@ test('the policy, every combination', () => {
   assert.equal(TABLE.length, 2 * 2 * 2 * 3);
   assert.equal(new Set(TABLE.map((row) => row.slice(0, 4).join())).size, TABLE.length);
   for (const [channel, asker, whoCanAsk, toolKind, outcome] of TABLE) {
-    assert.equal(decide({ channel, asker, whoCanAsk, toolKind }), outcome, `${channel} ${asker} ${whoCanAsk} ${toolKind}`);
+    const facts = { channel, asker, whoCanAsk, toolKind };
+    const row = `${channel} ${asker} ${whoCanAsk} ${toolKind}`;
+    assert.equal(decide({ ...facts, ownerPanelOpen: true }), outcome, row);
+    // No owner has a panel open: nothing spoken is done, shown or asked about.
+    // A typed request does not depend on it.
+    for (const ownerPanelOpen of [false, undefined, null, 'true', 1]) {
+      assert.equal(decide({ ...facts, ownerPanelOpen }), channel === 'voice' ? 'silent' : outcome, `${row}, panel ${String(ownerPanelOpen)}`);
+    }
   }
+});
+
+test('a spoken request is heard only while an owner has a panel open', () => {
+  assert.equal(voiceIsHeard({ ownerPanelOpen: true }), true);
+  for (const ownerPanelOpen of [false, undefined, null, 'true', 1, {}]) assert.equal(voiceIsHeard({ ownerPanelOpen }), false);
+  assert.equal(voiceIsHeard(), false);
+  assert.equal(voiceIsHeard(null), false);
 });
 
 test('anything the policy does not know is refused (typed) or silent (spoken), never run', () => {
@@ -52,10 +69,12 @@ test('anything the policy does not know is refused (typed) or silent (spoken), n
   ]) {
     assert.equal(decide({ ...good, ...bad }), 'refuse', JSON.stringify(bad));
   }
-  assert.equal(decide({ ...good, channel: 'voice', asker: 'verified' }), 'silent');
-  assert.equal(decide({ ...good, channel: 'voice', toolKind: 'anything' }), 'silent');
+  assert.equal(decide({ ...good, channel: 'voice', asker: 'verified', ownerPanelOpen: true }), 'silent');
+  assert.equal(decide({ ...good, channel: 'voice', toolKind: 'anything', ownerPanelOpen: true }), 'silent');
   // an unknown setting is the stricter one
-  assert.equal(decide({ channel: 'voice', asker: 'other', whoCanAsk: 'everyone', toolKind: 'read' }), 'sheet');
+  assert.equal(decide({ channel: 'voice', asker: 'other', whoCanAsk: 'everyone', toolKind: 'read', ownerPanelOpen: true }), 'sheet');
+  // a typed request with a tool kind that is not known is not answered from the transcript either
+  assert.equal(decide({ ...good, toolKind: undefined }), 'refuse');
   assert.equal(decide(), 'refuse');
   assert.equal(decide(null), 'refuse');
 });

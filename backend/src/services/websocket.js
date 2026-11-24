@@ -648,6 +648,23 @@ function hasNotesReaderPanel(meetingId, ownerUserIds) {
 }
 
 /**
+ * Whether one of these people (the meeting's owners) has a panel open in the
+ * meeting: signed in, and verified to be in it. The owner half of the check
+ * above, without the sharing half: a participant who reads shared notes
+ * cannot approve or do anything for Arlo. The agent asks before it sends a
+ * spoken request to a model (services/agent/agent.js).
+ */
+function hasOwnerPanel(meetingId, ownerUserIds) {
+  const owners = userIdSet(ownerUserIds);
+  const clients = connections.get(meetingId);
+  if (!clients || owners.size === 0) return false;
+  for (const ws of clients) {
+    if (ws.readyState === WebSocket.OPEN && isOwnerPanel(ws, meetingId, owners)) return true;
+  }
+  return false;
+}
+
+/**
  * A panel connected or subscribed: if it may see the notes (an owner's, or
  * anyone's while they are shared) and lines are waiting to be written up, the
  * notes engine takes it from here. The engine decides; this only wakes it.
@@ -889,6 +906,7 @@ module.exports = {
   sendArloDid,
   handsPanels,
   hasNotesReaderPanel,
+  hasOwnerPanel,
   currentStreamStatus,
   broadcastRtmsRequestStatus,
   disconnectUser,

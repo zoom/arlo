@@ -50,6 +50,9 @@ function setup(options = {}) {
     hands: async () => ({ ok: true }),
     share: () => true,
     verified: () => false,
+    // An owner has a panel open in the meeting, unless a test says otherwise
+    panelOpen: () => true,
+    panelAsked: [],
     chosen: [],
     answered: [],
     handed: [],
@@ -75,6 +78,7 @@ function setup(options = {}) {
     answer: (input) => { t.answered.push(input); return t.answer(input); },
     shareNotes: (meetingId, userId) => { t.shared.push([meetingId, userId]); return t.share(); },
     isVerifiedOwnerSpeaker: (meetingId, speaker) => t.verified(meetingId, speaker),
+    hasOwnerPanel: (meetingId, ownerUserIds) => { t.panelAsked.push([meetingId, ownerUserIds]); return t.panelOpen(); },
     send: {
       thinking: (meetingId, userIds, on) => t.thinking.push([meetingId, userIds, on]),
       did: (meetingId, action, audience) => t.did.push({ meetingId, action, audience }),
@@ -329,14 +333,187 @@ test('spoken by a speaker verified to be an owner: runs at once', async () => {
   assert.equal((await s.said('admit James again', ANA_SPEAKING)).status, 'waiting_approval');
 });
 
-test('no tool fits: a typed request is told so, a spoken one is silent', async () => {
+test('no tool fits: a typed request is answered from the transcript as typed, a spoken one is silent', async () => {
   const s = setup();
   s.picks('none');
-  assert.deepEqual(await s.typed('hello there'), { status: 'none' });
+  const res = await s.typed('  hello there, anything about Friday?  ');
+  assert.equal(res.status, 'answered');
+  assert.equal(res.tool, 'answer_from_meeting');
+  assert.equal(res.answer, 'On Friday.');
+  // the text as typed, not something a model made of it
+  assert.deepEqual(s.t.answered, [{ question: 'hello there, anything about Friday?', lines: ['Ana: We ship on Friday.', 'Ben: I will write the release notes.'] }]);
+  // recorded like any question: private, the asker's
+  assert.deepEqual(
+    { ...res.action, id: null, at: null },
+    { id: null, at: null, tool: 'answer_from_meeting', label: 'Answered a question', askedBy: 'Ana Ruiz', channel: 'panel', status: 'done', public: false },
+  );
+  assert.deepEqual(s.t.did.at(-1).audience, { everyone: false, userIds: ['user-ana'] });
+
   assert.deepEqual(await s.said('is taking notes'), { status: 'none' });
-  assert.deepEqual([s.store.listActions(M).length, s.t.handed.length, s.t.did.length, s.t.approval.length], [0, 0, 0, 0]);
+  assert.deepEqual([s.store.listActions(M).length, s.t.handed.length, s.t.did.length, s.t.approval.length, s.t.answered.length], [1, 0, 1, 0, 1]);
   assert.equal(s.t.thinking.length, 4);
   assert.equal(s.t.thinking.at(-1)[2], false);
+
+  // someone who is not an owner, where anyone may ask: the same
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  const bens = await s.typed('what will Ben write?', BEN);
+  assert.equal(bens.status, 'answered');
+  assert.equal(s.t.answered.at(-1).question, 'what will Ben write?');
+  // and where only owners may ask, still refused before any model
+  s.store.setMeta(M, { whoCanAsk: 'owner' });
+  const calls = s.t.chosen.length;
+  assert.deepEqual(await s.typed('what will Ben write?', BEN), { status: 'refused', reason: 'not_allowed' });
+  assert.equal(s.t.chosen.length, calls);
+
+  // when that answer fails, it fails as a question does
+  s.t.answer = async () => { throw Object.assign(new Error('x'), { code: 'rate_limited' }); };
+  const failed = await s.typed('and again?');
+  assert.deepEqual([failed.status, failed.tool, failed.code], ['failed', 'answer_from_meeting', 'model_rate_limited']);
+});
+
+test('a spoken request while no owner has a panel open is dropped before any model call, and recorded as nothing', async () => {
+  const s = setup();
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  s.t.panelOpen = () => false;
+  for (const speaker of [BEN_SPEAKING, ANA_SPEAKING]) {
+    assert.deepEqual(await s.said('when do we ship?', speaker), { status: 'none' });
+  }
+  // asked about this meeting's owners
+  assert.deepEqual(s.t.panelAsked.at(-1), [M, ['user-ana']]);
+  assert.deepEqual(
+    [s.t.chosen.length, s.t.answered.length, s.t.handed.length, s.t.thinking.length, s.t.did.length, s.t.approval.length, s.store.listActions(M).length],
+    [0, 0, 0, 0, 0, 0, 0],
+  );
+  // nothing is held for the meeting, and it does not count against the limit
+  assert.equal(s.agent.holds(M), false);
+  for (let i = 0; i < 40; i += 1) await s.said(`again ${i}`);
+  assert.equal(s.t.chosen.length, 0);
+
+  // a typed request does not depend on it
+  const typed = await s.typed('When do we ship?');
+  assert.equal(typed.status, 'answered');
+  assert.equal(s.t.chosen.length, 1);
+
+  // a check that fails, or says anything but yes, is "no panel"
+  for (const check of [() => { throw new Error('down'); }, () => 'yes', () => undefined, () => 1]) {
+    s.t.panelOpen = check;
+    assert.deepEqual(await s.said('when do we ship?'), { status: 'none' });
+  }
+  assert.equal(s.t.chosen.length, 1);
+
+  // the panel is back: heard again
+  s.t.panelOpen = () => true;
+  assert.equal((await s.said('when do we ship?')).status, 'answered');
+  assert.equal(s.t.chosen.length, 2);
+});
+
+test('the owner\'s panel closes while the model picks: the spoken request ends silently', async () => {
+  const s = setup();
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  const gate = deferred();
+  s.t.choose = () => gate.promise;
+  const asked = s.said('share the notes');
+  await turn();
+  s.t.panelOpen = () => false;
+  gate.resolve({ tool: 'share_notes', args: {} });
+  assert.deepEqual(await asked, { status: 'none' });
+  assert.deepEqual([s.store.listActions(M).length, s.t.approval.length, s.t.handed.length, s.t.shared.length], [0, 0, 0, 0]);
+  assert.equal(s.t.thinking.at(-1)[2], false);
+});
+
+test('without the check, nothing spoken is heard', async () => {
+  const store = createMemoryMeetingStore();
+  store.appendSegment(M, { text: 'We ship on Friday.' });
+  let asked = 0;
+  const agent = createAgent({
+    store,
+    presence: { ownerUserIds: () => ['user-ana'], isOwner: (meetingId, userId) => userId === 'user-ana' },
+    approvals: createApprovals(),
+    hands: { run: async () => ({ ok: true }) },
+    choose: async () => { asked += 1; return { tool: 'answer_from_meeting', args: { question: 'q' } }; },
+    answer: async () => 'On Friday.',
+    log: { log() {}, warn() {} },
+  });
+  assert.deepEqual(await agent.handle(M, { text: 'when do we ship?', channel: 'voice', askedBy: BEN_SPEAKING }), { status: 'none' });
+  assert.equal(asked, 0);
+  assert.equal((await agent.handle(M, { text: 'when do we ship?', channel: 'panel', askedBy: ANA })).status, 'answered');
+});
+
+test('the sheet for a chat message shows the whole message, and that is what is posted', async () => {
+  const s = setup();
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  const message = `Line one\n${'m'.repeat(291)}`;
+  assert.equal(message.length, 300);
+  s.picks('post_to_chat', { message });
+  const res = await s.typed('post that to the chat', BEN);
+  assert.equal(res.status, 'waiting_approval');
+  const { data } = s.t.approval[0];
+  assert.equal(data.question, `Post “${message}” to the meeting chat?`);
+  s.approvals.answer(M, data.id, { byUserId: 'user-ana', approve: true, done: true });
+  await s.agent.whenIdle(M);
+  assert.deepEqual(s.t.handed, [{ meetingId: M, tool: 'post_to_chat', args: { message } }]);
+  // one character more is not a tool call: nothing is posted or asked
+  s.picks('post_to_chat', { message: `${message}!` });
+  const before = s.t.approval.length;
+  await s.said('post that to the chat');
+  assert.equal(s.t.approval.length, before);
+  assert.equal(s.t.handed.length, 1);
+});
+
+test('a typed request goes ahead of waiting spoken ones, never ahead of the one being handled or of an earlier typed one', async () => {
+  const s = setup({ agent: { queueLimit: 5 } });
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  const gates = [];
+  s.t.choose = () => { const gate = deferred(); gates.push(gate); return gate.promise; };
+  const asks = {
+    v1: s.said('spoken one'), // being handled
+    v2: s.said('spoken two'),
+    v3: s.said('spoken three'),
+    t1: s.typed('typed one'),
+    t2: s.typed('typed two', BEN),
+    v4: s.said('spoken four'),
+  };
+  await turn();
+  assert.equal(gates.length, 1);
+  assert.deepEqual(s.t.chosen.map((one) => one.request), ['spoken one']);
+  // the limit is the same for everyone: one handled, five waiting
+  assert.deepEqual(await s.typed('typed three'), { status: 'refused', reason: 'busy' });
+
+  for (let i = 0; i < 6; i += 1) {
+    gates[i].resolve({ tool: 'none' });
+    await turn();
+    await turn();
+  }
+  await Promise.all(Object.values(asks));
+  assert.deepEqual(
+    s.t.chosen.map((one) => one.request),
+    ['spoken one', 'typed one', 'typed two', 'spoken two', 'spoken three', 'spoken four'],
+  );
+  assert.equal((await asks.t1).status, 'answered');
+});
+
+test('a run an owner approved takes its turn behind typed requests that wait', async () => {
+  const s = setup({ agent: { queueLimit: 5 } });
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  s.picks('share_notes');
+  assert.equal((await s.said('share the notes')).status, 'waiting_approval');
+  const gates = [];
+  s.t.choose = () => { const gate = deferred(); gates.push(gate); return gate.promise; };
+  const running = s.typed('typed one');
+  await turn();
+  s.approvals.answer(M, s.t.approval[0].data.id, { byUserId: 'user-ana', approve: true, done: true });
+  const waiting = s.typed('typed two');
+  await turn();
+  gates[0].resolve({ tool: 'none' });
+  await running;
+  await turn();
+  // the typed one that came after the approval is picked for before the approved run shares the notes
+  assert.equal(gates.length, 2);
+  assert.deepEqual(s.t.shared, []);
+  gates[1].resolve({ tool: 'none' });
+  await waiting;
+  await s.agent.whenIdle(M);
+  assert.deepEqual(s.t.shared, [[M, 'user-ana']]);
 });
 
 test('what a model picks is checked against the tool table: anything else is no tool', async () => {
@@ -346,7 +523,7 @@ test('what a model picks is checked against the tool table: anything else is no 
     { tool: 'delete_everything', args: {} },
     { tool: 'post_to_chat', args: { message: 'x', to: 'everyone' } },
     { tool: 'post_to_chat', args: {} },
-    { tool: 'post_to_chat', args: { message: 'm'.repeat(1001) } },
+    { tool: 'post_to_chat', args: { message: 'm'.repeat(301) } },
     { tool: 'admit_from_waiting_room', args: { name: 'A‮B' } },
     { tool: 'admit_from_waiting_room', args: { name: ['James'] } },
     { tool: 'answer_from_meeting', args: { question: 'q'.repeat(501) } },
@@ -358,11 +535,16 @@ test('what a model picks is checked against the tool table: anything else is no 
   ];
   for (const pick of picks) {
     s.t.choose = async () => pick;
-    assert.deepEqual(await s.typed('do something'), { status: 'none' }, JSON.stringify(pick));
+    // typed: no tool, so the text is answered as a question about the meeting, as typed
+    const typed = await s.typed('do something');
+    assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting'], JSON.stringify(pick));
+    assert.equal(s.t.answered.at(-1).question, 'do something');
     assert.deepEqual(await s.said('do something'), { status: 'none' }, JSON.stringify(pick));
     s.advance(60 * 1000);
   }
-  assert.deepEqual([s.store.listActions(M).length, s.t.handed.length, s.t.answered.length, s.t.approval.length], [0, 0, 0, 0]);
+  // nothing but those answers: nothing done in the meeting, nothing asked of the owners
+  assert.deepEqual([s.t.handed.length, s.t.answered.length, s.t.approval.length], [0, picks.length, 0]);
+  assert.deepEqual([...new Set(s.store.listActions(M).map((action) => `${action.tool} ${action.channel} ${action.public}`))], ['answer_from_meeting panel false']);
 });
 
 test('transcript text cannot get a tool run: a fooled model still only gets the sheet', async () => {
@@ -467,24 +649,26 @@ test('one request at a time, three waiting, the rest are turned away', async () 
 
   for (let i = 0; i < 4; i += 1) {
     gates[i].resolve({ tool: 'none' });
-    await asks[i];
+    await turn();
     await turn();
   }
-  assert.deepEqual(s.t.chosen.map((one) => one.request), ['one', 'two', 'three', 'four']);
+  await Promise.all(asks);
+  // the typed "four" went ahead of the spoken "three" that was waiting
+  assert.deepEqual(s.t.chosen.map((one) => one.request), ['one', 'two', 'four', 'three']);
   // room again
   s.t.choose = async () => ({ tool: 'none' });
-  assert.deepEqual(await s.typed('eight'), { status: 'none' });
+  assert.equal((await s.typed('eight')).status, 'answered');
 });
 
 test('at most 30 requests per meeting in ten minutes', async () => {
   const s = setup();
   s.picks('none');
-  for (let i = 0; i < 30; i += 1) assert.deepEqual(await s.typed(`ask ${i}`), { status: 'none' });
+  for (let i = 0; i < 30; i += 1) assert.equal((await s.typed(`ask ${i}`)).status, 'answered');
   assert.deepEqual(await s.typed('one more'), { status: 'refused', reason: 'rate_limited' });
   assert.deepEqual(await s.said('one more'), { status: 'refused', reason: 'rate_limited' });
   assert.equal(s.t.chosen.length, 30);
   s.advance(10 * 60 * 1000 + 1);
-  assert.deepEqual(await s.typed('later'), { status: 'none' });
+  assert.equal((await s.typed('later')).status, 'answered');
 });
 
 test('refused before anything else: no owner, a meeting not held, a request that is not one', async () => {

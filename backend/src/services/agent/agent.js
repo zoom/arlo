@@ -7,13 +7,21 @@
  *      requests here, more than `rateLimit` requests in `rateWindowMs`, or the
  *      queue is full. One request is handled at a time per meeting and
  *      `queueLimit` wait; a spoken request that is turned away gets one line
- *      in the chat ("I am busy"), not one per request.
+ *      in the chat ("I am busy"), not one per request. A typed request waits
+ *      ahead of the spoken ones that wait (someone sits at a panel for it),
+ *      behind typed ones that came earlier, and never interrupts the request
+ *      being handled.
+ *      A spoken request while no owner has a panel open in the meeting
+ *      (`hasOwnerPanel`) is dropped here, before any model is asked and
+ *      without a record: nothing it leads to could be delivered or approved.
  *   2. A model picks one tool for the request (`choose`). What it answers is
  *      untrusted: the pick goes through validateToolCall() (the tool table,
  *      services/agent/tools.js), and anything that does not pass is "no tool".
- *      When the model cannot be asked: a typed request is treated as a
- *      question about the meeting, as typed; a spoken one is dropped and
- *      recorded for the owners as "Could not understand a request".
+ *      For a typed request, "no tool" (the model said none, picked something
+ *      invalid, or could not be asked) means a question about the meeting:
+ *      it is answered from the transcript with the text as typed. A spoken
+ *      request no tool fits is silent; one the model could not be asked about
+ *      is dropped and recorded for the owners as "Could not understand a request".
  *   3. The policy (services/agent/policy.js) says what happens: run, ask the
  *      owners, refuse, or stay silent. The model has no say in it.
  *   4. Asking the owners: the action is recorded as `waiting_approval`, an
@@ -37,7 +45,7 @@
  *
  * handle() never rejects. It resolves to one of:
  *   { status: 'refused', reason }  'invalid' | 'no_owner' | 'not_allowed' | 'busy' | 'rate_limited' | 'gone'
- *   { status: 'none' }             no tool fits (also: a spoken non-request)
+ *   { status: 'none' }             a spoken request no tool fits, or one nobody's panel could show
  *   { status: 'answered', tool, answer, action }
  *   { status: 'done', tool, reply, action }       `reply`: a sentence for the asker's panel
  *   { status: 'waiting_approval', tool, action }
@@ -59,7 +67,7 @@
 const { newestLines } = require('../../lib/transcriptLines');
 const { cleanName } = require('../../lib/displayName');
 const { getTool, validateToolCall, NO_TOOL_NAME } = require('./tools');
-const { decide, panelMayAsk } = require('./policy');
+const { decide, panelMayAsk, voiceIsHeard } = require('./policy');
 const { approvalMessageData } = require('../approvals');
 const {
   TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT, CHAT_PREFIX,
@@ -138,6 +146,9 @@ function createAgent({
   shareNotes = () => false,
   // (meetingId, { speakerId, speakerLabel }) -> boolean; see services/agent/speakerMatch.js
   isVerifiedOwnerSpeaker = () => false,
+  // (meetingId, ownerUserIds) -> whether one of these owners has a panel open
+  // in the meeting right now. Without it nothing spoken is heard.
+  hasOwnerPanel = () => false,
   // What the panels are told. `thinking(meetingId, userIds, on)`,
   // `did(meetingId, action, { everyone, userIds })`, `approval(meetingId, userIds, data)`
   send = {},
@@ -175,6 +186,15 @@ function createAgent({
       return Array.isArray(ids) ? ids.filter(isId) : [];
     } catch {
       return [];
+    }
+  }
+
+  /** Whether an owner has a panel open in the meeting right now. A check that fails says no. */
+  function ownerPanelOpen(meetingId) {
+    try {
+      return hasOwnerPanel(meetingId, ownersOf(meetingId)) === true;
+    } catch {
+      return false;
     }
   }
 
@@ -244,8 +264,16 @@ function createAgent({
     }
   }
 
-  const enqueue = (meetingId, state, job) => new Promise((resolve) => {
-    state.queue.push({ job, resolve });
+  /**
+   * A turn in the meeting's queue. `first`: ahead of everything waiting that
+   * is not `first` itself (a typed request ahead of spoken ones), in order of
+   * arrival among its own. What is being handled is never interrupted.
+   */
+  const enqueue = (meetingId, state, job, { first = false } = {}) => new Promise((resolve) => {
+    const item = { job, resolve, first: first === true };
+    const behind = item.first ? state.queue.findIndex((waiting) => !waiting.first) : -1;
+    if (behind === -1) state.queue.push(item);
+    else state.queue.splice(behind, 0, item);
     pump(meetingId, state);
   });
 
@@ -470,6 +498,9 @@ function createAgent({
       log.warn(`Arlo agent: no tool could be picked (${code}) (${req.channel})`);
     }
     if (!alive()) return GONE;
+    // The owner's panel closed while the model was asked: nobody could see what follows
+    const heard = req.channel === 'voice' ? ownerPanelOpen(meetingId) : null;
+    if (req.channel === 'voice' && !voiceIsHeard({ ownerPanelOpen: heard })) return { status: 'none' };
 
     let tool = null;
     let args = null;
@@ -484,9 +515,7 @@ function createAgent({
           status: 'failed', tool: NO_TOOL_NAME, code: 'chooser', action: stored,
         };
       }
-      // Typed: the Ask input keeps answering questions about the meeting
-      tool = getTool('answer_from_meeting', toolOptions);
-      args = { question: req.text };
+      // Typed: no tool, which the policy answers as a question about the meeting
     } else if (isPlainObject(picked)) {
       const call = validateToolCall(picked.tool, picked.args, toolOptions);
       if (call.ok) {
@@ -497,9 +526,16 @@ function createAgent({
 
     const toolKind = tool === null ? 'none' : (tool.changesMeeting ? 'change' : 'read');
     const asker = askerOf(meetingId, req);
-    const outcome = decide({
-      channel: req.channel, asker, whoCanAsk: store.getMeta(meetingId).whoCanAsk, toolKind,
+    let outcome = decide({
+      channel: req.channel, asker, whoCanAsk: store.getMeta(meetingId).whoCanAsk, toolKind, ownerPanelOpen: heard === true,
     });
+    if (outcome === 'answer') {
+      // The Ask input keeps answering questions about the meeting: the text
+      // as typed, the asker's own words, not something a model made of them
+      tool = getTool('answer_from_meeting', toolOptions);
+      args = { question: req.text };
+      outcome = tool === null ? 'refuse' : 'run';
+    }
     if (outcome === 'silent') return { status: 'none' };
     if (outcome === 'refuse') return tool === null ? { status: 'none' } : refused('not_allowed');
 
@@ -533,6 +569,8 @@ function createAgent({
       const req = readRequest(request);
       if (!isId(meetingId) || req === null) return refused('invalid');
       if (!store.has(meetingId) || ownersOf(meetingId).length === 0) return refused('no_owner');
+      // Spoken while no owner has Arlo open: dropped before any model call, recorded as nothing
+      if (req.channel === 'voice' && !voiceIsHeard({ ownerPanelOpen: ownerPanelOpen(meetingId) })) return { status: 'none' };
       if (req.channel === 'panel'
           && !panelMayAsk({ asker: askerOf(meetingId, req), whoCanAsk: store.getMeta(meetingId).whoCanAsk })) {
         return refused('not_allowed');
@@ -543,7 +581,10 @@ function createAgent({
       if (state.recent.length >= rateLimit) return turnAway(meetingId, state, req, 'rate_limited');
       if (state.busy && state.queue.length >= queueLimit) return turnAway(meetingId, state, req, 'busy');
       state.recent.push(at);
-      return await enqueue(meetingId, state, () => thinkingWhile(meetingId, state, () => work(meetingId, state, req)));
+      // Someone waits at a panel for a typed request: it goes ahead of the spoken ones
+      return await enqueue(
+        meetingId, state, () => thinkingWhile(meetingId, state, () => work(meetingId, state, req)), { first: req.channel === 'panel' },
+      );
     } catch {
       return { status: 'failed', code: 'error', action: null };
     }
