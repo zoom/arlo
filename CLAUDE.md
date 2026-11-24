@@ -116,8 +116,8 @@ The notes, the "who can ask" setting, what is known about the meeting's streams 
 | Bring Arlo in | Signed-in host or co-host, Arlo not in the meeting | "Who can ask Arlo" (only I / anyone) and one button. Nothing is requested before the click |
 | Ask the host | Other signed-in users, Arlo not in the meeting | One button that asks the host through Zoom |
 | Waiting | Whoever clicked, while Arlo is not in the meeting yet | "Waiting for the host to allow Arlo…" or "Bringing Arlo in…" |
-| Live notes | An owner, while Arlo is or was in the meeting | Status line with Pause / Resume / Remove Arlo / Bring Arlo back, the notes, Ask Arlo, link to the meeting record, and next to it "Post notes to chat" (posts the notes to the Zoom meeting chat for everyone after an inline "Post" / "Cancel" confirm; at most 4000 characters, `notesToChatMessage` in `lib/notesText.js`; only with notes and when the client has `sendMessageToChat`). Pause, Resume and Remove only while the owner's own stream is live (`myStreamLive`); when it has stopped and Arlo is still here through another person's stream: "Arlo is in the meeting", "Your own Arlo has stopped. Notes continue from another person's." and the one action "Bring Arlo back" |
-| Participant | Everyone else, guests included | Who brought Arlo in, the meeting record link, Ask Arlo when the owner chose "anyone" (signed-in users only), otherwise "Only people using Arlo can ask in this meeting." Never the notes, and no controls. When the deployment sets `ALLOW_OWN_ARLO_STREAM=true` (off by default, see the known gap below), a signed-in participant has one secondary action, "Use Arlo yourself": it starts a stream of their own on the click (`startRTMS`), shows the wait or the reason it failed in place of the button, and the notes screen follows when the server says they are an owner. A guest gets "Sign in to ask Arlo" instead |
+| Live notes | An owner, while Arlo is or was in the meeting | Status line with Pause / Resume / Remove Arlo / Bring Arlo back, the notes, Ask Arlo, link to the meeting record, and next to it "Post notes to chat" (posts the notes to the Zoom meeting chat for everyone after an inline "Post" / "Cancel" confirm; at most 4000 characters, `notesToChatMessage` in `lib/notesText.js`; only with notes and when the client has `sendMessageToChat`). Pause, Resume and Remove only while the owner's own stream is live (`myStreamLive`); when it has stopped and Arlo is still here through another person's stream: "Arlo is in the meeting", "Your own Arlo has stopped. Notes continue from another person's." and the one action "Bring Arlo back". When a participant asks for the notes, a sheet rises over the notes (`ApprovalSheet`, the notes dimmed and inert behind it): "Share the notes in the meeting chat?", who asked, "Share notes" and "Not now", with a countdown. "Share notes" posts the notes to the chat from this panel (same code as "Post notes to chat", `lib/postNotes.js`) and reports whether it worked; Escape is "Not now"; it disappears when another owner answered or it ran out. Never answered without the click |
+| Participant | Everyone else, guests included | Who brought Arlo in, the meeting record link, Ask Arlo when the owner chose "anyone" (signed-in users only), otherwise "Only people using Arlo can ask in this meeting." Never the notes, and no controls. A signed-in participant has one quiet action while Arlo is here, "Ask <owner> for the notes" ("Ask for the notes" without a name): it asks the owners to share the notes in the meeting chat, and a status line then says where the request is (asked, shared, declined, no answer, could not be posted); the button returns two minutes after an outcome. It does not depend on `ALLOW_OWN_ARLO_STREAM` and shows above "Use Arlo yourself" when both show. When the deployment sets `ALLOW_OWN_ARLO_STREAM=true` (off by default, see the known gap below), a signed-in participant has one secondary action, "Use Arlo yourself": it starts a stream of their own on the click (`startRTMS`), shows the wait or the reason it failed in place of the button, and the notes screen follows when the server says they are an owner. A guest gets "Sign in to ask Arlo" instead |
 | After the meeting | An owner with notes | The notes, "Copy notes", the demo-mode line |
 | Meeting record | Everyone in the meeting (`/meeting/:id/record`, `/guest-meeting/:id/record`) | Transcript and timeline in time order; a toggle for "Only Arlo's actions" |
 
@@ -195,7 +195,8 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `services/meetingStreams.js` — The streams of each meeting, which one the transcript is taken from, and who ran one
 - `services/arloPresence.js` — Who brought Arlo in (the owners), the "who can ask" setting, and what each panel is told
 - `services/notesEngine.js` — When the live notes are written again, and validation of the model's answer
-- `routes/arlo.js` — Arlo's routes for one meeting (state, settings, notes, ask)
+- `services/approvals.js` — Requests that an owner answers in their panel (one kind today, `share_notes`: a participant asks for the notes). In memory per meeting, each open for `APPROVAL_EXPIRY_MS` (default one minute), at most 20 open per meeting, one per person every 2 minutes; flushed with the meeting (the lifecycle's `onForget`). Never logs a name or a user id
+- `routes/arlo.js` — Arlo's routes for one meeting (state, settings, notes, ask, notes-request, approvals)
 - `routes/` — auth, meetings, arlo, ai, home, rtms, search, highlights, zoom-meetings, preferences, tokens
 - `services/` — auth (token/PKCE/encryption), openrouter (LLM), websocket (broadcast)
 - `middleware/auth.js` — `requireAuth` and `optionalAuth` session middleware
@@ -204,9 +205,9 @@ Implemented in `useZoomAuth` hook (`frontend/src/hooks/useZoomAuth.js`) — sing
 - `App.jsx` — HashRouter, route definitions, provider hierarchy: Theme → ZoomSdk → Auth → Meeting → Arlo → Toast
 - `index.css` — Design tokens, typography (Source Serif 4 + Inter), light/dark theme variables
 - `views/` — ArloMeetingView (the in-meeting screens), MeetingRecordView, InMeetingView (the classic dashboard), Auth, Home, Settings, and the views that need stored meetings (MeetingsList, MeetingDetail, SearchResults, Upcoming)
-- `components/arlo/` — The Arlo screens' parts: BringArloIn, AskHost, LiveNotes, NotesDocument, StatusLine, AskArlo, PostNotesToChat, ParticipantView, AfterMeeting
-- `lib/arloScreen.js` — Which screen to show, and who may control Arlo (owners only). `lib/notesText.js` — notes as plain text. `lib/copyText.js` — copy with a fallback for webviews without the clipboard API
-- `contexts/` — AuthContext (session), ZoomSdkContext (SDK init), MeetingContext (active meeting + WS, `meetingEnded`), ArloContext (Arlo's state, notes, ask, settings), ServerSettingsContext (demo mode flags)
+- `components/arlo/` — The Arlo screens' parts: BringArloIn, AskHost, LiveNotes, NotesDocument, StatusLine, AskArlo, PostNotesToChat, ApprovalSheet, ParticipantView, AfterMeeting
+- `lib/arloScreen.js` — Which screen to show, and who may control Arlo (owners only). `lib/notesText.js` — notes as plain text. `lib/postNotes.js` — the one place the notes are posted to the meeting chat. `lib/approvalKinds.js` — per kind of approval, the sheet's texts and what agreeing does (a kind that is not listed is not shown and is left to expire). `lib/copyText.js` — copy with a fallback for webviews without the clipboard API
+- `contexts/` — AuthContext (session), ZoomSdkContext (SDK init), MeetingContext (active meeting + WS, `meetingEnded`), ArloContext (Arlo's state, notes, ask, settings, the owner's `approvals` queue and a participant's `notesRequest`), ServerSettingsContext (demo mode flags)
 - `hooks/useZoomAuth.js` — In-client OAuth PKCE flow hook
 - `lib/dynamicIndicator.js` + `hooks/useDynamicIndicator.js` — Zoom's Dynamic Indicator (status text in Zoom's meeting window, seen by everyone). Basic version: text only, set by the panel that started the stream, only for confirmed state: "Arlo is transcribing" while transcription is confirmed (`rtmsPhase === 'active'`), "Arlo is paused" while that user's own stream is paused (this panel's phase is `paused`, or the server's `arlo.state` says `myStreamPaused`, which also covers a pause made with Zoom's own controls); "Arlo is thinking…" while a voice command runs; removed when the stream stops or reconnects. Silent when the client or the Marketplace config lacks `setDynamicIndicator` / `removeDynamicIndicator`
 - `components/AppShell.jsx` — Persistent header + `<Outlet />`
@@ -267,6 +268,10 @@ All under `/api/meetings/by-zoom-id/:zoomMeetingId/arlo`. Every route needs the 
 - `PUT /settings` — `{ whoCanAsk: 'owner' | 'anyone' }`, owners only. Every panel of the meeting is told over its socket
 - `GET /notes` — `{ notes: { summary, decisions, actionItems, updatedAt, throughSeqNo } | null }`, owners only
 - `POST /ask` — `{ question }` (1 to 500 characters) → `{ answer }`, from the stored transcript, private to the asker. For an owner, and for other signed-in people in the meeting when the setting is `anyone`. Shares the AI rate limit. Takes no transcript and no model from the client; questions and answers are not stored or logged
+- `POST /notes-request` — body `{}` → `{ id, expiresAt }`. A signed-in participant asks the owners to share the notes. 400 for an owner (they have the notes), 409 `{ error: 'no_owner' }` when nobody brought Arlo in, 409 `{ error: 'arlo_absent' }` when Arlo is not in the meeting right now, 429 when this person asked in the last 2 minutes or has a request open. Opens an approval (`services/approvals.js`) and tells the owners' panels. The server never posts to the chat and never sends notes to the asker; the asker's name is never logged
+- `POST /approvals/:approvalId` — owners only (403), id a UUID. `{ approve: false }` → declined; `{ approve: true, done: true }` → approved (the owner's panel posted the notes); `{ approve: true, done: false }` → failed (the post did not work). → `{ id, outcome }`. The first answer wins; 404 when unknown, closed, expired, or the meeting's data is gone
+- `GET /approvals` — owners only: `{ approvals: [{ meetingId, id, kind, askedBy, expiresAt }] }`, oldest first, so a panel that reloads still shows a pending sheet
+- The three routes above take JSON only (415 otherwise) and exactly the fields listed (400 otherwise)
 - `GET /api/meetings/by-zoom-id/:id/transcript` and `/participant-events` — what the server holds so far (catch-up and the meeting record)
 
 ### Meetings (Demo Mode - Returns empty/disabled responses)
@@ -299,12 +304,15 @@ Server → Client: { type: 'ai.suggestion', data: { meetingId, suggestion: {...}
 Server → Client: { type: 'meeting.status', data: { meetingId, status: '...', fault?: true, meetingEnded?: true } }
 Server → Client: { type: 'arlo.state', data: { meetingId, present, paused, myStreamPaused?, myStreamLive?, role, ownerName, whoCanAsk } }
 Server → Client: { type: 'notes.updated', data: { meetingId, notes } }
+Server → Client: { type: 'arlo.approval', data: { meetingId, id, kind: 'share_notes', askedBy: name | null, expiresAt } }
+Server → Client: { type: 'arlo.approval.closed', data: { meetingId, id, outcome: 'approved' | 'declined' | 'failed' | 'expired' } }
 Server → Client: { type: 'participant.event', data: { meetingId, event: {...} } }
 ```
 
 - `meetingEnded: true` on a stop means the meeting is over and its data is deleted now. The panel keeps the notes it already has (the "after the meeting" screen).
 - `arlo.state` differs per person (`role`, `myStreamPaused`, `myStreamLive`). `paused` is the meeting-level value: true only when every live stream is paused. `myStreamPaused` is sent to owners only and says whether their own stream is paused; with two streams it can be true while `paused` is false, because the other stream still delivers. `myStreamLive` is sent to owners only and is true while a stream whose operator is that user runs in this meeting; someone stays an owner after their stream stops, so it can be false while `present` is true (another person's stream still runs). The state is sent when a socket connects or subscribes, when a stream starts, stops, is paused or resumed, and when the setting changes.
 - `notes.updated` goes only to owners' sockets whose verified meeting is this one. A guest's socket never gets it.
+- `arlo.approval` goes only to those same owners' sockets. `arlo.approval.closed` (an owner answered, or nobody did before `expiresAt`) goes to the owners' sockets and to the sockets of the person who asked, each verified for this meeting, and to nobody else. When the meeting's data is flushed, open approvals are dropped without a message.
 
 ## Environment Variables
 
@@ -327,6 +335,7 @@ AUTO_START_RTMS=false           # true = request transcription as soon as someon
 ALLOW_OWN_ARLO_STREAM=false     # true = offer "Use Arlo yourself" to a person in a meeting where someone else already runs Arlo. Off by default: see the known gap under "Several streams in one meeting"
 NOTES_MODEL=...                 # Optional. The model that writes the live notes and answers Ask Arlo. Must be one of OPENROUTER_MODELS; otherwise DEFAULT_MODEL is used
 NOTES_INTERVAL_MS=45000         # Whole milliseconds, 15000 to 600000. How often the live notes are written again while new lines arrive (each run is a model call)
+APPROVAL_EXPIRY_MS=60000        # Whole milliseconds, 100 to 600000. How long a request to the owner ("share the notes?") waits for an answer
 MEETING_FLUSH_GRACE_MS=120000   # Whole milliseconds, 100 to 3600000. How long a meeting's in-memory data is kept after its stream stopped and the last panel disconnected
 ```
 

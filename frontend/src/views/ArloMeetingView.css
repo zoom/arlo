@@ -267,6 +267,97 @@
   outline: none;
 }
 
+/* The owner is asked: a sheet over the notes. The notes dim and wait behind it. */
+.arlo-sheet-host {
+  position: relative;
+}
+
+.arlo-behind-sheet {
+  transition: opacity 0.15s ease;
+}
+
+.arlo-behind-sheet[inert],
+.arlo-behind-sheet[aria-hidden='true'] {
+  opacity: 0.35;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Reaches the panel's edges: .arlo-view pads 12px at the sides and the bottom */
+.arlo-sheet {
+  position: absolute;
+  left: -12px;
+  right: -12px;
+  bottom: -12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 12px 12px;
+  background: var(--card);
+  color: var(--card-foreground);
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-lg);
+  animation: arlo-sheet-rise 0.18s ease-out;
+}
+
+@keyframes arlo-sheet-rise {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arlo-sheet { animation: none; }
+  .arlo-behind-sheet { transition: none; }
+}
+
+.arlo-sheet-question {
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.arlo-sheet-detail {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+
+.arlo-sheet-button {
+  width: 100%;
+}
+
+.arlo-sheet-note,
+.arlo-sheet-countdown {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.arlo-sheet-countdown {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A participant asks for the notes: one quiet action, then one line */
+.arlo-ask-notes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.arlo-ask-notes-status {
+  font-size: 0.8125rem;
+}
+
+.arlo-ask-notes-status:empty {
+  display: none;
+}
+
 /* Participant view */
 .arlo-participant {
   display: flex;

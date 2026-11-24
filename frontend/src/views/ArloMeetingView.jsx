@@ -236,6 +236,8 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           recordPath={recordPath}
           whoCanAsk={arlo.whoCanAsk}
           onWhoCanAskChange={saveWhoCanAsk}
+          approvals={arlo.approvals}
+          onAnswerApproval={arlo.answerApproval}
         />
       );
       break;
@@ -283,6 +285,9 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           ownStart={ownStreamAvailable ? ownStart : null}
           onUseArlo={() => startRTMS(false)}
           useArloDisabled={rtmsLoading}
+          notesRequest={arlo.notesRequest}
+          onRequestNotes={arlo.requestNotes}
+          requestingNotes={arlo.requestingNotes}
         />
       );
       break;

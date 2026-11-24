@@ -10,7 +10,8 @@ import App from '../App';
 export const MEETING = 'MEETING-1==';
 
 /**
- * Arlo's routes for the test meeting: arloPath('state' | 'settings' | 'notes' | 'ask').
+ * Arlo's routes for the test meeting: arloPath('state' | 'settings' | 'notes' | 'ask' |
+ * 'notes-request' | 'approvals' | 'approvals/<id>').
  * `meetingId`: the id the server knows the meeting by, when a test makes it
  * differ from the one the Zoom SDK reports (see mockFetch `serverMeetingId`).
  */
@@ -177,6 +178,14 @@ export function mockFetch(routes = {}, { signedIn = true, serverMeetingId = MEET
     }),
     [arloPath('notes', serverMeetingId)]: () => json({ notes: null }),
     [`POST ${arloPath('ask', serverMeetingId)}`]: () => json({ answer: 'Arlo answers from the transcript.' }),
+    // Requests for the owner's approval: none open; asking and answering work
+    [arloPath('approvals', serverMeetingId)]: () => json({ approvals: [] }),
+    [`POST ${arloPath('approvals/', serverMeetingId)}`]: ({ url, body }) => json({
+      id: url.split('/').pop(), outcome: body?.approve ? (body.done ? 'approved' : 'failed') : 'declined',
+    }),
+    [`POST ${arloPath('notes-request', serverMeetingId)}`]: () => json({
+      id: '11111111-1111-4111-8111-111111111111', expiresAt: Date.now() + 60000,
+    }),
     ...routes,
   };
   const fetchMock = vi.fn(async (input, init = {}) => {
@@ -208,6 +217,14 @@ export const serverMessagesFor = (ofMeeting) => ({
     type: 'arlo.state', data: { meetingId, ...ARLO_ABSENT, ...state },
   }),
   notes: (notes, meetingId = ofMeeting) => ({ type: 'notes.updated', data: { meetingId, notes } }),
+  // A request for the owners' approval, as only their panels are told; it runs out in a minute unless given
+  approval: ({ id, kind = 'share_notes', askedBy = null, expiresAt = Date.now() + 60000 }, meetingId = ofMeeting) => ({
+    type: 'arlo.approval', data: { meetingId, id, kind, askedBy, expiresAt },
+  }),
+  // How it ended: 'approved' | 'declined' | 'failed' | 'expired'
+  approvalClosed: (id, outcome, meetingId = ofMeeting) => ({
+    type: 'arlo.approval.closed', data: { meetingId, id, outcome },
+  }),
   timelineEvent: (event) => ({ type: 'participant.event', data: { meetingId: ofMeeting, event } }),
   suggestion: (suggestion) => ({ type: 'ai.suggestion', data: { meetingId: ofMeeting, suggestion } }),
   segment: (seqNo, text, extra = {}) => ({

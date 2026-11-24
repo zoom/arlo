@@ -2,6 +2,7 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { useZoomSdk } from '../../contexts/ZoomSdkContext';
 import { useToast } from '../../contexts/ToastContext';
 import { notesToChatMessage } from '../../lib/notesText';
+import { postNotesToChat } from '../../lib/postNotes';
 import Button from '../ui/Button';
 
 // How long "Posted to chat just now" stands in for the action, so the notes
@@ -74,15 +75,8 @@ export default function PostNotesToChat({ notes }) {
   const post = async () => {
     if (step !== 'confirming' || !message) return;
     setStep('sending');
-    let sent = false;
-    try {
-      // Same call as the rest of the app (MeetingContext, useMeetingVoiceHandlers).
-      // Inside try: an SDK that throws at once fails like one that rejects.
-      await zoomSdk.sendMessageToChat({ message });
-      sent = true;
-    } catch {
-      // Not logged: Zoom's error may quote the message
-    }
+    // Shared with the owner's "Share notes" answer (ApprovalSheet)
+    const sent = (await postNotesToChat(zoomSdk, notes)) === 'sent';
     addToast(sent ? 'Notes posted to the chat' : 'Couldn\'t post to the chat. Try again.', sent ? 'success' : 'error');
     if (mountedRef.current) leave(sent ? 'posted' : 'idle');
   };
