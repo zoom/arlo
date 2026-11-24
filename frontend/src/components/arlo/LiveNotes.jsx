@@ -5,19 +5,22 @@ import NotesDocument from './NotesDocument';
 import AskArlo from './AskArlo';
 import WhoCanAsk from './WhoCanAsk';
 import PostNotesToChat from './PostNotesToChat';
+import ShareNotes from './ShareNotes';
 import ApprovalSheet from './ApprovalSheet';
 import { firstShowableApproval } from '../../lib/approvalKinds';
 
 /**
  * The owner's screen while Arlo is (or was) in the meeting: the notes, and one
  * input. The status line says where Arlo is, also while it is on its way back.
- * Under the notes, next to the record link, an owner can post them to the chat.
+ * Under the notes, next to the record link, an owner can share them with
+ * everyone in the meeting (live in their panels, until the owner stops) and
+ * post them to the chat (a one-time copy).
  * When someone asks the owner for something (`approvals`, oldest first), a
  * sheet rises over the notes with the question; the notes wait behind it.
  */
 export default function LiveNotes({
   notes, present, paused, myStreamPaused, myStreamLive, canControl, recordPath, whoCanAsk, onWhoCanAskChange,
-  approvals = [], onAnswerApproval,
+  approvals = [], onAnswerApproval, notesShared = false, onShareNotesChange,
 }) {
   // The oldest request this panel can show; one at a time
   const approval = canControl && onAnswerApproval ? firstShowableApproval(approvals) : null;
@@ -40,12 +43,13 @@ export default function LiveNotes({
         </div>
         <div className="arlo-notes-actions">
           <Link className="arlo-link" to={recordPath}>Meeting record</Link>
+          {canControl && onShareNotesChange && <ShareNotes shared={notesShared} onChange={onShareNotesChange} />}
           {canControl && <PostNotesToChat notes={notes} />}
         </div>
         <AskArlo />
         {canControl && <WhoCanAsk value={whoCanAsk} onChange={onWhoCanAskChange} />}
       </div>
-      {asked && <ApprovalSheet key={approval.id} approval={approval} notes={notes} onAnswer={onAnswerApproval} />}
+      {asked && <ApprovalSheet key={approval.id} approval={approval} onAnswer={onAnswerApproval} />}
     </div>
   );
 }

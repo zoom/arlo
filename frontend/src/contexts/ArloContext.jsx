@@ -9,23 +9,29 @@ import { useZoomSdk } from './ZoomSdkContext';
 
 /**
  * What this panel knows about Arlo in the current meeting: is it here, what is
- * this person to it (owner or participant), the owner's live notes, and the
- * private "ask". The server decides all of it; this only holds what it said.
+ * this person to it (owner or participant), the live notes (the owner's, and
+ * everyone's while an owner shares them), and the private "ask". The server decides all of it; this only holds what it said.
  *
  * - State comes from GET …/arlo/state once meeting access is verified, and
  *   from `arlo.state` on the meeting socket afterwards.
- * - Notes come from GET …/arlo/notes and `notes.updated`, for owners only.
+ * - Notes come from GET …/arlo/notes and `notes.updated`: for an owner always,
+ *   and for everyone else (a signed-in participant or a guest) only while the
+ *   server says the notes are shared (`notesShared`). Becoming someone who may
+ *   see them fetches them; the moment sharing stops, or the state says so,
+ *   a non-owner's notes are dropped and later ones are not kept.
+ *   `setShareNotes(true | false)` is the owner's switch.
  * - A message for another meeting id is ignored (an owner's socket can be
  *   told about another meeting).
  * - Routes and messages go by the meeting id the server verified
  *   (`verifiedMeetingId`), not the one read from the Zoom SDK: the two can
  *   differ. The SDK's id only says when the panel moved to another meeting.
  * - When the meeting ends the server deletes its data and says so: role
- *   'participant', no owner. The panel keeps what it had, so the owner's notes
- *   stay on screen until another meeting is opened.
+ *   'participant', no owner, nothing shared. The panel keeps what it had, so
+ *   the notes on screen (the owner's, or the shared ones a participant was
+ *   reading) stay until another meeting is opened.
  * - Leaving the meeting is the same for this panel as the meeting ending
  *   (`meetingOver`): the server's word may never arrive, the socket is closed.
- * - While the owner's notes are held, the meeting's transcript and timeline are
+ * - While notes are held, the meeting's transcript and timeline are
  *   held with them (MeetingContext), so the meeting record still opens.
  *
  * - `paused` is about the meeting (true only when every live stream in it is
@@ -45,14 +51,15 @@ import { useZoomSdk } from './ZoomSdkContext';
  *   has no name of its own, and deletes it with the meeting.
  *
  * - Approvals: someone asks the owners for something (today: to share the
- *   notes in the chat). An owner's panel reads the open ones from
+ *   notes with everyone in the meeting; the server does it when an owner agrees). An owner's panel reads the open ones from
  *   GET …/arlo/approvals when it learns it is an owner, and keeps them in step
  *   from `arlo.approval` / `arlo.approval.closed`: `approvals`, oldest first,
  *   without duplicates and without those past their time. Only an owner holds
  *   any. `answerApproval` reports the owner's answer.
  * - A participant's own request for the notes is `notesRequest`: null, or
  *   where it stands. The outcome comes as `arlo.approval.closed` for the id
- *   the server gave it; it clears by itself two minutes after it ended.
+ *   the server gave it; it clears by itself two minutes after it ended, and at
+ *   once when the notes are shared (they are on screen then).
  *
  * Nothing here is logged: state, notes, questions and answers are meeting content.
  */
@@ -70,7 +77,11 @@ const STATE_AFTER_START_MS = 3000;
 // `present` and `role` are null until the server answered: "not known" is not "not here"
 const NOT_LOADED = Object.freeze({
   loaded: false, present: null, paused: false, myStreamPaused: false, myStreamLive: null, role: null, ownerName: null, whoCanAsk: 'owner',
+  notesShared: false,
 });
+
+/** Who holds notes: an owner, and everyone while the owners share them. */
+const mayHoldNotes = (state) => state.role === 'owner' || state.notesShared === true;
 
 // How many approvals an owner's panel holds at once (the server allows 20 open per meeting)
 const MAX_APPROVALS = 20;
@@ -115,6 +126,8 @@ function parseState(data) {
     role: data.role,
     ownerName: usableName(data.ownerName),
     whoCanAsk: WHO_CAN_ASK.has(data.whoCanAsk) ? data.whoCanAsk : 'owner',
+    // Absent from a server that does not share notes yet: not shared
+    notesShared: data.notesShared === true,
   };
 }
 
@@ -238,10 +251,25 @@ export function ArloProvider({ children }) {
     if (merged.present) setEverPresent(true);
   }, []);
 
-  // Newer notes win; notes for someone who is not an owner are not kept
+  // The state again, when something says it changed and the socket's word may
+  // have been missed. Silent: the socket's `arlo.state` is the usual way.
+  const refreshState = useCallback(() => {
+    const id = serverMeetingIdRef.current;
+    if (!id) return;
+    fetch(arloUrl(id, 'state'), { credentials: 'include' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (data && serverMeetingIdRef.current === id) applyState(data); })
+      .catch(() => {});
+  }, [applyState]);
+
+  // Newer notes win. Notes for someone who may not see them are not kept: an
+  // owner is always signed in; anyone else holds notes only while they are shared
   const applyNotes = useCallback((value) => {
     const clean = cleanNotes(value);
-    if (!clean || stateRef.current.role !== 'owner' || !signedInRef.current) return;
+    if (!clean) return;
+    const current = stateRef.current;
+    const asOwner = current.role === 'owner' && signedInRef.current;
+    if (!asOwner && current.notesShared !== true) return;
     setNotes((prev) => (
       prev && prev.throughSeqNo !== null && clean.throughSeqNo !== null && prev.throughSeqNo > clean.throughSeqNo
         ? prev
@@ -278,8 +306,11 @@ export function ArloProvider({ children }) {
     const mine = notesRequestRef.current;
     if (mine && mine.status === 'asked' && mine.id === id && NOTES_OUTCOMES[outcome]) {
       putNotesRequest({ status: NOTES_OUTCOMES[outcome] });
+      // Agreed: the notes are shared now. The state says so; read it in case
+      // the socket's word was missed
+      if (outcome === 'approved' && stateRef.current.notesShared !== true) refreshState();
     }
-  }, [putNotesRequest]);
+  }, [putNotesRequest, refreshState]);
 
   // The state, once the server lets this panel ask. Again when the socket is
   // replaced (a reconnect) and when who is signed in changes (their role can change).
@@ -335,10 +366,13 @@ export function ArloProvider({ children }) {
     };
   }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval]);
 
-  // Becoming an owner fetches the notes; no longer being one clears them
+  // Becoming someone who may see the notes (an owner, or anyone once they are
+  // shared) fetches them; no longer being one clears them
   const role = state.role;
+  const notesShared = state.notesShared === true;
+  const canHoldNotes = mayHoldNotes(state);
   useEffect(() => {
-    if (role !== 'owner') {
+    if (!canHoldNotes) {
       setNotes(null);
       return undefined;
     }
@@ -350,7 +384,12 @@ export function ArloProvider({ children }) {
       .catch(() => {})
       .finally(() => { if (!cancelled) setNotesAnswered(true); });
     return () => { cancelled = true; };
-  }, [role, serverMeetingId, accessVerified, applyNotes]);
+  }, [canHoldNotes, serverMeetingId, accessVerified, applyNotes]);
+
+  // The notes are shared: a request for them has nothing left to say
+  useEffect(() => {
+    if (notesShared && notesRequestRef.current !== null) putNotesRequest(null);
+  }, [notesShared, notesRequest, putNotesRequest]);
 
   // Becoming an owner reads the requests that are waiting (a panel that
   // reloads, or a socket that was away); no longer being one drops them
@@ -425,6 +464,30 @@ export function ArloProvider({ children }) {
     }
   }, [applyState]);
 
+  /**
+   * The owner shares the notes with everyone in the meeting who has Arlo open
+   * (true), or stops (false). Resolves true when the server took it; the
+   * caller says so when it did not.
+   */
+  const setShareNotes = useCallback(async (value) => {
+    const id = serverMeetingIdRef.current;
+    if (!id || typeof value !== 'boolean') return false;
+    try {
+      const res = await fetch(arloUrl(id, 'settings'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ shareNotes: value }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => null);
+      if (serverMeetingIdRef.current === id) applyState(data);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [applyState]);
+
   const ask = useCallback(async (question) => {
     const text = typeof question === 'string' ? question.trim() : '';
     if (text.length === 0) return { error: ASK_MESSAGES.empty };
@@ -457,15 +520,15 @@ export function ArloProvider({ children }) {
   }, []);
 
   /**
-   * The owner's answer: { approve: false }, or { approve: true, done } once
-   * their panel did (or could not do) what was asked. Resolves true when the
-   * server took it. Either way the request leaves this panel's line: it is
-   * answered, or no longer open.
+   * The owner's answer: { approve: true | false }. Agreeing is all the panel
+   * does: the server does what was asked (it shares the notes). Resolves true
+   * when the server took the answer and, for an agreement, did it. Either way
+   * the request leaves this panel's line: it is answered, or no longer open.
    */
   const answerApproval = useCallback(async (approvalId, answer) => {
     const id = serverMeetingIdRef.current;
     if (!id || typeof approvalId !== 'string' || typeof answer?.approve !== 'boolean') return false;
-    const body = answer.approve ? { approve: true, done: answer.done === true } : { approve: false };
+    const body = { approve: answer.approve };
     let taken = false;
     try {
       const res = await fetch(arloUrl(id, `approvals/${encodeURIComponent(approvalId)}`), {
@@ -474,7 +537,9 @@ export function ArloProvider({ children }) {
         credentials: 'include',
         body: JSON.stringify(body),
       });
-      taken = res.ok;
+      const data = res.ok ? await res.json().catch(() => null) : null;
+      // 'failed': the owner agreed and the server could not do it
+      taken = res.ok && data?.outcome !== 'failed';
     } catch {
       // The server lets it run out
     }
@@ -482,7 +547,7 @@ export function ArloProvider({ children }) {
     return taken;
   }, [closeApproval]);
 
-  /** A participant asks the owners to share the notes in the chat. */
+  /** A participant asks the owners to share the notes with everyone in the meeting. */
   const requestNotes = useCallback(async () => {
     const id = serverMeetingIdRef.current;
     if (!id || requestingNotesRef.current) return;
@@ -507,6 +572,10 @@ export function ArloProvider({ children }) {
       } else if (res.status === 429) {
         // The server's own text is not shown: short, known messages only
         next = { status: 'error', message: NOTES_REQUEST_MESSAGES[429] };
+      } else if (res.status === 409 && (await res.json().catch(() => null))?.error === 'already_shared') {
+        // Nothing to ask for and nothing to say: the notes show once the state is read
+        next = null;
+        refreshState();
       } else {
         next = { status: 'error', message: NOTES_REQUEST_MESSAGES[res.status] || NOTES_REQUEST_MESSAGES.failed, retry: true };
       }
@@ -517,9 +586,11 @@ export function ArloProvider({ children }) {
       setRequestingNotes(false);
     }
     if (serverMeetingIdRef.current === id) putNotesRequest(next);
-  }, [putNotesRequest]);
+  }, [putNotesRequest, refreshState]);
 
-  const holdsNotes = role === 'owner' && notes !== null;
+  // Held only by someone who may see them; said here too, so the render between
+  // sharing being stopped and the notes being dropped shows none
+  const holdsNotes = canHoldNotes && notes !== null;
   useEffect(() => {
     setRecordRetained(holdsNotes);
   }, [holdsNotes, setRecordRetained]);
@@ -527,15 +598,16 @@ export function ArloProvider({ children }) {
   // The render between Zoom reporting another meeting and the reset above
   // already shows nothing of the previous one
   const shown = switchingMeeting ? NOT_LOADED : state;
-  const shownNotes = switchingMeeting ? null : notes;
+  const shownNotes = switchingMeeting || !canHoldNotes ? null : notes;
   // Only an owner is asked, and not about a meeting that is over
   const shownApprovals = useMemo(
     () => (switchingMeeting || role !== 'owner' || meetingOver ? [] : approvals),
     [switchingMeeting, role, meetingOver, approvals],
   );
   const shownNotesRequest = switchingMeeting ? null : notesRequest;
-  // The meeting whose notes are still on screen after it is over, for the way back to them
-  const afterNotesMeetingId = !switchingMeeting && holdsNotes && meetingOver ? lastMeetingId : null;
+  // The meeting whose notes are still on screen after it is over, for the way
+  // back to them. For a signed-in person: the way back is a signed-in route.
+  const afterNotesMeetingId = !switchingMeeting && holdsNotes && meetingOver && identity !== null ? lastMeetingId : null;
   // An owner whose notes are on their way: not yet "an owner without notes"
   const notesPending = role === 'owner' && notes === null && !notesAnswered
     && Boolean(serverMeetingId) && accessVerified && !switchingMeeting;
@@ -549,6 +621,7 @@ export function ArloProvider({ children }) {
     role: shown.role,
     ownerName: shown.ownerName,
     whoCanAsk: shown.whoCanAsk,
+    notesShared: shown.notesShared,
     everPresent: everPresent && !switchingMeeting,
     notes: shownNotes,
     notesPending,
@@ -556,6 +629,7 @@ export function ArloProvider({ children }) {
     meetingOver: meetingOver && !switchingMeeting,
     afterNotesMeetingId,
     setWhoCanAsk,
+    setShareNotes,
     ask,
     asking,
     approvals: shownApprovals,
@@ -563,7 +637,7 @@ export function ArloProvider({ children }) {
     notesRequest: shownNotesRequest,
     requestNotes,
     requestingNotes,
-  }), [shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, ask, asking,
+  }), [shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, ask, asking,
     shownApprovals, answerApproval, shownNotesRequest, requestNotes, requestingNotes]);
 
   return (

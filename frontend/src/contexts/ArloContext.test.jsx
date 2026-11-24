@@ -427,6 +427,122 @@ describe('the person stops being signed in', () => {
   });
 });
 
+describe('shared notes', () => {
+  const SHARED = { present: true, role: 'participant', ownerName: 'Ana', notesShared: true };
+  const NOT_SHARED = { ...SHARED, notesShared: false };
+  const leaveMeeting = () => act(async () => {
+    window.zoomSdk.emit('onRunningContextChange', { runningContext: 'inMainClient' });
+  });
+
+  test('notesShared is the server\'s word, false unless it says true', async () => {
+    await open();
+    expect(arlo.notesShared).toBe(false);
+    await send(serverMessage.arloState(SHARED));
+    expect(arlo.notesShared).toBe(true);
+    for (const notTrue of ['true', 1, null, undefined]) {
+      await send(serverMessage.arloState({ ...SHARED, notesShared: notTrue }));
+      expect(arlo.notesShared).toBe(false);
+    }
+    await send(serverMessage.arloState(SHARED, 'ANOTHER-MEETING=='));
+    expect(arlo.notesShared).toBe(false);
+  });
+
+  test('a participant holds notes only while they are shared: fetched when sharing starts, dropped when it stops', async () => {
+    const fetchMock = await open({ [arloPath('notes')]: () => json({ notes: NOTES }) });
+    await send(serverMessage.notes(NOTES));
+    expect(arlo.notes).toBeNull();
+    expect(callsTo(fetchMock, arloPath('notes'))).toHaveLength(0);
+
+    await send(serverMessage.arloState(SHARED));
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    expect(arlo.role).toBe('participant');
+    expect(callsTo(fetchMock, arloPath('notes'))).toHaveLength(1);
+    await send(serverMessage.notes({ ...NOTES, summary: 'Newer.', throughSeqNo: 12 }));
+    expect(arlo.notes.summary).toBe('Newer.');
+    await send(serverMessage.notes({ ...NOTES, summary: 'Another meeting.', throughSeqNo: 40 }, 'ANOTHER-MEETING=='));
+    expect(arlo.notes.summary).toBe('Newer.');
+
+    await send(serverMessage.arloState(NOT_SHARED));
+    expect(arlo.notes).toBeNull();
+    await send(serverMessage.notes({ ...NOTES, summary: 'After it stopped.', throughSeqNo: 20 }));
+    expect(arlo.notes).toBeNull();
+  });
+
+  test('an owner keeps the notes whether or not they are shared', async () => {
+    await asOwner();
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await send(serverMessage.arloState({ ...OWNER, notesShared: true }));
+    expect(arlo.notes).toEqual(NOTES);
+    await send(serverMessage.arloState({ ...OWNER, notesShared: false }));
+    expect(arlo.notes).toEqual(NOTES);
+    // no longer an owner, and nothing is shared: gone
+    await send(serverMessage.arloState(NOT_SHARED));
+    expect(arlo.notes).toBeNull();
+  });
+
+  test('setShareNotes sends the boolean, takes the server\'s state, and resolves to whether it worked', async () => {
+    let refuse = false;
+    const fetchMock = await open({
+      [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...OWNER }),
+      [`PUT ${arloPath('settings')}`]: ({ body }) => (refuse
+        ? json({ error: 'Forbidden' }, 403)
+        : json({ ...ARLO_ABSENT, ...OWNER, notesShared: body.shareNotes })),
+    });
+    const puts = () => fetchMock.mock.calls.filter(([url, init]) => String(url) === arloPath('settings') && init?.method === 'PUT');
+    let result;
+    await act(async () => { result = await arlo.setShareNotes(true); });
+    expect(result).toBe(true);
+    expect(arlo.notesShared).toBe(true);
+    expect(puts().map(([, init]) => JSON.parse(init.body))).toEqual([{ shareNotes: true }]);
+    puts().forEach(([, init]) => expect(init.credentials).toBe('include'));
+
+    refuse = true;
+    await act(async () => { result = await arlo.setShareNotes(false); });
+    expect(result).toBe(false);
+    expect(arlo.notesShared).toBe(true);
+    // not a boolean: nothing is sent
+    for (const bad of ['true', 1, null, undefined]) {
+      await act(async () => { result = await arlo.setShareNotes(bad); });
+      expect(result).toBe(false);
+    }
+    expect(puts()).toHaveLength(2);
+  });
+
+  test('a participant who left the meeting keeps the shared notes and the record; signing out clears them', async () => {
+    await open({
+      [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...SHARED }),
+      [arloPath('notes')]: () => json({ notes: NOTES }),
+    });
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.segment(1, 'Said while Arlo was here.'));
+    await leaveMeeting();
+    await waitFor(() => expect(arlo.afterNotesMeetingId).toBe(MEETING));
+    expect(arlo.notes).toEqual(NOTES);
+    expect(meeting.segments).toHaveLength(1);
+
+    await act(async () => { auth.logout(); });
+    await waitFor(() => {
+      expect(arlo.notes).toBeNull();
+      expect(arlo.notesShared).toBe(false);
+      expect(arlo.afterNotesMeetingId).toBeNull();
+      expect(meeting.segments).toHaveLength(0);
+    });
+  });
+
+  test('in a meeting that ended, the server\'s "nothing is shared" does not take the held notes away', async () => {
+    await open({
+      [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...SHARED }),
+      [arloPath('notes')]: () => json({ notes: NOTES }),
+    });
+    await waitFor(() => expect(arlo.notes).toEqual(NOTES));
+    await send(serverMessage.status('rtms_stopped', { meetingEnded: true }));
+    await send(serverMessage.arloState({ present: false, role: 'participant', ownerName: null, notesShared: false }));
+    expect(arlo.notes).toEqual(NOTES);
+    expect(arlo.present).toBe(false);
+  });
+});
+
 describe('myStreamLive', () => {
   test('is the server\'s word about whether this owner\'s own stream runs; null when it did not say', async () => {
     await asOwner();

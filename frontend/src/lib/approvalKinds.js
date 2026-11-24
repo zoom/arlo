@@ -1,27 +1,24 @@
 import { usableName } from './ownerName';
-import { postNotesToChat } from './postNotes';
 
 /**
- * What the owner is asked for each kind of approval, and what agreeing does.
- * A kind that is not here is not shown and not answered: it is left to run
- * out on the server. Add a kind by adding an entry.
+ * What the owner is asked for each kind of approval. Agreeing only reports the
+ * answer: the server does the work (for 'share_notes' it shares the notes with
+ * everyone in the meeting who has Arlo open). A kind that is not here is not
+ * shown and not answered: it is left to run out on the server. Add a kind by
+ * adding an entry.
  *
  *   question, primary, secondary   the sheet's texts
  *   detail(askedBy)                who asked; `askedBy` is a usable name or null
- *   unavailable({ chatSupported }) why agreeing cannot work in this client, or null
- *   run({ zoomSdk, notes })        does the work; resolves true when it is done
- *   doneToast, failedToast         what the owner is told afterwards
+ *   doneToast, failedToast         what the owner is told after agreeing
  */
 export const APPROVAL_KINDS = Object.freeze({
   share_notes: Object.freeze({
-    question: 'Share the notes in the meeting chat?',
-    detail: (askedBy) => (askedBy ? `${askedBy} asked for them.` : 'Someone in the meeting asked for them.'),
+    question: 'Share the notes with everyone in the meeting?',
+    detail: (askedBy) => (askedBy ? `${askedBy} asked to see them.` : 'Someone in the meeting asked to see them.'),
     primary: 'Share notes',
     secondary: 'Not now',
-    unavailable: ({ chatSupported }) => (chatSupported ? null : 'This Zoom client can\'t post to the chat.'),
-    run: async ({ zoomSdk, notes }) => (await postNotesToChat(zoomSdk, notes)) === 'sent',
-    doneToast: 'Notes posted to the chat',
-    failedToast: 'Couldn\'t post the notes to the chat.',
+    doneToast: 'Notes are now shared with everyone',
+    failedToast: 'Couldn\'t share the notes. Try again.',
   }),
 });
 

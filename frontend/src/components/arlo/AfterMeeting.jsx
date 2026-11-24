@@ -6,8 +6,12 @@ import { copyText } from '../../lib/copyText';
 import Button from '../ui/Button';
 import NotesDocument from './NotesDocument';
 
-/** The meeting has ended: the same notes, now the meeting's page, with one action. */
-export default function AfterMeeting({ title, notes, demoMode, recordPath }) {
+/**
+ * The meeting has ended: the same notes, now the meeting's page, with one
+ * action. `heading` is what the page is called when that is not the meeting's
+ * title (a participant's shared notes); copied notes carry the title either way.
+ */
+export default function AfterMeeting({ title, heading = title, notes, demoMode, recordPath }) {
   const { addToast } = useToast();
 
   const copyNotes = async () => {
@@ -19,7 +23,7 @@ export default function AfterMeeting({ title, notes, demoMode, recordPath }) {
 
   return (
     <div className="arlo-screen">
-      <h1 className="arlo-title arlo-after-title" tabIndex={-1} data-arlo-focus>{title}</h1>
+      <h1 className="arlo-title arlo-after-title" tabIndex={-1} data-arlo-focus>{heading}</h1>
       <div className="arlo-scroll">
         <NotesDocument notes={notes} listening={false} />
       </div>

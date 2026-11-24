@@ -10,7 +10,8 @@
  *   present       the server says Arlo is in the meeting; null until Arlo's state arrived
  *   phase         the transcription phase (lib/rtmsMachine.js)
  *   meetingEnded  Zoom reported that the meeting ended
- *   hasNotes      this panel holds notes
+ *   hasNotes      this panel holds notes: an owner's own, or the ones an owner
+ *                 shares with everyone (a panel holds notes only when it may)
  *   everPresent   Arlo was in this meeting at some point while this panel was open
  *   streamFault   the stream ended because of a connection problem (not a person's stop)
  *   awaitingRole  this panel asked for the start, the stream is up, and the server
@@ -22,6 +23,10 @@
  * does not take it away: the status line says what is happening. 'waiting' is
  * for someone who has not had the notes screen in this meeting, while Arlo is
  * not in it yet.
+ *
+ * Someone who is not an owner reads shared notes on the participant screen,
+ * while Arlo is in the meeting. After the meeting whoever holds notes keeps
+ * them ('after'), owner or not.
  *
  * Several people can each run Arlo in one meeting. Someone who asks for a
  * stream of their own while Arlo is already here through another person's
@@ -44,7 +49,7 @@ export function getArloScreen({
 }) {
   const owner = arloRole === 'owner';
 
-  if (meetingEnded) return owner && hasNotes ? 'after' : 'participant';
+  if (meetingEnded) return hasNotes ? 'after' : 'participant';
 
   // The server sends the stream's start before it says whose stream it is:
   // the person who asked does not see the participant view for a moment.

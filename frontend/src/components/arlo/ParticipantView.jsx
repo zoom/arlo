@@ -3,12 +3,13 @@ import { Link } from 'react-router-dom';
 import Button from '../ui/Button';
 import LoadingSpinner from '../ui/LoadingSpinner';
 import AskArlo from './AskArlo';
-import { ownerWording, usableName } from '../../lib/ownerName';
+import NotesDocument from './NotesDocument';
+import { ownerWording, sharedNotesHeading, usableName } from '../../lib/ownerName';
 
 const ONLY_USERS_ASK = 'Only people using Arlo can ask in this meeting.';
 
 /**
- * "Use Arlo yourself": the one secondary action of a signed-in participant.
+ * "Take notes yourself": one of a signed-in participant's two choices.
  * Several people can each run Arlo in a meeting; this starts theirs, on the
  * click only. While the request is unresolved its progress shows here, in
  * place of the button, and the screen stays. `ownStart`:
@@ -16,7 +17,7 @@ const ONLY_USERS_ASK = 'Only people using Arlo can ask in this meeting.';
  *   secondsLeft, hint, mayAskAgain   for a request waiting on the host
  *   message    why the last request did not bring Arlo in, or null
  */
-function UseArloYourself({ ownStart, onUseArlo, disabled }) {
+function TakeNotesYourself({ ownStart, onUseArlo, disabled }) {
   const { progress, secondsLeft, hint, mayAskAgain, message } = ownStart;
   return (
     <div className="arlo-use-yourself">
@@ -35,8 +36,8 @@ function UseArloYourself({ ownStart, onUseArlo, disabled }) {
         </>
       ) : (
         <>
-          <Button variant="outline" onClick={onUseArlo} disabled={disabled}>Use Arlo yourself</Button>
-          <p className="arlo-muted">Starts Arlo for you too. You get the notes and can ask.</p>
+          <Button variant="outline" onClick={onUseArlo} disabled={disabled}>Take notes yourself</Button>
+          <p className="arlo-muted">Starts Arlo for you too, under your own permission.</p>
         </>
       )}
       {message && <p className="arlo-error" role="alert">{message}</p>}
@@ -45,32 +46,37 @@ function UseArloYourself({ ownStart, onUseArlo, disabled }) {
 }
 
 const NOTES_REQUEST_TEXT = {
-  asked: 'Asked. The notes appear in the chat if they agree.',
-  shared: 'The notes are in the meeting chat.',
+  asked: 'Asked. The notes appear here if they agree.',
+  // Until the notes render: from then on they speak for themselves
+  shared: 'The notes are shared with everyone.',
   declined: 'They chose not to share the notes right now.',
   expired: 'No answer this time.',
-  failed: 'The notes couldn\'t be posted to the chat.',
+  failed: 'The notes couldn\'t be shared.',
 };
 
 /**
- * "Ask <owner> for the notes": a signed-in participant asks the person who
- * brought Arlo in to share the notes. The owner answers in their own panel and
- * the notes, if they agree, appear in the meeting chat: never here.
+ * "Ask <owner> to share notes with everyone": the other of a signed-in
+ * participant's two choices. The owner answers in their own panel; if they
+ * agree, the notes are shared and appear here, as in everyone's panel. Not
+ * rendered while the notes are shared already.
  * `request`: null | { status, message?, retry? } (ArloContext `notesRequest`).
- * After the click the button gives way to a line saying where the request is;
- * it is back when the context clears the request, or at once (`retry`) when
- * the request could not be made.
+ * After the click the button and its explanation give way to a line saying
+ * where the request is; they are back when the context clears the request, or
+ * at once (`retry`) when the request could not be made.
  */
-function AskForNotes({ ownerName, request, onAsk, disabled }) {
+function AskToShareNotes({ ownerName, request, onAsk, disabled }) {
   const name = usableName(ownerName);
   const text = request ? (NOTES_REQUEST_TEXT[request.status] || request.message || '') : '';
   const showButton = request === null || request.retry === true;
   return (
     <div className="arlo-ask-notes">
       {showButton && (
-        <Button variant="outline" size="sm" onClick={onAsk} disabled={disabled}>
-          {name ? `Ask ${name} for the notes` : 'Ask for the notes'}
-        </Button>
+        <>
+          <Button variant="outline" onClick={onAsk} disabled={disabled}>
+            {name ? `Ask ${name} to share notes with everyone` : 'Ask to share notes with everyone'}
+          </Button>
+          <p className="arlo-muted">They decide. If they agree, everyone with Arlo open sees the notes here.</p>
+        </>
       )}
       {/* Always here, so a screen reader hears the text when it appears */}
       <p className="arlo-muted arlo-ask-notes-status" role="status">{text}</p>
@@ -80,11 +86,20 @@ function AskForNotes({ ownerName, request, onAsk, disabled }) {
 
 /**
  * What someone who did not bring Arlo in sees: that Arlo is here and for whom,
- * the meeting record, and a private ask when the owner allows it. Never the notes,
- * and no controls: a stream belongs to the person who started it. A signed-in
- * participant can start one of their own ("Use Arlo yourself") and gets the
- * notes screen once the server says they are an owner too. Independently of
- * that, they can ask the owner to share the notes in the chat (`onRequestNotes`).
+ * the meeting record, and a private ask when the owner allows it. No controls:
+ * a stream, and the decision to share its notes, belong to the person who
+ * started it.
+ *
+ * The notes are here only while an owner shares them with everyone
+ * (`notesShared`): then the heading says who shares them and the same notes
+ * document follows, read-only, for a signed-in participant and a guest alike.
+ * `notes` is null until the first ones are written.
+ *
+ * A signed-in participant has two choices while Arlo is here, two secondary
+ * buttons of equal weight: ask the owner to share the notes with everyone
+ * (`onRequestNotes`; gone while they are shared), or take notes themselves
+ * (`ownStart`; they get the notes screen once the server says they are an
+ * owner too). A guest has neither: they can sign in.
  * `paused` is about the meeting (every live stream is paused): wording only.
  * `ownerName` can be missing or blank: the sentences then say it without a
  * name (lib/ownerName.js).
@@ -92,19 +107,26 @@ function AskForNotes({ ownerName, request, onAsk, disabled }) {
 export default function ParticipantView({
   present, paused = false, ownerName, whoCanAsk, guest, canBringIn = false, meetingEnded, showRecord, recordPath,
   onSignIn, signingIn, signInError, ownStart = null, onUseArlo, useArloDisabled = false,
-  notesRequest = null, onRequestNotes, requestingNotes = false,
+  notesRequest = null, onRequestNotes, requestingNotes = false, notesShared = false, notes = null,
 }) {
   const wording = ownerWording(ownerName);
-  const heading = present ? wording.heading : 'Arlo isn\'t in this meeting';
+  // The notes show only while Arlo is here and an owner shares them
+  const sharing = present && notesShared === true;
+  const heading = present
+    ? (sharing ? sharedNotesHeading(ownerName) : wording.heading)
+    : 'Arlo isn\'t in this meeting';
+  const signedInHere = present && !guest && !meetingEnded;
+  const canAskToShare = signedInHere && !sharing && Boolean(onRequestNotes);
+  const canTakeNotes = signedInHere && Boolean(ownStart);
 
   return (
     <div className="arlo-screen">
       <div className="arlo-scroll arlo-participant">
         <h1 className="arlo-title" tabIndex={-1} data-arlo-focus>{heading}</h1>
         {present && paused && <p className="arlo-muted" role="status">Arlo is paused</p>}
-        {present ? (
-          <p className="arlo-muted">{wording.body}</p>
-        ) : (
+        {sharing && (notes ? <NotesDocument notes={notes} /> : <p className="arlo-muted">Notes appear after the first minute or so.</p>)}
+        {present && !sharing && <p className="arlo-muted">{wording.body}</p>}
+        {!present && (
           <p className="arlo-muted">
             {meetingEnded ? 'Nothing is stored after the meeting ends.' : 'The host decides whether Arlo joins.'}
           </p>
@@ -124,11 +146,13 @@ export default function ParticipantView({
             {signInError && <p className="arlo-error" role="alert">{signInError}</p>}
           </div>
         )}
-        {present && !guest && !meetingEnded && onRequestNotes && (
-          <AskForNotes ownerName={ownerName} request={notesRequest} onAsk={onRequestNotes} disabled={requestingNotes} />
-        )}
-        {present && !guest && !meetingEnded && ownStart && (
-          <UseArloYourself ownStart={ownStart} onUseArlo={onUseArlo} disabled={useArloDisabled} />
+        {(canAskToShare || canTakeNotes) && (
+          <div className="arlo-choices">
+            {canAskToShare && (
+              <AskToShareNotes ownerName={ownerName} request={notesRequest} onAsk={onRequestNotes} disabled={requestingNotes} />
+            )}
+            {canTakeNotes && <TakeNotesYourself ownStart={ownStart} onUseArlo={onUseArlo} disabled={useArloDisabled} />}
+          </div>
         )}
       </div>
       {present && !guest && whoCanAsk === 'anyone' && <AskArlo />}

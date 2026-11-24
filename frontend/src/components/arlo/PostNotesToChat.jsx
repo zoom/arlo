@@ -75,7 +75,6 @@ export default function PostNotesToChat({ notes }) {
   const post = async () => {
     if (step !== 'confirming' || !message) return;
     setStep('sending');
-    // Shared with the owner's "Share notes" answer (ApprovalSheet)
     const sent = (await postNotesToChat(zoomSdk, notes)) === 'sent';
     addToast(sent ? 'Notes posted to the chat' : 'Couldn\'t post to the chat. Try again.', sent ? 'success' : 'error');
     if (mountedRef.current) leave(sent ? 'posted' : 'idle');

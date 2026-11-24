@@ -22,6 +22,7 @@ import AfterMeeting from '../components/arlo/AfterMeeting';
 import './ArloMeetingView.css';
 
 const FALLBACK_TITLE = 'Meeting notes';
+const SHARED_AFTER_TITLE = 'Notes from this meeting';
 const STILL_IN_FORCE = { owner: 'Only you', anyone: 'Anyone' };
 
 /** Text is being typed into this element (a radio or a button is not typing). */
@@ -112,6 +113,13 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   const whoCanAskRef = useRef(whoCanAsk);
   whoCanAskRef.current = whoCanAsk;
   // A choice that was not saved is never silent: say so, and which setting still holds
+  // The same for sharing the notes: the control shows what the server holds
+  const { setShareNotes } = arlo;
+  const saveShareNotes = useCallback(async (value) => {
+    const saved = await setShareNotes(value);
+    if (!saved) addToast('Couldn\'t change sharing. Try again.', 'error');
+    return saved;
+  }, [setShareNotes, addToast]);
   const saveWhoCanAsk = useCallback(async (value) => {
     const saved = await setWhoCanAsk(value);
     if (!saved) {
@@ -238,13 +246,17 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           onWhoCanAskChange={saveWhoCanAsk}
           approvals={arlo.approvals}
           onAnswerApproval={arlo.answerApproval}
+          notesShared={arlo.notesShared}
+          onShareNotesChange={saveShareNotes}
         />
       );
       break;
     case 'after':
+      // An owner's notes are the meeting's page; a participant's are the ones that were shared
       content = (
         <AfterMeeting
           title={titleRef.current || FALLBACK_TITLE}
+          heading={arlo.role === 'owner' ? undefined : SHARED_AFTER_TITLE}
           notes={arlo.notes}
           demoMode={demoMode}
           recordPath={recordPath}
@@ -255,7 +267,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
       // The stream is confirmed for this panel, or the server says Arlo is here
       const present = !meetingEnded
         && (arlo.present === true || rtmsPhase === 'active' || rtmsPhase === 'paused' || rtmsPhase === 'interrupted');
-      // "Use Arlo yourself": this person's own request, shown where they clicked.
+      // "Take notes yourself": this person's own request, shown where they clicked.
       // The host's own request needs nobody's permission.
       const ownProgress = rtmsPhase === 'requested'
         ? (zoomRole === 'host' ? 'starting' : 'asking')
@@ -288,6 +300,8 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           notesRequest={arlo.notesRequest}
           onRequestNotes={arlo.requestNotes}
           requestingNotes={arlo.requestingNotes}
+          notesShared={arlo.notesShared}
+          notes={arlo.notesShared ? arlo.notes : null}
         />
       );
       break;

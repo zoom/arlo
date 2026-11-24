@@ -1,5 +1,4 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { useZoomSdk } from '../../contexts/ZoomSdkContext';
 import { useToast } from '../../contexts/ToastContext';
 import useSecondsLeft from '../../hooks/useSecondsLeft';
 import { approvalKind } from '../../lib/approvalKinds';
@@ -11,17 +10,18 @@ import Button from '../ui/Button';
  * it is answered or goes away (another owner answered, or it ran out): the
  * caller makes what is behind it inert.
  *
- * Agreeing does the work here, in the owner's panel (for 'share_notes': the
- * notes are posted to the meeting chat), then reports whether it was done.
- * Nothing is ever agreed to without the click. The texts and the work come
- * from lib/approvalKinds.js; a kind that is not there renders nothing.
+ * Agreeing reports the answer; the server does the work (for 'share_notes':
+ * it shares the notes with everyone in the meeting who has Arlo open), and
+ * the owner is told whether it did. Nothing is ever agreed to without the
+ * click. The texts come from lib/approvalKinds.js; a kind that is not there
+ * renders nothing.
  *
- * `onAnswer(id, { approve, done? })` reports the answer. Mount one per
+ * `onAnswer(id, { approve })` reports the answer and resolves true when the
+ * server took it. Mount one per
  * approval (`key={approval.id}`): the focus goes to the primary button when it
  * opens and back to where it was when it closes.
  */
-export default function ApprovalSheet({ approval, notes, onAnswer }) {
-  const { zoomSdk, chatSupported } = useZoomSdk();
+export default function ApprovalSheet({ approval, onAnswer }) {
   const { addToast } = useToast();
   const questionId = useId();
   const detailId = useId();
@@ -32,16 +32,12 @@ export default function ApprovalSheet({ approval, notes, onAnswer }) {
   const secondaryRef = useRef(null);
   const secondsLeft = useSecondsLeft(approval.expiresAt);
   const kind = approvalKind(approval.kind);
-  const unavailable = kind ? kind.unavailable({ chatSupported }) : null;
 
   // The focus comes in, and goes back to where it was. In an effect, not a
   // layout effect: by then what is behind the sheet is no longer inert.
-  const canAgree = unavailable === null;
-  const canAgreeRef = useRef(canAgree);
-  canAgreeRef.current = canAgree;
   useEffect(() => {
     const before = document.activeElement;
-    (canAgreeRef.current ? primaryRef.current : secondaryRef.current)?.focus();
+    primaryRef.current?.focus();
     return () => {
       if (before && before !== document.body && before.isConnected && typeof before.focus === 'function') before.focus();
     };
@@ -57,17 +53,16 @@ export default function ApprovalSheet({ approval, notes, onAnswer }) {
   };
 
   const agree = async () => {
-    if (busyRef.current || !canAgree) return;
+    if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     let done = false;
     try {
-      done = (await kind.run({ zoomSdk, notes })) === true;
+      done = (await onAnswer(approval.id, { approve: true })) === true;
     } catch {
       // Not logged: an error may quote meeting content
     }
     addToast(done ? kind.doneToast : kind.failedToast, done ? 'success' : 'error');
-    await onAnswer(approval.id, { approve: true, done });
   };
 
   const onKeyDown = (event) => {
@@ -104,10 +99,9 @@ export default function ApprovalSheet({ approval, notes, onAnswer }) {
     >
       <p className="arlo-sheet-question" id={questionId}>{kind.question}</p>
       <p className="arlo-sheet-detail" id={detailId}>{kind.detail(approval.askedBy)}</p>
-      <Button className="arlo-sheet-button" ref={primaryRef} onClick={agree} disabled={busy || !canAgree}>
+      <Button className="arlo-sheet-button" ref={primaryRef} onClick={agree} disabled={busy}>
         {kind.primary}
       </Button>
-      {unavailable && <p className="arlo-sheet-note">{unavailable}</p>}
       <Button className="arlo-sheet-button" variant="ghost" ref={secondaryRef} onClick={() => answer({ approve: false })} disabled={busy}>
         {kind.secondary}
       </Button>

@@ -17,7 +17,7 @@ const OWNER = { present: true, role: 'owner', ownerName: 'Ana' };
 const ANA_BROUGHT_ARLO = { present: true, role: 'participant', ownerName: 'Ana' };
 const ME_TOO = { ...OWNER, myStreamLive: true };
 const MINE_STOPPED = { ...OWNER, myStreamLive: false };
-const USE = 'Use Arlo yourself';
+const USE = 'Take notes yourself';
 
 const server = () => FakeWebSocket.last;
 const send = (message) => act(async () => { server().serverSend(message); });
@@ -77,7 +77,7 @@ afterEach(() => {
   resetHarness();
 });
 
-describe('"Use Arlo yourself" that never becomes a stream of one\'s own', () => {
+describe('"Take notes yourself" that never becomes a stream of one\'s own', () => {
   test('Zoom answers "already running" (10308): the other stream is never taken for this panel\'s', async () => {
     const { sdk } = await openBesideAna({ startRTMS: alreadyRunning });
     const user = fakeTimersAndUser();
@@ -142,7 +142,7 @@ describe('"Use Arlo yourself" that never becomes a stream of one\'s own', () => 
   }, 20000);
 });
 
-describe('an owner\'s "Bring Arlo back" while Arlo is here through another person\'s stream (no "Use Arlo yourself" in this deployment)', () => {
+describe('an owner\'s "Bring Arlo back" while Arlo is here through another person\'s stream (no "Take notes yourself" in this deployment)', () => {
   test('Zoom answers "already running": the other stream is never taken for this owner\'s', async () => {
     const sdk = createZoomSdk({ startRTMS: alreadyRunning });
     await open({

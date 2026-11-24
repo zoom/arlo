@@ -222,7 +222,7 @@
   color: var(--muted-foreground);
 }
 
-/* Under the notes: the record link, and "Post notes to chat" as a quiet second action */
+/* Under the notes: the record link, and the owner's quiet actions: share with everyone, post to chat */
 .arlo-notes-actions {
   display: flex;
   align-items: center;
@@ -236,11 +236,27 @@
   align-self: center;
 }
 
-.arlo-post {
+.arlo-post,
+.arlo-share {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   min-width: 0;
+}
+
+/* The owner shares the notes with everyone: a line that says so, and one quiet button */
+.arlo-share {
+  gap: 0 6px;
+}
+
+.arlo-share-status {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.arlo-share-status:empty {
+  display: none;
 }
 
 .arlo-post-confirm {
@@ -330,7 +346,6 @@
   width: 100%;
 }
 
-.arlo-sheet-note,
 .arlo-sheet-countdown {
   color: var(--muted-foreground);
   font-size: 0.75rem;
@@ -342,7 +357,17 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* A participant asks for the notes: one quiet action, then one line */
+/* A participant's two choices: ask the owner to share the notes with
+   everyone, or take notes themselves. Two secondary buttons of equal weight,
+   each with one line under it */
+.arlo-choices {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
 .arlo-ask-notes {
   display: flex;
   flex-direction: column;
@@ -350,7 +375,7 @@
   gap: 6px;
 }
 
-.arlo-ask-notes-status {
+.arlo-ask-notes > .arlo-muted {
   font-size: 0.8125rem;
 }
 
@@ -373,14 +398,12 @@
   gap: 6px;
 }
 
-/* "Use Arlo yourself": secondary, under what the screen is about */
+/* "Take notes yourself": the second of the participant's two choices */
 .arlo-use-yourself {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
 }
 
 .arlo-use-yourself .arlo-waiting {

@@ -1,4 +1,4 @@
-import { usableName, ownerWording } from './ownerName';
+import { usableName, ownerWording, sharedNotesHeading } from './ownerName';
 
 describe('usableName', () => {
   test('a name is trimmed; anything blank or not a string is no name', () => {
@@ -65,5 +65,15 @@ describe('ownerWording', () => {
       expect(ownerWording(none)).toEqual(plain);
     }
     for (const sentence of Object.values(plain)) expect(sentence).not.toMatch(/ {2}| \./);
+  });
+});
+
+describe('sharedNotesHeading', () => {
+  test('names who shares the notes, and says it without a name when there is none', () => {
+    expect(sharedNotesHeading('Ana')).toBe('Ana is sharing Arlo\'s notes');
+    expect(sharedNotesHeading(' Ana Ruiz ')).toBe('Ana Ruiz is sharing Arlo\'s notes');
+    for (const none of [null, undefined, '', '   ', '\u202E', 42]) {
+      expect(sharedNotesHeading(none)).toBe('Arlo\'s notes are shared with everyone');
+    }
   });
 });

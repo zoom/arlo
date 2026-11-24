@@ -31,6 +31,12 @@ export function usableName(value, max = MAX_NAME_CHARS) {
   return isShowable(name) ? name : null;
 }
 
+/** The heading over notes an owner shares with everyone in the meeting. */
+export function sharedNotesHeading(ownerName) {
+  const name = usableName(ownerName);
+  return name === null ? 'Arlo\'s notes are shared with everyone' : `${name} is sharing Arlo's notes`;
+}
+
 /** What a participant reads about whose Arlo this is: { heading, body }. */
 export function ownerWording(ownerName) {
   const name = usableName(ownerName);

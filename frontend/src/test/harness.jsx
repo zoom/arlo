@@ -20,10 +20,11 @@ export const arloPath = (name, meetingId = MEETING) => `/api/meetings/by-zoom-id
 /**
  * What the server says about Arlo before anyone brought it in. `paused` is
  * about the meeting (true only when every live stream is paused);
- * `myStreamPaused` is about the own stream of the person it is sent to.
+ * `myStreamPaused` is about the own stream of the person it is sent to;
+ * `notesShared` says whether the owners share the notes with everyone.
  */
 export const ARLO_ABSENT = Object.freeze({
-  present: false, paused: false, myStreamPaused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner',
+  present: false, paused: false, myStreamPaused: false, role: 'participant', ownerName: null, whoCanAsk: 'owner', notesShared: false,
 });
 
 /** Fake `window.zoomSdk`. `sdk.emit(event, payload)` fires an SDK event. */
@@ -167,21 +168,21 @@ export function mockFetch(routes = {}, { signedIn = true, serverMeetingId = MEET
       : json({ error: 'Not authenticated' }, 401)),
     // Tests run with the deployment's auto-start flag ON unless a test overrides
     // this route, so `renderInMeeting({ autoStart })` alone decides the behaviour.
-    // The same goes for "Use Arlo yourself" (ownStream), which a deployment has on unless it turns it off.
+    // The same goes for "Take notes yourself" (ownStream), which a deployment has on unless it turns it off.
     '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true } }),
     '/api/auth/meeting-access': async () => json({ verified: true, isGuest: !signedIn, meetingId: await verifiedMeetingId() }),
     // Arlo's routes: not in the meeting, nobody's notes, until a test says otherwise
     [arloPath('state', serverMeetingId)]: () => json({ ...ARLO_ABSENT }),
     // The caller's state, as the server answers it: an owner the server has a name for
     [`PUT ${arloPath('settings', serverMeetingId)}`]: ({ body }) => json({
-      ...ARLO_ABSENT, role: 'owner', ownerName: 'Ana', whoCanAsk: body?.whoCanAsk,
+      ...ARLO_ABSENT, role: 'owner', ownerName: 'Ana', whoCanAsk: body?.whoCanAsk, notesShared: body?.shareNotes === true,
     }),
     [arloPath('notes', serverMeetingId)]: () => json({ notes: null }),
     [`POST ${arloPath('ask', serverMeetingId)}`]: () => json({ answer: 'Arlo answers from the transcript.' }),
     // Requests for the owner's approval: none open; asking and answering work
     [arloPath('approvals', serverMeetingId)]: () => json({ approvals: [] }),
     [`POST ${arloPath('approvals/', serverMeetingId)}`]: ({ url, body }) => json({
-      id: url.split('/').pop(), outcome: body?.approve ? (body.done ? 'approved' : 'failed') : 'declined',
+      id: url.split('/').pop(), outcome: body?.approve ? 'approved' : 'declined',
     }),
     [`POST ${arloPath('notes-request', serverMeetingId)}`]: () => json({
       id: '11111111-1111-4111-8111-111111111111', expiresAt: Date.now() + 60000,

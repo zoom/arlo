@@ -1064,8 +1064,8 @@ describe('a guest who leaves the meeting', () => {
   });
 });
 
-describe('use Arlo yourself (someone else already brought Arlo in)', () => {
-  const USE = 'Use Arlo yourself';
+describe('take notes yourself (someone else already brought Arlo in)', () => {
+  const USE = 'Take notes yourself';
   const useButton = () => screen.queryByRole('button', { name: USE });
   const ME_TOO = { ...OWNER, myStreamLive: true };
 
@@ -1094,7 +1094,7 @@ describe('use Arlo yourself (someone else already brought Arlo in)', () => {
     const button = await screen.findByRole('button', { name: USE });
     expect(button).toBeEnabled();
     expect(button).toHaveClass('btn-outline');
-    expect(screen.getByText('Starts Arlo for you too. You get the notes and can ask.')).toBeInTheDocument();
+    expect(screen.getByText('Starts Arlo for you too, under your own permission.')).toBeInTheDocument();
     // below what the screen is about
     const body = screen.getByText(/Arlo reads Zoom's live transcript/);
     expect(body.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -1203,7 +1203,7 @@ describe('use Arlo yourself (someone else already brought Arlo in)', () => {
     await send(serverMessage.arloState(ANA_BROUGHT_ARLO));
     await screen.findByRole('heading', { name: 'Ana brought Arlo into this meeting' });
     expect(useButton()).not.toBeInTheDocument();
-    expect(screen.queryByText('Starts Arlo for you too. You get the notes and can ask.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Starts Arlo for you too, under your own permission.')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in to ask Arlo' })).toBeInTheDocument();
     expect(startCalls(sdk)).toHaveLength(0);
   });
@@ -1330,9 +1330,9 @@ describe('Zoom\'s indicator when two people each run Arlo', () => {
     return result;
   }
 
-  test('a participant who clicked "Use Arlo yourself" and became an owner sets their own, and not before', async () => {
+  test('a participant who clicked "Take notes yourself" and became an owner sets their own, and not before', async () => {
     const { sdk } = await openBesideAna();
-    await userEvent.click(await screen.findByRole('button', { name: 'Use Arlo yourself' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Take notes yourself' }));
     await screen.findByText(/Waiting for the host to allow Arlo…/);
     await send(serverMessage.segment(1, 'said through the other stream'));
     await send(serverMessage.status('rtms_started'));
@@ -1361,7 +1361,7 @@ describe('Zoom\'s indicator when two people each run Arlo', () => {
 
   test('a request that was declined sets nothing either', async () => {
     const { sdk } = await openBesideAna();
-    await userEvent.click(await screen.findByRole('button', { name: 'Use Arlo yourself' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Take notes yourself' }));
     await screen.findByText(/Waiting for the host to allow Arlo…/);
     await send(serverMessage.requestStatus(3));
     await screen.findByRole('alert');
