@@ -24,7 +24,7 @@
  *
  * A case: { kind, said, expectTool, expectArgs?, context? }
  *   expectTool  a tool name or 'none', or a list when more than one is right
- *   expectArgs  { <argument>: { equals?: string | boolean, includes?: string[], excludes?: string[] } },
+ *   expectArgs  { <argument>: { equals?: string | boolean | number, includes?: string[], excludes?: string[] } },
  *               text compared without regard to case, yes or no as such;
  *               checked when a tool was picked
  *   context     lines of a made-up meeting. Not given to the model any more: the
@@ -42,6 +42,8 @@ function argumentMatches(value, rule) {
   if (rule === null || typeof rule !== 'object') return false;
   // Yes or no: the same boolean, never a word for it
   if (typeof rule.equals === 'boolean') return value === rule.equals;
+  // A number: the same number, never text that reads like it
+  if (typeof rule.equals === 'number') return value === rule.equals;
   if (typeof value !== 'string') return false;
   const got = lower(value).trim();
   if (typeof rule.equals === 'string' && got !== lower(rule.equals).trim()) return false;

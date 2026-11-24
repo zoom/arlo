@@ -17,6 +17,7 @@ test('the steps are a fixed table of short sentences', () => {
     reacting: 'Sending a reaction',
     mutingSomeone: 'Muting someone',
     openingTicket: 'Opening a ticket',
+    stoppingTimer: 'Stopping the timer',
   });
   assert.equal(Object.isFrozen(STEPS), true);
   assert.equal(MAX_STEP_CHARS, 120);

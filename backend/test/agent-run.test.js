@@ -1886,6 +1886,101 @@ test('a ticket: the log has the tool and how it ended, never the key or the URL'
   assert.equal(/proj|123|jira|example|browse/i.test(lines.join('\n')), false);
 });
 
+// --- a timer -------------------------------------------------------------------------
+
+test('a timer, typed by an owner with the word and the minutes: their panel gets the minutes and nothing else', async () => {
+  const s = setup();
+  s.picks('set_timer', { minutes: 5 });
+  const res = await s.typed('set a five minute timer');
+  assert.deepEqual([res.status, res.tool, res.reply], ['done', 'set_timer', 'Done: started a 5 minute timer.']);
+  assert.deepEqual(s.t.handed, [{ meetingId: M, tool: 'set_timer', args: { minutes: 5 }, userId: 'user-ana' }]);
+  assert.deepEqual([res.action.label, res.action.status, res.action.public], ['Started a 5 minute timer', 'done', true]);
+  assert.deepEqual(s.t.approval, []);
+  assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Starting a 5 minute timer', 'panel'], [false]]);
+
+  // digits a model wrote as text are the number
+  s.picks('set_timer', { minutes: '10' });
+  await s.typed('start a 10 minute timer');
+  assert.deepEqual(s.t.handed.at(-1).args, { minutes: 10 });
+
+  s.picks('stop_timer', {});
+  const stopped = await s.typed('stop the timer');
+  assert.deepEqual([stopped.status, stopped.reply, stopped.action.label], ['done', 'Done: stopped the timer.', 'Stopped the timer']);
+  assert.deepEqual(s.t.handed.at(-1), { meetingId: M, tool: 'stop_timer', args: {}, userId: 'user-ana' });
+  assert.deepEqual(s.t.approval, []);
+});
+
+test('a timer, spoken or not in what was typed: the sheet says how long, has no body, and it starts on the panel of the owner who agreed', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  s.picks('set_timer', { minutes: 5 });
+  s.t.verified = () => true;
+  const res = await s.said('Arlo, set a five minute timer', ANA_SPEAKING);
+  assert.equal(res.status, 'waiting_approval');
+  assert.deepEqual(
+    [s.sheet().question, s.sheet().primaryLabel, 'body' in s.sheet(), s.sheet().kind],
+    ['Start a 5 minute timer for everyone?', 'Start timer', false, 'agent_action'],
+  );
+  assert.equal(res.action.label, 'Asked to start a 5 minute timer');
+  assert.deepEqual(s.t.handed, []);
+  await s.approve('user-cy');
+  assert.deepEqual(s.t.handed, [{ meetingId: M, tool: 'set_timer', args: { minutes: 5 }, userId: 'user-cy' }]);
+  assert.equal(lastAction(s).label, 'Started a 5 minute timer');
+  s.t.verified = () => false;
+
+  s.picks('stop_timer', {});
+  await s.said('Arlo, stop the timer');
+  assert.deepEqual([s.sheet().question, s.sheet().primaryLabel, 'body' in s.sheet()], ['Stop the timer?', 'Stop timer', false]);
+  s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+  await s.agent.whenIdle(M);
+  assert.deepEqual([lastAction(s).status, lastAction(s).label], ['declined', 'Asked to stop the timer']);
+  assert.equal(s.t.handed.length, 1);
+
+  // typed by an owner, and what would be done is not what they typed: the sheet
+  for (const [text, tool, args, question] of [
+    ['set a fifteen minute timer', 'set_timer', { minutes: 50 }, 'Start a 50 minute timer for everyone?'],
+    ['give us five minutes', 'set_timer', { minutes: 5 }, 'Start a 5 minute timer for everyone?'],
+    ['don\'t stop the timer', 'stop_timer', {}, 'Stop the timer?'],
+  ]) {
+    s.picks(tool, args);
+    const asked = await s.typed(text);
+    assert.equal(asked.status, 'waiting_approval', text);
+    assert.equal(s.sheet().question, question);
+    s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+    await s.agent.whenIdle(M);
+  }
+  assert.equal(s.t.handed.length, 1);
+  // typed by someone who is not an owner: the sheet
+  s.picks('set_timer', { minutes: 5 });
+  assert.equal((await s.typed('set a 5 minute timer', BEN)).status, 'waiting_approval');
+});
+
+test('minutes that are not a whole number from 1 to 120 are no tool: no timer, no sheet', async () => {
+  const s = setup();
+  for (const minutes of [5.5, 'five', 0, 121, '5.5', -1, null, true]) {
+    s.picks('set_timer', { minutes });
+    const res = await s.typed('set a five minute timer');
+    assert.notEqual(res.tool, 'set_timer', String(minutes));
+  }
+  s.picks('set_timer', { minutes: 5, text: 'Buy now' });
+  assert.notEqual((await s.typed('set a five minute timer')).tool, 'set_timer');
+  assert.deepEqual(s.t.handed, []);
+  assert.deepEqual(s.t.approval, []);
+  assert.equal(s.store.listActions(M).some((action) => action.tool === 'set_timer' || action.tool === 'stop_timer'), false);
+});
+
+test('a timer when the owner has no panel that can show one, or Zoom refuses', async () => {
+  const s = setup();
+  s.picks('set_timer', { minutes: 5 });
+  s.t.hands = async () => ({ ok: false, code: 'no_hands' });
+  const noPanel = await s.typed('set a 5 minute timer');
+  assert.deepEqual([noPanel.status, noPanel.code, noPanel.action.label], ['failed', 'no_hands', 'Open Arlo to let it do that.']);
+  s.t.hands = async () => ({ ok: false, code: 'sdk_error' });
+  const refused = await s.typed('set a 5 minute timer');
+  assert.deepEqual([refused.status, refused.code, refused.action.label], ['failed', 'sdk_error', 'Asked to start a 5 minute timer']);
+});
+
 test('a sheet says whether it is on the panel of the person who asked', async () => {
   const s = setup();
   s.t.owners = ['user-ana', 'user-cy'];

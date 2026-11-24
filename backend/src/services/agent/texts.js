@@ -123,6 +123,14 @@ const ticketName = (args) => (args !== null && typeof args === 'object' && isTic
 /** Whether the share dialog is opened after the ticket. */
 const sharesToo = (args) => args !== null && typeof args === 'object' && args.share === true;
 
+// A timer runs for whole minutes, from one to two hours
+const TIMER_MIN_MINUTES = 1;
+const TIMER_MAX_MINUTES = 120;
+/** Whether this is a timer's length as the tool table gives it. */
+const isTimerMinutes = (value) => Number.isInteger(value) && value >= TIMER_MIN_MINUTES && value <= TIMER_MAX_MINUTES;
+/** "a 5 minute timer", or "a timer" for minutes that are not the tool table's (it lets none through). */
+const aTimer = (args) => (args !== null && typeof args === 'object' && isTimerMinutes(args.minutes) ? `a ${args.minutes} minute timer` : 'a timer');
+
 // The sheet for text a model wrote (an answer, a summary): the text is the body
 const POST_ANSWER_QUESTION = 'Post Arlo\'s answer in the meeting chat?';
 const POST_ANSWER_PRIMARY = 'Post answer';
@@ -185,6 +193,21 @@ const TOOL_TEXTS = Object.freeze({
     question: (args) => `Mute ${args.name}?`,
     primary: () => 'Mute',
     reply: (args) => `Done: muted ${args.name}.`,
+  }),
+  set_timer: Object.freeze({
+    asked: (args) => `Asked to start ${aTimer(args)}`,
+    done: (args) => `Started ${aTimer(args)}`,
+    // "for everyone": it counts down in Zoom's own meeting window
+    question: (args) => `Start ${aTimer(args)} for everyone?`,
+    primary: () => 'Start timer',
+    reply: (args) => `Done: started ${aTimer(args)}.`,
+  }),
+  stop_timer: Object.freeze({
+    asked: () => 'Asked to stop the timer',
+    done: () => 'Stopped the timer',
+    question: () => 'Stop the timer?',
+    primary: () => 'Stop timer',
+    reply: () => 'Done: stopped the timer.',
   }),
   open_ticket: Object.freeze({
     asked: (args) => `Asked to open ${ticketName(args)}`,
@@ -279,7 +302,7 @@ const NO_HANDS = Object.freeze({
 // table; a test holds the two lists together), and the ones any panel of the
 // owner runs that post nothing to the chat
 const NEEDS_HOST_PANEL = new Set(['admit_from_waiting_room', 'mute_participant']);
-const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'send_reaction', 'open_ticket']);
+const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'send_reaction', 'open_ticket', 'set_timer', 'stop_timer']);
 function noHands(toolName) {
   if (NEEDS_HOST_PANEL.has(toolName)) return NO_HANDS.host;
   return NEEDS_OWN_PANEL.has(toolName) ? NO_HANDS.panel : NO_HANDS.chat;
@@ -315,6 +338,7 @@ const STEPS = Object.freeze({
   reacting: 'Sending a reaction',
   mutingSomeone: 'Muting someone',
   openingTicket: 'Opening a ticket',
+  stoppingTimer: 'Stopping the timer',
 });
 // The name came with the request: shown only when it is a name (lib/displayName.js), and short
 const stepName = (args) => cleanName(args !== null && typeof args === 'object' ? args.name : null, MAX_STEP_NAME_CHARS);
@@ -334,6 +358,9 @@ const TOOL_STEPS = Object.freeze({
     const name = stepName(args);
     return name.length > 0 ? `Muting ${name}` : STEPS.mutingSomeone;
   },
+  // The minutes only as the tool table gives them
+  set_timer: (args) => `Starting ${aTimer(args)}`,
+  stop_timer: () => STEPS.stoppingTimer,
   // The key only as the tool table rebuilt it; whether it is shared is not part of the step
   open_ticket: (args) => (ticketName(args) === 'a ticket' ? STEPS.openingTicket : `Opening ${ticketName(args)}`),
 });
@@ -360,6 +387,9 @@ module.exports = {
   ticketShareFailed,
   REACTIONS,
   REACTION_NAMES,
+  TIMER_MIN_MINUTES,
+  TIMER_MAX_MINUTES,
+  isTimerMinutes,
   NEEDS_HOST_PANEL,
   TOO_MANY_WAITING_LABEL,
   cleanLine,

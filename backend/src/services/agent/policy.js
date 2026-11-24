@@ -45,6 +45,7 @@
  * Anything unknown takes the stricter way: never 'run'.
  */
 const { isTicketKey, ticketKeysIn } = require('../../lib/jira');
+const { isTimerMinutes } = require('./texts');
 
 const ASKERS = new Set(['owner', 'other']);
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
@@ -110,6 +111,51 @@ const SHARE_NOTES_WORD = /(?<![\p{L}\p{N}_])share(?![\p{L}\p{N}_])/u;
 // A word that turns a request around ("don't share", "no heart", "stop").
 // Anywhere in the text: with one, the owner gets the sheet
 const NEGATION = /(?<![\p{L}\p{N}_])(?:not|no|never|stop|without|cannot|dont|\p{L}*n't)(?![\p{L}\p{N}_])/u;
+// The same without "stop", for the one request that is a stop ("stop the timer")
+const NEGATION_BUT_STOP = /(?<![\p{L}\p{N}_])(?:not|no|never|without|cannot|dont|\p{L}*n't)(?![\p{L}\p{N}_])/u;
+
+const TIMER_WORD = words('timer');
+const STOP_TIMER_WORD = words('stop|cancel|end');
+
+// The number words a timer's minutes are read from. A small table on purpose:
+// any other amount is typed as digits, or the owner gets the sheet
+const MINUTE_WORDS = Object.freeze({
+  one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19,
+  twenty: 20, thirty: 30, 'forty-five': 45, 'forty five': 45, sixty: 60, ninety: 90,
+});
+// "5 minutes", "5-minute", "five min": a number of the table or up to three
+// digits, then the unit. Not the end of a longer number ("twenty five", "a
+// hundred and five", "1.5"): what stands before it must not be part of one
+const MINUTES_SAID = new RegExp(
+  '(?<![\\p{L}\\p{N}_.,\\-])(?<!(?:twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|and|point)[ \\-])'
+  + `(\\d{1,3}|${Object.keys(MINUTE_WORDS).sort((a, b) => b.length - a.length).join('|')})[ \\-]?(?:min|mins|minute|minutes)${AFTER_WORD}`,
+  'gu',
+);
+// A unit of time that is left when the amounts above are taken out: an amount
+// that was not read ("twenty five minutes", "1.5 minutes", "a minute"), or one
+// in another unit
+const OTHER_AMOUNT = words('mins?|minutes?|hours?|hrs?|seconds?|secs?');
+
+/**
+ * Every length of time in the text (plain()), in minutes, in the order read:
+ * "5 minutes", "five minute", "an hour" (60), "half an hour" (30). An amount
+ * that cannot be read for sure (hours, seconds, "twenty five minutes", "1.5
+ * minutes", "a minute") is NaN, which equals no number: with one in the text nothing is
+ * covered.
+ */
+function minutesIn(text) {
+  if (typeof text !== 'string') return [];
+  const found = [];
+  let rest = text.replace(/(?<![\p{L}\p{N}_])half an hour(?![\p{L}\p{N}_]| and)/gu, () => { found.push(30); return ' | '; });
+  rest = rest.replace(/(?<![\p{L}\p{N}_])an hour(?![\p{L}\p{N}_]| and)/gu, () => { found.push(60); return ' | '; });
+  rest = rest.replace(MINUTES_SAID, (all, amount) => {
+    found.push(/^\d/.test(amount) ? Number(amount) : MINUTE_WORDS[amount]);
+    return ' | ';
+  });
+  if (OTHER_AMOUNT.test(rest)) found.push(NaN);
+  return found;
+}
 
 /** Compared without case and with every run of whitespace as one space. */
 const folded = (value) => value.normalize('NFC').replace(/\s+/gu, ' ').trim().toLowerCase();
@@ -173,6 +219,16 @@ function isPlainRequest(text, forms) {
  *                            and when the share dialog would be opened too,
  *                            the typed text has "share" as a word and no
  *                            NEGATION word ("open PROJ-123, don't share")
+ *   set_timer                the typed text has the word "timer", no NEGATION
+ *                            word, and a length of time that is exactly the
+ *                            tool call's minutes: digits or a number word of
+ *                            MINUTE_WORDS with "minute(s)" or "min(s)", "an
+ *                            hour" (60) or "half an hour" (30). Two different
+ *                            lengths, hours, seconds or a number that is not
+ *                            read for sure ("twenty five minutes"): the sheet
+ *   stop_timer               the typed text has "stop", "cancel" or "end" and
+ *                            "timer" as words of their own, and no other word
+ *                            that turns it around ("don't stop the timer")
  *   invite_everyone          never: it shares the notes and sends an
  *                            invitation, and only the sheet says both
  * Any other tool, or anything that is not text: false.
@@ -207,9 +263,16 @@ function typedRequestCovers(typed, toolName, args) {
     if (!isTicketKey(key) || typeof share !== 'boolean') return false;
     return ticketKeysIn(typed).includes(key) && (share === false || (SHARE_WORD.test(text) && !NEGATION.test(text)));
   }
+  if (toolName === 'set_timer') {
+    const { minutes } = args;
+    if (!isTimerMinutes(minutes) || !TIMER_WORD.test(text) || NEGATION.test(text)) return false;
+    const said = minutesIn(text);
+    return said.length > 0 && said.every((one) => one === minutes);
+  }
+  if (toolName === 'stop_timer') return STOP_TIMER_WORD.test(text) && TIMER_WORD.test(text) && !NEGATION_BUT_STOP.test(text);
   return false;
 }
 
 module.exports = {
-  decide, panelMayAsk, voiceIsHeard, typedRequestCovers,
+  decide, panelMayAsk, voiceIsHeard, typedRequestCovers, minutesIn,
 };

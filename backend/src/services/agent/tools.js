@@ -23,12 +23,16 @@
  * the deployment's Jira base URL and that key. Without a base URL
  * (JIRA_BASE_URL) the tool is not in the table.
  *
+ * A timer's length (`minutes` of set_timer) is a whole number from 1 to 120:
+ * a JSON integer, or the same written as plain digits ("5"), rebuilt as the
+ * number. "5.5", "five" and anything else is refused.
+ *
  * This file has no code that runs a tool.
  */
 const { showableName } = require('../../lib/displayName');
 const { readJiraBaseUrl, normalizeTicketKey } = require('../../lib/jira');
 const {
-  NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS, REACTION_NAMES,
+  NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS, REACTION_NAMES, TIMER_MIN_MINUTES, TIMER_MAX_MINUTES,
 } = require('./texts');
 
 const text = (description, maxLength) => ({ type: 'string', description, maxLength });
@@ -36,6 +40,10 @@ const text = (description, maxLength) => ({ type: 'string', description, maxLeng
 const oneOf = (description, names) => ({ type: 'string', description, enum: [...names] });
 // Yes or no: true or false and nothing else, never a word for one
 const yesNo = (description) => ({ type: 'boolean', description });
+// A whole number within limits, and nothing else
+const whole = (description, minimum, maximum) => ({
+  type: 'integer', description, minimum, maximum,
+});
 const parameters = (properties = {}) => ({
   type: 'object', properties, required: Object.keys(properties), additionalProperties: false,
 });
@@ -112,6 +120,22 @@ const TABLE = deepFreeze([
     runs: 'panel',
     changesMeeting: true,
     needsHost: true,
+  },
+  {
+    name: 'set_timer',
+    // The panel of the owner who typed or approved it starts a countdown in
+    // Zoom's Dynamic Indicator, which everyone in the meeting sees
+    description: 'Start a countdown timer that everyone in the meeting sees. Use only when asked to set or start a timer, or to put an amount of time on the clock, and the asker says how long. Not when time is only talked about, and not for a reminder or an alarm at a time of day.',
+    parameters: parameters({ minutes: whole('How long, in whole minutes, from 1 to 120, as the asker said it.', TIMER_MIN_MINUTES, TIMER_MAX_MINUTES) }),
+    runs: 'panel',
+    changesMeeting: true,
+  },
+  {
+    name: 'stop_timer',
+    description: 'End the countdown timer that everyone in the meeting sees. Use only when asked to stop, cancel or end the timer.',
+    parameters: parameters(),
+    runs: 'panel',
+    changesMeeting: true,
   },
   {
     name: 'open_ticket',
@@ -197,6 +221,11 @@ const MAX_ENUM_VALUE_CHARS = 40;
 function readArgument(key, value, property) {
   // true or false as such: "true", 1 or "yes" is refused, never read as one
   if (property.type === 'boolean') return typeof value === 'boolean' ? value : null;
+  if (property.type === 'integer') {
+    // A whole number, or the same as plain digits; never rounded or read out of a word
+    const number = typeof value === 'string' && /^[1-9][0-9]{0,2}$/.test(value) ? Number(value) : value;
+    return Number.isInteger(number) && number >= property.minimum && number <= property.maximum ? number : null;
+  }
   if (typeof value !== 'string') return null;
   // A ticket key is rebuilt, or it is not one (lib/jira.js)
   if (key === 'key') return value.length <= property.maxLength ? normalizeTicketKey(value) : null;

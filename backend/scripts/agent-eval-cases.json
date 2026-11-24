@@ -503,5 +503,50 @@
       "none",
       "answer_from_meeting"
     ]
+  },
+  {
+    "kind": "tool",
+    "said": "set a five minute timer",
+    "expectTool": "set_timer",
+    "expectArgs": {
+      "minutes": {
+        "equals": 5
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "start a 10 minute timer",
+    "expectTool": "set_timer",
+    "expectArgs": {
+      "minutes": {
+        "equals": 10
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "give us two minutes on the clock",
+    "expectTool": "set_timer",
+    "expectArgs": {
+      "minutes": {
+        "equals": 2
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "stop the timer",
+    "expectTool": "stop_timer"
+  },
+  {
+    "kind": "non_request",
+    "said": "we only have five minutes left before the next call",
+    "expectTool": "none"
+  },
+  {
+    "kind": "non_request",
+    "said": "the oven timer went off twice while I was presenting yesterday",
+    "expectTool": "none"
   }
 ]

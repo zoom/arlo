@@ -137,7 +137,7 @@ const {
 } = require('./policy');
 const { approvalMessageData } = require('../approvals');
 const {
-  TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, chatText, cleanLine, noHands, TOO_MANY_WAITING_LABEL,
+  TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, isTimerMinutes, chatText, cleanLine, noHands, TOO_MANY_WAITING_LABEL,
   failedReply, INVITE_NOT_SENT,
   MAX_CHAT_ANSWER_CHARS, MAX_CHAT_MESSAGE_CHARS, MAX_SHEET_REQUEST_CHARS, MAX_SHEET_NAME_CHARS,
   STEPS, toolStep,
@@ -544,6 +544,12 @@ function createAgent({
           if (url === null || typeof args.share !== 'boolean') return { ok: false, code: 'unsupported' };
           return await viaHands(meetingId, { tool: tool.name, args: { url, key: args.key, share: args.share } }, actorUserId);
         }
+        case 'set_timer':
+          // The minutes once more, as the panel is sent them and nothing with them
+          if (!isTimerMinutes(args.minutes)) return { ok: false, code: 'unsupported' };
+          return await viaHands(meetingId, { tool: tool.name, args: { minutes: args.minutes } }, actorUserId);
+        case 'stop_timer':
+          return await viaHands(meetingId, { tool: tool.name, args: {} }, actorUserId);
         default:
           // A tool of the panel goes to the hands; a tool of the server that
           // is not above (web search) is not built
