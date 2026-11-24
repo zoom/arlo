@@ -94,6 +94,7 @@ export const DID_TEXT = Object.freeze({
   admit_from_waiting_room: 'Arlo let someone in',
   share_notes: 'Arlo shared the notes',
   invite_everyone: 'Arlo invited everyone to the notes',
+  open_notes_for_everyone: 'Arlo opened the notes for everyone',
   mute_participant: 'Arlo muted a participant',
   open_ticket: 'Arlo opened a ticket',
 });

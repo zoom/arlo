@@ -19,6 +19,7 @@ import AskHost from '../components/arlo/AskHost';
 import LiveNotes from '../components/arlo/LiveNotes';
 import ParticipantView from '../components/arlo/ParticipantView';
 import AfterMeeting from '../components/arlo/AfterMeeting';
+import CollaborateNotes from '../components/arlo/CollaborateNotes';
 import './ArloMeetingView.css';
 
 const FALLBACK_TITLE = 'Meeting notes';
@@ -34,7 +35,10 @@ function isTextEntry(element) {
 
 /**
  * Arlo in a meeting: one screen at a time, chosen by lib/arloScreen.js from
- * confirmed state. No tabs, no dashboard.
+ * confirmed state. No tabs, no dashboard. While the app runs in Zoom's
+ * Collaborate mode (an owner opened the notes for everyone) the screen is the
+ * notes as a document, for everyone; when Collaborate ends, the screen is the
+ * one above again.
  *
  * Zoom's Dynamic Indicator needs nothing here: MeetingProvider keeps it in
  * step with the stream on every screen (hooks/useDynamicIndicator.js).
@@ -49,7 +53,9 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   const { addToast } = useToast();
   const arlo = useArlo();
   const { isAuthenticated } = useAuth();
-  const { meetingContext, userContext, isTestMode, runningContext } = useZoomSdk();
+  const {
+    zoomSdk, meetingContext, userContext, isTestMode, runningContext, inCollaborate,
+  } = useZoomSdk();
   const { demoMode, ownStreamAvailable } = useServerSettings();
   const { authorize, isAuthorizing, error: signInError } = useZoomAuth();
   const secondsLeft = useSecondsLeft(rtmsRequestExpiresAt);
@@ -118,8 +124,15 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   const saveShareNotes = useCallback(async (value) => {
     const saved = await setShareNotes(value);
     if (!saved) addToast('Couldn\'t change sharing. Try again.', 'error');
+    // Notes that were opened for everyone are closed with the sharing. This
+    // panel cannot be sure whether Collaborate runs (the side panel may stay
+    // "in the meeting" while it does; lib/collaborate.js), so Zoom is asked
+    // every time, and its "not in collaborate mode" is not an error
+    if (saved && value === false && typeof zoomSdk?.endCollaborate === 'function') {
+      Promise.resolve().then(() => zoomSdk.endCollaborate()).catch(() => {});
+    }
     return saved;
-  }, [setShareNotes, addToast]);
+  }, [setShareNotes, addToast, zoomSdk]);
   const saveWhoCanAsk = useCallback(async (value) => {
     const saved = await setWhoCanAsk(value);
     if (!saved) {
@@ -163,16 +176,21 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   // when what had it is gone. Never from an input the user is typing in that
   // is still there (the header's search, for one).
   const accessNotice = accessHidesScreen(meetingAccess) && screen !== 'after';
+  // While the app runs in Zoom's Collaborate mode the notes are one document
+  // for everyone, whatever screen this person would have otherwise. Not after
+  // the meeting, and not before the server said what this person is to Arlo
+  const collaborating = inCollaborate === true && screen !== 'after' && screen !== 'loading';
+  const shownScreen = collaborating ? 'collaborate' : screen;
   const viewRef = useRef(null);
   const focusedScreenRef = useRef(null);
   useEffect(() => {
-    if (nothingToShow || accessNotice || focusedScreenRef.current === screen) return;
+    if (nothingToShow || accessNotice || focusedScreenRef.current === shownScreen) return;
     const target = viewRef.current?.querySelector('[data-arlo-focus]');
     if (!target) return;
-    focusedScreenRef.current = screen;
+    focusedScreenRef.current = shownScreen;
     if (isTextEntry(document.activeElement)) return;
     target.focus();
-  }, [screen, nothingToShow, accessNotice]);
+  }, [shownScreen, nothingToShow, accessNotice]);
 
   if (nothingToShow) return null;
 
@@ -199,7 +217,30 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   });
 
   let content;
-  switch (screen) {
+  switch (shownScreen) {
+    case 'collaborate': {
+      // The owner's view is the one Zoom shares as a screen: see CollaborateNotes
+      const owner = canControl && screen === 'notes';
+      content = (
+        <CollaborateNotes
+          owner={owner}
+          notes={owner || arlo.notesShared ? arlo.notes : null}
+          notesShared={arlo.notesShared}
+          actions={arlo.actions}
+          status={owner ? {
+            present: arlo.present === true,
+            paused: arlo.paused,
+            myStreamPaused: arlo.myStreamPaused,
+            myStreamLive: arlo.myStreamLive,
+            canControl,
+            thinking: arlo.thinking,
+            thinkingStep: arlo.thinkingStep,
+            thinkingChannel: arlo.thinkingChannel,
+          } : null}
+        />
+      );
+      break;
+    }
     case 'bring-in':
       content = (
         <BringArloIn
@@ -328,7 +369,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
   }
 
   return (
-    <div className="arlo-view" data-screen={screen} ref={viewRef}>
+    <div className="arlo-view" data-screen={shownScreen} ref={viewRef}>
       {content}
     </div>
   );

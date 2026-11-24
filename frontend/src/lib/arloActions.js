@@ -13,6 +13,9 @@
  *                                          Zoom's share dialog when `share` is true
  *   set_timer                { minutes }   a countdown on Zoom's Dynamic Indicator, for everyone
  *   stop_timer               {}            takes it down again
+ *   open_notes_for_everyone  {}            Zoom's Collaborate mode: Arlo opens for everyone in
+ *                                          the meeting, with this person's Arlo view as a screen
+ *                                          share for people without the app
  *
  * Codes: 'unsupported' (not a tool of this panel, arguments it cannot use, a
  * Zoom client without the API, or muting the person whose panel this is:
@@ -22,7 +25,18 @@
  * the name is how someone else's begins, or it mixes look-alike scripts: Arlo
  * then asks for the full name), 'sdk_error' (Zoom refused or failed, or the
  * list of people is longer than is looked through), 'share_failed' (the
- * ticket was opened in the browser and the share dialog was not).
+ * ticket was opened in the browser and the share dialog was not),
+ * 'fell_back_invite' (Collaborate did not start, and the invitation to open
+ * Arlo was sent to everyone instead).
+ *
+ * Opening the notes for everyone: the server has shared the notes before it
+ * asks. Collaborate is started with the screen share (lib/collaborate.js,
+ * where what is guessed about that API is kept). When Zoom refuses (the
+ * feature is off for the app, a webinar or a breakout room, an older client),
+ * the next best thing is done without asking again: the app invitation goes
+ * to everyone, as for invite_everyone, and the report says which of the two
+ * happened. The owner agreed to "open the notes for everyone"; an invitation
+ * to open them is less than that, never more.
  *
  * A ticket's URL is never taken as it comes: this panel builds it again from
  * the deployment's Jira base URL (the server's settings, given as
@@ -51,6 +65,7 @@
  */
 import { INDICATOR_GUESSES } from './dynamicIndicator';
 import { isTimerMinutes } from './indicatorTimer';
+import { startCollaborateForEveryone } from './collaborate';
 
 export const HAND_TOOLS = Object.freeze({
   chat: 'post_to_chat',
@@ -61,6 +76,7 @@ export const HAND_TOOLS = Object.freeze({
   ticket: 'open_ticket',
   setTimer: 'set_timer',
   stopTimer: 'stop_timer',
+  openNotes: 'open_notes_for_everyone',
 });
 
 /**
@@ -146,12 +162,13 @@ export function jiraBaseOf(value) {
  * the host or a co-host; a ticket when the client opens URLs and the
  * deployment has a Jira (the share dialog is not needed to announce it: a
  * ticket can be opened without it); a timer, to start and to stop, when the
- * client accepted the Dynamic Indicator APIs. At most eight names (the server
- * takes ten).
+ * client accepted the Dynamic Indicator APIs; opening the notes for everyone
+ * when the client accepted startCollaborate (whether Zoom then starts it is
+ * only known when it is tried). At most nine names (the server takes ten).
  */
 export function handsFor({
   chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl,
-  indicatorSupported, zoomRole,
+  indicatorSupported, collaborateSupported, zoomRole,
 }) {
   const can = [];
   if (chatSupported === true) can.push(HAND_TOOLS.chat);
@@ -161,6 +178,7 @@ export function handsFor({
   if (muteSupported === true && MAY_MUTE.has(zoomRole)) can.push(HAND_TOOLS.mute);
   if (openUrlSupported === true && jiraBaseOf(jiraBaseUrl) !== null) can.push(HAND_TOOLS.ticket);
   if (indicatorSupported === true) can.push(HAND_TOOLS.setTimer, HAND_TOOLS.stopTimer);
+  if (collaborateSupported === true) can.push(HAND_TOOLS.openNotes);
   return can;
 }
 
@@ -369,6 +387,24 @@ async function stopTimer(zoomSdk, args, stillAllowed, indicatorTimer) {
   return ok;
 }
 
+async function openNotesForEveryone(zoomSdk, args, stillAllowed) {
+  // Nothing is asked with it: an option of Zoom's would be something nobody approved
+  if (args !== undefined && args !== null && !isEmptyObject(args)) return fail('unsupported');
+  if (!has(zoomSdk, 'startCollaborate')) return fail('unsupported');
+  if (typeof stillAllowed !== 'function' || stillAllowed() !== true) return fail('not_allowed');
+
+  if (await startCollaborateForEveryone(zoomSdk)) return ok;
+  // Zoom did not start Collaborate. The invitation instead, when this panel
+  // may still act and the client has it; otherwise nothing more was done
+  if (stillAllowed() !== true || !has(zoomSdk, 'sendAppInvitationToAllParticipants')) return fail('sdk_error');
+  try {
+    await zoomSdk.sendAppInvitationToAllParticipants();
+  } catch {
+    return fail('sdk_error');
+  }
+  return fail('fell_back_invite');
+}
+
 /**
  * Run one action with the Zoom Apps SDK. `zoomRole`: this person's role in
  * the Zoom meeting, as Zoom reports it. `stillAllowed()`: true while this
@@ -402,6 +438,8 @@ export async function runArloAction(zoomSdk, action, {
         return await setTimer(zoomSdk, action.args, stillAllowed, indicatorTimer);
       case HAND_TOOLS.stopTimer:
         return await stopTimer(zoomSdk, action.args, stillAllowed, indicatorTimer);
+      case HAND_TOOLS.openNotes:
+        return await openNotesForEveryone(zoomSdk, action.args, stillAllowed);
       default:
         return fail('unsupported');
     }

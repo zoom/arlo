@@ -367,6 +367,69 @@
   outline: none;
 }
 
+/* The notes opened for everyone (Zoom's Collaborate mode): one wide, readable
+   page in the meeting window. The bar above it is the owner's (status and
+   "Close for everyone") or a participant's ("Leave"). Existing tokens only */
+.arlo-collab-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.arlo-collab-bar .arlo-status {
+  flex: 1;
+  min-width: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.arlo-collab-bar-actions {
+  display: flex;
+  align-items: center;
+  min-height: 32px;
+}
+
+.arlo-collab-page {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 24px 8px 48px;
+}
+
+.arlo-collab-title {
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.arlo-collab-page .arlo-notes {
+  margin-top: 16px;
+  font-size: 1.125rem;
+  line-height: 1.65;
+}
+
+.arlo-collab-page .arlo-notes section + section {
+  margin-top: 24px;
+}
+
+.arlo-collab-page .arlo-notes-heading {
+  margin-bottom: 6px;
+  font-size: 0.8125rem;
+}
+
+.arlo-collab-page .arlo-notes li + li {
+  margin-top: 6px;
+}
+
 /* A participant's two choices: ask the owner to share the notes with
    everyone, or take notes themselves. Two secondary buttons of equal weight,
    each with one line under it */

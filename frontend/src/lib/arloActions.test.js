@@ -61,13 +61,21 @@ describe('handsFor: what a panel announces', () => {
     for (const indicatorSupported of [false, undefined, 'yes', 1]) expect(handsFor({ indicatorSupported, zoomRole: 'host' })).toEqual([]);
   });
 
-  test('never more names than the server takes: a host whose client has everything announces eight', () => {
+  test('opening the notes for everyone when the client took startCollaborate, whatever the Zoom role', () => {
+    expect(handsFor({ collaborateSupported: true, zoomRole: 'attendee' })).toEqual(['open_notes_for_everyone']);
+    expect(handsFor({ collaborateSupported: true, zoomRole: null })).toEqual(['open_notes_for_everyone']);
+    expect(handsFor({ chatSupported: true, collaborateSupported: true, zoomRole: 'host' })).toEqual(['post_to_chat', 'open_notes_for_everyone']);
+    for (const collaborateSupported of [false, undefined, 'yes', 1]) expect(handsFor({ collaborateSupported, zoomRole: 'host' })).toEqual([]);
+  });
+
+  test('never more names than the server takes: a host whose client has everything announces nine', () => {
     const all = {
       chatSupported: true, waitingRoomSupported: true, invitationSupported: true, reactionSupported: true, muteSupported: true,
-      openUrlSupported: true, jiraBaseUrl: 'https://jira.example.test', indicatorSupported: true,
+      openUrlSupported: true, jiraBaseUrl: 'https://jira.example.test', indicatorSupported: true, collaborateSupported: true,
     };
     expect(handsFor({ ...all, zoomRole: 'host' })).toEqual([
       'post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant', 'open_ticket', 'set_timer', 'stop_timer',
+      'open_notes_for_everyone',
     ]);
     expect(handsFor({ ...all, zoomRole: 'host' }).length).toBeLessThanOrEqual(10);
   });
@@ -261,6 +269,87 @@ describe('admit_from_waiting_room', () => {
     expect(await admit(noAdmit, 'James')).toEqual({ ok: false, code: 'sdk_error' });
     const noId = sdkWith([waiting('James', undefined)]);
     expect(await admit(noId, 'James')).toEqual({ ok: false, code: 'sdk_error' });
+  });
+});
+
+describe('open_notes_for_everyone', () => {
+  const collaborateSdk = () => ({
+    startCollaborate: vi.fn(async () => ({ message: 'Success' })),
+    sendAppInvitationToAllParticipants: vi.fn(async () => ({ invitationUUID: 'i-1' })),
+  });
+  const open = (sdk, stillAllowed = yes, args = {}) => runArloAction(sdk, { tool: 'open_notes_for_everyone', args }, { zoomRole: 'attendee', stillAllowed });
+  const refuses = () => vi.fn(async () => { throw Object.assign(new Error('This app cannot support collaborate mode.'), { code: 10089 }); });
+
+  test('starts Collaborate once, with the screen share, and sends no invitation', async () => {
+    const sdk = collaborateSdk();
+    expect(await open(sdk)).toEqual({ ok: true });
+    expect(sdk.startCollaborate).toHaveBeenCalledTimes(1);
+    expect(sdk.startCollaborate).toHaveBeenCalledWith({ shareScreen: true });
+    expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
+    // without arguments at all is the same request
+    expect(await runArloAction(collaborateSdk(), { tool: 'open_notes_for_everyone' }, { stillAllowed: yes })).toEqual({ ok: true });
+  });
+
+  test('Collaborate does not start: the invitation goes out instead, and that is what is reported', async () => {
+    const sdk = collaborateSdk();
+    sdk.startCollaborate = refuses();
+    expect(await open(sdk)).toEqual({ ok: false, code: 'fell_back_invite' });
+    expect(sdk.sendAppInvitationToAllParticipants).toHaveBeenCalledTimes(1);
+    expect(sdk.sendAppInvitationToAllParticipants).toHaveBeenCalledWith();
+  });
+
+  test('Collaborate does not start and the invitation fails too, or the client has none: sdk_error', async () => {
+    const both = collaborateSdk();
+    both.startCollaborate = refuses();
+    both.sendAppInvitationToAllParticipants = vi.fn(async () => { throw new Error('no'); });
+    expect(await open(both)).toEqual({ ok: false, code: 'sdk_error' });
+    expect(both.sendAppInvitationToAllParticipants).toHaveBeenCalledTimes(1);
+    const throws = collaborateSdk();
+    throws.startCollaborate = vi.fn(() => { throw new Error('at once'); });
+    throws.sendAppInvitationToAllParticipants = vi.fn(() => { throw new Error('at once'); });
+    expect(await open(throws)).toEqual({ ok: false, code: 'sdk_error' });
+    expect(await open({ startCollaborate: refuses() })).toEqual({ ok: false, code: 'sdk_error' });
+  });
+
+  test('Zoom says the app is in Collaborate already: done, and nobody is invited', async () => {
+    const sdk = collaborateSdk();
+    sdk.startCollaborate = vi.fn(async () => { throw Object.assign(new Error('The app is in collaborate mode.'), { code: 10084 }); });
+    expect(await open(sdk)).toEqual({ ok: true });
+    expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
+  });
+
+  test('a panel that may no longer act for Arlo opens nothing and invites nobody', async () => {
+    for (const stillAllowed of [() => false, () => 'yes', null, undefined]) {
+      const sdk = collaborateSdk();
+      expect(await runArloAction(sdk, { tool: 'open_notes_for_everyone', args: {} }, { stillAllowed })).toEqual({ ok: false, code: 'not_allowed' });
+      expect(sdk.startCollaborate).not.toHaveBeenCalled();
+      expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
+    }
+    // it stopped being allowed while Zoom was refusing: no invitation is sent in its place
+    const sdk = collaborateSdk();
+    let allowed = true;
+    sdk.startCollaborate = vi.fn(async () => { allowed = false; throw new Error('no'); });
+    expect(await open(sdk, () => allowed)).toEqual({ ok: false, code: 'sdk_error' });
+    expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
+  });
+
+  test('a client without startCollaborate: unsupported, and no invitation in its place', async () => {
+    const sdk = { sendAppInvitationToAllParticipants: vi.fn(async () => ({})) };
+    expect(await open(sdk)).toEqual({ ok: false, code: 'unsupported' });
+    expect(await open(undefined)).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['an option of Zoom\'s', { shareScreen: false }],
+    ['an argument', { name: 'James' }],
+    ['arguments that are a list', []],
+    ['arguments that are text', 'everyone'],
+  ])('%s is not what was approved: unsupported, nothing opened', async (_name, args) => {
+    const sdk = collaborateSdk();
+    expect(await open(sdk, yes, args)).toEqual({ ok: false, code: 'unsupported' });
+    expect(sdk.startCollaborate).not.toHaveBeenCalled();
+    expect(sdk.sendAppInvitationToAllParticipants).not.toHaveBeenCalled();
   });
 });
 

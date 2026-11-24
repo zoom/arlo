@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, waitFor } from '@testing-library/react';
-import { createZoomSdk, resetHarness } from '../test/harness';
+import { render, waitFor, act } from '@testing-library/react';
+import { createZoomSdk, resetHarness, MEETING } from '../test/harness';
 import { ZoomSdkProvider, useZoomSdk } from './ZoomSdkContext';
 
 // What the panel takes a Zoom client to support. Zoom can accept a
@@ -27,10 +27,11 @@ async function configured(options) {
     mute: zoom.muteSupported,
     openUrl: zoom.openUrlSupported,
     shareScreen: zoom.shareScreenSupported,
+    collaborate: zoom.collaborateSupported,
   };
 }
 const ALL = {
-  chat: true, waitingRoom: true, indicator: true, rtmsStatus: true, invitation: true, reaction: true, mute: true, openUrl: true, shareScreen: true,
+  chat: true, waitingRoom: true, indicator: true, rtmsStatus: true, invitation: true, reaction: true, mute: true, openUrl: true, shareScreen: true, collaborate: true,
 };
 const lastCapabilities = () => window.zoomSdk.config.mock.calls.at(-1)[0].capabilities;
 
@@ -54,6 +55,7 @@ test.each([
   ['getMeetingParticipants', { mute: false }],
   ['openUrl', { openUrl: false }],
   ['promptShareScreen', { shareScreen: false }],
+  ['startCollaborate', { collaborate: false }],
 ])('%s accepted at config but listed in unsupportedApis is not supported', async (api, lost) => {
   expect(await configured({ unsupportedApis: [api] })).toEqual({ ...ALL, ...lost });
   // Zoom accepted the first, largest set: nothing was asked again
@@ -61,7 +63,7 @@ test.each([
 });
 
 test('an API of another tier in the list takes nothing away', async () => {
-  expect(await configured({ unsupportedApis: ['startCollaborate', 'runRenderingContext'] })).toEqual(ALL);
+  expect(await configured({ unsupportedApis: ['joinCollaborate', 'runRenderingContext'] })).toEqual(ALL);
 });
 
 test.each([
@@ -151,7 +153,7 @@ test('a client that takes the core set only: every set is tried once, largest fi
   const flags = await configured({ refusedApis: ['getMeetingParticipants'] });
   expect(flags).toEqual({
     chat: true, waitingRoom: false, indicator: false, rtmsStatus: false, invitation: false, reaction: false, mute: false,
-    openUrl: true, shareScreen: false,
+    openUrl: true, shareScreen: false, collaborate: false,
   });
   const sizes = window.zoomSdk.config.mock.calls.map(([options]) => options.capabilities.length);
   expect(sizes).toHaveLength(7);
@@ -172,4 +174,92 @@ test('a client object without the methods does not support them, whatever config
   expect(zoom.invitationSupported).toBe(false);
   expect(zoom.openUrlSupported).toBe(false);
   expect(zoom.shareScreenSupported).toBe(false);
+});
+
+// --- Collaborate mode: the running context ---------------------------------------
+
+async function started(options) {
+  window.zoomSdk = createZoomSdk(options);
+  render(<ZoomSdkProvider><Probe /></ZoomSdkProvider>);
+  await waitFor(() => expect(zoom.sdkConfigured).toBe(true));
+  await waitFor(() => expect(zoom.runningContext).not.toBeNull());
+  return window.zoomSdk;
+}
+const fire = (sdk, event, payload) => act(async () => { sdk.emit(event, payload); });
+
+test('in a meeting\'s side panel: in a meeting, not in Collaborate', async () => {
+  await started();
+  expect([zoom.runningContext, zoom.inCollaborate]).toEqual(['inMeeting', false]);
+  await waitFor(() => expect(zoom.meetingContext?.meetingUUID).toBe(MEETING));
+});
+
+test('an app that starts in Collaborate is in a meeting, with the meeting\'s id, and says it is in Collaborate', async () => {
+  await started({ runningContext: 'inCollaborate' });
+  expect([zoom.runningContext, zoom.inCollaborate]).toEqual(['inMeeting', true]);
+  await waitFor(() => expect(zoom.meetingContext?.meetingUUID).toBe(MEETING));
+  expect(zoom.isGuest).toBe(false);
+});
+
+test('onCollaborateChange carries no state: the running context is read again, each time', async () => {
+  const sdk = await started();
+  await waitFor(() => expect(zoom.meetingContext?.meetingUUID).toBe(MEETING));
+  const reads = sdk.getRunningContext.mock.calls.length;
+  sdk.runningContext = 'inCollaborate';
+  await fire(sdk, 'onCollaborateChange', { action: 'start', timestamp: 1 });
+  await waitFor(() => expect(zoom.inCollaborate).toBe(true));
+  expect(sdk.getRunningContext.mock.calls.length).toBe(reads + 1);
+  // still the same meeting for everything else in the panel
+  expect(zoom.runningContext).toBe('inMeeting');
+  expect(zoom.meetingContext?.meetingUUID).toBe(MEETING);
+
+  sdk.runningContext = 'inMeeting';
+  await fire(sdk, 'onCollaborateChange', undefined);
+  await waitFor(() => expect(zoom.inCollaborate).toBe(false));
+  expect([zoom.runningContext, zoom.meetingContext?.meetingUUID]).toEqual(['inMeeting', MEETING]);
+});
+
+test('onRunningContextChange into and out of Collaborate keeps the meeting', async () => {
+  const sdk = await started();
+  await waitFor(() => expect(zoom.meetingContext?.meetingUUID).toBe(MEETING));
+  await fire(sdk, 'onRunningContextChange', { runningContext: 'inCollaborate' });
+  await waitFor(() => expect(zoom.inCollaborate).toBe(true));
+  expect([zoom.runningContext, zoom.meetingContext?.meetingUUID]).toEqual(['inMeeting', MEETING]);
+  await fire(sdk, 'onRunningContextChange', { runningContext: 'inMeeting' });
+  await waitFor(() => expect(zoom.inCollaborate).toBe(false));
+  expect(zoom.meetingContext?.meetingUUID).toBe(MEETING);
+  // out of the meeting altogether: no meeting, as before
+  await fire(sdk, 'onRunningContextChange', { runningContext: 'inMainClient' });
+  await waitFor(() => expect(zoom.meetingContext).toBeNull());
+  expect([zoom.runningContext, zoom.inCollaborate]).toEqual(['inMainClient', false]);
+});
+
+test('Zoom does not answer for the meeting while in Collaborate: the meeting the panel was in is kept', async () => {
+  const sdk = await started();
+  await waitFor(() => expect(zoom.meetingContext?.meetingUUID).toBe(MEETING));
+  sdk.getMeetingUUID.mockImplementation(async () => { throw new Error('not in this context'); });
+  sdk.getMeetingContext.mockImplementation(async () => { throw new Error('not in this context'); });
+  await fire(sdk, 'onRunningContextChange', { runningContext: 'inCollaborate' });
+  await waitFor(() => expect(zoom.inCollaborate).toBe(true));
+  await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 20); }); });
+  expect(zoom.meetingContext?.meetingUUID).toBe(MEETING);
+});
+
+test('a re-read that fails, or answers nothing usable, changes nothing', async () => {
+  const sdk = await started();
+  sdk.getRunningContext.mockImplementation(async () => { throw new Error('no'); });
+  await fire(sdk, 'onCollaborateChange', {});
+  sdk.getRunningContext.mockImplementation(async () => ({ context: 7 }));
+  await fire(sdk, 'onCollaborateChange', {});
+  await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 20); }); });
+  expect([zoom.runningContext, zoom.inCollaborate]).toEqual(['inMeeting', false]);
+});
+
+test('a client that did not take onCollaborateChange is not listened to for it', async () => {
+  const sdk = await started({ unsupportedApis: ['onCollaborateChange'] });
+  const reads = sdk.getRunningContext.mock.calls.length;
+  sdk.runningContext = 'inCollaborate';
+  await fire(sdk, 'onCollaborateChange', {});
+  await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 20); }); });
+  expect(sdk.getRunningContext.mock.calls.length).toBe(reads);
+  expect(zoom.inCollaborate).toBe(false);
 });

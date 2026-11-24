@@ -92,6 +92,7 @@ describe('indicatorState: the state table', () => {
       admit_from_waiting_room: 'Arlo let someone in',
       share_notes: 'Arlo shared the notes',
       invite_everyone: 'Arlo invited everyone to the notes',
+      open_notes_for_everyone: 'Arlo opened the notes for everyone',
       mute_participant: 'Arlo muted a participant',
       open_ticket: 'Arlo opened a ticket',
     });
@@ -127,7 +128,7 @@ describe('indicatorState: the state table', () => {
     expect([...INDICATOR_STRINGS].sort()).toEqual([
       'Arlo invited everyone to the notes', 'Arlo is paused', 'Arlo is thinking…', 'Arlo is transcribing',
       'Arlo is transcribing · Say "Hey Arlo"', 'Arlo is waiting for an OK', 'Arlo let someone in', 'Arlo muted a participant',
-      'Arlo opened a ticket', 'Arlo posted to the chat', 'Arlo shared the notes', 'Timer',
+      'Arlo opened a ticket', 'Arlo opened the notes for everyone', 'Arlo posted to the chat', 'Arlo shared the notes', 'Timer',
     ].sort());
     const hostile = ['Danny Reyes', 'Muting Danny Reyes', 'Asked to admit Priya from the waiting room', 'PROJ-123', 'Buy now', { name: 'Danny' }];
     const styles = new Set([null, ...Object.values(INDICATOR_STYLES)]);

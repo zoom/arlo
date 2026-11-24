@@ -27,6 +27,8 @@ import { useServerSettings } from './ServerSettingsContext';
  *   see them fetches them; the moment sharing stops, or the state says so,
  *   a non-owner's notes are dropped and later ones are not kept.
  *   `setShareNotes(true | false)` is the owner's switch.
+ *   `shareNotesForOpening()` turns it on for an owner who opens the notes for
+ *   everyone (POST …/arlo/open-notes).
  * - A message for another meeting id is ignored (an owner's socket can be
  *   told about another meeting).
  * - Routes and messages go by the meeting id the server verified
@@ -223,7 +225,7 @@ export function ArloProvider({ children }) {
   const { isAuthenticated, user } = useAuth();
   const {
     userContext, zoomSdk, chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported,
-    dynamicIndicatorSupported,
+    dynamicIndicatorSupported, collaborateSupported,
   } = useZoomSdk();
   // The deployment's Jira, from the server's settings: a ticket is opened only
   // there (lib/arloActions.js checks the value and the URL the server sends)
@@ -646,10 +648,10 @@ export function ArloProvider({ children }) {
   const hands = useMemo(
     () => handsFor({
       chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl,
-      indicatorSupported: dynamicIndicatorSupported, zoomRole,
+      indicatorSupported: dynamicIndicatorSupported, collaborateSupported, zoomRole,
     }),
     [chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl,
-      dynamicIndicatorSupported, zoomRole],
+      dynamicIndicatorSupported, collaborateSupported, zoomRole],
   );
   const hasHands = state.role === 'owner' && isAuthenticated && !meetingOver;
   useEffect(() => {
@@ -816,6 +818,30 @@ export function ArloProvider({ children }) {
       return false;
     }
   }, [applyState]);
+
+  /**
+   * The owner is about to open the notes for everyone (Zoom's Collaborate
+   * mode, started by this panel right after): the server turns sharing the
+   * notes on, so the panels Zoom opens have notes to show. Resolves true when
+   * the server took it. The new state arrives over the socket.
+   */
+  const shareNotesForOpening = useCallback(async () => {
+    const id = serverMeetingIdRef.current;
+    if (!id) return false;
+    try {
+      const res = await fetch(arloUrl(id, 'open-notes'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: '{}',
+      });
+      if (!res.ok) return false;
+      const data = await res.json().catch(() => null);
+      return data?.shared === true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   const ask = useCallback(async (question) => {
     const text = typeof question === 'string' ? question.trim() : '';
@@ -991,6 +1017,7 @@ export function ArloProvider({ children }) {
     afterNotesMeetingId,
     setWhoCanAsk,
     setShareNotes,
+    shareNotesForOpening,
     ask,
     asking,
     approvals: shownApprovals,
@@ -1002,7 +1029,7 @@ export function ArloProvider({ children }) {
     thinking,
     thinkingStep,
     thinkingChannel,
-  }), [shownActions, thinking, thinkingStep, thinkingChannel, shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, ask, asking,
+  }), [shownActions, thinking, thinkingStep, thinkingChannel, shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, shareNotesForOpening, ask, asking,
     shownApprovals, answerApproval, shownNotesRequest, requestNotes, requestingNotes]);
 
   return (

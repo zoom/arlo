@@ -20,6 +20,12 @@ function screenHeading() {
  * holds), one at a time, in a sheet over the screen; the sheet puts the rest
  * of the app out of reach while it is open.
  *
+ * Also while the notes are open for everyone (Zoom's Collaborate mode,
+ * components/arlo/CollaborateNotes.jsx): the owner's view is then shared as a
+ * screen with people who cannot join, so the sheet, with who asked and what
+ * would be posted, is seen by them too. It is shown all the same: a request
+ * must be answerable, and it runs out in a minute.
+ *
  * Several requests in a row are one run of sheets. The focus goes back to
  * where it was before the first of them when the last one closes, if that
  * element is still in the document and takes the focus; otherwise to the

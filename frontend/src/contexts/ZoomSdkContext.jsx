@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { resolveUserStatus } from '../lib/userStatus';
+import { isInCollaborate, meetingRunningContext, readRunningContext } from '../lib/collaborate';
 
 const ZoomSdkContext = createContext();
 
@@ -110,7 +111,12 @@ export function ZoomSdkProvider({ children }) {
   const [isTestModeState, setIsTestModeState] = useState(initialTestMode);
   const [sdkConfigured, setSdkConfigured] = useState(initialTestMode);
   const [sdkError, setSdkError] = useState(null);
-  const [runningContext, setRunningContext] = useState(initialTestMode ? 'test' : null);
+  // The running context as Zoom gives it. What the panel reads (`runningContext`
+  // below) says 'inMeeting' for Collaborate too: Collaborate is in a meeting
+  // (lib/collaborate.js); `inCollaborate` says which of the two it is
+  const [zoomRunningContext, setRunningContext] = useState(initialTestMode ? 'test' : null);
+  const runningContext = meetingRunningContext(zoomRunningContext);
+  const inCollaborate = isInCollaborate(zoomRunningContext);
   const [meetingContext, setMeetingContext] = useState(null);
   const [userContext, setUserContext] = useState(null);
   // "Accepted" below: asked for in the set Zoom took, and not in the answer's `unsupportedApis`
@@ -130,6 +136,10 @@ export function ZoomSdkProvider({ children }) {
   // The same for openUrl (in the core set) and for promptShareScreen
   const [openUrlSupported, setOpenUrlSupported] = useState(false);
   const [shareScreenSupported, setShareScreenSupported] = useState(false);
+  // The same for startCollaborate: Arlo's notes opened for everyone (lib/collaborate.js).
+  // That Zoom took the API does not say Collaborate is switched on for the app
+  // in Marketplace: that is only known when it is started
+  const [collaborateSupported, setCollaborateSupported] = useState(false);
   // null = SDK not loaded yet, true = guest, false = authorized user
   const [isGuest, setIsGuest] = useState(initialTestMode ? false : null);
 
@@ -223,6 +233,7 @@ export function ZoomSdkProvider({ children }) {
         setMuteSupported(usable('toggleParticipantMediaAudio') && usable('getMeetingParticipants'));
         setOpenUrlSupported(usable('openUrl'));
         setShareScreenSupported(usable('promptShareScreen'));
+        setCollaborateSupported(usable('startCollaborate'));
         setSdkConfigured(true);
         setIsTestModeState(false); // Definitely not in test mode if SDK configured
 
@@ -230,6 +241,8 @@ export function ZoomSdkProvider({ children }) {
         const contextResponse = await zoomSdk.getRunningContext();
         const context = contextResponse.context || contextResponse;
         setRunningContext(context);
+        // Whether the app is in a meeting: its side panel, or Collaborate
+        const inAMeeting = (value) => meetingRunningContext(value) === 'inMeeting';
 
         // Get user context. Guest mode only exists in a meeting; outside one the
         // person opened their own app and is never a guest (lib/userStatus.js).
@@ -291,22 +304,44 @@ export function ZoomSdkProvider({ children }) {
         }
 
         // Get meeting context (if in meeting)
-        if (context === 'inMeeting') {
+        if (inAMeeting(context)) {
           const meetingData = await fetchMeetingContext();
           setMeetingContext(meetingData);
         }
 
-        // Listen for context changes (e.g. user joins/leaves a meeting)
-        zoomSdk.onRunningContextChange(async (event) => {
-          const newContext = event.runningContext;
+        // The context the panel is in changed: into or out of a meeting, or
+        // between a meeting's side panel and Collaborate (the same meeting)
+        let lastContext = context;
+        const contextChanged = async (newContext) => {
+          const collaborateInvolved = isInCollaborate(newContext) || isInCollaborate(lastContext);
+          lastContext = newContext;
           setRunningContext(newContext);
-          if (newContext === 'inMeeting') {
-            const meetingData = await fetchMeetingContext();
-            setMeetingContext(meetingData);
-          } else {
+          if (!inAMeeting(newContext)) {
             setMeetingContext(null);
+            return;
           }
-        });
+          const meetingData = await fetchMeetingContext();
+          // Superseded by a later change while Zoom answered
+          if (lastContext !== newContext) return;
+          // Not known whether Zoom answers for the meeting while in
+          // Collaborate (lib/collaborate.js): when it does not, the meeting
+          // the panel was in is kept. It is the same meeting
+          setMeetingContext((held) => (
+            collaborateInvolved && !meetingData.meetingUUID && held?.meetingUUID ? held : meetingData
+          ));
+        };
+
+        // Listen for context changes (e.g. user joins/leaves a meeting)
+        zoomSdk.onRunningContextChange((event) => contextChanged(event.runningContext));
+
+        // Collaborate started or ended, or this person joined or left it. The
+        // event says nothing to rely on, so the running context is read again
+        if (usable('onCollaborateChange')) {
+          zoomSdk.onCollaborateChange(async () => {
+            const read = readRunningContext(await zoomSdk.getRunningContext().catch(() => null));
+            if (read !== null && read !== lastContext) await contextChanged(read);
+          });
+        }
 
         // Listen for user context changes (e.g. guest → authorized after promptAuthorize)
         zoomSdk.onMyUserContextChange(async (event) => {
@@ -367,8 +402,10 @@ export function ZoomSdkProvider({ children }) {
     muteSupported,
     openUrlSupported,
     shareScreenSupported,
+    collaborateSupported,
+    inCollaborate,
     isTestMode: isTestModeState,
-  }), [openUrlSupported, shareScreenSupported, invitationSupported, reactionSupported, muteSupported, waitingRoomSupported, zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
+  }), [collaborateSupported, inCollaborate, openUrlSupported, shareScreenSupported, invitationSupported, reactionSupported, muteSupported, waitingRoomSupported, zoomSdk, sdkConfigured, sdkError, runningContext, meetingContext, userContext, isGuest, rtmsStatusSupported, dynamicIndicatorSupported, chatSupported, isTestModeState]);
 
   return (
     <ZoomSdkContext.Provider value={contextValue}>

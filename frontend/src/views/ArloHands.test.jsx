@@ -17,8 +17,10 @@ const A1 = 'aaaaaaaa-1111-4111-8111-111111111111';
 const A2 = 'aaaaaaaa-2222-4222-8222-222222222222';
 // A timer, to start and to stop: announced by every panel whose client took Zoom's indicator APIs
 const TIMERS = ['set_timer', 'stop_timer'];
-const HOST_HANDS = ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant', ...TIMERS];
-const ATTENDEE_HANDS = ['post_to_chat', 'invite_everyone', 'send_reaction', ...TIMERS];
+// Opening the notes for everyone: announced last, by every panel whose client took startCollaborate
+const OPEN_NOTES = 'open_notes_for_everyone';
+const HOST_HANDS = ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant', ...TIMERS, OPEN_NOTES];
+const ATTENDEE_HANDS = ['post_to_chat', 'invite_everyone', 'send_reaction', ...TIMERS, OPEN_NOTES];
 const CHAT = { tool: 'post_to_chat', args: { message: 'The beta moves to March 3.' } };
 
 const server = () => FakeWebSocket.last;
@@ -84,7 +86,7 @@ describe('what the panel says it can do', () => {
     const sdk = createZoomSdk({ waitingRoomApis: false });
     await openAsOwner({ sdk });
     // The tiers asked for after the waiting room (muting, reactions) go with it
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone', ...TIMERS] }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone', ...TIMERS, OPEN_NOTES] }));
     // The rest of what the client accepts is kept: Zoom's indicator APIs are still asked for
     expect(sdk.config.mock.calls.at(-1)[0].capabilities).toContain('setDynamicIndicator');
     expect(sdk.config.mock.calls.at(-1)[0].capabilities).not.toContain('getWaitingRoomParticipants');
@@ -94,14 +96,14 @@ describe('what the panel says it can do', () => {
     const sdk = createZoomSdk({ waitingRoomRefused: true });
     expect(typeof sdk.admitParticipantFromWaitingRoom).toBe('function');
     await openAsOwner({ sdk });
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone', ...TIMERS] }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: ['post_to_chat', 'invite_everyone', ...TIMERS, OPEN_NOTES] }));
     await settle();
     expect(hands()).toHaveLength(1);
   });
 
   test.each([
-    ['the reaction APIs', ['setEmojiReaction'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'mute_participant', ...TIMERS]],
-    ['the participant-audio API', ['toggleParticipantMediaAudio'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', ...TIMERS]],
+    ['the reaction APIs', ['setEmojiReaction'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'mute_participant', ...TIMERS, OPEN_NOTES]],
+    ['the participant-audio API', ['toggleParticipantMediaAudio'], ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', ...TIMERS, OPEN_NOTES]],
   ])('%s refused at config: what the client had before is still announced', async (_name, refusedApis, can) => {
     await openAsOwner({ sdk: createZoomSdk({ refusedApis }) });
     await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can }));
@@ -428,7 +430,7 @@ describe('an action from the server', () => {
 
     test('announced only when the deployment\'s settings name a Jira', async () => {
       await openAsOwner({ routes: withJira });
-      await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS.slice(0, 5), 'open_ticket', ...TIMERS] }));
+      await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS.slice(0, 5), 'open_ticket', ...TIMERS, OPEN_NOTES] }));
     });
 
     test('not announced when the settings name none, one that is not https, or the client cannot open URLs', async () => {
@@ -638,6 +640,6 @@ describe('a timer on Zoom\'s indicator', () => {
 
   test('a client without the indicator APIs announces no timer', async () => {
     await openAsOwner({ sdk: createZoomSdk({ unsupportedApis: ['setDynamicIndicator'] }) });
-    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: HOST_HANDS.slice(0, 5) }));
+    await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS.slice(0, 5), OPEN_NOTES] }));
   });
 });

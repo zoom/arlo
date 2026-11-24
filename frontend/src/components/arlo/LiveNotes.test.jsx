@@ -11,6 +11,7 @@ vi.mock('./NotesDocument', () => ({ default: () => <div data-testid="notes-docum
 vi.mock('./AskArlo', () => ({ default: () => <div data-testid="ask-arlo" /> }));
 vi.mock('./WhoCanAsk', () => ({ default: () => <div data-testid="who-can-ask" /> }));
 vi.mock('./PostNotesToChat', () => ({ default: () => <button type="button">Post notes to chat</button> }));
+vi.mock('./OpenNotesForEveryone', () => ({ default: () => <button type="button">Open notes for everyone</button> }));
 
 const NOTES = { summary: 'The beta moves to March 3.', decisions: [], actionItems: [], updatedAt: '2026-11-23T12:00:00.000Z', throughSeqNo: 3 };
 
@@ -35,6 +36,7 @@ describe('LiveNotes', () => {
   test('someone who can control Arlo gets "Post notes to chat" and the who-can-ask setting', () => {
     show(true);
     expect(screen.getByRole('button', { name: 'Post notes to chat' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open notes for everyone' })).toBeInTheDocument();
     expect(screen.getByTestId('who-can-ask')).toBeInTheDocument();
     expect(screen.getByTestId('status-line')).toHaveAttribute('data-can-control', 'true');
   });
@@ -42,6 +44,7 @@ describe('LiveNotes', () => {
   test('someone who cannot (a guest, or not an owner) gets neither: posting to everyone is the owner\'s call', () => {
     show(false);
     expect(screen.queryByRole('button', { name: 'Post notes to chat' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open notes for everyone' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('who-can-ask')).not.toBeInTheDocument();
     // the notes, the record link and the question input are still there
     expect(screen.getByTestId('notes-document')).toBeInTheDocument();

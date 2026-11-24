@@ -11,7 +11,7 @@ export const MEETING = 'MEETING-1==';
 
 /**
  * Arlo's routes for the test meeting: arloPath('state' | 'settings' | 'notes' | 'ask' |
- * 'notes-request' | 'approvals' | 'approvals/<id>' | 'actions' | 'actions/<id>/result').
+ * 'notes-request' | 'open-notes' | 'approvals' | 'approvals/<id>' | 'actions' | 'actions/<id>/result').
  * `meetingId`: the id the server knows the meeting by, when a test makes it
  * differ from the one the Zoom SDK reports (see mockFetch `serverMeetingId`).
  */
@@ -63,6 +63,8 @@ export function createZoomSdk({
   };
   const sdk = {
     rtmsStatus,
+    // What getRunningContext answers; a test changes it to move into or out of Collaborate
+    runningContext,
     config: vi.fn(async ({ capabilities }) => {
       if ((!waitingRoomApis || waitingRoomRefused) && capabilities.includes('getWaitingRoomParticipants')) {
         throw new Error('getWaitingRoomParticipants is not supported by this client');
@@ -73,7 +75,7 @@ export function createZoomSdk({
       // The shape of the SDK's ConfigResponse: the APIs asked for that this client does not have
       return { clientVersion: '6.6.0', unsupportedApis: unsupportedApis.filter((name) => capabilities.includes(name)) };
     }),
-    getRunningContext: vi.fn(async () => ({ context: runningContext })),
+    getRunningContext: vi.fn(async () => ({ context: sdk.runningContext })),
     getUserContext: vi.fn(async () => {
       if (userContextFails) throw new Error('getUserContext is not available in this context');
       return { status, role, screenName, participantUUID, participantId };
@@ -103,6 +105,8 @@ export function createZoomSdk({
     showAppInvitationDialog: vi.fn(async () => ({})),
     startCollaborate: vi.fn(async () => ({})),
     endCollaborate: vi.fn(async () => ({})),
+    joinCollaborate: vi.fn(async () => ({})),
+    leaveCollaborate: vi.fn(async () => ({})),
     // RTMS controls: the app calls start through callZoomApi (it passes media
     // options) and the others through the documented methods.
     startRTMS: vi.fn(startRTMS),
