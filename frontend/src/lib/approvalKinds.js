@@ -25,17 +25,56 @@ export const APPROVAL_KINDS = Object.freeze({
 const MAX_ID_CHARS = 64;
 const MAX_KIND_CHARS = 64;
 
+/** How long the server waits for an owner's answer (its default; it does not say). */
+export const APPROVAL_WINDOW_MS = 60 * 1000;
+// The longest time left this panel takes from a server
+const MAX_TIME_LEFT_MS = 10 * 60 * 1000;
+// A response's `Date` header is in whole seconds
+const SERVER_CLOCK_SLACK_MS = 1000;
+
 /**
  * An approval as the server sends it (`arlo.approval`, GET …/arlo/approvals),
- * rebuilt from known fields: { id, kind, askedBy, expiresAt }. null when it is not one.
+ * rebuilt from known fields: { id, kind, askedBy, expiresAt, expiresInMs }.
+ * `expiresAt` is by the server's clock; `expiresInMs` is the time left as the
+ * server gave it, or null (it does not today). null when it is not one.
  */
 export function parseApproval(data) {
   if (data === null || typeof data !== 'object') return null;
-  const { id, kind, expiresAt } = data;
+  const { id, kind, expiresAt, expiresInMs } = data;
   if (typeof id !== 'string' || id.length === 0 || id.length > MAX_ID_CHARS) return null;
   if (typeof kind !== 'string' || kind.length === 0 || kind.length > MAX_KIND_CHARS) return null;
   if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return null;
-  return { id, kind, askedBy: usableName(data.askedBy), expiresAt };
+  const timeLeft = typeof expiresInMs === 'number' && Number.isFinite(expiresInMs)
+    ? Math.min(Math.max(0, expiresInMs), MAX_TIME_LEFT_MS)
+    : null;
+  return { id, kind, askedBy: usableName(data.askedBy), expiresAt, expiresInMs: timeLeft };
+}
+
+/**
+ * How long an approval still waits, in ms from the moment it was received.
+ * The server's `expiresAt` is by the server's clock and this panel's clock
+ * may be minutes off, so the two are never simply compared:
+ *
+ * 1. the time left as the server gives it (`expiresInMs`), when it does;
+ * 2. `expiresAt` against the server's own clock (`serverNow`: the `Date`
+ *    header of the response it came in), when that is known and plausible;
+ * 3. over the socket (`fetched` false) it was just opened: the whole window;
+ * 4. read from the server without its clock: `expiresAt` against this panel's
+ *    clock when that gives something a server would say (not past by more
+ *    than the window, not further ahead than it), else the whole window.
+ *
+ * The server closes an approval at its own time whatever is shown here, and
+ * says so; answering one it closed is refused.
+ */
+export function approvalTimeLeft(approval, { now, fetched = false, serverNow = null }) {
+  if (approval.expiresInMs !== null && approval.expiresInMs !== undefined) return approval.expiresInMs;
+  if (typeof serverNow === 'number' && Number.isFinite(serverNow)) {
+    const left = approval.expiresAt - serverNow;
+    if (left <= APPROVAL_WINDOW_MS + SERVER_CLOCK_SLACK_MS && left > -APPROVAL_WINDOW_MS) return left;
+  }
+  if (!fetched) return APPROVAL_WINDOW_MS;
+  const left = approval.expiresAt - now;
+  return Math.abs(left) <= APPROVAL_WINDOW_MS ? left : APPROVAL_WINDOW_MS;
 }
 
 /** The texts and action of a kind, or null for one this panel does not know. */

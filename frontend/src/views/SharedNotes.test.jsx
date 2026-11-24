@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import {
   createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage,
-  arloPath, ARLO_ABSENT,
+  arloPath, ARLO_ABSENT, pastSheetGuard,
 } from '../test/harness';
 
 // Sharing means the notes are live in everyone's Arlo panel. The owner turns
@@ -242,6 +242,65 @@ describe('a participant sees the notes only while they are shared', () => {
     expect(await screen.findByRole('heading', { name: SHARING_HEADING })).toBeInTheDocument();
     expect(screen.getByText(NOT_YET)).toBeInTheDocument();
   });
+
+  test.each([401, 403])('the server refusing the notes with %i takes away the ones the panel holds', async (status) => {
+    let refuse;
+    await openAsParticipant({
+      state: SHARED,
+      notes: NOTES,
+      routes: { [arloPath('notes')]: () => new Promise((resolve) => { refuse = () => resolve(json({ error: 'Refused' }, status)); }) },
+    });
+    expect(await screen.findByText(NOTES.summary)).toBeInTheDocument();
+    await waitFor(() => expect(refuse).toBeTypeOf('function'));
+    await act(async () => { refuse(); });
+    await waitFor(() => expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument());
+    expect(screen.queryByText(NOTES.decisions[0])).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ['a participant', 401, false],
+    ['a participant', 403, false],
+    ['a guest', 403, true],
+  ])('the server refusing %s the state with %i on a later read takes the shared notes away', async (_who, status, guest) => {
+    let refused = null;
+    const options = {
+      state: SHARED,
+      notes: NOTES,
+      routes: {
+        [arloPath('state')]: () => {
+          if (refused === null) return json({ ...ARLO_ABSENT, ...SHARED });
+          refused += 1;
+          return json({ error: 'Refused' }, status);
+        },
+      },
+    };
+    await (guest ? openAsGuest(options) : openAsParticipant(options));
+    expect(await screen.findByText(NOTES.summary)).toBeInTheDocument();
+    // the socket drops and comes back: the panel reads the state again
+    refused = 0;
+    await act(async () => { server().close(1006); });
+    await waitFor(() => expect(refused).toBeGreaterThan(0), { timeout: 8000 });
+    await waitFor(() => expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument());
+  }, 20000);
+
+  test('an owner\'s own notes stay when a read is refused', async () => {
+    let refused = null;
+    await openAsOwner({
+      routes: {
+        [arloPath('state')]: () => {
+          if (refused === null) return json({ ...ARLO_ABSENT, ...OWNER });
+          refused += 1;
+          return json({ error: 'Refused' }, 403);
+        },
+        [arloPath('notes')]: () => json({ error: 'Refused' }, 403),
+      },
+    });
+    refused = 0;
+    await act(async () => { server().close(1006); });
+    await waitFor(() => expect(refused).toBeGreaterThan(0), { timeout: 8000 });
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
+    expect(screen.getByText(NOTES.summary)).toBeInTheDocument();
+  }, 20000);
 
   test('another meeting\'s state and notes never render', async () => {
     await openAsParticipant();
@@ -653,6 +712,7 @@ describe('the owner is asked to share with everyone', () => {
     const dialog = await screen.findByRole('dialog', { name: QUESTION });
     expect(within(dialog).getByText('Ben Okafor asked to see them.')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Not now' })).toBeEnabled();
+    await pastSheetGuard();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Share notes' }));
 
     expect(await screen.findByText('Notes are now shared with everyone')).toBeInTheDocument();
@@ -675,7 +735,8 @@ describe('the owner is asked to share with everyone', () => {
     expect(screen.queryByText('This Zoom client can\'t post to the chat.')).not.toBeInTheDocument();
     const share = within(dialog).getByRole('button', { name: 'Share notes' });
     expect(share).toBeEnabled();
-    expect(share).toHaveFocus();
+    expect(dialog).toHaveFocus();
+    await pastSheetGuard();
     await userEvent.click(share);
     await waitFor(() => expect(bodies(fetchMock, `approvals/${ID1}`, 'POST')).toEqual([{ approve: true }]));
   });

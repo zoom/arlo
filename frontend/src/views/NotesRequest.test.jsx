@@ -1,9 +1,9 @@
-import { screen, waitFor, act, within } from '@testing-library/react';
+import { screen, waitFor, act, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import {
   createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage,
-  arloPath, ARLO_ABSENT,
+  arloPath, ARLO_ABSENT, pastSheetGuard,
 } from '../test/harness';
 
 // A participant asks the owner to share the notes with everyone; the owner
@@ -29,6 +29,15 @@ const server = () => FakeWebSocket.last;
 const send = (message) => act(async () => { server().serverSend(message); });
 const sheet = () => screen.queryByRole('dialog', { name: QUESTION });
 const findSheet = () => screen.findByRole('dialog', { name: QUESTION });
+/** The sheet, once it takes an answer (it takes none for the first 700 ms). */
+const findArmedSheet = async () => {
+  const dialog = await findSheet();
+  await pastSheetGuard();
+  return dialog;
+};
+/** The seconds the sheet says are left. */
+const countdown = (dialog) => Number.parseInt(within(dialog).getByText(/^\d+s$/).textContent, 10);
+const approvalCalls = (fetchMock) => fetchMock.mock.calls.filter(([url]) => String(url).startsWith(arloPath('approvals')));
 const attendee = (extra = {}) => createZoomSdk({ role: 'attendee', screenName: 'Ben', ...extra });
 
 async function open({ sdk, guest = false, state = OWNER, notes = NOTES, routes = {} } = {}) {
@@ -66,7 +75,7 @@ afterEach(() => {
 });
 
 describe('the owner is asked in a sheet over the notes', () => {
-  test('with the name of the person who asked, the focus on "Share notes", and the notes behind inert', async () => {
+  test('with the name of the person who asked, the focus on the sheet and on no button, and the notes behind inert', async () => {
     await openAsOwner();
     expect(sheet()).not.toBeInTheDocument();
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben Okafor' }));
@@ -76,7 +85,10 @@ describe('the owner is asked in a sheet over the notes', () => {
     expect(within(dialog).getByText('Ben Okafor asked to see them.')).toBeInTheDocument();
     const share = within(dialog).getByRole('button', { name: 'Share notes' });
     expect(share).toBeEnabled();
-    expect(share).toHaveFocus();
+    // The focus comes to the sheet itself: a key already on its way lands on no button
+    expect(dialog).toHaveFocus();
+    expect(dialog).toHaveAttribute('tabindex', '-1');
+    expect(share).not.toHaveFocus();
     expect(within(dialog).getByRole('button', { name: 'Not now' })).toBeEnabled();
     expect(within(dialog).getByText(/^\d+s$/)).toBeInTheDocument();
 
@@ -101,7 +113,7 @@ describe('the owner is asked in a sheet over the notes', () => {
   test('"Share notes" reports the agreement once and says the notes are shared; nothing goes to the chat', async () => {
     const { sdk, fetchMock } = await openAsOwner();
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
-    await userEvent.click(within(await findSheet()).getByRole('button', { name: 'Share notes' }));
+    await userEvent.click(within(await findArmedSheet()).getByRole('button', { name: 'Share notes' }));
 
     expect(await screen.findByText('Notes are now shared with everyone')).toBeInTheDocument();
     expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
@@ -118,7 +130,7 @@ describe('the owner is asked in a sheet over the notes', () => {
       routes: { [`POST ${arloPath('approvals/')}`]: () => new Promise((res) => { resolve = () => res(json({ id: ID1, outcome: 'approved' })); }) },
     });
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
-    const dialog = await findSheet();
+    const dialog = await findArmedSheet();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Share notes' }));
 
     expect(within(dialog).getByRole('button', { name: 'Share notes' })).toBeDisabled();
@@ -137,7 +149,7 @@ describe('the owner is asked in a sheet over the notes', () => {
   ])('%s: an error toast, and the sheet goes', async (_name, answer) => {
     const { fetchMock } = await openAsOwner({ routes: { [`POST ${arloPath('approvals/')}`]: answer } });
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
-    await userEvent.click(within(await findSheet()).getByRole('button', { name: 'Share notes' }));
+    await userEvent.click(within(await findArmedSheet()).getByRole('button', { name: 'Share notes' }));
 
     expect(await screen.findByText('Couldn\'t share the notes. Try again.')).toBeInTheDocument();
     expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: true }]);
@@ -149,7 +161,7 @@ describe('the owner is asked in a sheet over the notes', () => {
   test('no notes yet: the owner can agree all the same, they are shared as they come', async () => {
     const { sdk, fetchMock } = await openAsOwner({ notes: null });
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
-    await userEvent.click(within(await findSheet()).getByRole('button', { name: 'Share notes' }));
+    await userEvent.click(within(await findArmedSheet()).getByRole('button', { name: 'Share notes' }));
 
     expect(await screen.findByText('Notes are now shared with everyone')).toBeInTheDocument();
     await waitFor(() => expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: true }]));
@@ -159,17 +171,22 @@ describe('the owner is asked in a sheet over the notes', () => {
   test('"Not now" declines and posts nothing to the chat', async () => {
     const { sdk, fetchMock } = await openAsOwner();
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
-    await userEvent.click(within(await findSheet()).getByRole('button', { name: 'Not now' }));
+    await userEvent.click(within(await findArmedSheet()).getByRole('button', { name: 'Not now' }));
 
     await waitFor(() => expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: false }]));
     await waitFor(() => expect(sheet()).not.toBeInTheDocument());
     expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
   });
 
-  test('Escape is "Not now"', async () => {
+  test('Escape is "Not now", once the sheet takes an answer', async () => {
     const { sdk, fetchMock } = await openAsOwner();
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
     await findSheet();
+    // an Escape held down from before the sheet opened declines nothing
+    await userEvent.keyboard('{Escape}');
+    expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([]);
+    expect(sheet()).toBeInTheDocument();
+    await pastSheetGuard();
     await userEvent.keyboard('{Escape}');
 
     await waitFor(() => expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: false }]));
@@ -182,9 +199,11 @@ describe('the owner is asked in a sheet over the notes', () => {
     const input = screen.getByRole('textbox', { name: 'Ask Arlo' });
     input.focus();
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
-    const dialog = await findSheet();
+    const dialog = await findArmedSheet();
     const share = within(dialog).getByRole('button', { name: 'Share notes' });
     const notNow = within(dialog).getByRole('button', { name: 'Not now' });
+    expect(dialog).toHaveFocus();
+    await userEvent.tab();
     expect(share).toHaveFocus();
     await userEvent.tab();
     expect(notNow).toHaveFocus();
@@ -210,15 +229,28 @@ describe('the owner is asked in a sheet over the notes', () => {
     expect(screen.queryByText('Notes are now shared with everyone')).not.toBeInTheDocument();
   });
 
-  test('it runs out by its own time, and is never answered for the owner', async () => {
+  test('it runs out a minute after it arrived, and is never answered for the owner', async () => {
     const { sdk, fetchMock } = await openAsOwner();
-    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben', expiresAt: Date.now() + 1200 }));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
     await findSheet();
-    await waitFor(() => expect(sheet()).not.toBeInTheDocument(), { timeout: 3000 });
+    await act(async () => { vi.advanceTimersByTime(58000); });
+    expect(sheet()).toBeInTheDocument();
+    await act(async () => { vi.advanceTimersByTime(3000); });
+    expect(sheet()).not.toBeInTheDocument();
     expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([]);
     expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
-    // one that is already past its time is not shown at all
-    await send(serverMessage.approval({ id: ID2, askedBy: 'Ben', expiresAt: Date.now() - 1 }));
+  });
+
+  test('a time left that the server gives is the one that counts', async () => {
+    await openAsOwner();
+    await send({ ...serverMessage.approval({ id: ID1, askedBy: 'Ben' }), data: { ...serverMessage.approval({ id: ID1, askedBy: 'Ben' }).data, expiresInMs: 20000 } });
+    const left = countdown(await findSheet());
+    expect(left).toBeGreaterThanOrEqual(19);
+    expect(left).toBeLessThanOrEqual(20);
+    // none left: not shown at all
+    await send(serverMessage.approvalClosed(ID1, 'declined'));
+    await send({ type: 'arlo.approval', data: { ...serverMessage.approval({ id: ID2, askedBy: 'Dee' }).data, expiresInMs: 0 } });
     expect(sheet()).not.toBeInTheDocument();
   });
 
@@ -227,12 +259,16 @@ describe('the owner is asked in a sheet over the notes', () => {
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
     await send(serverMessage.approval({ id: ID2, askedBy: 'Dee' }));
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
-    expect(within(await findSheet()).getByText('Ben asked to see them.')).toBeInTheDocument();
+    expect(within(await findArmedSheet()).getByText('Ben asked to see them.')).toBeInTheDocument();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
 
     await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
     await screen.findByText('Dee asked to see them.');
-    expect(screen.getByRole('button', { name: 'Share notes' })).toHaveFocus();
+    // the next sheet is a new question: the focus on the sheet, and its own wait
+    expect(sheet()).toHaveFocus();
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(posted(fetchMock, `approvals/${ID2}`)).toEqual([]);
+    await pastSheetGuard();
     await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
     await waitFor(() => expect(sheet()).not.toBeInTheDocument());
     expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: false }]);
@@ -248,7 +284,7 @@ describe('the owner is asked in a sheet over the notes', () => {
         [arloPath('approvals')]: () => json({ approvals: [serverMessage.approval({ id: ID1, askedBy: 'Ben' }).data] }),
       },
     });
-    expect(within(await findSheet()).getByText('Ben asked to see them.')).toBeInTheDocument();
+    expect(within(await findArmedSheet()).getByText('Ben asked to see them.')).toBeInTheDocument();
     // the same one over the socket is not a second one
     await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
     await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
@@ -284,7 +320,265 @@ describe('the owner is asked in a sheet over the notes', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByText(QUESTION)).not.toBeInTheDocument();
     // and a participant's panel does not ask for the list
-    expect(fetchMock.mock.calls.some(([url]) => String(url) === arloPath('approvals'))).toBe(false);
+    expect(approvalCalls(fetchMock)).toEqual([]);
+  });
+
+  test('a participant\'s panel does not hold a request it was sent: none shows when they become an owner', async () => {
+    const { fetchMock } = await openAsParticipant();
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Dee' }));
+    expect(approvalCalls(fetchMock)).toEqual([]);
+
+    await send(serverMessage.arloState(OWNER));
+    await screen.findByText('Arlo is in the meeting');
+    // an owner reads the open ones from the server (none here), and only those
+    await waitFor(() => expect(approvalCalls(fetchMock)).toHaveLength(1));
+    await pastSheetGuard();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test('an owner who stops being one holds none: back as an owner, only what the server lists shows', async () => {
+    const { fetchMock } = await openAsOwner();
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
+    await findSheet();
+    await send(serverMessage.arloState(ANA_BROUGHT_ARLO));
+    await waitFor(() => expect(sheet()).not.toBeInTheDocument());
+    const before = approvalCalls(fetchMock).length;
+
+    await send(serverMessage.arloState(OWNER));
+    await waitFor(() => expect(approvalCalls(fetchMock)).toHaveLength(before + 1));
+    await pastSheetGuard();
+    expect(sheet()).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ['told it is a participant', ANA_BROUGHT_ARLO],
+    // What a panel is told is never enough: not signed in is never an owner
+    ['told it is an owner', OWNER],
+  ])('a guest\'s panel, %s, never asks for the list and never shows a sheet', async (_name, state) => {
+    const { fetchMock } = await open({ sdk: attendee({ status: 'unauthenticated' }), guest: true, state, notes: null });
+    await screen.findByRole('button', { name: 'Sign in to ask Arlo' });
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Dee' }));
+    await send(serverMessage.arloState(state));
+    await pastSheetGuard();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByText(QUESTION)).not.toBeInTheDocument();
+    expect(approvalCalls(fetchMock)).toEqual([]);
+  });
+});
+
+describe('a key or a click already on its way never answers the sheet', () => {
+  const askInput = () => screen.getByRole('textbox', { name: 'Ask Arlo', hidden: true });
+
+  test('the owner is typing a question when the sheet opens: nothing is agreed to, and the text stays', async () => {
+    const { fetchMock } = await openAsOwner();
+    await userEvent.type(screen.getByRole('textbox', { name: 'Ask Arlo' }), 'what did');
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
+    await findSheet();
+    await userEvent.keyboard(' we decide{Enter}');
+
+    expect(approvalCalls(fetchMock).filter(([, init]) => init?.method === 'POST')).toEqual([]);
+    expect(posted(fetchMock, 'ask')).toEqual([]);
+    expect(sheet()).toBeInTheDocument();
+    expect(askInput()).toHaveValue('what did');
+
+    // the same keys later, still on the sheet and on no button: nothing
+    await pastSheetGuard();
+    await userEvent.keyboard(' {Enter}');
+    expect(approvalCalls(fetchMock).filter(([, init]) => init?.method === 'POST')).toEqual([]);
+    expect(sheet()).toBeInTheDocument();
+
+    // answered: the text is still there, with the focus
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(sheet()).not.toBeInTheDocument());
+    expect(screen.getByRole('textbox', { name: 'Ask Arlo' })).toHaveValue('what did');
+    expect(screen.getByRole('textbox', { name: 'Ask Arlo' })).toHaveFocus();
+  });
+
+  test.each([
+    ['Share notes', { approve: true }],
+    ['Not now', { approve: false }],
+  ])('a click on "%s" in the first 700 ms does nothing; after that it answers', async (name, body) => {
+    const { fetchMock } = await openAsOwner();
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
+    const dialog = await findSheet();
+    await userEvent.click(within(dialog).getByRole('button', { name }));
+    expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([]);
+    expect(sheet()).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name })).toBeEnabled();
+
+    await pastSheetGuard();
+    await userEvent.click(within(dialog).getByRole('button', { name }));
+    await waitFor(() => expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([body]));
+    await waitFor(() => expect(sheet()).not.toBeInTheDocument());
+  });
+
+  test('Enter or Space on a button reached by Tab in the first 700 ms does nothing', async () => {
+    const { fetchMock } = await openAsOwner();
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
+    const dialog = await findSheet();
+    await userEvent.tab();
+    expect(within(dialog).getByRole('button', { name: 'Share notes' })).toHaveFocus();
+    await userEvent.keyboard('{Enter} ');
+    expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([]);
+    expect(sheet()).toBeInTheDocument();
+  });
+
+  test('Escape declines wherever the focus is, but not in the first 700 ms', async () => {
+    const { fetchMock } = await openAsOwner();
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
+    await findSheet();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([]);
+    expect(sheet()).toBeInTheDocument();
+
+    await pastSheetGuard();
+    await act(async () => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    await waitFor(() => expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: false }]));
+    await waitFor(() => expect(sheet()).not.toBeInTheDocument());
+    // no listener is left behind
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: false }]);
+  });
+});
+
+describe('nothing outside the sheet is in reach while it is open', () => {
+  test('the header\'s buttons cannot be reached by Tab, focus or click, and can again afterwards', async () => {
+    await openAsOwner();
+    const settings = screen.getByRole('button', { name: 'Settings' });
+    const back = screen.getByRole('button', { name: 'Back' });
+    expect(settings.closest('[inert]')).toBeNull();
+    const address = window.location.hash;
+
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
+    const dialog = await findArmedSheet();
+    expect(screen.queryByRole('button', { name: 'Settings' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    for (const button of [settings, back]) {
+      expect(button.closest('[inert]')).not.toBeNull();
+      expect(button.closest('[aria-hidden="true"]')).not.toBeNull();
+    }
+    // Tab goes round the sheet's two buttons only
+    const seen = new Set();
+    for (let i = 0; i < 6; i += 1) {
+      await userEvent.tab();
+      seen.add(document.activeElement);
+    }
+    expect([...seen]).toEqual([
+      within(dialog).getByRole('button', { name: 'Share notes' }), within(dialog).getByRole('button', { name: 'Not now' }),
+    ]);
+    // a browser without `inert`: the focus does not stay outside, and a click does nothing
+    act(() => { settings.focus(); });
+    expect(dialog).toContainElement(document.activeElement);
+    await userEvent.click(settings);
+    await userEvent.click(back);
+    expect(window.location.hash).toBe(address);
+    expect(sheet()).toBeInTheDocument();
+
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(sheet()).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Back' })).toBe(back);
+    expect(settings.closest('[inert]')).toBeNull();
+    expect(settings.closest('[aria-hidden]')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await waitFor(() => expect(window.location.hash).toBe('#/settings'));
+  });
+
+  test('what was made inert is given back when the panel goes away with the sheet open', async () => {
+    const outside = document.createElement('button');
+    const already = document.createElement('div');
+    already.setAttribute('aria-hidden', 'true');
+    document.body.append(outside, already);
+    try {
+      const { unmount } = await openAsOwner();
+      await send(serverMessage.approval({ id: ID1, askedBy: 'Ben' }));
+      await findSheet();
+      expect(outside).toHaveAttribute('inert');
+      expect(outside).toHaveAttribute('aria-hidden', 'true');
+      unmount();
+      expect(outside).not.toHaveAttribute('inert');
+      expect(outside).not.toHaveAttribute('aria-hidden');
+      // what was hidden before stays as it was
+      expect(already).toHaveAttribute('aria-hidden', 'true');
+      expect(already).not.toHaveAttribute('inert');
+    } finally {
+      outside.remove();
+      already.remove();
+    }
+  });
+});
+
+describe('the time left does not depend on the panel\'s clock', () => {
+  const MINUTES = 60 * 1000;
+  /** The panel's clock is `ms` ahead of the server's (behind when negative). */
+  const skewPanelClock = (ms) => {
+    const real = Date.now.bind(Date);
+    vi.spyOn(Date, 'now').mockImplementation(() => real() + ms);
+    return real;
+  };
+  const expectFullWindow = (dialog) => {
+    expect(countdown(dialog)).toBeGreaterThanOrEqual(58);
+    expect(countdown(dialog)).toBeLessThanOrEqual(60);
+  };
+
+  test.each([
+    ['five minutes ahead', 5 * MINUTES],
+    ['five minutes behind', -5 * MINUTES],
+  ])('a request that arrives while the panel\'s clock is %s shows, with a minute to answer', async (_name, skew) => {
+    await openAsOwner();
+    const serverNow = skewPanelClock(skew);
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben', expiresAt: serverNow() + 60000 }));
+    expectFullWindow(await findSheet());
+  });
+
+  test.each([
+    ['five minutes ahead', 5 * MINUTES],
+    ['five minutes behind', -5 * MINUTES],
+  ])('a request read from the server while the panel\'s clock is %s shows, with a minute to answer', async (_name, skew) => {
+    const serverNow = skewPanelClock(skew);
+    await openAsOwner({
+      routes: { [arloPath('approvals')]: () => json({ approvals: [serverMessage.approval({ id: ID1, askedBy: 'Ben', expiresAt: serverNow() + 20000 }).data] }) },
+    });
+    expectFullWindow(await findSheet());
+  });
+
+  test('read from the server with clocks that agree: the server\'s time is the one shown', async () => {
+    await openAsOwner({
+      routes: { [arloPath('approvals')]: () => json({ approvals: [serverMessage.approval({ id: ID1, askedBy: 'Ben', expiresAt: Date.now() + 20000 }).data] }) },
+    });
+    const left = countdown(await findSheet());
+    expect(left).toBeGreaterThanOrEqual(18);
+    expect(left).toBeLessThanOrEqual(20);
+  });
+
+  test('read from the server, which says what time it has: the time left is by the server\'s clock', async () => {
+    // Half a minute ahead: by the panel's clock alone 10 seconds would be left
+    const serverNow = skewPanelClock(30000);
+    await openAsOwner({
+      routes: {
+        [arloPath('approvals')]: () => new Response(
+          JSON.stringify({ approvals: [serverMessage.approval({ id: ID1, askedBy: 'Ben', expiresAt: serverNow() + 40000 }).data] }),
+          { status: 200, headers: { 'Content-Type': 'application/json', Date: new Date(serverNow()).toUTCString() } },
+        ),
+      },
+    });
+    const left = countdown(await findSheet());
+    expect(left).toBeGreaterThanOrEqual(38);
+    expect(left).toBeLessThanOrEqual(41);
+  });
+
+  test('two requests keep the server\'s order whatever the panel\'s clock says', async () => {
+    const serverNow = skewPanelClock(5 * MINUTES);
+    await openAsOwner({
+      routes: {
+        [arloPath('approvals')]: () => json({
+          approvals: [
+            serverMessage.approval({ id: ID2, askedBy: 'Dee', expiresAt: serverNow() + 50000 }).data,
+            serverMessage.approval({ id: ID1, askedBy: 'Ben', expiresAt: serverNow() + 20000 }).data,
+          ],
+        }),
+      },
+    });
+    expect(within(await findSheet()).getByText('Ben asked to see them.')).toBeInTheDocument();
   });
 });
 
@@ -340,12 +634,32 @@ describe('a participant asks the owner to share the notes', () => {
     expect(screen.getByText(ASKED)).toBeInTheDocument();
   });
 
-  test('429: asked a moment ago, and the button stays away', async () => {
-    await openAsParticipant({ routes: { [`POST ${arloPath('notes-request')}`]: () => json({ error: 'too_soon', message: 'server words' }, 429) } });
+  test('429 without words from the server: asked a moment ago, and the button stays away', async () => {
+    await openAsParticipant({ routes: { [`POST ${arloPath('notes-request')}`]: () => json({ error: 'too_soon' }, 429) } });
     await userEvent.click(await screen.findByRole('button', { name: 'Ask Ana to share notes with everyone' }));
     expect(await screen.findByText('You asked a moment ago. Give it a couple of minutes.')).toBeInTheDocument();
-    expect(screen.queryByText('server words')).not.toBeInTheDocument();
     expect(askButton()).not.toBeInTheDocument();
+  });
+
+  test('429 with a short message from the server: that message, as text', async () => {
+    const words = 'Too many requests are waiting for <b>Ana</b>. Try again in a minute.';
+    await openAsParticipant({ routes: { [`POST ${arloPath('notes-request')}`]: () => json({ error: 'too_many_open', message: words }, 429) } });
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask Ana to share notes with everyone' }));
+    expect(await screen.findByText(words)).toBeInTheDocument();
+    expect(document.querySelector('b')).toBeNull();
+    expect(screen.queryByText('You asked a moment ago. Give it a couple of minutes.')).not.toBeInTheDocument();
+    expect(askButton()).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ['longer than 200 characters', 'x'.repeat(201)],
+    ['blank', '   '],
+    ['not text', { text: 'server words' }],
+  ])('429 with a message that is %s: the panel\'s own words', async (_name, message) => {
+    await openAsParticipant({ routes: { [`POST ${arloPath('notes-request')}`]: () => json({ error: 'too_soon', message }, 429) } });
+    await userEvent.click(await screen.findByRole('button', { name: 'Ask Ana to share notes with everyone' }));
+    expect(await screen.findByText('You asked a moment ago. Give it a couple of minutes.')).toBeInTheDocument();
+    expect(screen.queryByText(/x{201}|server words/)).not.toBeInTheDocument();
   });
 
   test('409: Arlo is not taking notes for anyone, and the button is there again at once', async () => {

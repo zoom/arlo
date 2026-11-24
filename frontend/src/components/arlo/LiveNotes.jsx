@@ -28,7 +28,8 @@ export default function LiveNotes({
   return (
     <div className="arlo-screen arlo-sheet-host">
       {/* Behind an open sheet the screen is dimmed and out of reach: `inert`
-          where the browser has it, hidden from assistive technology everywhere */}
+          where the browser has it, hidden from assistive technology everywhere.
+          The sheet does the same for the rest of the app (the header) */}
       <div className="arlo-screen arlo-behind-sheet" inert={asked ? '' : undefined} aria-hidden={asked ? 'true' : undefined}>
         <h1 className="arlo-sr-only" tabIndex={-1} data-arlo-focus>Your notes</h1>
         <StatusLine

@@ -3,7 +3,7 @@
  * a fake Zoom Apps SDK, a fake WebSocket the test can speak through as the
  * server, and a fetch router. The app code under test is not mocked.
  */
-import { render } from '@testing-library/react';
+import { render, act } from '@testing-library/react';
 import { vi } from 'vitest';
 import App from '../App';
 
@@ -264,6 +264,14 @@ export function renderInMeeting({
   window.location.hash = `#/${route}/${encodeURIComponent(routeMeetingId)}${page ? `/${page}` : ''}`;
   return { sdk, ...render(<App />) };
 }
+
+/**
+ * Wait until an approval sheet that is open takes an answer: for its first
+ * 700 ms it takes none (ApprovalSheet SHEET_GUARD_MS). Real timers.
+ */
+export const pastSheetGuard = () => act(async () => {
+  await new Promise((resolve) => { setTimeout(resolve, 760); });
+});
 
 /** The earlier dashboard (InMeetingView), kept at the classic route. */
 export const renderClassic = (options = {}) => renderInMeeting({ ...options, page: 'classic' });

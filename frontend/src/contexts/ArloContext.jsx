@@ -5,7 +5,7 @@ import { cleanNotes } from '../lib/notesText';
 import { readMeetingMessage } from '../lib/meetingMessage';
 import { usableName } from '../lib/ownerName';
 import { identityReport } from '../lib/arloIdentity';
-import { parseApproval } from '../lib/approvalKinds';
+import { parseApproval, approvalTimeLeft } from '../lib/approvalKinds';
 import { useZoomSdk } from './ZoomSdkContext';
 
 /**
@@ -56,7 +56,12 @@ import { useZoomSdk } from './ZoomSdkContext';
  *   GET …/arlo/approvals when it learns it is an owner, and keeps them in step
  *   from `arlo.approval` / `arlo.approval.closed`: `approvals`, oldest first,
  *   without duplicates and without those past their time. Only an owner holds
- *   any. `answerApproval` reports the owner's answer.
+ *   any. `answerApproval` reports the owner's answer. An approval's
+ *   `expiresAt` here is by this panel's clock, counted from when it was
+ *   received (lib/approvalKinds.js approvalTimeLeft): the server's clock and
+ *   the panel's can be minutes apart.
+ * - A read the server refuses (401 or 403 from …/arlo/state or …/arlo/notes)
+ *   takes away the shared notes a non-owner holds. An owner's own notes stay.
  * - A participant's own request for the notes is `notesRequest`: null, or
  *   where it stands. The outcome comes as `arlo.approval.closed` for the id
  *   the server gave it; it clears by itself two minutes after it ended, and at
@@ -95,6 +100,8 @@ const NOTES_REQUEST_LATE_MS = 3000;
 const NOTES_OUTCOMES = {
   approved: 'shared', declined: 'declined', expired: 'expired', failed: 'failed',
 };
+// The longest text from the server this panel shows for a request it would not take
+const MAX_SERVER_MESSAGE_CHARS = 200;
 const NOTES_REQUEST_MESSAGES = {
   409: 'Arlo isn\'t taking notes for anyone right now.',
   429: 'You asked a moment ago. Give it a couple of minutes.',
@@ -130,6 +137,20 @@ function parseState(data) {
     // Absent from a server that does not share notes yet: not shared
     notesShared: data.notesShared === true,
   };
+}
+
+const REFUSED = new Set([401, 403]);
+
+/** What the server's clock said when it answered (the `Date` header), in ms; null when it did not say. */
+function serverClock(res) {
+  const at = Date.parse(res.headers?.get?.('Date') ?? '');
+  return Number.isFinite(at) ? at : null;
+}
+
+/** The server's own words for a refusal, when they are short text; null otherwise. Shown as text only. */
+function shortServerMessage(data) {
+  const text = typeof data?.message === 'string' ? data.message.trim() : '';
+  return text.length > 0 && text.length <= MAX_SERVER_MESSAGE_CHARS ? text : null;
 }
 
 const arloUrl = (meetingId, name) => `/api/meetings/by-zoom-id/${encodeURIComponent(meetingId)}/arlo/${name}`;
@@ -252,16 +273,26 @@ export function ArloProvider({ children }) {
     if (merged.present) setEverPresent(true);
   }, []);
 
+  // The server refused a read (401, 403): shared notes held by someone who is
+  // not an owner go. An owner's own notes follow their own rules.
+  const dropRefusedNotes = useCallback(() => {
+    if (stateRef.current.role === 'owner' && signedInRef.current) return;
+    setNotes(null);
+  }, []);
+
   // The state again, when something says it changed and the socket's word may
   // have been missed. Silent: the socket's `arlo.state` is the usual way.
   const refreshState = useCallback(() => {
     const id = serverMeetingIdRef.current;
     if (!id) return;
     fetch(arloUrl(id, 'state'), { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (REFUSED.has(res.status) && serverMeetingIdRef.current === id) dropRefusedNotes();
+        return res.ok ? res.json() : null;
+      })
       .then((data) => { if (data && serverMeetingIdRef.current === id) applyState(data); })
       .catch(() => {});
-  }, [applyState]);
+  }, [applyState, dropRefusedNotes]);
 
   // Newer notes win. Notes for someone who may not see them are not kept: an
   // owner is always signed in; anyone else holds notes only while they are shared
@@ -280,18 +311,30 @@ export function ArloProvider({ children }) {
 
   // A request for this owner's answer. Kept once, oldest first; not for someone
   // who is not an owner, not when it already ended or is past its time.
-  const addApprovals = useCallback((values) => {
+  // `fetched`: read from the server (an older one), not just announced on the
+  // socket; `serverNow`: the server's clock when it answered, if it said.
+  // Held with `expiresAt` by this panel's clock, counted from now.
+  const addApprovals = useCallback((values, { fetched = false, serverNow = null } = {}) => {
     if (stateRef.current.role !== 'owner' || !signedInRef.current) return;
+    const now = Date.now();
     const fresh = (Array.isArray(values) ? values : []).map(parseApproval)
-      .filter((one) => one !== null && one.expiresAt > Date.now() && !closedApprovalsRef.current.has(one.id));
+      .filter((one) => one !== null && !closedApprovalsRef.current.has(one.id))
+      .map((one) => ({
+        id: one.id,
+        kind: one.kind,
+        askedBy: one.askedBy,
+        expiresAt: now + approvalTimeLeft(one, { now, fetched, serverNow }),
+        serverExpiresAt: one.expiresAt,
+      }))
+      .filter((one) => one.expiresAt > now);
     if (fresh.length === 0) return;
     setApprovals((prev) => {
       const next = [...prev];
       fresh.forEach((one) => {
         if (next.length < MAX_APPROVALS && !next.some((held) => held.id === one.id)) next.push(one);
       });
-      // They all wait equally long, so the one that runs out first was asked first
-      return next.length === prev.length ? prev : next.sort((a, b) => a.expiresAt - b.expiresAt);
+      // They all wait equally long, so the one the server closes first was asked first
+      return next.length === prev.length ? prev : next.sort((a, b) => a.serverExpiresAt - b.serverExpiresAt);
     });
   }, []);
 
@@ -319,11 +362,14 @@ export function ArloProvider({ children }) {
     if (!serverMeetingId || !accessVerified) return undefined;
     let cancelled = false;
     fetch(arloUrl(serverMeetingId, 'state'), { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!cancelled && REFUSED.has(res.status)) dropRefusedNotes();
+        return res.ok ? res.json() : null;
+      })
       .then((data) => { if (!cancelled && data) applyState(data); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [serverMeetingId, accessVerified, identity, ws, applyState]);
+  }, [serverMeetingId, accessVerified, identity, ws, applyState, dropRefusedNotes]);
 
   useEffect(() => {
     if (!ws || !serverMeetingId) return undefined;
@@ -380,12 +426,15 @@ export function ArloProvider({ children }) {
     if (!serverMeetingId || !accessVerified) return undefined;
     let cancelled = false;
     fetch(arloUrl(serverMeetingId, 'notes'), { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : null))
+      .then((res) => {
+        if (!cancelled && REFUSED.has(res.status)) dropRefusedNotes();
+        return res.ok ? res.json() : null;
+      })
       .then((data) => { if (!cancelled && data) applyNotes(data.notes); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setNotesAnswered(true); });
     return () => { cancelled = true; };
-  }, [canHoldNotes, serverMeetingId, accessVerified, applyNotes]);
+  }, [canHoldNotes, serverMeetingId, accessVerified, applyNotes, dropRefusedNotes]);
 
   // The notes are shared: a request for them has nothing left to say
   useEffect(() => {
@@ -402,8 +451,10 @@ export function ArloProvider({ children }) {
     if (!serverMeetingId || !accessVerified) return undefined;
     let cancelled = false;
     fetch(arloUrl(serverMeetingId, 'approvals'), { credentials: 'include' })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => { if (!cancelled && data) addApprovals(data.approvals); })
+      .then(async (res) => (res.ok ? { data: await res.json(), serverNow: serverClock(res) } : null))
+      .then((answer) => {
+        if (!cancelled && answer?.data) addApprovals(answer.data.approvals, { fetched: true, serverNow: answer.serverNow });
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [role, serverMeetingId, accessVerified, ws, addApprovals]);
@@ -592,8 +643,10 @@ export function ArloProvider({ children }) {
         const already = NOTES_OUTCOMES[closedApprovalsRef.current.get(data.id)];
         next = already ? { status: already } : { status: 'asked', id: data.id, expiresAt };
       } else if (res.status === 429) {
-        // The server's own text is not shown: short, known messages only
-        next = { status: 'error', message: NOTES_REQUEST_MESSAGES[429] };
+        // The server knows why (asked a moment ago, or too many requests are
+        // waiting): its words when they are short text, else this panel's
+        const said = shortServerMessage(await res.json().catch(() => null));
+        next = { status: 'error', message: said ?? NOTES_REQUEST_MESSAGES[429] };
       } else if (res.status === 409 && (await res.json().catch(() => null))?.error === 'already_shared') {
         // Nothing to ask for and nothing to say: the notes show once the state is read
         next = null;

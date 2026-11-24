@@ -317,6 +317,11 @@
   animation: arlo-sheet-rise 0.18s ease-out;
 }
 
+/* The focus lands on the sheet itself when it opens: a place to start from, not a control */
+.arlo-sheet:focus {
+  outline: none;
+}
+
 @keyframes arlo-sheet-rise {
   from { transform: translateY(100%); }
   to { transform: translateY(0); }
