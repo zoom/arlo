@@ -35,10 +35,14 @@ function fail(message, code) {
  * @param {string} [input.model] - Preferred model, when allowed
  * @param {boolean} [input.fallback=true] - false: ask only `model`, and nobody when it is not allowed
  * @param {Set<string>} [input.dead] - Where models answering 404 are remembered
+ * @param {AbortSignal} [input.signal] - When it aborts, the request that is running is
+ *   aborted and no further model is asked; the call rejects with code 'aborted'
  */
 async function askModels({
-  messages, body = {}, read, model, fallback = true, maxTokens = 2048, timeoutMs = 20000, dead = deadModels,
+  messages, body = {}, read, model, fallback = true, maxTokens = 2048, timeoutMs = 20000, dead = deadModels, signal,
 }) {
+  const stopped = () => signal !== undefined && signal !== null && signal.aborted === true;
+  if (stopped()) throw fail('The AI call was stopped', 'aborted');
   const chain = () => {
     if (fallback) return buildModelChain(model);
     return config.allowedOpenRouterModels.includes(model) ? [model] : [];
@@ -66,8 +70,12 @@ async function askModels({
   let rateLimited = 0;
   let gone = 0;
   for (const one of models) {
+    // Whoever asked gave up (its time limit, or the meeting is gone): nobody is asked any more
+    if (stopped()) throw fail('The AI call was stopped', 'aborted');
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    const stop = () => controller.abort();
+    if (signal) signal.addEventListener('abort', stop, { once: true });
     try {
       const response = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
@@ -109,11 +117,13 @@ async function askModels({
       lastError = fail(`OpenRouter returned an empty response for ${one}`, 'empty_response');
       console.error(`❌ OpenRouter model "${one}" returned no text (finish_reason: ${typeof finish === 'string' ? finish.slice(0, 40) : 'unknown'})`);
     } catch (error) {
+      if (stopped()) throw fail('The AI call was stopped', 'aborted');
       // Ran out of time: say so with a code, as the other failures do
       lastError = error && error.name === 'AbortError' ? fail('OpenRouter call timed out', 'timeout') : error;
       console.error(`❌ OpenRouter call failed for ${one}:`, lastError.message);
     } finally {
       clearTimeout(timeout);
+      if (signal) signal.removeEventListener('abort', stop);
     }
   }
 
@@ -138,6 +148,7 @@ async function callOpenRouter(prompt, systemPrompt = '', options = {}) {
     model: options.model,
     maxTokens: options.maxTokens || 2048,
     timeoutMs: options.timeoutMs || 20000,
+    signal: options.signal,
     read: (data) => {
       const content = data.choices?.[0]?.message?.content || '';
       return typeof content === 'string' && content.trim() ? content : undefined;
@@ -350,6 +361,7 @@ ${transcript}
  * @param {string} input.question
  * @param {string[]} input.lines - "<speaker>: <text>", one per transcript line
  * @param {string} [input.model]
+ * @param {AbortSignal} [input.signal] - Aborts the call (the asker's time limit, or the meeting is gone)
  * @returns {Promise<string>} The answer text, unvalidated: the caller cleans and bounds it
  */
 const ASK_SYSTEM_PROMPT = `You are Arlo, an assistant in a meeting that is still going on. You answer one question about the meeting, using the meeting's transcript so far.
@@ -381,8 +393,10 @@ ${withoutAskMarkers(typeof question === 'string' ? question : '')}
 </question>`;
 }
 
-async function answerFromTranscript({ question, lines = [], model } = {}) {
-  return callOpenRouter(buildAskPrompt({ question, lines }), ASK_SYSTEM_PROMPT, { maxTokens: 512, model });
+async function answerFromTranscript({
+  question, lines = [], model, signal,
+} = {}) {
+  return callOpenRouter(buildAskPrompt({ question, lines }), ASK_SYSTEM_PROMPT, { maxTokens: 512, model, signal });
 }
 
 /**
@@ -412,6 +426,7 @@ async function answerFromTranscript({ question, lines = [], model } = {}) {
  * @param {string} [input.model]
  * @param {boolean} [input.fallback=true] - false: only `model` is asked (measuring one model)
  * @param {number} [input.timeoutMs=8000] - per model
+ * @param {AbortSignal} [input.signal] - Aborts the call (the asker's time limit, or the meeting is gone)
  * @returns {Promise<{ tool: string, args: object } | { tool: 'none' }>} Throws
  *   (with a code: 'rate_limited', 'timeout', 'no_models', …) when no model answered.
  */
@@ -456,7 +471,7 @@ function readToolChoice(message, offered) {
 }
 
 async function chooseTool({
-  request, tools, model, fallback = true, timeoutMs = 8000,
+  request, tools, model, fallback = true, timeoutMs = 8000, signal,
 } = {}) {
   const offered = (Array.isArray(tools) ? tools : [])
     .filter((tool) => tool !== null && typeof tool === 'object' && typeof tool.name === 'string');
@@ -483,6 +498,7 @@ ${asked}
     fallback,
     maxTokens: 300,
     timeoutMs,
+    signal,
     dead: toolDeadModels,
     // A reply without a tool call is an answer too ("none"); only a response
     // with no message in it sends the question on to the next model

@@ -269,9 +269,13 @@ test('429 too_many_open when the meeting has as many requests open as it takes; 
   const m = await meetingWith('NR-FULL==');
   const mine = await requestNotes(m);
   assert.equal(mine.status, 200);
-  // the meeting fills up with other requests (Arlo's own sheets count too)
+  // Arlo's own sheets have a room of their own (five): people talking to Arlo cannot keep others from asking for the notes
+  let sheets = 0;
+  while (getApprovals().open(m.meetingId, { kind: 'agent_action', askedByName: null, question: 'Do it?', primaryLabel: 'Do it', channel: 'voice' })) sheets += 1;
+  assert.equal(sheets, 5);
+  // the meeting fills up with other people's requests for the notes: twenty, not counting Arlo's sheets
   let opened = 1;
-  while (getApprovals().open(m.meetingId, { kind: 'agent_action', askedByName: null, question: 'Do it?', primaryLabel: 'Do it', channel: 'voice' })) opened += 1;
+  while (getApprovals().open(m.meetingId, { kind: 'share_notes', askedByUserId: `nr-full-filler-${opened}`, askedByName: null })) opened += 1;
   assert.equal(opened, 20);
 
   const full = await requestNotes(m, m.third);

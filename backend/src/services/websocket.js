@@ -543,8 +543,10 @@ function sendNotesUpdated(meetingId, ownerUserIds, notes) {
 
 /**
  * Tell the owners' panels that someone asks for their approval
- * (services/approvals.js). The same sockets the notes go to, and nobody else:
- * `data` carries the asker's name.
+ * (services/approvals.js). Owners' sockets verified for this meeting, and
+ * nobody else: `data` carries the asker's name and, for something Arlo was
+ * asked, the text that would be posted. `ownerUserIds` is every owner, or for
+ * a sheet only some panels can act on (admitting needs a host's) those owners.
  */
 function sendApprovalOpened(meetingId, ownerUserIds, data) {
   const owners = userIdSet(ownerUserIds);
@@ -568,8 +570,11 @@ function sendApprovalClosed(meetingId, ownerUserIds, askedByUserId, data) {
 }
 
 /**
- * Tell these people's panels (the meeting's owners), each verified to be in
- * this meeting, that Arlo is handling a request, or that it stopped.
+ * Tell these people's panels, each verified to be in this meeting, that Arlo
+ * is handling a request, or that it stopped. Who they are is the agent's
+ * decision (services/agent/agent.js): the owners for a request spoken in the
+ * meeting; for a typed one only the owner who typed it, so another owner does
+ * not learn that someone asked something in private.
  */
 function sendArloThinking(meetingId, userIds, on) {
   const told = userIdSet(userIds);

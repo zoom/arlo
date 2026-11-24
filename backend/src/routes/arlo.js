@@ -9,6 +9,7 @@
  *                   transcript, private to the asker
  *   GET  /actions   what Arlo was asked and did in this meeting, as far as this person may see it
  *   POST /actions/:actionId/result  { ok, code? }: an owner's panel reports an action Arlo sent it
+ *                                (the same result again within two minutes is answered again)
  *   POST /notes-request          {}: a participant asks the owners to share the notes with everyone
  *   POST /approvals/:approvalId  { approve }: an owner's answer, owners only; approving a request for
  *                                the notes turns sharing on, approving something Arlo was asked lets it run
@@ -36,11 +37,13 @@ const { requireAuth, optionalAuth, requireMeetingAccess } = require('../middlewa
 const { aiLimiter } = require('../middleware/aiLimiter');
 const { getMeetingStore } = require('../storage');
 const { getArloPresence } = require('../services/arloPresence');
-const { getApprovals, approvalMessageData, msLeft } = require('../services/approvals');
+const {
+  getApprovals, approvalMessageData, isFor, msLeft,
+} = require('../services/approvals');
 const { broadcastArloState, sendApprovalOpened } = require('../services/websocket');
 const { shareNotes } = require('../services/notesSharing');
 const { getAgentRuntime } = require('../services/agent');
-const { REPLIES, couldNot } = require('../services/agent/texts');
+const { REPLIES, couldNot, noHands } = require('../services/agent/texts');
 const { RESULT_CODES } = require('../services/agent/hands');
 const { userStore } = require('../lib/memoryStore');
 const { newestLines } = require('../lib/transcriptLines');
@@ -209,8 +212,16 @@ function accountName(userId) {
   return cleanName(user?.displayName) || null;
 }
 
-/** What a response says about an action: never its id, who asked, or when. */
-const actionSummary = (action) => (action ? { action: { tool: action.tool, status: action.status, label: action.label } } : {});
+/**
+ * What a response says about an action: its id (the one `arlo.did` carries
+ * later, so the panel can match how it ended to this ask), the tool, the
+ * status and the label. Never who asked, or when.
+ */
+const actionSummary = (action) => (action ? {
+  action: {
+    id: action.id, tool: action.tool, status: action.status, label: action.label,
+  },
+} : {});
 // A request that only reads: when its model fails, the answer is an error, as before there were tools
 const ANSWER_TOOLS = new Set(['answer_from_meeting', 'summarize_so_far', 'web_search']);
 const BUSY_MESSAGE = 'Arlo is busy right now. Try again in a moment.';
@@ -218,7 +229,8 @@ const BUSY_MESSAGE = 'Arlo is busy right now. Try again in a moment.';
 /**
  * POST /ask
  * { question } -> { answer } and, when Arlo did more than answer a question,
- * { answer, action: { tool, status, label } }. For an owner, and for other
+ * { answer, action: { id, tool, status, label } } (`id`: the stored action's,
+ * the same one sent in `arlo.did` when it ends). For an owner, and for other
  * signed-in people in the meeting only when the meeting's setting is "anyone".
  *
  * The request goes through the agent (services/agent/agent.js) as a typed
@@ -278,7 +290,9 @@ router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, a
       // The code only: an error message can quote the model or the transcript
       console.error(`Arlo ask failed (${typeof result.code === 'string' ? result.code : 'error'})`);
       if (!ANSWER_TOOLS.has(result.tool) || result.code === 'unsupported') {
-        return res.json({ answer: couldNot(result.code), ...actionSummary(result.action) });
+        // No panel of the asker's can do it: said as what to do about it
+        const sentence = result.code === 'no_hands' ? noHands(result.tool) : couldNot(result.code);
+        return res.json({ answer: sentence, ...actionSummary(result.action) });
       }
       if (result.code === 'model_rate_limited') return res.status(429).json({ error: RATE_LIMITED_MESSAGE });
       if (result.code === 'no_transcript') {
@@ -320,7 +334,10 @@ router.get('/actions', optionalAuth, requireMeetingAccess, (req, res) => {
  * reports whether it did it. `code`, only with `ok: false`, is one of
  * not_found, several_match, no_notes, sdk_error, unsupported, not_allowed.
  * Owners only, and only the owner the action was sent to: 404 for an action
- * that is unknown, finished, or someone else's. Nothing of it is logged.
+ * that is unknown, finished, or someone else's. The same result sent again by
+ * the same owner within two minutes is answered { received: true } again (a
+ * panel retries a POST whose response was lost); another verdict is 404.
+ * Nothing of it is logged.
  */
 router.post('/actions/:actionId/result', requireAuth, requireMeetingAccess, requireJson, (req, res) => {
   const meetingId = req.params.zoomMeetingId;
@@ -415,7 +432,8 @@ router.post('/approvals/:approvalId', requireAuth, requireMeetingAccess, require
   const approvals = getApprovals();
   // Looked up before anything is changed: an answer to nothing shares nothing
   const open = approvals.get(meetingId, id);
-  if (open === null) return notFound();
+  // One put only to the owners whose panels can do it is not open for the others
+  if (open === null || !isFor(open, req.user.id)) return notFound();
   if (!body.approve) {
     const declined = approvals.answer(meetingId, id, { byUserId: req.user.id, approve: false });
     return declined === null ? notFound() : res.json({ id, outcome: declined });
@@ -442,7 +460,9 @@ router.post('/approvals/:approvalId', requireAuth, requireMeetingAccess, require
  * with the time left by the server's clock when this was answered. One of kind
  * 'agent_action' also has the sheet's fields: `question`, `primaryLabel`,
  * `channel`, `askerVerified`, and when there is one `body` (the exact text
- * that will be posted to the chat) and `request` (what was asked).
+ * that will be posted to the chat) and `request` (what was asked). One put
+ * only to the owners whose panels can do it (admitting needs a host's panel)
+ * is listed for them alone.
  */
 router.get('/approvals', requireAuth, requireMeetingAccess, (req, res) => {
   const meetingId = req.params.zoomMeetingId;
@@ -450,7 +470,9 @@ router.get('/approvals', requireAuth, requireMeetingAccess, (req, res) => {
     return forbidden(res, 'Only the person who brought Arlo in sees these.');
   }
   return res.json({
-    approvals: getApprovals().listOpen(meetingId).map((approval) => approvalMessageData(meetingId, approval)),
+    approvals: getApprovals().listOpen(meetingId)
+      .filter((approval) => isFor(approval, req.user.id))
+      .map((approval) => approvalMessageData(meetingId, approval)),
   });
 });
 

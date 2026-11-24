@@ -12,6 +12,7 @@
  * `runs`: 'server' (the server does it from what it stored) or 'panel' (it
  * needs the Zoom Apps SDK, so an owner's open panel does it).
  * `changesMeeting`: whether people in the meeting see an effect.
+ * `needsHost`: the panel that runs it must be a host's or co-host's.
  *
  * This file has no code that runs a tool.
  */
@@ -61,6 +62,7 @@ const TABLE = deepFreeze([
     parameters: parameters({ name: text('The name of the person to admit, exactly as the asker said it.', 100) }),
     runs: 'panel',
     changesMeeting: true,
+    needsHost: true,
   },
   {
     name: 'share_notes',
@@ -86,6 +88,9 @@ const ALL_TOOL_NAMES = Object.freeze(TABLE.map((tool) => tool.name));
 const NO_TOOL_NAME = 'none';
 /** The tools an owner's open panel does with the Zoom Apps SDK. */
 const PANEL_TOOL_NAMES = Object.freeze(TABLE.filter((tool) => tool.runs === 'panel').map((tool) => tool.name));
+
+/** The panel tools only a host's or co-host's panel may run. */
+const HOST_TOOL_NAMES = Object.freeze(TABLE.filter((tool) => tool.runs === 'panel' && tool.needsHost === true).map((tool) => tool.name));
 
 /** Whether this deployment has web search on (WEB_SEARCH_ENABLED=true). Read when asked: config needs the environment. */
 function webSearchOn(options) {
@@ -144,5 +149,5 @@ function validateToolCall(name, args, options) {
 }
 
 module.exports = {
-  listTools, toolNames, getTool, validateToolCall, ALL_TOOL_NAMES, NO_TOOL_NAME, PANEL_TOOL_NAMES,
+  listTools, toolNames, getTool, validateToolCall, ALL_TOOL_NAMES, NO_TOOL_NAME, PANEL_TOOL_NAMES, HOST_TOOL_NAMES,
 };

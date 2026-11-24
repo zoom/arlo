@@ -481,3 +481,52 @@ test('the store\'s sweep names each meeting it deletes', () => {
   assert.equal(store.has('NEW'), true);
   assert.equal(store.sweep('not a function'), 0);
 });
+
+test('a meeting the store drops to make room is forgotten like one the age sweep deletes: once, with what is tracked for it', () => {
+  const store = createMemoryMeetingStore({ maxMeetings: 2 });
+  const forgotten = [];
+  const timers = [];
+  const lifecycle = createMeetingLifecycle({
+    store,
+    schedule: (fn) => { const timer = { fn, cancelled: false }; timers.push(timer); return () => { timer.cancelled = true; }; },
+    onForget: (meetingId) => forgotten.push(meetingId),
+  });
+  const speak = (meetingId) => {
+    assert.equal(lifecycle.dataReceived(meetingId), true);
+    store.appendSegment(meetingId, { text: 'x' });
+  };
+
+  // OLDEST stopped and waits out its grace period; WATCHED has a panel open
+  lifecycle.streamStatus('OLDEST', 'rtms_started');
+  speak('OLDEST');
+  lifecycle.streamStatus('OLDEST', 'rtms_stopped');
+  assert.equal(timers.filter((timer) => !timer.cancelled).length, 1);
+  lifecycle.panelsChanged('WATCHED', 1);
+  speak('WATCHED');
+  assert.deepEqual(forgotten, []);
+
+  // a third meeting arrives: the store drops the one written to longest ago
+  speak('NEW');
+  assert.equal(store.has('OLDEST'), false);
+  // its approvals, agent, hands and stream state go through the same callback, once
+  assert.deepEqual(forgotten, ['OLDEST']);
+  // its timer is cancelled and it is no longer tracked
+  assert.equal(timers.filter((timer) => !timer.cancelled).length, 0);
+  assert.equal(lifecycle.tracked(), 2);
+
+  // a meeting with a panel still connected is forgotten too, and the panel stays counted
+  speak('NEWER');
+  assert.equal(store.has('WATCHED'), false);
+  assert.deepEqual(forgotten, ['OLDEST', 'WATCHED']);
+  assert.equal(lifecycle.tracked(), 3);
+  // nothing is forgotten twice by the sweep that follows
+  lifecycle.sweep();
+  assert.deepEqual(forgotten, ['OLDEST', 'WATCHED']);
+
+  // a listener that throws does not stop the line that made room from being kept
+  const throwing = createMemoryMeetingStore({ maxMeetings: 1 });
+  createMeetingLifecycle({ store: throwing, schedule: () => () => {}, onForget: () => { throw new Error('listener'); } });
+  throwing.appendSegment('A', { text: 'x' });
+  assert.notEqual(throwing.appendSegment('B', { text: 'x' }), null);
+  assert.deepEqual([throwing.has('A'), throwing.has('B')], [false, true]);
+});

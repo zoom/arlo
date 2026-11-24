@@ -43,10 +43,12 @@ function getAgentRuntime() {
       approvals: getApprovals(),
       hands,
       // The request and the tool table: nothing of the meeting goes to the model that picks
-      choose: ({ request }) => openrouter.chooseTool({
-        request, tools: listTools(), model: config.agentModel,
+      choose: ({ request, signal }) => openrouter.chooseTool({
+        request, tools: listTools(), model: config.agentModel, signal,
       }),
-      answer: ({ question, lines }) => openrouter.answerFromTranscript({ question, lines, model: config.notesModel }),
+      answer: ({ question, lines, signal }) => openrouter.answerFromTranscript({
+        question, lines, model: config.notesModel, signal,
+      }),
       shareNotes: (meetingId, userId) => typeof userId === 'string' && shareNotes(meetingId, userId, true) !== 'refused',
       isVerifiedOwnerSpeaker: createSpeakerMatch({ mode: config.agentSpeakerMatch, store }),
       // A spoken request is looked at only while an owner's panel is open

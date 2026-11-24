@@ -19,7 +19,9 @@
  *                   name on a spoken request is a Zoom display name, which
  *                   anyone can set. The asker may have no user id (a request
  *                   spoken in the meeting); how often someone may ask is the
- *                   agent's limit, not this module's.
+ *                   agent's limit, not this module's. `forUserIds`, when
+ *                   given, is the owners whose panels can do it (a tool that
+ *                   needs a host): only they are shown it and may answer it.
  *
  * What an answer means: whoever calls answer() does the work first (for
  * 'share_notes' the route turns sharing on, routes/arlo.js), then reports.
@@ -39,7 +41,10 @@
  * 'invalid' (not a request).
  *
  * Kept in memory per meeting and gone with the meeting (`forget`, called from
- * the meeting lifecycle). Bounded: at most `maxPerMeeting` open at once, one
+ * the meeting lifecycle). Bounded per kind, so one kind cannot crowd out the
+ * other: at most `maxPerMeeting` (20) 'share_notes' open at once and at most
+ * `maxAgentActionsPerMeeting` (5) 'agent_action' (people talking to Arlo must
+ * not be able to keep participants from asking for the notes); one
  * 'share_notes' per person every ASK_AGAIN_MS, and a bounded memory of who asked.
  * The asker's name is held only while the approval is open. Nothing is logged
  * here: not a name, not a user id.
@@ -61,6 +66,7 @@ const ASK_AGAIN_MS = 2 * 60 * 1000;
 const MAX_ID_CHARS = 256;
 const MAX_NAME_CHARS = 200;
 const MAX_MEETINGS = 5000;
+const MAX_FOR_USERS = 50;
 
 const isId = (value) => typeof value === 'string' && value.length > 0 && value.length <= MAX_ID_CHARS;
 const isKind = (value) => typeof value === 'string' && APPROVAL_KINDS.has(value);
@@ -89,6 +95,7 @@ function createApprovals({
   schedule = defaultSchedule,
   expiryMs = 60000,
   maxPerMeeting = 20,
+  maxAgentActionsPerMeeting = 5,
   maxAskersPerMeeting = 500,
   // Called with (meetingId, approval, outcome) when an approval is answered or
   // runs out. Not when its meeting is forgotten: there is nobody left to tell.
@@ -104,7 +111,20 @@ function createApprovals({
     askedByName: entry.askedByName,
     expiresAt: entry.expiresAt,
     ...(WITH_TEXTS.has(entry.kind) && sheetTexts(entry)),
+    ...(WITH_TEXTS.has(entry.kind) && { forUserIds: entry.forUserIds === null ? null : [...entry.forUserIds] }),
   });
+
+  /** How many of this kind a meeting may have open, and has. */
+  const capFor = (kind) => (kind === 'agent_action' ? maxAgentActionsPerMeeting : maxPerMeeting);
+  const openOfKind = (meeting, kind) => [...meeting.open.values()].filter((entry) => entry.kind === kind).length;
+
+  /** Whether the meeting can take one more open approval of this kind. Asked before work is done for one. */
+  function hasRoom(meetingId, kind) {
+    if (!isId(meetingId) || !isKind(kind)) return false;
+    const meeting = meetings.get(meetingId);
+    if (!meeting) return meetings.size < MAX_MEETINGS;
+    return openOfKind(meeting, kind) < capFor(kind);
+  }
 
   const askerKey = (kind, userId) => `${kind}:${userId}`;
 
@@ -171,7 +191,7 @@ function createApprovals({
    * Someone who asked a moment ago hears 'too_soon' also while the meeting is full.
    */
   function tryOpen(meetingId, {
-    kind, askedByUserId, askedByName, question, primaryLabel, body, request, channel, askerVerified, onOutcome,
+    kind, askedByUserId, askedByName, question, primaryLabel, body, request, channel, askerVerified, forUserIds, onOutcome,
   } = {}) {
     if (!isId(meetingId) || !isKind(kind)) return refuse('invalid');
     const perAsker = ONE_PER_ASKER.has(kind);
@@ -188,6 +208,10 @@ function createApprovals({
         || !(isAbsent(request) || isSheetText(request, MAX_REQUEST_CHARS)))) {
       return refuse('invalid');
     }
+    const forSome = withTexts && !isAbsent(forUserIds);
+    if (forSome && !(Array.isArray(forUserIds) && forUserIds.length > 0 && forUserIds.length <= MAX_FOR_USERS && forUserIds.every(isId))) {
+      return refuse('invalid');
+    }
     if (!mayOpen(meetingId, kind, askedByUserId)) return refuse('too_soon');
     let meeting = meetings.get(meetingId);
     if (!meeting) {
@@ -195,7 +219,7 @@ function createApprovals({
       meeting = { open: new Map(), askedAt: new Map() };
     }
     const key = askerKey(kind, askedByUserId);
-    if (meeting.open.size >= maxPerMeeting || (perAsker && !roomForAsker(meeting, key))) return refuse('too_many_open');
+    if (openOfKind(meeting, kind) >= capFor(kind) || (perAsker && !roomForAsker(meeting, key))) return refuse('too_many_open');
     meetings.set(meetingId, meeting);
 
     const entry = {
@@ -212,6 +236,7 @@ function createApprovals({
       request: withTexts && !isAbsent(request) ? request : null,
       channel: withTexts ? channel : null,
       askerVerified: withTexts ? askerVerified === true : null,
+      forUserIds: forSome ? [...new Set(forUserIds)] : null,
       onOutcome: typeof onOutcome === 'function' ? onOutcome : null,
     };
     if (perAsker) meeting.askedAt.set(key, now());
@@ -294,7 +319,7 @@ function createApprovals({
   }
 
   return {
-    open, tryOpen, answer, get, listOpen, mayOpen, forget, size,
+    open, tryOpen, answer, get, listOpen, mayOpen, hasRoom, forget, size,
   };
 }
 
@@ -313,7 +338,8 @@ const msLeft = (expiresAt, at = Date.now()) => {
  * whose clock is off shows the right time. For 'agent_action' also
  * `askerVerified` and the sheet's fields: `question` and `primaryLabel`, which
  * the server wrote, `channel`, and when there is one `body` (the exact text
- * that will be posted) and `request` (what was asked).
+ * that will be posted) and `request` (what was asked). Never `forUserIds`:
+ * who else is asked is not a panel's business (see isFor).
  */
 const approvalMessageData = (meetingId, approval, at = Date.now()) => ({
   meetingId,
@@ -331,6 +357,9 @@ const approvalMessageData = (meetingId, approval, at = Date.now()) => ({
     ...(typeof approval.request === 'string' && { request: approval.request }),
   }),
 });
+
+/** Whether this approval is put to this owner: all of them, unless it names the ones whose panels can do it. */
+const isFor = (approval, userId) => !Array.isArray(approval.forUserIds) || approval.forUserIds.includes(userId);
 
 /** The one the running server uses: a close is told to the owners and to the person who asked. */
 function getApprovals() {
@@ -356,5 +385,5 @@ function getApprovals() {
 }
 
 module.exports = {
-  createApprovals, getApprovals, approvalMessageData, msLeft, APPROVAL_KINDS, ASK_AGAIN_MS,
+  createApprovals, getApprovals, approvalMessageData, isFor, msLeft, APPROVAL_KINDS, ASK_AGAIN_MS,
 };

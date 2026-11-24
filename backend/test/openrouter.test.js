@@ -191,3 +191,55 @@ test('the notes prompt shows a missing owner as a JSON null, never as the word i
   assert.equal(/"owner":\s*"[^"]*\bnull\b[^"]*"/.test(system), false);
   assert.match(system, /"owner":\s*null/);
 });
+
+// --- stopping a call from outside ------------------------------------------------
+
+/** A fetch that never answers until its signal aborts, as the real one does. */
+function stubHanging() {
+  calls = [];
+  global.fetch = (url, init) => {
+    calls.push(JSON.parse(init.body));
+    return new Promise((resolve, reject) => {
+      const stop = () => reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' }));
+      if (init.signal.aborted) stop();
+      else init.signal.addEventListener('abort', stop);
+    });
+  };
+}
+
+test('a signal stops the request that is running, and no further model is asked', async () => {
+  for (const ask of [
+    (signal) => openrouter.answerFromTranscript({ question: 'When?', lines: ['Ana: hello'], signal }),
+    (signal) => openrouter.chooseTool({ request: 'share the notes', tools: [{ name: 'share_notes', description: 'x', parameters: { type: 'object', properties: {} } }], signal }),
+  ]) {
+    openrouter._resetForTests();
+    stubHanging();
+    const controller = new AbortController();
+    const asking = ask(controller.signal);
+    const outcome = asking.then(() => 'answered', (error) => error.code);
+    await new Promise((resolve) => { setImmediate(resolve); });
+    assert.equal(calls.length, 1);
+    controller.abort();
+    // stopped now, long before the 8 or 20 seconds a model is given, and with a code of its own
+    assert.equal(await Promise.race([outcome, new Promise((resolve) => { setTimeout(() => resolve('still running'), 500); })]), 'aborted');
+    // the other two models in the chain were not asked
+    assert.equal(calls.length, 1);
+  }
+});
+
+test('a signal that has already aborted asks no model at all; without one, or with one that never aborts, nothing changes', async () => {
+  stubModels(() => ({ content: 'On Friday.' }));
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(
+    openrouter.answerFromTranscript({ question: 'When?', lines: ['Ana: hello'], signal: controller.signal }),
+    (error) => error.code === 'aborted',
+  );
+  assert.equal(calls.length, 0);
+  assert.equal(await openrouter.answerFromTranscript({ question: 'When?', lines: ['Ana: hello'], signal: new AbortController().signal }), 'On Friday.');
+  assert.equal(await openrouter.answerFromTranscript({ question: 'When?', lines: ['Ana: hello'] }), 'On Friday.');
+  // a model's own time limit is still a timeout, and the next model is still asked
+  stubModels((model) => (model === 'a/one:free' ? { status: 500 } : { content: 'On Friday.' }));
+  assert.equal(await openrouter.answerFromTranscript({ question: 'When?', lines: ['Ana: hello'], signal: new AbortController().signal }), 'On Friday.');
+  assert.equal(calls.length, 2);
+});

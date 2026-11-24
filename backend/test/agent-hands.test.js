@@ -59,8 +59,11 @@ function setup(options = {}) {
     hands, t, panel, advance, live,
   };
 }
-const POST = { tool: 'post_to_chat', args: { message: 'Back in five.' } };
-const ADMIT = { tool: 'admit_from_waiting_room', args: { name: 'James' } };
+const POST = { tool: 'post_to_chat', args: { message: 'Back in five.' }, userId: 'user-ana' };
+const ADMIT = { tool: 'admit_from_waiting_room', args: { name: 'James' }, userId: 'user-ana' };
+const turn = () => new Promise((resolve) => { setImmediate(resolve); });
+/** What a run resolved to, or 'waiting' when it has not: a test never waits on a run that may not settle. */
+const settled = (running) => Promise.race([running, turn().then(turn).then(() => 'waiting')]);
 
 test('an action goes to one panel, and its result is the outcome', async () => {
   const s = setup();
@@ -70,6 +73,7 @@ test('an action goes to one panel, and its result is the outcome', async () => {
   const { type, data } = ana.got[0];
   assert.equal(type, 'arlo.action');
   assert.match(data.actionId, UUID);
+  // who it is for is not in the message: the panel is theirs
   assert.deepEqual(data, { meetingId: M, actionId: data.actionId, tool: 'post_to_chat', args: { message: 'Back in five.' } });
   assert.equal(s.hands.pending(), 1);
 
@@ -87,40 +91,84 @@ test('an action goes to one panel, and its result is the outcome', async () => {
   }
 });
 
-test('which panel: it must be an owner\'s and list the tool; a host or co-host first, then the oldest', async () => {
+test('whose panel: only the owner who typed or approved it, never another owner\'s, host or not', async () => {
   const s = setup();
   const guest = s.panel(null, 'host', ['post_to_chat'], 1);
   const ben = s.panel('user-ben', 'host', ['post_to_chat'], 2); // signed in, not an owner
-  const cannot = s.panel('user-ana', 'host', ['admit_from_waiting_room'], 3);
-  const attendee = s.panel('user-ana', 'attendee', ['post_to_chat'], 4);
-  const laterHost = s.panel('user-cy', 'coHost', ['post_to_chat', 'admit_from_waiting_room'], 6);
-  const host = s.panel('user-cy', 'host', ['post_to_chat'], 5);
+  const cannot = s.panel('user-ana', 'host', ['admit_from_waiting_room'], 3); // hers, but did not announce posting
+  const cyHost = s.panel('user-cy', 'host', ['post_to_chat', 'admit_from_waiting_room'], 4); // the host, and another owner
+  const later = s.panel('user-ana', 'attendee', ['post_to_chat'], 6);
+  const first = s.panel('user-ana', 'attendee', ['post_to_chat'], 5);
 
+  // Ana's request: her own panel, the one connected longest. Not the host's
   s.hands.run(M, POST);
-  assert.equal(host.got.length, 1);
-  for (const other of [guest, ben, cannot, attendee, laterHost]) assert.equal(other.got.length, 0);
+  assert.equal(first.got.length, 1);
+  for (const other of [guest, ben, cannot, cyHost, later]) assert.equal(other.got.length, 0);
 
-  // nobody who is host or co-host can: the oldest of the others
-  s.t.panels.splice(s.t.panels.indexOf(host), 1);
-  s.t.panels.splice(s.t.panels.indexOf(laterHost), 1);
-  s.hands.run(M, POST);
-  assert.equal(attendee.got.length, 1);
+  // she has no panel that can post: it fails. Cy's panel, which could, is not used
+  s.t.panels.splice(s.t.panels.indexOf(first), 1);
+  s.t.panels.splice(s.t.panels.indexOf(later), 1);
+  assert.deepEqual(await settled(s.hands.run(M, POST)), { ok: false, code: 'no_hands' });
+  assert.equal(cyHost.got.length, 0);
+  // Cy's own request does run on Cy's panel
+  s.hands.run(M, { ...POST, userId: 'user-cy' });
+  assert.equal(cyHost.got.length, 1);
+
+  // nobody behind the action, or someone who is not an owner: no panel at all
+  for (const userId of [undefined, null, '', 5, 'user-ben', 'x'.repeat(257), ['user-cy']]) {
+    assert.deepEqual(await settled(s.hands.run(M, { ...POST, userId })), { ok: false, code: 'no_hands' }, String(userId));
+  }
+  assert.equal(ben.got.length + guest.got.length, 0);
+  assert.equal(cyHost.got.length, 1);
 
   // someone stops being an owner: their panel is not used, whatever it announced
-  s.t.owners = ['user-cy'];
-  assert.deepEqual(await s.hands.run(M, POST), { ok: false, code: 'no_hands' });
-  assert.equal(attendee.got.length, 1);
+  s.t.owners = ['user-ana'];
+  assert.deepEqual(await settled(s.hands.run(M, { ...POST, userId: 'user-cy' })), { ok: false, code: 'no_hands' });
+  assert.equal(cyHost.got.length, 1);
 });
 
-test('admitting from the waiting room needs a host or co-host', async () => {
+test('admitting from the waiting room needs a host\'s or co-host\'s panel, and the owner\'s own', async () => {
   const s = setup();
   const attendee = s.panel('user-ana', 'attendee', ['admit_from_waiting_room', 'post_to_chat'], 1);
-  assert.deepEqual(await s.hands.run(M, ADMIT), { ok: false, code: 'no_hands' });
+  const cyHost = s.panel('user-cy', 'host', ['admit_from_waiting_room'], 2);
+  // an attendee's panel cannot admit, and nothing is sent to it. Settles at once: nothing waits for a result
+  for (const zoomRole of ['attendee', 'panelist', 'owner', '']) {
+    attendee.zoomRole = zoomRole;
+    assert.deepEqual(await settled(s.hands.run(M, ADMIT)), { ok: false, code: 'no_hands' }, zoomRole);
+  }
   assert.equal(attendee.got.length, 0);
-  const coHost = s.panel('user-cy', 'coHost', ['admit_from_waiting_room'], 2);
-  s.hands.run(M, ADMIT);
-  assert.equal(coHost.got.length, 1);
-  assert.deepEqual(coHost.got[0].data.args, { name: 'James' });
+  assert.equal(s.hands.pending(), 0);
+  // the host is another owner: not used for her request
+  assert.equal(cyHost.got.length, 0);
+  // the same panel may still post
+  assert.equal(await settled(s.hands.run(M, POST)), 'waiting');
+  assert.equal(attendee.got.length, 1);
+
+  for (const zoomRole of ['host', 'coHost']) {
+    attendee.zoomRole = zoomRole;
+    s.hands.run(M, ADMIT);
+    assert.deepEqual(attendee.got.at(-1).data.args, { name: 'James' }, zoomRole);
+  }
+  assert.equal(attendee.got.length, 3);
+});
+
+test('who can: the owners with a panel open that may run the tool', () => {
+  const s = setup();
+  s.panel('user-ana', 'attendee', ['post_to_chat', 'admit_from_waiting_room'], 1);
+  s.panel('user-ana', 'attendee', ['post_to_chat'], 2);
+  s.panel('user-cy', 'coHost', ['admit_from_waiting_room'], 3);
+  s.panel('user-ben', 'host', ['post_to_chat', 'admit_from_waiting_room'], 4); // not an owner
+  s.panel(null, 'host', ['post_to_chat', 'admit_from_waiting_room'], 5);
+  assert.deepEqual(s.hands.whoCan(M, 'post_to_chat'), ['user-ana']);
+  assert.deepEqual(s.hands.whoCan(M, 'admit_from_waiting_room'), ['user-cy']);
+  for (const [meetingId, tool] of [['ANOTHER==', 'post_to_chat'], [M, 'share_notes'], [M, 'delete_everything'], [M, null], ['', 'post_to_chat'], [null, 'post_to_chat']]) {
+    assert.deepEqual(s.hands.whoCan(meetingId, tool), []);
+  }
+  s.t.owners = [];
+  assert.deepEqual(s.hands.whoCan(M, 'post_to_chat'), []);
+  // panels that cannot be listed: nobody
+  const broken = createHands({ panels: () => { throw new Error('down'); }, isOwner: () => true });
+  assert.deepEqual(broken.whoCan(M, 'post_to_chat'), []);
 });
 
 test('no panel, a tool that is not a panel\'s, or a call that is not one: nothing is sent', async () => {
@@ -129,8 +177,10 @@ test('no panel, a tool that is not a panel\'s, or a call that is not one: nothin
   const ana = s.panel('user-ana', 'host', ['post_to_chat', 'share_notes', 'answer_from_meeting']);
   assert.deepEqual(await s.hands.run('ANOTHER==', POST), { ok: false, code: 'no_hands' });
   for (const call of [
-    { tool: 'share_notes', args: {} }, { tool: 'answer_from_meeting', args: { question: 'x' } }, { tool: 'delete_everything', args: {} },
-    { tool: 'post_to_chat' }, { tool: 'post_to_chat', args: 'hello' }, { tool: 5, args: {} }, null, undefined, 'post_to_chat',
+    { tool: 'share_notes', args: {}, userId: 'user-ana' }, { tool: 'answer_from_meeting', args: { question: 'x' }, userId: 'user-ana' },
+    { tool: 'delete_everything', args: {}, userId: 'user-ana' },
+    { tool: 'post_to_chat', userId: 'user-ana' }, { tool: 'post_to_chat', args: 'hello', userId: 'user-ana' }, { tool: 5, args: {}, userId: 'user-ana' },
+    null, undefined, 'post_to_chat',
   ]) {
     assert.deepEqual(await s.hands.run(M, call), { ok: false, code: 'unsupported' }, JSON.stringify(call));
   }
@@ -139,23 +189,26 @@ test('no panel, a tool that is not a panel\'s, or a call that is not one: nothin
   assert.equal(s.hands.pending(), 0);
 });
 
-test('a panel that cannot be sent to is passed over', async () => {
+test('a panel that cannot be sent to is passed over, for another panel of the same owner', async () => {
   const s = setup();
   const broken = s.panel('user-ana', 'host', ['post_to_chat'], 1, false);
   const thrower = s.panel('user-ana', 'host', ['post_to_chat'], 2);
   thrower.send = () => { throw new Error('socket closed'); };
-  const works = s.panel('user-cy', 'attendee', ['post_to_chat'], 3);
+  const cy = s.panel('user-cy', 'host', ['post_to_chat'], 3);
+  const works = s.panel('user-ana', 'attendee', ['post_to_chat'], 4);
   const running = s.hands.run(M, POST);
   assert.equal(broken.got.length, 1);
   assert.equal(works.got.length, 1);
-  // only the panel that got it may answer
-  assert.equal(s.hands.result(M, broken.got[0].data.actionId, 'user-ana', { ok: true }), false);
-  assert.equal(s.hands.result(M, works.got[0].data.actionId, 'user-ana', { ok: true }), false);
-  assert.equal(s.hands.result(M, works.got[0].data.actionId, 'user-cy', { ok: true }), true);
+  assert.equal(cy.got.length, 0);
+  // only the user it was sent to may answer
+  assert.equal(s.hands.result(M, works.got[0].data.actionId, 'user-cy', { ok: true }), false);
+  assert.equal(s.hands.result(M, works.got[0].data.actionId, 'user-ana', { ok: true }), true);
   assert.deepEqual(await running, { ok: true });
 
+  // none of her panels can be sent to: it ends, and Cy's panel is still not used
   s.t.panels.pop();
-  assert.deepEqual(await s.hands.run(M, POST), { ok: false, code: 'no_hands' });
+  assert.deepEqual(await settled(s.hands.run(M, POST)), { ok: false, code: 'no_hands' });
+  assert.equal(cy.got.length, 0);
   assert.equal(s.hands.pending(), 0);
 });
 
@@ -180,7 +233,7 @@ test('a result is taken once, from the user it was sent to, for the meeting it w
 
   assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: false, code: 'not_found' }), true);
   assert.deepEqual(await running, { ok: false, code: 'not_found' });
-  // finished: a second result changes nothing
+  // finished: another verdict changes nothing and is refused
   assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: true }), false);
 
   // someone who stopped being an owner cannot report any more
@@ -189,6 +242,102 @@ test('a result is taken once, from the user it was sent to, for the meeting it w
   assert.equal(s.hands.result(M, ana.got[1].data.actionId, 'user-ana', { ok: true }), false);
   s.advance(15000);
   assert.deepEqual(await next, { ok: false, code: 'timeout' });
+});
+
+test('a result for the same action reported in another meeting is refused, also by someone who is an owner there too', async () => {
+  // Ana is an owner of both meetings, and has a panel in each
+  const OTHER = 'MEETING-HANDS-OTHER==';
+  const panels = { [M]: [], [OTHER]: [] };
+  const hands = createHands({ panels: (meetingId) => panels[meetingId] || [], isOwner: (meetingId, userId) => userId === 'user-ana' });
+  const got = [];
+  for (const meetingId of [M, OTHER]) {
+    panels[meetingId].push({
+      userId: 'user-ana', zoomRole: 'host', can: ['post_to_chat'], since: 1, send(message) { got.push(message); return true; },
+    });
+  }
+  const running = hands.run(M, POST);
+  const { actionId } = got[0].data;
+  assert.equal(got[0].data.meetingId, M);
+  // the right user, the right action, an owner of the meeting named: but not the meeting it was sent in
+  assert.equal(hands.result(OTHER, actionId, 'user-ana', { ok: true }), false);
+  assert.equal(await settled(running), 'waiting');
+  assert.equal(hands.pending(), 1);
+  assert.equal(hands.result(M, actionId, 'user-ana', { ok: true }), true);
+  assert.deepEqual(await running, { ok: true });
+  // and a repeat is only taken in the meeting it was first taken in
+  assert.equal(hands.result(OTHER, actionId, 'user-ana', { ok: true }), false);
+  assert.equal(hands.result(M, actionId, 'user-ana', { ok: true }), true);
+});
+
+test('the same result sent again by the same user is taken again for two minutes, and changes nothing', async () => {
+  const s = setup();
+  const ana = s.panel('user-ana', 'host', ['post_to_chat']);
+  const running = s.hands.run(M, POST);
+  const { actionId } = ana.got[0].data;
+  assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: true }), true);
+  assert.deepEqual(await running, { ok: true });
+  // the panel never got the response and sends it again
+  assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: true }), true);
+  assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: true }), true);
+  assert.equal(s.hands.pending(), 0);
+  // another verdict, another user, another meeting: refused as before
+  assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: false }), false);
+  assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: false, code: 'not_found' }), false);
+  assert.equal(s.hands.result(M, actionId, 'user-cy', { ok: true }), false);
+  assert.equal(s.hands.result('ANOTHER==', actionId, 'user-ana', { ok: true }), false);
+  // someone who stopped being an owner is not answered
+  s.t.owners = ['user-cy'];
+  assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: true }), false);
+  s.t.owners = ['user-ana', 'user-cy'];
+  // two minutes after the first, no more
+  s.advance(2 * 60 * 1000 - 1);
+  assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: true }), true);
+  s.advance(1);
+  assert.equal(s.hands.result(M, actionId, 'user-ana', { ok: true }), false);
+
+  // a failure is repeated by its code; no code is "the SDK failed", as the first time
+  const failing = s.hands.run(M, POST);
+  const failedId = ana.got[1].data.actionId;
+  assert.equal(s.hands.result(M, failedId, 'user-ana', { ok: false }), true);
+  assert.deepEqual(await failing, { ok: false, code: 'sdk_error' });
+  assert.equal(s.hands.result(M, failedId, 'user-ana', { ok: false, code: 'sdk_error' }), true);
+  assert.equal(s.hands.result(M, failedId, 'user-ana', { ok: false, code: 'not_found' }), false);
+  assert.equal(s.hands.result(M, failedId, 'user-ana', { ok: true }), false);
+
+  // an action that timed out was never reported: a late result is still refused
+  const late = s.hands.run(M, POST);
+  s.advance(15000);
+  assert.deepEqual(await late, { ok: false, code: 'timeout' });
+  assert.equal(s.hands.result(M, ana.got[2].data.actionId, 'user-ana', { ok: true }), false);
+});
+
+test('what is remembered of results is bounded, and goes with the meeting', async () => {
+  const s = setup({ maxReported: 3 });
+  const ana = s.panel('user-ana', 'host', ['post_to_chat']);
+  const ids = [];
+  for (let i = 0; i < 5; i += 1) {
+    const running = s.hands.run(M, POST);
+    ids.push(ana.got[i].data.actionId);
+    s.hands.result(M, ids[i], 'user-ana', { ok: true });
+    await running;
+    s.advance(1000);
+  }
+  assert.equal(s.hands.remembered(), 3);
+  // the oldest went first
+  assert.equal(s.hands.result(M, ids[0], 'user-ana', { ok: true }), false);
+  assert.equal(s.hands.result(M, ids[4], 'user-ana', { ok: true }), true);
+  // old ones go when a new one comes
+  s.advance(2 * 60 * 1000);
+  const running = s.hands.run(M, POST);
+  s.hands.result(M, ana.got[5].data.actionId, 'user-ana', { ok: true });
+  await running;
+  assert.equal(s.hands.remembered(), 1);
+  // forgotten with the meeting: a repeat is refused, and another meeting's stay
+  s.hands.forget('ANOTHER==');
+  assert.equal(s.hands.remembered(), 1);
+  s.hands.forget(M);
+  assert.equal(s.hands.remembered(), 0);
+  assert.equal(s.hands.result(M, ana.got[5].data.actionId, 'user-ana', { ok: true }), false);
 });
 
 test('no result in 15 seconds is a timeout, and a late result is refused', async () => {
@@ -258,6 +407,7 @@ test('what a panel announces: a Zoom role and the panel tools it can run, nothin
 let srv;
 const real = { notes: openrouter.generateLiveNotes, ask: openrouter.answerFromTranscript, choose: openrouter.chooseTool };
 let pick;
+let chosenCount = 0;
 let clientIp;
 let testNo = 0;
 test.before(async () => { srv = await h.startServer(); });
@@ -267,7 +417,7 @@ test.beforeEach(() => {
   pick = async () => ({ tool: 'post_to_chat', args: { message: 'Back in five.' } });
   openrouter.generateLiveNotes = async () => ({ summary: 'They ship Friday.', decisions: [], actionItems: [] });
   openrouter.answerFromTranscript = async () => 'On Friday.';
-  openrouter.chooseTool = async (input) => pick(input);
+  openrouter.chooseTool = async (input) => { chosenCount += 1; return pick(input); };
 });
 test.after(() => {
   openrouter.generateLiveNotes = real.notes;
@@ -375,11 +525,27 @@ test('an owner types "post … to the chat": their panel gets the action, and it
   assert.deepEqual(taken.body, { received: true });
   assert.equal(taken.cache, 'no-store');
   const res = await asking;
-  assert.deepEqual(res.body, { answer: 'Done: posted to chat.', action: { tool: 'post_to_chat', status: 'done', label: 'Posted to chat' } });
-  // finished: reported once
-  assert.equal((await report(m, sent.actionId, { ok: true })).status, 404);
+  assert.match(res.body.action.id, UUID);
+  assert.deepEqual(res.body, {
+    answer: 'Done: posted to chat.', action: { id: res.body.action.id, tool: 'post_to_chat', status: 'done', label: 'Posted to chat' },
+  });
   await h.wait(50);
-  for (const ws of [ownerPanel, benPanel, guestPanel]) assert.equal(of(ws, 'arlo.did').at(-1).data.action.label, 'Posted to chat');
+  // the id in the answer is the one the panels are told about, so a panel can match the two
+  for (const ws of [ownerPanel, benPanel, guestPanel]) {
+    assert.deepEqual([of(ws, 'arlo.did').at(-1).data.action.id, of(ws, 'arlo.did').at(-1).data.action.label], [res.body.action.id, 'Posted to chat']);
+  }
+  assert.equal(of(ownerPanel, 'arlo.did').length, 1);
+
+  // finished. The panel did not get the response and sends the same result again: answered the same
+  const again = await report(m, sent.actionId, { ok: true });
+  assert.deepEqual([again.status, again.body], [200, { received: true }]);
+  // another verdict, or another owner's or a participant's retry, is refused as before
+  assert.equal((await report(m, sent.actionId, { ok: false })).status, 404);
+  assert.equal((await report(m, sent.actionId, { ok: false, code: 'sdk_error' })).status, 404);
+  assert.equal((await report(m, sent.actionId, { ok: true }, m.participant)).status, 403);
+  // and it changed nothing: nobody is told twice
+  await h.wait(50);
+  assert.equal(of(ownerPanel, 'arlo.did').length, 1);
   closeAll(ownerPanel, benPanel, guestPanel);
 });
 
@@ -398,9 +564,15 @@ test('what the panel reports back is what the asker is told', async () => {
     const sent = await actionSent(ownerPanel, i + 1);
     assert.deepEqual([sent.tool, sent.args], ['admit_from_waiting_room', { name: 'James' }]);
     assert.equal((await report(m, sent.actionId, { ok: false, code })).status, 200);
-    assert.deepEqual((await asking).body, {
-      answer: sentence, action: { tool: 'admit_from_waiting_room', status: 'failed', label: 'Asked to admit James from the waiting room' },
+    const { body } = await asking;
+    assert.deepEqual(body, {
+      answer: sentence,
+      action: {
+        id: body.action.id, tool: 'admit_from_waiting_room', status: 'failed', label: 'Asked to admit James from the waiting room',
+      },
     });
+    // a failure reported twice is answered twice
+    assert.equal((await report(m, sent.actionId, { ok: false, code })).status, 200);
   }
   closeAll(ownerPanel);
 });
@@ -436,36 +608,50 @@ test('the result route: only the owner the action was sent to, in that meeting, 
   closeAll(ownerPanel);
 });
 
+const NO_CHAT_PANEL = 'Open Arlo to let it post in the chat.';
+const NO_HOST_PANEL = 'Arlo needs the host\'s panel for that.';
+
 test('announcements: only an owner\'s, only valid ones, and the newest counts', async () => {
   const m = await meetingWith('AH-ANNOUNCE==', { secondOwner: true });
   // nobody announced anything
   const quiet = await panel(m.meetingId, m.owner);
-  assert.match((await ask(m, POST_IT)).body.answer, /nobody who can do it has Arlo open/);
+  const none = await ask(m, POST_IT);
+  assert.deepEqual([none.body.answer, none.body.action.status, none.body.action.label], [NO_CHAT_PANEL, 'failed', NO_CHAT_PANEL]);
 
   // an announcement that is not one is ignored, and the socket stays open
   for (const payload of [{ zoomRole: 'host', can: ['share_notes'] }, { zoomRole: 'host' }, 'host', null, { zoomRole: 'host', can: ['post_to_chat'], userId: m.ana.user.id }]) {
     quiet.socket.send(JSON.stringify({ type: 'arlo.hands', payload }));
   }
   await h.wait(50);
-  assert.match((await ask(m, POST_IT)).body.answer, /nobody who can do it has Arlo open/);
+  assert.equal((await ask(m, POST_IT)).body.answer, NO_CHAT_PANEL);
   assert.equal(quiet.socket.readyState, 1);
 
-  // the other owner's panel can: it gets the action for a request the first owner typed
-  const cyPanel = await panel(m.meetingId, m.owner2, { zoomRole: 'attendee', can: ['post_to_chat'] });
-  const asking = ask(m, POST_IT);
+  // the other owner's panel can, and is the host's: it is still not used for a request the first owner typed
+  const cyPanel = await panel(m.meetingId, m.owner2, HOST);
+  assert.equal((await ask(m, POST_IT)).body.answer, NO_CHAT_PANEL);
+  await h.wait(50);
+  assert.deepEqual(of(cyPanel, 'arlo.action'), []);
+  // his own request runs on it, and only he may report the result
+  cyPanel.socket.send(JSON.stringify({ type: 'arlo.hands', payload: { zoomRole: 'attendee', can: ['post_to_chat'] } }));
+  await h.wait(50);
+  const asking = ask(m, POST_IT, m.owner2);
   const sent = await actionSent(cyPanel);
   assert.equal((await report(m, sent.actionId, { ok: true }, m.owner)).status, 404);
   assert.equal((await report(m, sent.actionId, { ok: true }, m.owner2)).status, 200);
   assert.equal((await asking).body.answer, 'Done: posted to chat.');
+  assert.deepEqual(of(quiet, 'arlo.action'), []);
 
   // an attendee cannot admit; announcing again as host changes that
   pick = async () => ({ tool: 'admit_from_waiting_room', args: { name: 'James' } });
   cyPanel.socket.send(JSON.stringify({ type: 'arlo.hands', payload: { zoomRole: 'attendee', can: ['post_to_chat', 'admit_from_waiting_room'] } }));
   await h.wait(50);
-  assert.match((await ask(m, 'admit James')).body.answer, /nobody who can do it has Arlo open/);
+  const cannot = await ask(m, 'admit James', m.owner2);
+  assert.deepEqual([cannot.body.answer, cannot.body.action.label], [NO_HOST_PANEL, NO_HOST_PANEL]);
   cyPanel.socket.send(JSON.stringify({ type: 'arlo.hands', payload: { zoomRole: 'coHost', can: ['post_to_chat', 'admit_from_waiting_room'] } }));
   await h.wait(50);
-  const admitting = ask(m, 'admit James');
+  // the first owner is not the host: her request does not borrow his panel
+  assert.equal((await ask(m, 'admit James')).body.answer, NO_HOST_PANEL);
+  const admitting = ask(m, 'admit James', m.owner2);
   const admit = await actionSent(cyPanel, 2);
   await report(m, admit.actionId, { ok: true }, m.owner2);
   assert.equal((await admitting).body.answer, 'Done: admitted James from the waiting room.');
@@ -473,25 +659,46 @@ test('announcements: only an owner\'s, only valid ones, and the newest counts', 
   // announcing nothing takes the hands away again
   cyPanel.socket.send(JSON.stringify({ type: 'arlo.hands', payload: { zoomRole: 'coHost', can: [] } }));
   await h.wait(50);
-  assert.match((await ask(m, 'admit James')).body.answer, /nobody who can do it has Arlo open/);
+  assert.equal((await ask(m, 'admit James', m.owner2)).body.answer, NO_HOST_PANEL);
   // and so does closing the panel
   cyPanel.socket.send(JSON.stringify({ type: 'arlo.hands', payload: { zoomRole: 'coHost', can: ['admit_from_waiting_room'] } }));
   await h.wait(50);
   cyPanel.socket.close();
   await h.wait(100);
-  assert.match((await ask(m, 'admit James')).body.answer, /nobody who can do it has Arlo open/);
+  assert.equal((await ask(m, 'admit James', m.owner2)).body.answer, NO_HOST_PANEL);
   closeAll(quiet);
 });
 
-test('an owner\'s panel open in another meeting is not this meeting\'s hands', async () => {
+test('an owner\'s panel open in another meeting is not this meeting\'s hands, and is told nothing of this meeting', async () => {
   const m = await meetingWith('AH-ELSEWHERE==');
   const otherPass = await access('AH-ELSEWHERE-OTHER==');
   const elsewhere = await panel('AH-ELSEWHERE-OTHER==', cookies(otherPass, m.ana.session), HOST);
+  const here = await panel(m.meetingId, m.owner);
   // a restart of her stream lists that socket under this meeting too
   await status(m.meetingId, { status: 'rtms_started', streamId: 's1', operatorId: m.ana.zoomUserId });
-  assert.match((await ask(m, POST_IT)).body.answer, /nobody who can do it has Arlo open/);
+  assert.equal((await ask(m, POST_IT)).body.answer, NO_CHAT_PANEL);
   assert.deepEqual(of(elsewhere, 'arlo.action'), []);
-  closeAll(elsewhere);
+
+  // what Arlo did here: her own private answer, and something everyone in this meeting is told
+  pick = async () => ({ tool: 'answer_from_meeting', args: { question: 'When do we ship?' } });
+  assert.equal((await ask(m, 'When do we ship?')).status, 200);
+  pick = async () => ({ tool: 'share_notes', args: {} });
+  assert.equal((await ask(m, 'Share the notes')).body.answer, 'Done: shared the notes with everyone.');
+  await h.wait(100);
+  assert.deepEqual(of(here, 'arlo.did').map((msg) => [msg.data.action.tool, msg.data.action.public]),
+    [['post_to_chat', true], ['answer_from_meeting', false], ['share_notes', true]]);
+  // the socket verified for the other meeting gets none of it, though it is hers and listed here
+  assert.deepEqual(of(elsewhere, 'arlo.did'), []);
+  assert.deepEqual(of(elsewhere, 'arlo.thinking'), []);
+  // called directly too: a socket is told only of the meeting it is verified for
+  const { sendArloDid } = require('../src/services/websocket');
+  const action = { id: crypto.randomUUID(), tool: 'share_notes', label: 'Shared the notes with everyone', status: 'done', public: true };
+  assert.equal(sendArloDid(m.meetingId, action, { everyone: true }), 1);
+  assert.equal(sendArloDid(m.meetingId, action, { everyone: false, userIds: [m.ana.user.id] }), 1);
+  await h.wait(50);
+  assert.deepEqual(of(elsewhere, 'arlo.did'), []);
+  assert.equal(of(here, 'arlo.did').length, 5);
+  closeAll(elsewhere, here);
 });
 
 test('a spoken question: the owner sees the answer on the sheet, and their panel posts exactly that when they agree', async () => {
@@ -538,45 +745,72 @@ test('a spoken question the owner declines is posted nowhere', async () => {
   closeAll(ownerPanel);
 });
 
-test('two owners and one sheet: the first answer wins, the sheet closes on both, and a host\'s panel admits', async () => {
+test('two owners and one sheet: the first answer wins, the sheet closes on both, and it runs on the panel of the one who agreed', async () => {
   const m = await meetingWith('AH-SHEET==', { secondOwner: true });
-  const anaPanel = await panel(m.meetingId, m.owner, { zoomRole: 'attendee', can: ['post_to_chat', 'admit_from_waiting_room'] });
-  const cyPanel = await panel(m.meetingId, m.owner2, HOST);
+  const anaPanel = await panel(m.meetingId, m.owner, HOST);
+  const cyPanel = await panel(m.meetingId, m.owner2, { zoomRole: 'attendee', can: ['post_to_chat'] });
   const benPanel = await panel(m.meetingId, m.participant);
-  pick = async () => ({ tool: 'admit_from_waiting_room', args: { name: 'James' } });
-  await say(m.meetingId, 'Arlo, admit James from the waiting room.');
+  pick = async () => ({ tool: 'post_to_chat', args: { message: 'Lunch is here.' } });
+  await say(m.meetingId, 'Arlo, post lunch is here to the chat.');
   const sheet = (await until(() => of(anaPanel, 'arlo.approval')[0])).data;
-  assert.deepEqual([sheet.kind, sheet.question, sheet.primaryLabel, sheet.askedBy], ['agent_action', 'Admit James from the waiting room?', 'Admit James', 'Ben']);
+  assert.deepEqual([sheet.kind, sheet.question, sheet.body, sheet.primaryLabel, sheet.askedBy, sheet.askerVerified],
+    ['agent_action', 'Post this in the meeting chat?', 'Lunch is here.', 'Post to chat', 'Ben', false]);
   assert.deepEqual(of(cyPanel, 'arlo.approval').map((msg) => msg.data), [sheet]);
   assert.deepEqual(of(benPanel, 'arlo.approval'), []);
   // nothing is sent to a panel before an owner agreed
-  assert.deepEqual(of(cyPanel, 'arlo.action'), []);
+  assert.deepEqual(of(anaPanel, 'arlo.action').concat(of(cyPanel, 'arlo.action')), []);
 
-  const answers = await Promise.all([
-    call('POST', m.meetingId, `approvals/${sheet.id}`, { headers: m.owner, body: { approve: true } }),
-    call('POST', m.meetingId, `approvals/${sheet.id}`, { headers: m.owner2, body: { approve: false } }),
-  ]);
-  assert.deepEqual(answers.map((res) => res.status).sort(), [200, 404]);
-  const { outcome } = answers.find((res) => res.status === 200).body;
+  // Cy agrees first; Ana is too late
+  const agreed = await call('POST', m.meetingId, `approvals/${sheet.id}`, { headers: m.owner2, body: { approve: true } });
+  assert.deepEqual([agreed.status, agreed.body], [200, { id: sheet.id, outcome: 'approved' }]);
+  assert.equal((await call('POST', m.meetingId, `approvals/${sheet.id}`, { headers: m.owner, body: { approve: false } })).status, 404);
+  // it runs on Cy's panel, an attendee's, and not on the host's: Ana pressed nothing
+  const sent = await actionSent(cyPanel);
+  assert.deepEqual([sent.tool, sent.args], ['post_to_chat', { message: 'Arlo: Lunch is here.' }]);
   await h.wait(100);
+  assert.deepEqual(of(anaPanel, 'arlo.action'), []);
   for (const ws of [anaPanel, cyPanel]) {
-    assert.deepEqual(of(ws, 'arlo.approval.closed').map((msg) => msg.data), [{ meetingId: m.meetingId, id: sheet.id, outcome }]);
+    assert.deepEqual(of(ws, 'arlo.approval.closed').map((msg) => msg.data), [{ meetingId: m.meetingId, id: sheet.id, outcome: 'approved' }]);
   }
-
-  if (outcome === 'approved') {
-    // Ana agreed; Cy is the host, so his panel does it
-    const sent = await actionSent(cyPanel);
-    assert.deepEqual([sent.tool, sent.args], ['admit_from_waiting_room', { name: 'James' }]);
-    assert.deepEqual(of(anaPanel, 'arlo.action'), []);
-    await report(m, sent.actionId, { ok: true }, m.owner2);
-    const did = await until(() => of(benPanel, 'arlo.did')[0]);
-    assert.deepEqual([did.data.action.status, did.data.action.label], ['done', 'Admitted James from the waiting room']);
-  } else {
-    await h.wait(100);
-    assert.deepEqual(of(cyPanel, 'arlo.action'), []);
-    assert.equal(of(benPanel, 'arlo.did')[0].data.action.status, 'declined');
-  }
+  assert.equal((await report(m, sent.actionId, { ok: true }, m.owner)).status, 404);
+  assert.equal((await report(m, sent.actionId, { ok: true }, m.owner2)).status, 200);
+  const did = await until(() => of(benPanel, 'arlo.did').find((msg) => msg.data.action.status === 'done'));
+  assert.equal(did.data.action.label, 'Posted to chat');
   closeAll(anaPanel, cyPanel, benPanel);
+});
+
+test('admitting: only an owner whose panel is a host\'s gets the sheet, may answer it, and admits', async () => {
+  const m = await meetingWith('AH-ADMIT-SHEET==', { secondOwner: true });
+  const anaPanel = await panel(m.meetingId, m.owner, { zoomRole: 'attendee', can: ['post_to_chat', 'admit_from_waiting_room'] });
+  const cyPanel = await panel(m.meetingId, m.owner2, HOST);
+  pick = async () => ({ tool: 'admit_from_waiting_room', args: { name: 'James' } });
+  await say(m.meetingId, 'Arlo, admit James from the waiting room.');
+  const sheet = (await until(() => of(cyPanel, 'arlo.approval')[0])).data;
+  assert.deepEqual([sheet.question, sheet.primaryLabel, 'body' in sheet, 'forUserIds' in sheet], ['Admit James from the waiting room?', 'Admit James', false, false]);
+  await h.wait(50);
+  // Ana's panel could not do it: she is not asked, does not find it after a reload, and cannot answer it
+  assert.deepEqual(of(anaPanel, 'arlo.approval'), []);
+  assert.deepEqual((await call('GET', m.meetingId, 'approvals', { headers: m.owner })).body, { approvals: [] });
+  assert.equal((await call('GET', m.meetingId, 'approvals', { headers: m.owner2 })).body.approvals.length, 1);
+  for (const approve of [true, false]) {
+    assert.equal((await call('POST', m.meetingId, `approvals/${sheet.id}`, { headers: m.owner, body: { approve } })).status, 404);
+  }
+  assert.equal((await call('POST', m.meetingId, `approvals/${sheet.id}`, { headers: m.owner2, body: { approve: true } })).status, 200);
+  const sent = await actionSent(cyPanel);
+  assert.deepEqual([sent.tool, sent.args], ['admit_from_waiting_room', { name: 'James' }]);
+  assert.deepEqual(of(anaPanel, 'arlo.action'), []);
+  await report(m, sent.actionId, { ok: true }, m.owner2);
+  const did = await until(() => of(anaPanel, 'arlo.did').find((msg) => msg.data.action.status === 'done'));
+  assert.equal(did.data.action.label, 'Admitted James from the waiting room');
+
+  // the host's panel closes: nobody could admit, so there is no sheet at all, and the record says why
+  cyPanel.socket.close();
+  await h.wait(100);
+  await say(m.meetingId, 'Arlo, admit James from the waiting room again.');
+  const failed = await until(() => of(anaPanel, 'arlo.did').find((msg) => msg.data.action.status === 'failed'));
+  assert.equal(failed.data.action.label, NO_HOST_PANEL);
+  assert.deepEqual(of(anaPanel, 'arlo.approval'), []);
+  closeAll(anaPanel);
 });
 
 test('the meeting ends while a panel has an action: nothing is left, and its result is refused', async () => {
@@ -594,3 +828,43 @@ test('the meeting ends while a panel has an action: nothing is left, and its res
   assert.equal((await report(m, sent.actionId, { ok: true })).status, 404);
   closeAll(ownerPanel);
 });
+
+test('forgetting a meeting through the runtime ends what its hands and its detector hold', async () => {
+  const m = await meetingWith('AH-FORGET==');
+  const ownerPanel = await panel(m.meetingId, m.owner, HOST);
+  const runtime = getAgentRuntime();
+  const before = { pending: runtime.hands.pending(), remembered: runtime.hands.remembered(), heard: runtime.detector.tracked() };
+
+  // an action is with the owner's panel, and another one was reported a moment ago
+  const done = runtime.hands.run(m.meetingId, { tool: 'post_to_chat', args: { message: 'Arlo: one' }, userId: m.ana.user.id });
+  const first = await actionSent(ownerPanel);
+  assert.equal(runtime.hands.result(m.meetingId, first.actionId, m.ana.user.id, { ok: true }), true);
+  assert.deepEqual(await done, { ok: true });
+  const waiting = runtime.hands.run(m.meetingId, { tool: 'post_to_chat', args: { message: 'Arlo: two' }, userId: m.ana.user.id });
+  const second = await actionSent(ownerPanel, 2);
+  // and someone has begun to say something to Arlo
+  runtime.lineStored(m.meetingId, { text: 'Arlo, share', speakerId: '8', speakerLabel: 'Ben' });
+  assert.deepEqual(
+    [runtime.hands.pending(), runtime.hands.remembered(), runtime.detector.tracked()],
+    [before.pending + 1, before.remembered + 1, before.heard + 1],
+  );
+
+  // the runtime's own forget, as the meeting lifecycle calls it. The store still holds the meeting,
+  // and she is still an owner: only the forget itself can end these
+  runtime.forget(m.meetingId);
+  const outcome = await Promise.race([waiting, h.wait(500).then(() => 'still waiting')]);
+  assert.deepEqual(outcome, { ok: false, code: 'gone' });
+  assert.deepEqual(
+    [runtime.hands.pending(), runtime.hands.remembered(), runtime.detector.tracked()],
+    [before.pending, before.remembered, before.heard],
+  );
+  assert.equal(runtime.hands.result(m.meetingId, first.actionId, m.ana.user.id, { ok: true }), false);
+  assert.equal(runtime.hands.result(m.meetingId, second.actionId, m.ana.user.id, { ok: true }), false);
+  // what was being heard is gone: the rest of the sentence is not a request any more
+  chosenCount = 0;
+  runtime.lineStored(m.meetingId, { text: 'the notes with everyone.', speakerId: '8', speakerLabel: 'Ben' });
+  await h.wait(100);
+  assert.equal(chosenCount, 0);
+  closeAll(ownerPanel);
+});
+

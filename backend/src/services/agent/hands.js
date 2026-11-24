@@ -1,7 +1,12 @@
 /**
  * The hands: what Arlo can only do through the Zoom Apps SDK (post to the
- * meeting chat, admit someone from the waiting room) is sent to one owner's
+ * meeting chat, admit someone from the waiting room) is sent to an owner's
  * open panel as an action; the panel runs it and reports the result.
+ *
+ * WHOSE PANEL. An action runs only on a panel of the owner who typed the
+ * request or who pressed the approval: run() is given that user, and no other
+ * owner's panel is ever used, host or not. An owner must not find that their
+ * client posted or admitted something they never saw.
  *
  * A panel says what it can do after it subscribes, over its socket:
  *   { type: 'arlo.hands', payload: { zoomRole, can: [tool names] } }
@@ -9,32 +14,44 @@
  * An announcement is a claim, so it only counts for a socket whose user is an
  * owner of the meeting at the moment an action is sent, not when it was made.
  *
- * run(meetingId, { tool, args }) picks one panel:
- *   - its user is an owner of the meeting now, and it listed the tool;
- *   - for `admit_from_waiting_room` its Zoom role is host or co-host;
- *   - a host's or co-host's panel first, then the one connected longest.
+ * run(meetingId, { tool, args, userId }) picks one panel:
+ *   - its user is `userId`, who is an owner of the meeting now, and it listed
+ *     the tool;
+ *   - for a tool that needs a host (`admit_from_waiting_room`) its Zoom role
+ *     is host or co-host;
+ *   - of several, the one connected longest.
  * It sends { type: 'arlo.action', data: { meetingId, actionId, tool, args } }
  * and waits for result(), which the route POST …/arlo/actions/:actionId/result
  * calls for the signed-in user who reports. Resolves to
  *   { ok: true }
  *   { ok: false, code }  a code the panel reported (RESULT_CODES), or
- *                        'no_hands' (no suitable panel), 'timeout' (no result
- *                        in `timeoutMs`), 'busy' (too many wait already),
+ *                        'no_hands' (that owner has no suitable panel, or no
+ *                        owner was given), 'timeout' (no result in
+ *                        `timeoutMs`), 'busy' (too many wait already),
  *                        'unsupported' (not a panel's tool), 'gone' (the
  *                        meeting's data was flushed meanwhile).
- * It never rejects.
+ * It always settles, and never rejects.
+ *
+ * whoCan(meetingId, tool) is the owners who have such a panel open now: the
+ * agent asks before it puts a sheet on anyone's panel for a tool that needs a
+ * host.
  *
  * A result counts once, and only from the user the action was sent to, for
- * the meeting it was sent in, while that user is still an owner.
+ * the meeting it was sent in, while that user is still an owner. The same
+ * user may send the same result again for `resultRepeatMs` (two minutes): a
+ * panel whose first POST got no response retries, and is answered as the
+ * first time. Another user, or another verdict, is refused as before.
  *
  * `args` were checked against the tool table by the caller. Nothing here is
  * logged: an action's arguments are what someone asked for.
  *
  * Kept per meeting: the actions waiting for a result (at most
- * `maxPendingPerMeeting`), gone with the meeting (forget()).
+ * `maxPendingPerMeeting`), and for two minutes who reported what (at most
+ * `maxReported` in all, the oldest dropped first). Gone with the meeting
+ * (forget()).
  */
 const crypto = require('node:crypto');
-const { PANEL_TOOL_NAMES } = require('./tools');
+const { PANEL_TOOL_NAMES, HOST_TOOL_NAMES } = require('./tools');
 
 const MAX_ID_CHARS = 256;
 const MAX_ROLE_CHARS = 32;
@@ -80,12 +97,17 @@ function createHands({
   panels,
   // (meetingId, userId) -> whether this Arlo user is an owner of the meeting now
   isOwner,
+  now = Date.now,
   schedule = defaultSchedule,
   timeoutMs = 15000,
   maxPendingPerMeeting = 10,
+  resultRepeatMs = 2 * 60 * 1000,
+  maxReported = 500,
 } = {}) {
   // actionId -> { meetingId, userId, settle(result) }
   const pending = new Map();
+  // actionId -> { meetingId, userId, verdict, at }: results taken, oldest first, for a retry
+  const reported = new Map();
 
   const owns = (meetingId, userId) => {
     try {
@@ -95,8 +117,8 @@ function createHands({
     }
   };
 
-  /** The panels that may run this tool now, the preferred one first. */
-  function candidates(meetingId, tool) {
+  /** This owner's panels that may run this tool now, the one connected longest first. */
+  function candidates(meetingId, tool, userId) {
     let list = [];
     try {
       list = panels(meetingId);
@@ -105,10 +127,17 @@ function createHands({
     }
     return (Array.isArray(list) ? list : [])
       .filter((panel) => isPlainObject(panel) && typeof panel.send === 'function'
+        && (userId === undefined || panel.userId === userId)
         && Array.isArray(panel.can) && panel.can.includes(tool)
-        && (tool !== 'admit_from_waiting_room' || MAY_ADMIT.has(panel.zoomRole))
+        && (!HOST_TOOL_NAMES.includes(tool) || MAY_ADMIT.has(panel.zoomRole))
         && owns(meetingId, panel.userId))
-      .sort((a, b) => (MAY_ADMIT.has(b.zoomRole) - MAY_ADMIT.has(a.zoomRole)) || (a.since - b.since));
+      .sort((a, b) => a.since - b.since);
+  }
+
+  /** The owners who have a panel open now that may run this tool. No one for anything that is not a panel's tool. */
+  function whoCan(meetingId, tool) {
+    if (!isId(meetingId) || typeof tool !== 'string' || !PANEL_TOOL_NAMES.includes(tool)) return [];
+    return [...new Set(candidates(meetingId, tool).map((panel) => panel.userId))];
   }
 
   const waitingIn = (meetingId) => [...pending.values()].filter((one) => one.meetingId === meetingId).length;
@@ -117,15 +146,16 @@ function createHands({
     if (!isPlainObject(call) || typeof call.tool !== 'string' || !PANEL_TOOL_NAMES.includes(call.tool) || !isPlainObject(call.args)) {
       return Promise.resolve(fail('unsupported'));
     }
-    if (!isId(meetingId)) return Promise.resolve(fail('no_hands'));
-    const { tool, args } = call;
-    const able = candidates(meetingId, tool);
+    // Without the owner who typed or approved it there is nobody's panel to use
+    if (!isId(meetingId) || !isId(call.userId)) return Promise.resolve(fail('no_hands'));
+    const { tool, args, userId } = call;
+    const able = candidates(meetingId, tool, userId);
     if (able.length === 0) return Promise.resolve(fail('no_hands'));
     if (waitingIn(meetingId) >= maxPendingPerMeeting) return Promise.resolve(fail('busy'));
 
     return new Promise((resolve) => {
       const actionId = crypto.randomUUID();
-      const entry = { meetingId, userId: null, settle: null };
+      const entry = { meetingId, userId, settle: null };
       const cancel = schedule(() => entry.settle(fail('timeout')), timeoutMs);
       entry.settle = (result) => {
         if (pending.get(actionId) !== entry) return;
@@ -142,8 +172,6 @@ function createHands({
         },
       };
       for (const panel of able) {
-        // Whose result counts is set before the send: the panel may answer at once
-        entry.userId = panel.userId;
         let sent = false;
         try {
           sent = panel.send(message) === true;
@@ -156,34 +184,57 @@ function createHands({
     });
   }
 
+  /** Keep who reported what for a while, so the same report sent again is answered the same. */
+  function remember(actionId, meetingId, userId, verdict) {
+    const at = now();
+    for (const [id, one] of reported) {
+      if (at - one.at < resultRepeatMs && reported.size < maxReported) break;
+      reported.delete(id);
+    }
+    reported.set(actionId, {
+      meetingId, userId, verdict, at,
+    });
+  }
+
   /**
    * A panel's report: { ok: true } or { ok: false, code? }. Returns whether it
    * was taken: false for an action that is unknown or finished, was sent in
    * another meeting or to someone else, for someone who is no longer an owner,
-   * and for anything that is not a report.
+   * and for anything that is not a report. The same report again from the
+   * same user, within `resultRepeatMs` of the first, is taken again (and
+   * changes nothing): the panel retried a POST whose response it never got.
    */
   function result(meetingId, actionId, userId, report) {
     if (!isId(meetingId) || typeof actionId !== 'string' || !UUID.test(actionId) || !isId(userId)) return false;
     if (!isPlainObject(report) || typeof report.ok !== 'boolean') return false;
+    if (!owns(meetingId, userId)) return false;
+    const verdict = report.ok
+      ? 'ok'
+      : (typeof report.code === 'string' && RESULT_CODES.includes(report.code) ? report.code : 'sdk_error');
     const entry = pending.get(actionId);
-    if (!entry || entry.meetingId !== meetingId || entry.userId !== userId || !owns(meetingId, userId)) return false;
-    if (report.ok) {
-      entry.settle({ ok: true });
-    } else {
-      entry.settle(fail(typeof report.code === 'string' && RESULT_CODES.includes(report.code) ? report.code : 'sdk_error'));
+    if (!entry) {
+      const before = reported.get(actionId);
+      return before !== undefined && before.meetingId === meetingId && before.userId === userId
+        && before.verdict === verdict && now() - before.at < resultRepeatMs;
     }
+    if (entry.meetingId !== meetingId || entry.userId !== userId) return false;
+    remember(actionId, meetingId, userId, verdict);
+    entry.settle(report.ok ? { ok: true } : fail(verdict));
     return true;
   }
 
-  /** The meeting's data is gone: what waited for a panel ends, and a late result is refused. */
+  /** The meeting's data is gone: what waited for a panel ends, and a late or repeated result is refused. */
   function forget(meetingId) {
     for (const entry of [...pending.values()]) {
       if (entry.meetingId === meetingId) entry.settle(fail('gone'));
     }
+    for (const [actionId, one] of reported) {
+      if (one.meetingId === meetingId) reported.delete(actionId);
+    }
   }
 
   return {
-    run, result, forget, pending: () => pending.size,
+    run, result, whoCan, forget, pending: () => pending.size, remembered: () => reported.size,
   };
 }
 

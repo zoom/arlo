@@ -19,8 +19,11 @@
  *
  * handle(meetingId, { text, channel, askedBy }) goes through these steps:
  *   1. Refused at once: a meeting without an owner, someone who may not type
- *      requests here, more than `rateLimit` requests in `rateWindowMs`, or the
- *      queue is full. One request is handled at a time per meeting and
+ *      requests here, too many requests in `rateWindowMs` (spoken ones have a
+ *      budget per meeting, `spokenRateLimit`; typed ones a budget per person
+ *      per meeting, `typedRateLimit`: what people say can never use up what
+ *      someone may type), or the queue is full. One request is handled at a
+ *      time per meeting and
  *      `queueLimit` wait. A typed request waits ahead of the spoken ones that
  *      wait (someone sits at a panel for it), behind typed ones that came
  *      earlier, and never interrupts the request being handled.
@@ -56,7 +59,13 @@
  *      it, in the record only.
  *   7. Tools of the server run here (an answer or summary from the stored
  *      transcript, sharing the notes); a tool of the panel goes to the hands
- *      (services/agent/hands.js). Each has `runLimitMs`.
+ *      (services/agent/hands.js), and only to a panel of the owner who typed
+ *      the request or pressed the approval, never to another owner's. When
+ *      that owner has no panel that can do it, it fails as 'no_hands'. A
+ *      sheet for a tool that needs a host's panel (admitting) is put only to
+ *      the owners who have one open; with none there is no sheet and it
+ *      fails at once. Each run has `runLimitMs`; a model call still running
+ *      then, or when the meeting's data goes, is aborted (an AbortSignal).
  *   8. Recording: every request that got as far as a tool is an action in the
  *      meeting store, with a label from services/agent/texts.js. An answer to
  *      a typed request is private (`public: false`); everything spoken and
@@ -67,8 +76,14 @@
  * written from the transcript, which everyone in the meeting can read anyway.
  * (GET …/arlo/notes refuses the same people.)
  *
- * Around steps 2 to 7 the owners' panels are told Arlo is thinking, and
- * always told when it stopped.
+ * Around steps 2 to 7 panels are told Arlo is thinking, and always told when
+ * it stopped: for a spoken request the owners' panels; for a typed one only
+ * the owner who typed it (another owner must not learn that someone asked
+ * something in private), and nobody when the asker is not an owner.
+ *
+ * At most 5 sheets of the agent are open per meeting (services/approvals.js);
+ * a request that would need one more is dropped and recorded as failed, "Too
+ * many requests are waiting".
  *
  * handle() never rejects. It resolves to one of:
  *   { status: 'refused', reason }  'invalid' | 'no_owner' | 'not_allowed' | 'busy' | 'rate_limited' | 'gone'
@@ -101,7 +116,7 @@ const {
 } = require('./policy');
 const { approvalMessageData } = require('../approvals');
 const {
-  TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, chatText, cleanLine,
+  TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, chatText, cleanLine, noHands, TOO_MANY_WAITING_LABEL,
   MAX_CHAT_ANSWER_CHARS, MAX_CHAT_MESSAGE_CHARS, MAX_SHEET_REQUEST_CHARS, MAX_SHEET_NAME_CHARS,
 } = require('./texts');
 
@@ -111,6 +126,9 @@ const MAX_NAME_CHARS = 200;
 const MAX_ANSWER_CHARS = 4000;
 const MAX_TRANSCRIPT_CHARS = 12000;
 const MAX_MEETINGS = 5000;
+// People whose typed requests are counted per meeting, and private answers remembered
+const MAX_TYPED_ASKERS = 200;
+const MAX_PRIVATE_ANSWERS = 500;
 // Notes this many lines behind the transcript are too old to be the summary
 const NOTES_FRESH_WITHIN_LINES = 10;
 const SUMMARY_QUESTION = 'Summarize the meeting so far in a few sentences: what was discussed, what was decided, and what is still open.';
@@ -164,12 +182,14 @@ function createAgent({
   store,
   presence,
   approvals,
-  // { run(meetingId, { tool, args }) -> Promise<{ ok: true } | { ok: false, code }> }
+  // { run(meetingId, { tool, args, userId }) -> Promise<{ ok: true } | { ok: false, code }>: on a
+  //   panel of that owner and nobody else's;
+  //   whoCan(meetingId, tool) -> the owners who have a panel open that can run it }
   hands,
-  // ({ request }) -> Promise<{ tool, args } | { tool: 'none' }>; rejects when no model answered.
-  // Given the request and nothing of the meeting
+  // ({ request, signal }) -> Promise<{ tool, args } | { tool: 'none' }>; rejects when no model answered.
+  // Given the request and nothing of the meeting. `signal` aborts when the time is up or the meeting is gone
   choose,
-  // ({ question, lines }) -> Promise<string>
+  // ({ question, lines, signal }) -> Promise<string>
   answer,
   // (meetingId, ownerUserId) -> whether the notes are shared with everyone now
   shareNotes = () => false,
@@ -187,14 +207,18 @@ function createAgent({
   schedule = defaultSchedule,
   log = console,
   queueLimit = 3,
-  rateLimit = 30,
+  // Spoken requests per meeting, and typed requests per person per meeting, in `rateWindowMs`
+  spokenRateLimit = 20,
+  typedRateLimit = 30,
   rateWindowMs = 10 * 60 * 1000,
   chooseLimitMs = 20000,
   runLimitMs = 20000,
 } = {}) {
   // meetingId -> {
   //   busy: a request is being handled, queue: [{ job, resolve }] waiting,
-  //   recent: times of the requests taken in the last window,
+  //   spoken: times of the spoken requests taken in the last window,
+  //   typed: Map(user id -> times of that person's typed requests in the last window),
+  //   aborts: the AbortControllers of model calls that are running,
   //   thinkingFor: the user ids told "thinking" is on, or null,
   //   privateAskers: Map(action id -> user id) for private answers,
   //   idle: resolvers waiting for the queue to drain }
@@ -226,15 +250,26 @@ function createAgent({
     }
   }
 
-  function setThinking(meetingId, state, on) {
+  /**
+   * Who is told Arlo is thinking about this request. Spoken: the owners (it
+   * was said in front of everyone). Typed: the owner who typed it and nobody
+   * else, since what they ask is private; nobody when they are not an owner.
+   */
+  function thinkingAudience(meetingId, req) {
+    const owners = ownersOf(meetingId);
+    if (req.channel === 'voice') return owners;
+    return owners.includes(req.userId) ? [req.userId] : [];
+  }
+
+  function setThinking(meetingId, state, on, req) {
     if (on) {
-      const owners = ownersOf(meetingId);
-      state.thinkingFor = owners;
-      tellPanels('thinking', meetingId, owners, true);
+      const told = thinkingAudience(meetingId, req);
+      state.thinkingFor = told;
+      if (told.length > 0) tellPanels('thinking', meetingId, told, true);
     } else if (state.thinkingFor) {
       const told = state.thinkingFor;
       state.thinkingFor = null;
-      tellPanels('thinking', meetingId, told, false);
+      if (told.length > 0) tellPanels('thinking', meetingId, told, false);
     }
   }
 
@@ -245,9 +280,13 @@ function createAgent({
     meetings.delete(meetingId);
     // The panels that were told Arlo is thinking are told it stopped
     setThinking(meetingId, state, false);
+    // A model still working on this meeting's text is stopped
+    for (const controller of [...state.aborts]) controller.abort();
+    state.aborts.clear();
     for (const item of state.queue.splice(0)) item.resolve(GONE);
     state.privateAskers.clear();
-    state.recent.length = 0;
+    state.spoken.length = 0;
+    state.typed.clear();
     for (const done of state.idle.splice(0)) done();
   }
 
@@ -257,19 +296,30 @@ function createAgent({
       // A backstop only: a meeting normally leaves through forget()
       if (meetings.size >= MAX_MEETINGS) forget(meetings.keys().next().value);
       state = {
-        busy: false, queue: [], recent: [], thinkingFor: null, privateAskers: new Map(), idle: [],
+        busy: false, queue: [], spoken: [], typed: new Map(), aborts: new Set(), thinkingFor: null, privateAskers: new Map(), idle: [],
       };
       meetings.set(meetingId, state);
     }
     return state;
   }
 
-  /** `start()`'s promise, rejected with code 'timeout' when it takes longer than `ms`. */
-  const limited = (start, ms) => new Promise((resolve, reject) => {
-    const cancel = schedule(() => reject(Object.assign(new Error('timeout'), { code: 'timeout' })), ms);
+  /**
+   * `start(signal)`'s promise, rejected with code 'timeout' when it takes
+   * longer than `ms`. The signal aborts then, and when the meeting is
+   * forgotten (`state` given), so a model call does not outlive its turn.
+   */
+  const limited = (start, ms, state = null) => new Promise((resolve, reject) => {
+    const controller = new AbortController();
+    if (state) state.aborts.add(controller);
+    const settled = () => { if (state) state.aborts.delete(controller); };
+    const cancel = schedule(() => {
+      settled();
+      controller.abort();
+      reject(Object.assign(new Error('timeout'), { code: 'timeout' }));
+    }, ms);
     Promise.resolve()
-      .then(start)
-      .then((value) => { cancel(); resolve(value); }, (error) => { cancel(); reject(error); });
+      .then(() => start(controller.signal))
+      .then((value) => { cancel(); settled(); resolve(value); }, (error) => { cancel(); settled(); reject(error); });
   });
 
   async function pump(meetingId, state) {
@@ -305,10 +355,15 @@ function createAgent({
     pump(meetingId, state);
   });
 
-  /** One hands call with the run limit, as { ok: true } or { ok: false, code }. Never throws. */
-  async function viaHands(meetingId, call) {
+  /**
+   * One hands call with the run limit, as { ok: true } or { ok: false, code }.
+   * `userId`: the owner who typed the request or pressed the approval; it
+   * runs on a panel of theirs or not at all. Never throws.
+   */
+  async function viaHands(meetingId, call, userId) {
+    if (!isId(userId)) return { ok: false, code: 'no_hands' };
     try {
-      const result = await limited(() => hands.run(meetingId, call), runLimitMs);
+      const result = await limited(() => hands.run(meetingId, { ...call, userId }), runLimitMs);
       if (isPlainObject(result) && result.ok === true) return { ok: true };
       const known = isPlainObject(result) && result.ok === false && typeof result.code === 'string' && HANDS_CODES.has(result.code);
       return { ok: false, code: known ? result.code : 'error' };
@@ -322,9 +377,9 @@ function createAgent({
    * which must already be clean (what an owner saw on the sheet, or typed).
    * Text that cleaning would still change is not posted.
    */
-  function postLine(meetingId, text, max) {
+  function postLine(meetingId, text, max, userId) {
     if (typeof text !== 'string' || chatText(text, max) !== text) return Promise.resolve({ ok: false, code: 'empty' });
-    return viaHands(meetingId, { tool: 'post_to_chat', args: { message: `${CHAT_PREFIX}${text}` } });
+    return viaHands(meetingId, { tool: 'post_to_chat', args: { message: `${CHAT_PREFIX}${text}` } }, userId);
   }
 
   /** Tell the panels that may see this action that it ended. */
@@ -356,7 +411,7 @@ function createAgent({
     const { lines } = newestLines(store.listSegments(meetingId), MAX_TRANSCRIPT_CHARS);
     if (lines.length === 0) return { ok: false, code: 'no_transcript' };
     try {
-      const text = await limited(() => answer({ question, lines }), runLimitMs);
+      const text = await limited((signal) => answer({ question, lines, signal }), runLimitMs, meetings.get(meetingId));
       // The model's answer is untrusted: text only, and bounded
       if (typeof text !== 'string' || text.trim().length === 0) return { ok: false, code: 'model_error' };
       return { ok: true, text: cut(text.trim(), MAX_ANSWER_CHARS) };
@@ -407,17 +462,17 @@ function createAgent({
           return fromNotes !== null ? { ok: true, text: fromNotes } : await answerWith(meetingId, SUMMARY_QUESTION);
         }
         case 'post_to_chat':
-          return await postLine(meetingId, args.message, MAX_CHAT_MESSAGE_CHARS);
+          return await postLine(meetingId, args.message, MAX_CHAT_MESSAGE_CHARS, actorUserId);
         case 'share_notes':
-          // As an owner: the one who typed or approved it, else the first
-          return shareNotes(meetingId, actorUserId ?? ownersOf(meetingId)[0] ?? null) === true
+          // As the owner who typed or approved it, and nobody else
+          return isId(actorUserId) && shareNotes(meetingId, actorUserId) === true
             ? { ok: true }
             : { ok: false, code: 'not_allowed' };
         default:
           // A tool of the panel goes to the hands; a tool of the server that
           // is not above (web search) is not built
           return tool.runs === 'panel'
-            ? await viaHands(meetingId, { tool: tool.name, args })
+            ? await viaHands(meetingId, { tool: tool.name, args }, actorUserId)
             : { ok: false, code: 'unsupported' };
       }
     } catch {
@@ -431,8 +486,12 @@ function createAgent({
       meetingId, state, req, tool, args,
     } = ctx;
     const texts = TOOL_TEXTS[tool.name];
+    // A failure keeps the label of what was asked, but for the two the reader can do something about
+    let failedLabel;
+    if (!outcome.ok && outcome.code === 'no_hands') failedLabel = noHands(tool.name);
+    if (!outcome.ok && outcome.code === 'busy') failedLabel = TOO_MANY_WAITING_LABEL;
     const stored = action
-      ? finish(meetingId, state, action.id, outcome.ok ? 'done' : 'failed', outcome.ok ? texts.done(args) : undefined)
+      ? finish(meetingId, state, action.id, outcome.ok ? 'done' : 'failed', outcome.ok ? texts.done(args) : failedLabel)
       : null;
     log.log(`Arlo agent: ${tool.name} ${outcome.ok ? 'done' : `failed (${outcome.code})`} (${req.channel})`);
     if (!outcome.ok) {
@@ -464,9 +523,9 @@ function createAgent({
   }
 
   /** One turn in the meeting's queue with "thinking" on, and off again whatever happens. */
-  async function thinkingWhile(meetingId, state, work) {
+  async function thinkingWhile(meetingId, state, req, work) {
     if (meetings.get(meetingId) !== state || !store.has(meetingId)) return GONE;
-    setThinking(meetingId, state, true);
+    setThinking(meetingId, state, true, req);
     try {
       return await work();
     } finally {
@@ -486,12 +545,13 @@ function createAgent({
     if (outcome === 'forgotten' || !alive()) return;
     if (outcome === 'approved') {
       // A turn of its own: other requests were handled while the owners decided
-      enqueue(meetingId, state, () => thinkingWhile(meetingId, state, async () => {
+      enqueue(meetingId, state, () => thinkingWhile(meetingId, state, req, async () => {
         store.updateAction(meetingId, action.id, { status: 'pending' });
+        // The owner who pressed the button: it runs on their panel, as them
         const approver = isId(byUserId) ? byUserId : null;
         if (body === null) return runAndFinish(ctx, action, approver);
         // The answer the owner saw, as it is: no model is asked again
-        const posted = await postLine(meetingId, body, MAX_CHAT_ANSWER_CHARS);
+        const posted = await postLine(meetingId, body, MAX_CHAT_ANSWER_CHARS, approver);
         return alive() ? ended(ctx, action, posted) : GONE;
       })).catch(() => {});
       return;
@@ -500,6 +560,26 @@ function createAgent({
     const status = outcome === 'declined' || outcome === 'expired' ? outcome : 'failed';
     finish(meetingId, state, action.id, status);
     log.log(`Arlo agent: ${tool.name} ${status} (${req.channel})`);
+  }
+
+  /** The owners who have a panel open that can run this tool. A check that fails says nobody. */
+  function hostsAmong(meetingId, toolName) {
+    try {
+      const able = hands.whoCan(meetingId, toolName);
+      const owners = ownersOf(meetingId);
+      return Array.isArray(able) ? owners.filter((id) => able.includes(id)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Whether the owners can be asked one more thing. A check that fails says no. */
+  function roomForSheet(meetingId) {
+    try {
+      return approvals.hasRoom(meetingId, 'agent_action') === true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -512,6 +592,18 @@ function createAgent({
       meetingId, state, req, tool, args,
     } = ctx;
     const texts = TOOL_TEXTS[tool.name];
+    // Who is asked: the owners; for a tool that needs a host's panel, only
+    // the owners who have one open. It would run on the panel of whoever agrees
+    const audience = tool.needsHost === true ? hostsAmong(meetingId, tool.name) : ownersOf(meetingId);
+    const why = audience.length === 0 ? 'no_hands' : (roomForSheet(meetingId) ? null : 'busy');
+    if (why !== null) {
+      // No sheet: nobody could do it, or the owners have as many open as they take
+      if (answer !== null) return ended(ctx, answer.action, { ok: false, code: why });
+      const dropped = store.appendAction(meetingId, {
+        tool: tool.name, label: texts.asked(args), askedBy: req.name, channel: req.channel, status: 'pending', public: true,
+      });
+      return dropped ? ended(ctx, dropped, { ok: false, code: why }) : refused('busy');
+    }
     const action = answer !== null
       ? store.updateAction(meetingId, answer.action.id, { status: 'waiting_approval' })
       : store.appendAction(meetingId, {
@@ -531,18 +623,13 @@ function createAgent({
       primaryLabel: texts.primary(args),
       body,
       request: cleanLine(req.text, MAX_SHEET_REQUEST_CHARS),
+      ...(tool.needsHost === true && { forUserIds: audience }),
       onOutcome: (outcome, by) => ownersAnswered(ctx, action, outcome, by ? by.byUserId : null, answer !== null ? answer.body : null),
     });
-    if (!opened) {
-      // The owners have as many questions open as they take
-      const stored = finish(meetingId, state, action.id, 'failed');
-      log.log(`Arlo agent: ${tool.name} failed (busy) (${req.channel})`);
-      return {
-        status: 'failed', tool: tool.name, code: 'busy', action: stored,
-      };
-    }
+    // The owners have as many questions open as they take after all
+    if (!opened) return ended(ctx, action, { ok: false, code: 'busy' });
     const approval = approvals.get(meetingId, opened.id);
-    if (approval) tellPanels('approval', meetingId, ownersOf(meetingId), approvalMessageData(meetingId, approval, now()));
+    if (approval) tellPanels('approval', meetingId, audience, approvalMessageData(meetingId, approval, now()));
     log.log(`Arlo agent: ${tool.name} waiting for approval (${req.channel})`);
     return { status: 'waiting_approval', tool: tool.name, action };
   }
@@ -560,6 +647,8 @@ function createAgent({
     });
     // Nothing the meeting sees is prepared without a record of it
     if (!action) return refused('busy');
+    // The owners have as many sheets open as they take: dropped before a model is asked
+    if (!roomForSheet(meetingId)) return ended(ctx, action, { ok: false, code: 'busy' });
     const result = await runTool(ctx, null);
     if (!alive()) return GONE;
     // What a model wrote is untrusted: one line of plain text, bounded, or nothing
@@ -588,7 +677,7 @@ function createAgent({
     // or the notes, so what people said cannot steer the pick
     const request = cleanLine(req.text, MAX_REQUEST_CHARS);
     try {
-      if (request !== null) picked = await limited(() => choose({ request }), chooseLimitMs);
+      if (request !== null) picked = await limited((signal) => choose({ request, signal }), chooseLimitMs, state);
     } catch (error) {
       pickFailed = true;
       // The code only, and only one that looks like a code: a message can quote the request
@@ -661,8 +750,38 @@ function createAgent({
     });
     // Nothing the meeting sees is done without a record of it
     if (!action && isPublic) return refused('busy');
-    if (action && !isPublic) state.privateAskers.set(action.id, req.userId);
+    if (action && !isPublic) {
+      // Bounded like the record itself: the oldest goes first
+      if (state.privateAskers.size >= MAX_PRIVATE_ANSWERS) state.privateAskers.delete(state.privateAskers.keys().next().value);
+      state.privateAskers.set(action.id, req.userId);
+    }
     return runAndFinish(ctx, action, asker === 'owner' ? req.userId : null);
+  }
+
+  /**
+   * The budget this request counts against, with the times still inside the
+   * window: { times, limit }. Spoken requests share one per meeting; typed
+   * ones have one per person, so nothing said in the meeting can use up what
+   * someone may type. null when the meeting already counts as many people as
+   * it takes (then the request is turned away).
+   */
+  function budgetFor(state, req) {
+    const at = now();
+    const recent = (times) => times.filter((time) => at - time < rateWindowMs);
+    if (req.channel === 'voice') {
+      state.spoken = recent(state.spoken);
+      return { times: state.spoken, limit: spokenRateLimit };
+    }
+    for (const [userId, times] of state.typed) {
+      const kept = recent(times);
+      if (kept.length === 0) state.typed.delete(userId);
+      else state.typed.set(userId, kept);
+    }
+    if (!state.typed.has(req.userId)) {
+      if (state.typed.size >= MAX_TYPED_ASKERS) return null;
+      state.typed.set(req.userId, []);
+    }
+    return { times: state.typed.get(req.userId), limit: typedRateLimit };
   }
 
   async function handle(meetingId, request) {
@@ -677,15 +796,14 @@ function createAgent({
         return refused('not_allowed');
       }
       const state = stateFor(meetingId);
-      const at = now();
-      state.recent = state.recent.filter((time) => at - time < rateWindowMs);
-      if (state.recent.length >= rateLimit) return refused('rate_limited');
+      const budget = budgetFor(state, req);
       // Turned away without a word in the chat: nobody approved one
+      if (budget === null || budget.times.length >= budget.limit) return refused('rate_limited');
       if (state.busy && state.queue.length >= queueLimit) return refused('busy');
-      state.recent.push(at);
+      budget.times.push(now());
       // Someone waits at a panel for a typed request: it goes ahead of the spoken ones
       return await enqueue(
-        meetingId, state, () => thinkingWhile(meetingId, state, () => work(meetingId, state, req)), { first: req.channel === 'panel' },
+        meetingId, state, () => thinkingWhile(meetingId, state, req, () => work(meetingId, state, req)), { first: req.channel === 'panel' },
       );
     } catch {
       return { status: 'failed', code: 'error', action: null };

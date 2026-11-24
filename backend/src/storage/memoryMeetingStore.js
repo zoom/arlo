@@ -4,8 +4,11 @@
  * and a few facts about the
  * meeting (who brought Arlo in, who may ask, whether the notes are shared with
  * everyone in it), in memory only. Nothing here touches disk. A meeting's data
- * is removed by deleteMeeting() (see services/meetingLifecycle.js) or by
- * sweep() once it is older than the age limit.
+ * is removed by deleteMeeting() (see services/meetingLifecycle.js), by
+ * sweep() once it is older than the age limit, or, as a last backstop, when
+ * the store holds as many meetings as it takes and a new one arrives: then the
+ * meeting written to longest ago goes, and the listener given to onEvicted()
+ * is told, so what other services hold for it goes too.
  *
  * Everything stored is rebuilt from known fields with bounded sizes, so a
  * caller cannot store arbitrary objects. Lists are returned as copies.
@@ -107,6 +110,8 @@ function createMemoryMeetingStore(options = {}) {
     if (Number.isInteger(options[key]) && options[key] > 0) limits[key] = options[key];
   }
   const meetings = new Map(); // meetingId -> { createdAt, segments, events, nextSeqNo, notes, meta }
+  // Told the id of a meeting dropped to make room (onEvicted)
+  let evicted = null;
 
   function entryFor(meetingId) {
     let entry = meetings.get(meetingId);
@@ -115,7 +120,15 @@ function createMemoryMeetingStore(options = {}) {
       meetings.delete(meetingId);
     } else {
       if (meetings.size >= limits.maxMeetings) {
-        meetings.delete(meetings.keys().next().value);
+        const oldest = meetings.keys().next().value;
+        meetings.delete(oldest);
+        if (evicted) {
+          try {
+            evicted(oldest);
+          } catch {
+            // A listener must never stop a line from being kept
+          }
+        }
       }
       entry = {
         createdAt: now(),
@@ -313,12 +326,15 @@ function createMemoryMeetingStore(options = {}) {
    * when not given). What a tool was called with is not kept.
    *
    * Only for a meeting already held, like setNotes: an action that ends after
-   * the flush must not bring the meeting back. At most 500 per meeting; more
-   * are refused, so the record never loses an action it took.
+   * the flush must not bring the meeting back. At most 500 per meeting: at
+   * the cap the oldest action that has ended (done, declined, failed,
+   * expired) is dropped to make room, so a long meeting never runs out of
+   * record. Only when all 500 are still open is a new one refused: an action
+   * that is not over is never lost.
    */
   function appendAction(meetingId, raw) {
     const entry = meetings.get(meetingId);
-    if (!entry || !isPlainObject(raw) || entry.actions.length >= limits.maxActionsPerMeeting) return null;
+    if (!entry || !isPlainObject(raw)) return null;
     const label = readActionLabel(raw.label);
     const status = hasOwn(raw, 'status') ? raw.status : 'pending';
     const knownTool = typeof raw.tool === 'string' && (ALL_TOOL_NAMES.includes(raw.tool) || raw.tool === NO_TOOL_NAME);
@@ -336,6 +352,12 @@ function createMemoryMeetingStore(options = {}) {
       status,
       public: raw.public === true,
     };
+    // Checked last: nothing is dropped for an action that is refused
+    if (entry.actions.length >= limits.maxActionsPerMeeting) {
+      const oldestEnded = entry.actions.findIndex((one) => ACTION_ENDED.has(one.status));
+      if (oldestEnded === -1) return null;
+      entry.actions.splice(oldestEnded, 1);
+    }
     entry.actions.push(action);
     return { ...action };
   }
@@ -394,7 +416,16 @@ function createMemoryMeetingStore(options = {}) {
     return deleted;
   }
 
+  /**
+   * `listener(meetingId)` is called when a meeting is dropped to make room
+   * for a new one (the meeting-count limit). One listener; null removes it.
+   */
+  function onEvicted(listener) {
+    evicted = typeof listener === 'function' ? listener : null;
+  }
+
   return {
+    onEvicted,
     appendSegment, appendEvent, listSegments, listEvents,
     setNotes, getNotes, setMeta, getMeta,
     setIdentity, listIdentities, addIdentityCheck, getIdentityCheck,

@@ -31,7 +31,9 @@
  *                                        most 200 characters, askedBy a name or null, channel 'voice' |
  *                                        'panel', status 'pending' | 'waiting_approval' | 'done' |
  *                                        'declined' | 'failed' | 'expired', public a boolean (shown to
- *                                        participants). At most 500 per meeting; more are refused
+ *                                        participants). At most 500 per meeting: at the cap the
+ *                                        oldest one that ended is dropped; refused only when all
+ *                                        are still open
  *   updateAction(meetingId, id, patch) -> stored action | null; `status` and `label` only, and not for
  *                                        an action that ended (done, declined, failed, expired)
  *   listActions(meetingId)            -> action[], oldest first
@@ -40,6 +42,10 @@
  *   sweep(onDeleted?)                 -> number of meetings deleted; `onDeleted(meetingId)` is called
  *                                        for each, so state kept elsewhere per meeting can go with it
  *   size()                            -> number of meetings held
+ *   onEvicted(listener)               -> `listener(meetingId)` is called when the store drops a meeting
+ *                                        itself to make room for a new one (its meeting-count limit),
+ *                                        so state kept elsewhere per meeting goes with it; the meeting
+ *                                        lifecycle registers its `onForget` here
  *
  * setNotes, setMeta, setIdentity, addIdentityCheck, appendAction and updateAction only work for a meeting already held (a segment or event
  * was stored) and return null otherwise, so a late write cannot bring back a

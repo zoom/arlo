@@ -155,6 +155,18 @@ const REASONS = Object.freeze({
 /** What a panel is answered when a request it typed was not done. */
 const couldNot = (code) => `I couldn't do that: ${Object.prototype.hasOwnProperty.call(REASONS, code) ? REASONS[code] : 'something went wrong'}.`;
 
+/**
+ * No panel of the owner who typed or approved it can do it: what the record
+ * and the asker's panel say. An action runs only on that owner's own panel.
+ */
+const NO_HANDS = Object.freeze({
+  host: 'Arlo needs the host\'s panel for that.',
+  chat: 'Open Arlo to let it post in the chat.',
+});
+const noHands = (toolName) => (toolName === 'admit_from_waiting_room' ? NO_HANDS.host : NO_HANDS.chat);
+/** The record of a request that was dropped because the owners have as many sheets open as they take. */
+const TOO_MANY_WAITING_LABEL = 'Too many requests are waiting';
+
 const REPLIES = Object.freeze({
   none: 'I didn\'t catch a request.',
   waitingApproval: 'I asked the person who brought Arlo in to approve that.',
@@ -169,6 +181,8 @@ module.exports = {
   REPLIES,
   CHAT_PREFIX,
   couldNot,
+  noHands,
+  TOO_MANY_WAITING_LABEL,
   cleanLine,
   chatText,
   NOT_IN_TEXT,

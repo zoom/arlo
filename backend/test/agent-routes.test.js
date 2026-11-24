@@ -121,6 +121,8 @@ test('a typed question is answered as before; the picking model gets the request
   // nothing of the meeting goes to the model that picks: no transcript, no notes
   assert.deepEqual(Object.keys(chosen[0]).filter((key) => key !== 'signal').sort(), ['model', 'request', 'tools']);
   assert.equal(JSON.stringify(chosen[0]).includes('Friday'), false);
+  // and it can be stopped: when the request's time is up, or the meeting's data goes
+  assert.ok(chosen[0].signal instanceof AbortSignal);
   assert.deepEqual(chosen[0].tools.map((tool) => tool.name), ['answer_from_meeting', 'summarize_so_far', 'post_to_chat', 'admit_from_waiting_room', 'share_notes']);
   assert.equal(typeof chosen[0].model, 'string');
 
@@ -155,8 +157,13 @@ test('typed requests that are not a plain question: the answer is a sentence of 
   pick = async () => ({ tool: 'summarize_so_far', args: {} });
   const summary = await ask(m, 'Summarize the meeting so far');
   assert.equal(summary.status, 200);
+  // the stored action's id comes with it: the one `arlo.did` carries, so a panel can match the two
+  assert.match(summary.body.action.id, UUID);
   assert.deepEqual(summary.body, {
-    answer: 'On Friday.', action: { tool: 'summarize_so_far', status: 'done', label: 'Summarized the meeting so far' },
+    answer: 'On Friday.',
+    action: {
+      id: summary.body.action.id, tool: 'summarize_so_far', status: 'done', label: 'Summarized the meeting so far',
+    },
   });
 
   // no tool fits: the Ask input answers from the transcript, with the text as typed, as it always did
@@ -177,8 +184,10 @@ test('typed requests that are not a plain question: the answer is a sentence of 
   const post = await ask(m, 'Post "Back in five." to the chat');
   assert.equal(post.status, 200);
   assert.deepEqual(post.body, {
-    answer: 'I couldn\'t do that: nobody who can do it has Arlo open in the meeting.',
-    action: { tool: 'post_to_chat', status: 'failed', label: 'Asked to post to chat' },
+    answer: 'Open Arlo to let it post in the chat.',
+    action: {
+      id: post.body.action.id, tool: 'post_to_chat', status: 'failed', label: 'Open Arlo to let it post in the chat.',
+    },
   });
 
   const ownerPanel = await panel(m.meetingId, m.owner);
@@ -186,8 +195,12 @@ test('typed requests that are not a plain question: the answer is a sentence of 
   const share = await ask(m, 'Share the notes with everyone');
   assert.deepEqual(share.body, {
     answer: 'Done: shared the notes with everyone.',
-    action: { tool: 'share_notes', status: 'done', label: 'Shared the notes with everyone' },
+    action: {
+      id: share.body.action.id, tool: 'share_notes', status: 'done', label: 'Shared the notes with everyone',
+    },
   });
+  await h.wait(50);
+  assert.deepEqual(of(ownerPanel, 'arlo.did').map((msg) => msg.data.action.id), [share.body.action.id]);
   assert.equal((await call('GET', m.meetingId, 'state', { headers: m.guest })).body.notesShared, true);
   await h.wait(50);
   assert.equal(of(ownerPanel, 'arlo.state').at(-1).data.notesShared, true);
@@ -195,6 +208,7 @@ test('typed requests that are not a plain question: the answer is a sentence of 
 
   // what was to be posted is in no record and no response
   const all = await actions(m, m.owner);
+  assert.deepEqual(all.body.actions.filter((action) => action.public).map((action) => action.id), [post.body.action.id, share.body.action.id]);
   assert.equal(JSON.stringify(all.body).includes('Back in five'), false);
   assert.deepEqual(all.body.actions.map((action) => [action.tool, action.status, action.public]), [
     ['summarize_so_far', 'done', false], ['answer_from_meeting', 'done', false], ['answer_from_meeting', 'done', false],
@@ -214,7 +228,7 @@ test('the answering model fails: the same errors as before, and no words of the 
   assert.equal(/sk-secret|Friday/.test(JSON.stringify(failed.body)), false);
 });
 
-test('thinking goes on and off on the owners\' panels only; a private answer is told to the asker alone', async () => {
+test('thinking for a typed request goes on and off on the asker\'s own panel only; a private answer is told to the asker alone', async () => {
   const m = await meetingWith('AG-THINKING==', { secondOwner: true });
   const [anaPanel, cyPanel, benPanel, guestPanel] = await Promise.all([
     panel(m.meetingId, m.owner), panel(m.meetingId, m.owner2), panel(m.meetingId, m.participant), panel(m.meetingId, m.guest),
@@ -223,13 +237,13 @@ test('thinking goes on and off on the owners\' panels only; a private answer is 
   await ask(m, 'When do we ship?');
   await h.wait(100);
 
-  for (const ws of [anaPanel, cyPanel]) {
-    assert.deepEqual(of(ws, 'arlo.thinking'), [
-      { type: 'arlo.thinking', data: { meetingId: m.meetingId, on: true } },
-      { type: 'arlo.thinking', data: { meetingId: m.meetingId, on: false } },
-    ]);
-  }
-  for (const ws of [benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.thinking'), []);
+  const onAndOff = [
+    { type: 'arlo.thinking', data: { meetingId: m.meetingId, on: true } },
+    { type: 'arlo.thinking', data: { meetingId: m.meetingId, on: false } },
+  ];
+  assert.deepEqual(of(anaPanel, 'arlo.thinking'), onAndOff);
+  // the other owner is not told that she asked something in private
+  for (const ws of [cyPanel, benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.thinking'), []);
 
   const did = of(anaPanel, 'arlo.did');
   assert.equal(did.length, 1);
@@ -237,6 +251,20 @@ test('thinking goes on and off on the owners\' panels only; a private answer is 
   assert.deepEqual(Object.keys(did[0].data.action), ACTION_KEYS);
   assert.deepEqual([did[0].data.meetingId, did[0].data.action.status, did[0].data.action.public], [m.meetingId, 'done', false]);
   for (const ws of [cyPanel, benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.did'), []);
+
+  // a participant's typed question, where anyone may ask: no owner's panel shows Arlo thinking
+  await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: { whoCanAsk: 'anyone' } });
+  assert.equal((await ask(m, 'When do we ship?', m.participant)).status, 200);
+  await h.wait(100);
+  assert.deepEqual(of(anaPanel, 'arlo.thinking'), onAndOff);
+  for (const ws of [cyPanel, benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.thinking'), []);
+  // something said in the meeting is heard by everyone: both owners' panels show it
+  pick = async () => ({ tool: 'share_notes', args: {} });
+  await say(m.meetingId, 'Arlo, share the notes with everyone.');
+  await h.wait(150);
+  assert.deepEqual(of(anaPanel, 'arlo.thinking').slice(2), onAndOff);
+  assert.deepEqual(of(cyPanel, 'arlo.thinking'), onAndOff);
+  for (const ws of [benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.thinking'), []);
   closeAll(anaPanel, cyPanel, benPanel, guestPanel);
 });
 
@@ -341,8 +369,8 @@ test('"not now" ends a spoken request, and a request for the notes keeps working
   const m = await meetingWith('AG-VOICE-DECLINE==');
   const ownerPanel = await panel(m.meetingId, m.owner);
   await h.wait(50);
-  pick = async () => ({ tool: 'admit_from_waiting_room', args: { name: 'James' } });
-  await say(m.meetingId, 'Hey Arlo, admit James from the waiting room.');
+  pick = async () => ({ tool: 'post_to_chat', args: { message: 'Lunch is here.' } });
+  await say(m.meetingId, 'Hey Arlo, post lunch is here to the chat.');
   await h.wait(150);
   const notesRequest = await call('POST', m.meetingId, 'notes-request', { headers: m.participant, body: {} });
   assert.equal(notesRequest.status, 200);
@@ -350,14 +378,14 @@ test('"not now" ends a spoken request, and a request for the notes keeps working
 
   const sheets = of(ownerPanel, 'arlo.approval').map((msg) => msg.data);
   assert.deepEqual(sheets.map((data) => data.kind), ['agent_action', 'share_notes']);
-  assert.deepEqual([sheets[0].question, sheets[0].primaryLabel], ['Admit James from the waiting room?', 'Admit James']);
+  assert.deepEqual([sheets[0].question, sheets[0].body, sheets[0].primaryLabel], ['Post this in the meeting chat?', 'Lunch is here.', 'Post to chat']);
   assert.deepEqual(Object.keys(sheets[1]), ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt', 'expiresInMs']);
 
   const declined = await call('POST', m.meetingId, `approvals/${sheets[0].id}`, { headers: m.owner, body: { approve: false } });
   assert.deepEqual(declined.body, { id: sheets[0].id, outcome: 'declined' });
   await h.wait(100);
   assert.deepEqual((await actions(m, m.guest)).body.actions.map((action) => [action.status, action.label]),
-    [['declined', 'Asked to admit James from the waiting room']]);
+    [['declined', 'Asked to post to chat']]);
   assert.equal(of(ownerPanel, 'arlo.did').at(-1).data.action.status, 'declined');
   // the request for the notes is still open, and agreeing to it shares them as before
   const shared = await call('POST', m.meetingId, `approvals/${sheets[1].id}`, { headers: m.owner, body: { approve: true } });
@@ -413,8 +441,8 @@ test('when the meeting ends nothing of the agent is left, and a model that answe
   const m = await meetingWith('AG-ENDED==');
   const ownerPanel = await panel(m.meetingId, m.owner);
   await ask(m, 'When do we ship?');
-  pick = async () => ({ tool: 'admit_from_waiting_room', args: { name: 'James' } });
-  await say(m.meetingId, 'Arlo, admit James from the waiting room.');
+  pick = async () => ({ tool: 'share_notes', args: {} });
+  await say(m.meetingId, 'Arlo, share the notes with everyone.');
   await h.wait(150);
   const sheet = of(ownerPanel, 'arlo.approval')[0].data;
   assert.equal((await actions(m, m.owner)).body.actions.length, 2);
@@ -422,8 +450,9 @@ test('when the meeting ends nothing of the agent is left, and a model that answe
 
   // a typed question is with the model when the meeting ends
   let release;
+  let answering;
   pick = async () => ({ tool: 'answer_from_meeting', args: { question: 'When do we ship?' } });
-  answer = () => new Promise((resolve) => { release = resolve; });
+  answer = (input) => { answering = input.signal; return new Promise((resolve) => { release = resolve; }); };
   const late = ask(m, 'When do we ship?');
   await h.wait(100);
   assert.equal(of(ownerPanel, 'arlo.thinking').at(-1).data.on, true);
@@ -431,6 +460,8 @@ test('when the meeting ends nothing of the agent is left, and a model that answe
   await h.wait(50);
   // the panel is told thinking stopped
   assert.equal(of(ownerPanel, 'arlo.thinking').at(-1).data.on, false);
+  // and the model call that was running for this meeting is stopped
+  assert.equal(answering.aborted, true);
   const told = ownerPanel.messages.length;
   release('On Friday.');
   const res = await late;

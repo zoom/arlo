@@ -8,7 +8,8 @@
  *   - the stream is not running and no Arlo panel is connected for the
  *     grace period (a panel knows the meeting is still going; none left
  *     means nobody is there to read the data), or
- *   - the store's age limit passes (sweep), in case no signal ever arrives.
+ *   - the store's age limit passes (sweep), in case no signal ever arrives,
+ *   - the store drops it to make room for a new meeting (its meeting-count limit).
  * Every one of these also calls `onForget` for the meeting, exactly once.
  *
  * Per meeting this module knows three things: whether the stream is running
@@ -50,6 +51,12 @@ function createMeetingLifecycle({
   // running: true | false as told by the rtms service, null = never told
   const meetings = new Map(); // meetingId -> { running, panels, cancel }
   const flushedAt = new Map(); // meetingId -> { at: when it was flushed, ended: because the meeting ended }
+
+  // The store drops the meeting written to longest ago when it holds as many
+  // as it takes. That is a deletion like the age sweep's: the same callback,
+  // so who ran its streams, its approvals, and the agent's, the hands' and the
+  // notes engine's state do not stay behind under that id.
+  if (typeof store.onEvicted === 'function') store.onEvicted((meetingId) => dataDeleted(meetingId));
 
   function stateFor(meetingId) {
     let state = meetings.get(meetingId);
@@ -95,6 +102,18 @@ function createMeetingLifecycle({
     } catch {
       // A listener must never undo a flush or crash a timer
     }
+  }
+
+  /** The store deleted this meeting's data itself (too old, or to make room): forgotten once. */
+  function dataDeleted(meetingId) {
+    const state = meetings.get(meetingId);
+    if (state?.cancel) {
+      state.cancel();
+      state.cancel = null;
+    }
+    // Panels that are still connected stay counted, as in flush()
+    if (state && state.panels === 0) meetings.delete(meetingId);
+    forget(meetingId);
   }
 
   function flush(meetingId, reason) {
@@ -197,16 +216,7 @@ function createMeetingLifecycle({
   function sweep() {
     const aged = new Set();
     const deleted = store.sweep((meetingId) => aged.add(meetingId));
-    for (const meetingId of aged) {
-      const state = meetings.get(meetingId);
-      if (state?.cancel) {
-        state.cancel();
-        state.cancel = null;
-      }
-      // Panels that are still connected stay counted, as in flush()
-      if (state && state.panels === 0) meetings.delete(meetingId);
-      forget(meetingId);
-    }
+    for (const meetingId of aged) dataDeleted(meetingId);
     for (const [meetingId, state] of meetings) {
       // Forgotten above already: its state stays only for the panel count
       if (aged.has(meetingId)) continue;

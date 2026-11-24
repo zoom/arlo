@@ -2,7 +2,9 @@
 // one of them answers, or that runs out. Time and timers are the test's.
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createApprovals, approvalMessageData, APPROVAL_KINDS } = require('../src/services/approvals');
+const {
+  createApprovals, approvalMessageData, isFor, APPROVAL_KINDS,
+} = require('../src/services/approvals');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const M = 'MEETING-APPROVALS==';
@@ -255,6 +257,7 @@ test('agent_action: carries the sheet\'s texts, needs no user id, and is not lim
     primaryLabel: 'Admit James',
     channel: 'voice',
     askerVerified: false,
+    forUserIds: null,
   });
   // spoken requests have no user; the same person may have several open
   assert.notEqual(agentAsk(approvals), null);
@@ -314,6 +317,66 @@ test('agent_action: the text that will be posted is kept as given, with what was
     ['meetingId', 'id', 'kind', 'askedBy', 'expiresAt', 'expiresInMs', 'askerVerified', 'question', 'primaryLabel', 'channel']);
   // 500 and 200 characters are the most; a longer one is refused, never cut
   assert.notEqual(agentAsk(approvals, { body: 'b'.repeat(500), request: 'r'.repeat(200) }), null);
+});
+
+test('each kind has its own room: five of Arlo\'s sheets, twenty requests for the notes, and neither crowds out the other', () => {
+  const { approvals, advance } = setup();
+  const sheets = [];
+  for (let i = 0; i < 5; i += 1) sheets.push(agentAsk(approvals));
+  assert.equal(sheets.includes(null), false);
+  assert.equal(approvals.hasRoom(M, 'agent_action'), false);
+  assert.equal(agentAsk(approvals), null);
+  assert.deepEqual(approvals.tryOpen(M, {
+    kind: 'agent_action', question: 'Do it?', primaryLabel: 'Do it', channel: 'voice',
+  }), { ok: false, reason: 'too_many_open' });
+  // requests for the notes are not held up by that
+  assert.equal(approvals.hasRoom(M, 'share_notes'), true);
+  for (let i = 0; i < 20; i += 1) assert.notEqual(ask(approvals, `user-${i}`), null, `request ${i}`);
+  assert.equal(ask(approvals, 'user-20'), null);
+  assert.equal(approvals.hasRoom(M, 'share_notes'), false);
+  assert.equal(approvals.size().open, 25);
+  // one sheet is answered: room for one, and still none for a request for the notes
+  approvals.answer(M, sheets[0].id, { byUserId: 'owner-1', approve: false });
+  assert.equal(approvals.hasRoom(M, 'agent_action'), true);
+  assert.notEqual(agentAsk(approvals), null);
+  assert.equal(agentAsk(approvals), null);
+  assert.equal(ask(approvals, 'user-21'), null);
+  // they run out like any other
+  advance(60000);
+  assert.deepEqual([approvals.hasRoom(M, 'agent_action'), approvals.hasRoom(M, 'share_notes'), approvals.size().open], [true, true, 0]);
+  // another meeting has its own; nothing that is not a kind or a meeting has room
+  assert.equal(approvals.hasRoom('ANOTHER==', 'agent_action'), true);
+  for (const [meetingId, kind] of [[M, 'nope'], [M, undefined], ['', 'agent_action'], [null, 'share_notes']]) {
+    assert.equal(approvals.hasRoom(meetingId, kind), false);
+  }
+  // the caps can be set
+  const small = setup({ maxAgentActionsPerMeeting: 1 }).approvals;
+  assert.notEqual(agentAsk(small), null);
+  assert.equal(agentAsk(small), null);
+});
+
+test('agent_action: a sheet can name the owners it is for; then it is for nobody else', () => {
+  const { approvals } = setup();
+  const forHosts = agentAsk(approvals, { forUserIds: ['user-cy', 'user-cy', 'user-di'] });
+  assert.deepEqual(approvals.get(M, forHosts.id).forUserIds, ['user-cy', 'user-di']);
+  assert.equal(isFor(approvals.get(M, forHosts.id), 'user-cy'), true);
+  assert.equal(isFor(approvals.get(M, forHosts.id), 'user-ana'), false);
+  assert.equal(isFor(approvals.get(M, forHosts.id), undefined), false);
+  // the panels are not told who else is asked
+  assert.equal('forUserIds' in approvalMessageData(M, approvals.get(M, forHosts.id)), false);
+  // without it: every owner
+  const forAll = agentAsk(approvals);
+  assert.equal(approvals.get(M, forAll.id).forUserIds, null);
+  assert.equal(isFor(approvals.get(M, forAll.id), 'user-ana'), true);
+  // what is handed out is a copy
+  approvals.get(M, forHosts.id).forUserIds.push('user-mallory');
+  assert.deepEqual(approvals.get(M, forHosts.id).forUserIds, ['user-cy', 'user-di']);
+  for (const forUserIds of [[], 'user-cy', [5], [''], ['x'.repeat(257)], new Array(51).fill('user-cy'), { 0: 'user-cy' }]) {
+    assert.equal(agentAsk(approvals, { forUserIds }), null, JSON.stringify(forUserIds));
+  }
+  // a request for the notes is for every owner, whatever is passed
+  const notes = approvals.open(M, { kind: 'share_notes', askedByUserId: 'user-ben', forUserIds: ['user-cy'] });
+  assert.equal(isFor(approvals.get(M, notes.id), 'user-ana'), true);
 });
 
 test('agent_action: refused without its texts, with texts that are too long, or with a bad asker', () => {
@@ -415,10 +478,8 @@ test('tryOpen says why a request is refused: asked a moment ago, too many open, 
   // the meeting has as many open as it takes
   assert.equal(approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-dee' }).ok, true);
   assert.deepEqual(approvals.tryOpen(M, { kind: 'share_notes', askedByUserId: 'user-eve' }), { ok: false, reason: 'too_many_open' });
-  assert.deepEqual(
-    approvals.tryOpen(M, { kind: 'agent_action', question: 'Do it?', primaryLabel: 'Do it', channel: 'voice' }),
-    { ok: false, reason: 'too_many_open' },
-  );
+  // Arlo's own sheets are counted apart: full of requests for the notes, one of them still opens
+  assert.equal(approvals.tryOpen(M, { kind: 'agent_action', question: 'Do it?', primaryLabel: 'Do it', channel: 'voice' }).ok, true);
   // someone who asked a moment ago hears that, also while the meeting is full
   assert.deepEqual(approvals.tryOpen(M, again), { ok: false, reason: 'too_soon' });
   // closed, and still within two minutes

@@ -85,14 +85,36 @@ test('a meeting the store does not hold takes no action, and is not created by o
   for (const meetingId of [null, undefined, 5, '', {}]) assert.equal(store.appendAction(meetingId, ACTION), null);
 });
 
-test('at most 500 actions per meeting: more are refused, and the first ones stay', () => {
+test('at most 500 actions per meeting: the oldest that ended makes room; only when all are open is one refused', () => {
   const { store } = held({ maxActionsPerMeeting: 3 });
   const first = store.appendAction(M, ACTION);
-  store.appendAction(M, ACTION);
-  store.appendAction(M, ACTION);
+  const second = store.appendAction(M, ACTION);
+  const third = store.appendAction(M, ACTION);
+  // all three are still open: nothing may be dropped, so nothing more is taken
   assert.equal(store.appendAction(M, ACTION), null);
+  assert.equal(store.appendAction(M, { ...ACTION, status: 'waiting_approval' }), null);
+  assert.deepEqual(store.listActions(M).map((action) => action.id), [first.id, second.id, third.id]);
+
+  // the second and the third end: the next two take their places, the oldest ended one first
+  store.updateAction(M, third.id, { status: 'failed' });
+  store.updateAction(M, second.id, { status: 'done' });
+  const fourth = store.appendAction(M, ACTION);
+  assert.deepEqual(store.listActions(M).map((action) => action.id), [first.id, third.id, fourth.id]);
+  const fifth = store.appendAction(M, { ...ACTION, status: 'done' });
+  assert.deepEqual(store.listActions(M).map((action) => action.id), [first.id, fourth.id, fifth.id]);
+  // the open ones are never the ones dropped, however old
+  for (const status of ['declined', 'expired', 'done', 'failed']) {
+    const next = store.appendAction(M, { ...ACTION, status });
+    assert.deepEqual(store.listActions(M).map((action) => action.id), [first.id, fourth.id, next.id], status);
+  }
+  // an action that is refused for what it is drops nothing
+  const before = store.listActions(M).map((action) => action.id);
+  assert.equal(store.appendAction(M, { ...ACTION, tool: 'delete_everything' }), null);
+  assert.equal(store.appendAction(M, { ...ACTION, label: '' }), null);
+  assert.deepEqual(store.listActions(M).map((action) => action.id), before);
+  // a meeting never runs out of record: any number of actions that end
+  for (let i = 0; i < 50; i += 1) assert.notEqual(store.appendAction(M, { ...ACTION, status: 'done' }), null);
   assert.equal(store.listActions(M).length, 3);
-  assert.equal(store.listActions(M)[0].id, first.id);
 
   const big = held();
   for (let i = 0; i < 500; i += 1) assert.notEqual(big.store.appendAction(M, ACTION), null);

@@ -137,6 +137,33 @@ test('past the meeting limit, the meeting written to longest ago is dropped, not
   assert.equal(store.size(), 2);
 });
 
+test('the store names the meeting it drops to make room, to the one listener, and only then', () => {
+  const store = createMemoryMeetingStore({ maxMeetings: 2 });
+  const dropped = [];
+  store.onEvicted((meetingId) => { dropped.push([meetingId, store.has(meetingId)]); });
+  store.appendSegment('A', segment(1));
+  store.appendSegment('B', segment(1));
+  store.appendSegment('A', segment(2));
+  store.deleteMeeting('A');
+  store.appendSegment('A', segment(1));
+  assert.deepEqual(dropped, []);
+  // the listener is called after the meeting is gone
+  store.appendSegment('C', segment(1));
+  assert.deepEqual(dropped, [['B', false]]);
+  store.appendSegment('D', segment(1));
+  assert.deepEqual(dropped, [['B', false], ['A', false]]);
+  // a listener that throws does not stop the line from being kept
+  store.onEvicted(() => { throw new Error('listener'); });
+  assert.notEqual(store.appendSegment('E', segment(1)), null);
+  assert.equal(store.has('E'), true);
+  // not a function: no listener
+  for (const listener of [null, undefined, 'call me', {}]) {
+    store.onEvicted(listener);
+    assert.notEqual(store.appendSegment(`F-${String(listener)}`, segment(1)), null);
+  }
+  assert.equal(dropped.length, 2);
+});
+
 test('sweep deletes meetings older than the age limit', () => {
   const clock = { now: 0 };
   const store = createMemoryMeetingStore({ now: () => clock.now, maxAgeMs: 1000 });
