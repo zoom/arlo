@@ -398,6 +398,57 @@ test('asking for notes that are shared already is a 409 and opens nothing', asyn
   assert.equal((await call('POST', m.meetingId, 'notes-request', { headers: m.participant, body: {} })).status, 200);
 });
 
+test('shared notes stay readable while Arlo is out of the meeting, until its data is flushed', async () => {
+  const m = await meetingWith('SN-ABSENT==');
+  const [benPanel, guestPanel] = await Promise.all([panel(m.meetingId, m.participant), panel(m.meetingId, m.guest)]);
+  await sayMany(m.meetingId, 5);
+  await share(m, true);
+  await h.wait(150);
+  const current = getMeetingStore().getNotes(m.meetingId);
+  assert.ok(current && current.summary.includes('Friday'));
+
+  // the only stream stops and the meeting goes on
+  await status(m.meetingId, { status: 'rtms_stopped', streamId: 's1' });
+  await h.wait(100);
+  for (const ws of [benPanel, guestPanel]) {
+    assert.equal(lastState(ws).present, false);
+    assert.equal(lastState(ws).notesShared, true);
+    assert.equal(lastState(ws).role, 'participant');
+  }
+  // what a panel that opens or reloads now reads: a participant, a guest, and the owner
+  for (const headers of [m.participant, m.third, m.guest]) {
+    const state = await call('GET', m.meetingId, 'state', { headers });
+    assert.equal(state.status, 200);
+    assert.equal(state.body.present, false);
+    assert.equal(state.body.notesShared, true);
+    assert.equal(state.body.role, 'participant');
+    assert.equal(state.body.ownerName, 'Ana Ruiz');
+    const notes = await getNotes(m, headers);
+    assert.equal(notes.status, 200);
+    assert.equal(notes.cache, 'no-store');
+    assert.deepEqual(notes.body, { notes: current });
+  }
+  assert.deepEqual((await getNotes(m, m.owner)).body, { notes: current });
+  // still only for this meeting, and only while shared
+  const otherPass = await access('SN-ABSENT-OTHER==');
+  assert.equal((await getNotes(m, cookies(otherPass, m.ben.session))).status, 403);
+  assert.equal((await getNotes(m, cookies(m.ben.session))).status, 401);
+  assert.equal((await share(m, false)).status, 200);
+  await h.wait(100);
+  assert.equal(lastState(benPanel).notesShared, false);
+  for (const headers of [m.participant, m.guest]) assert.equal((await getNotes(m, headers)).status, 403);
+  assert.equal((await share(m, true)).status, 200);
+  assert.equal((await getNotes(m, m.guest)).status, 200);
+
+  // the meeting ends: the data is flushed and nothing is handed out
+  await status(m.meetingId, { status: 'rtms_stopped', streamId: 's1', meetingEnded: true });
+  for (const headers of [m.participant, m.guest]) {
+    assert.equal((await call('GET', m.meetingId, 'state', { headers })).body.notesShared, false);
+    assert.equal((await getNotes(m, headers)).status, 403);
+  }
+  closeAll(benPanel, guestPanel);
+});
+
 test('when the meeting\'s data is flushed the notes are shared with nobody', async () => {
   const m = await meetingWith('SN-FLUSH==');
   const ownerPanel = await panel(m.meetingId, m.owner);

@@ -144,6 +144,10 @@ export default function ArloMeetingView({ isGuestMode = false }) {
     startRTMS(false);
   }, [arloRole, whoCanAsk, whoCanAskChoice, saveWhoCanAsk, startRTMS]);
 
+  // A start that leaves "who can ask" as it is: asking the host, a stream of
+  // one's own beside someone else's, and bringing Arlo in under shared notes
+  const askForArlo = useCallback(() => startRTMS(false), [startRTMS]);
+
   const signIn = useCallback(() => {
     // The reason is shown next to the button; nothing else to do with it here
     authorize().catch(() => {});
@@ -208,7 +212,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
       );
       break;
     case 'ask-host':
-      content = <AskHost onAsk={() => startRTMS(false)} disabled={rtmsLoading} message={transport.message} />;
+      content = <AskHost onAsk={askForArlo} disabled={rtmsLoading} message={transport.message} />;
       break;
     case 'waiting': {
       // The host's own request needs nobody's permission
@@ -225,7 +229,7 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           </div>
           {transport.hint && <p className="arlo-muted">{transport.hint}</p>}
           {transport.actions.includes('start') && (
-            <Button variant="outline" size="sm" onClick={() => startRTMS(false)}>Try again</Button>
+            <Button variant="outline" size="sm" onClick={askForArlo}>Try again</Button>
           )}
           {transport.message && <p className="arlo-error" role="alert">{transport.message}</p>}
         </div>
@@ -264,14 +268,19 @@ export default function ArloMeetingView({ isGuestMode = false }) {
       );
       break;
     case 'participant': {
+      // Shared notes read while Arlo is out of the meeting. A start asked for
+      // from there is not "Arlo is here" before the server says whose stream it is.
+      const sharedNotes = arlo.notesShared ? arlo.notes : null;
+      const bringingIn = sharedNotes !== null && arlo.present !== true && startAskedHere && arlo.awaitingState;
       // The stream is confirmed for this panel, or the server says Arlo is here
-      const present = !meetingEnded
+      const present = !meetingEnded && !bringingIn
         && (arlo.present === true || rtmsPhase === 'active' || rtmsPhase === 'paused' || rtmsPhase === 'interrupted');
       // "Take notes yourself": this person's own request, shown where they clicked.
       // The host's own request needs nobody's permission.
-      const ownProgress = rtmsPhase === 'requested'
+      const requestProgress = rtmsPhase === 'requested'
         ? (zoomRole === 'host' ? 'starting' : 'asking')
         : (rtmsPhase === 'starting' ? 'starting' : null);
+      const ownProgress = requestProgress ?? (bringingIn ? 'starting' : null);
       const ownStart = {
         progress: ownProgress,
         secondsLeft,
@@ -295,13 +304,17 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           signingIn={isAuthorizing}
           signInError={signInError ? 'Could not sign in. Try again.' : null}
           ownStart={ownStreamAvailable ? ownStart : null}
-          onUseArlo={() => startRTMS(false)}
+          onUseArlo={askForArlo}
           useArloDisabled={rtmsLoading}
           notesRequest={arlo.notesRequest}
           onRequestNotes={arlo.requestNotes}
           requestingNotes={arlo.requestingNotes}
           notesShared={arlo.notesShared}
-          notes={arlo.notesShared ? arlo.notes : null}
+          notes={sharedNotes}
+          bringIn={{
+            label: canBringArloIn(zoomRole) ? 'Bring Arlo into this meeting' : 'Ask the host to bring Arlo in',
+            start: ownStart,
+          }}
         />
       );
       break;

@@ -61,6 +61,33 @@ describe('getArloScreen', () => {
     ['owner, the notes are still being fetched', { arloRole: 'owner', notesPending: true, zoomRole: 'host' }, 'loading'],
     ['left by a fault before the first notes, owner', { arloRole: 'owner', everPresent: true, zoomRole: 'host', phase: 'stopped', streamFault: true }, 'notes'],
     ['a fault, participant', { everPresent: true, phase: 'stopped', streamFault: true }, 'ask-host'],
+    // 4a. Arlo has left while the meeting goes on: someone reading shared notes keeps them
+    ['left, host reading shared notes', { zoomRole: 'host', hasNotes: true, everPresent: true, phase: 'stopped' }, 'participant'],
+    ['left, co-host reading shared notes', { zoomRole: 'coHost', hasNotes: true, everPresent: true, phase: 'stopped' }, 'participant'],
+    ['left, attendee reading shared notes', { hasNotes: true, everPresent: true, phase: 'stopped' }, 'participant'],
+    ['left, guest reading shared notes', { guest: true, hasNotes: true, everPresent: true, phase: 'stopped' }, 'participant'],
+    ['left, guest who is the Zoom host reading shared notes', { guest: true, zoomRole: 'host', hasNotes: true }, 'participant'],
+    ['left before this panel opened, host reading shared notes', { zoomRole: 'host', hasNotes: true }, 'participant'],
+    ['left before this panel opened, attendee reading shared notes', { hasNotes: true }, 'participant'],
+    ['left by a fault, attendee reading shared notes', { hasNotes: true, everPresent: true, phase: 'stopped', streamFault: true }, 'participant'],
+    // ...and the notes stay through their own request to bring Arlo in
+    ['left, host reading shared notes, requested', { zoomRole: 'host', hasNotes: true, phase: 'requested' }, 'participant'],
+    ['left, attendee reading shared notes, requested', { hasNotes: true, phase: 'requested' }, 'participant'],
+    ['left, attendee reading shared notes, starting', { hasNotes: true, phase: 'starting' }, 'participant'],
+    ['left, attendee reading shared notes, the role not re-sent yet', { hasNotes: true, phase: 'active', awaitingRole: true }, 'participant'],
+    ['left, attendee reading shared notes, request denied', { hasNotes: true, phase: 'denied' }, 'participant'],
+    // shared but nothing written yet, or not shared (a panel then holds no notes): as before
+    ['left, shared without notes, host', { zoomRole: 'host', everPresent: true, phase: 'stopped' }, 'bring-in'],
+    ['left, shared without notes, co-host', { zoomRole: 'coHost', everPresent: true, phase: 'stopped' }, 'bring-in'],
+    ['left, shared without notes, attendee', { everPresent: true, phase: 'stopped' }, 'ask-host'],
+    ['left, shared without notes, guest', { guest: true, everPresent: true, phase: 'stopped' }, 'participant'],
+    ['left, shared without notes, attendee, requested', { everPresent: true, phase: 'requested' }, 'waiting'],
+    // the owner is unaffected
+    ['left, owner with notes, requested', { arloRole: 'owner', hasNotes: true, phase: 'requested' }, 'notes'],
+    ['left, owner with notes, host', { arloRole: 'owner', zoomRole: 'host', hasNotes: true, phase: 'stopped' }, 'notes'],
+    // present again: the usual screens
+    ['back, attendee reading shared notes', { present: true, hasNotes: true, everPresent: true }, 'participant'],
+    ['back, now an owner', { present: true, arloRole: 'owner', hasNotes: true, everPresent: true }, 'notes'],
     // 5. not present
     ['not present, host', { zoomRole: 'host' }, 'bring-in'],
     ['not present, co-host', { zoomRole: 'coHost' }, 'bring-in'],

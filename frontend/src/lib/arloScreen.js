@@ -24,9 +24,13 @@
  * for someone who has not had the notes screen in this meeting, while Arlo is
  * not in it yet.
  *
- * Someone who is not an owner reads shared notes on the participant screen,
- * while Arlo is in the meeting. After the meeting whoever holds notes keeps
- * them ('after'), owner or not.
+ * Someone who is not an owner reads shared notes on the participant screen.
+ * They keep that screen while Arlo is out of the meeting and the meeting goes
+ * on, as long as their panel holds the notes (shared, and something written):
+ * the screen then offers the way to bring Arlo in, and their own request
+ * shows there, not on 'waiting'. Sharing stopped, or no notes yet: the
+ * bring-in and ask-host screens, as for anyone. After the meeting whoever
+ * holds notes keeps them ('after'), owner or not.
  *
  * Several people can each run Arlo in one meeting. Someone who asks for a
  * stream of their own while Arlo is already here through another person's
@@ -48,13 +52,15 @@ export function getArloScreen({
   streamFault = false, awaitingRole = false, notesPending = false,
 }) {
   const owner = arloRole === 'owner';
+  // Not an owner, and the panel holds notes: the ones an owner shares
+  const readsSharedNotes = arloRole === 'participant' && hasNotes === true;
 
   if (meetingEnded) return hasNotes ? 'after' : 'participant';
 
   // The server sends the stream's start before it says whose stream it is:
   // the person who asked does not see the participant view for a moment.
   // Not when Arlo was here already: they asked from the screen they are on.
-  if (awaitingRole && !owner && present !== true) return 'waiting';
+  if (awaitingRole && !owner && present !== true) return readsSharedNotes ? 'participant' : 'waiting';
 
   if (present === true || PRESENT_PHASES.has(phase)) {
     // The stream can be confirmed before the server said who this person is
@@ -64,7 +70,11 @@ export function getArloScreen({
   }
 
   const hadNotesScreen = owner && (hasNotes || everPresent);
-  if (WAITING_PHASES.has(phase)) return hadNotesScreen ? 'notes' : 'waiting';
+  if (WAITING_PHASES.has(phase)) {
+    if (hadNotesScreen) return 'notes';
+    // Their request shows under the shared notes they are reading
+    return readsSharedNotes && present === false ? 'participant' : 'waiting';
+  }
 
   // Arlo's state not received yet
   if (present !== false) return 'loading';
@@ -75,6 +85,9 @@ export function getArloScreen({
   if (owner && hasNotes) return 'notes';
   // A fault before the first notes: still the owner's screen, with the reason
   if (hadNotesScreen && streamFault) return 'notes';
+
+  // Shared notes stay on screen while Arlo is out of the meeting
+  if (readsSharedNotes) return 'participant';
 
   if (guest) return 'participant';
   return canBringArloIn(zoomRole) ? 'bring-in' : 'ask-host';

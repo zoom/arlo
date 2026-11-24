@@ -429,6 +429,221 @@ describe('asking the owner to share, end to end', () => {
   });
 });
 
+describe('shared notes stay while Arlo is out of the meeting', () => {
+  const LEFT = 'Arlo has left the meeting. These are the notes so far.';
+  const BRING = 'Bring Arlo into this meeting';
+  const ASK_HOST = 'Ask the host to bring Arlo in';
+  const SHARED_ABSENT = { ...SHARED, present: false };
+  const host = (extra = {}) => createZoomSdk({ role: 'host', screenName: 'Ben', ...extra });
+  const coHost = () => createZoomSdk({ role: 'coHost', screenName: 'Ben' });
+  const arloLeaves = async (state = SHARED_ABSENT) => {
+    await send(serverMessage.status('rtms_stopped'));
+    await send(serverMessage.arloState(state));
+  };
+  /** Reading shared notes, then Arlo leaves while the meeting goes on. */
+  async function readThenArloLeaves(options = {}) {
+    const result = await openAsParticipant({ state: SHARED, notes: NOTES, ...options });
+    await screen.findByText(NOTES.summary);
+    await arloLeaves();
+    await screen.findByText(LEFT);
+    return result;
+  }
+  const expectNotesKept = () => {
+    expect(screen.getByRole('heading', { level: 1, name: SHARING_HEADING })).toBeInTheDocument();
+    expect(screen.getByText(NOTES.summary)).toBeInTheDocument();
+    expect(screen.getByText('Beta launch moves to March 3')).toBeInTheDocument();
+    const line = screen.getByText(LEFT);
+    expect(line.closest('[role="status"]')).not.toBeNull();
+    // above the notes
+    expect(line.compareDocumentPosition(screen.getByText(NOTES.summary)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  };
+  const expectNothingToAskOfArlo = () => {
+    expect(screen.queryByRole('button', { name: /share notes with everyone$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: TAKE })).not.toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Ask Arlo' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Only people using Arlo can ask in this meeting.')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Only I can ask|Anyone can ask/)).not.toBeInTheDocument();
+    expectNoOwnerControls();
+  };
+  /** The one action: a secondary button below the notes, after the record link. */
+  const expectOneAction = (name) => {
+    const action = screen.getByRole('button', { name });
+    expect(action).toHaveClass('btn-outline');
+    expect(action).toBeEnabled();
+    const record = screen.getByRole('link', { name: 'Meeting record' });
+    expect(screen.getByText(NOTES.summary).compareDocumentPosition(record) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(record.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const other of [BRING, ASK_HOST, 'Sign in to bring Arlo in', 'Sign in to ask Arlo'].filter((one) => one !== name)) {
+      expect(screen.queryByRole('button', { name: other })).not.toBeInTheDocument();
+    }
+  };
+
+  test.each([
+    ['an attendee', () => attendee(), ASK_HOST],
+    ['the host', () => host(), BRING],
+    ['a co-host', () => coHost(), BRING],
+  ])('%s keeps the notes when Arlo leaves, with the line that says so and one action', async (_who, makeSdk, action) => {
+    const { sdk } = await readThenArloLeaves({ sdk: makeSdk() });
+    expectNotesKept();
+    expectOneAction(action);
+    expectNothingToAskOfArlo();
+    // nothing was requested without a click
+    expect(sdk.startRTMS).not.toHaveBeenCalled();
+  });
+
+  test('"anyone can ask" does not bring the Ask input back while Arlo is out', async () => {
+    await openAsParticipant({ state: { ...SHARED, whoCanAsk: 'anyone' }, notes: NOTES });
+    await screen.findByRole('textbox', { name: 'Ask Arlo' });
+    await arloLeaves({ ...SHARED_ABSENT, whoCanAsk: 'anyone' });
+    await screen.findByText(LEFT);
+    expectNotesKept();
+    expectNothingToAskOfArlo();
+  });
+
+  test('without a usable owner name the heading says it without one', async () => {
+    await openAsParticipant({ state: { ...SHARED, ownerName: null }, notes: NOTES });
+    await screen.findByText(NOTES.summary);
+    await arloLeaves({ ...SHARED_ABSENT, ownerName: null });
+    expect(await screen.findByText(LEFT)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Arlo\'s notes are shared with everyone' })).toBeInTheDocument();
+    expect(screen.getByText(NOTES.summary)).toBeInTheDocument();
+  });
+
+  test('a guest keeps the notes, with no action', async () => {
+    await openAsGuest({ state: SHARED, notes: NOTES });
+    await screen.findByText(NOTES.summary);
+    await arloLeaves();
+    await screen.findByText(LEFT);
+    expectNotesKept();
+    expectNothingToAskOfArlo();
+    for (const name of [BRING, ASK_HOST, 'Sign in to bring Arlo in', 'Sign in to ask Arlo']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+  });
+
+  test('a guest who is the Zoom host gets "Sign in to bring Arlo in" under the notes', async () => {
+    const { sdk } = await openAsParticipant({ sdk: host({ status: 'unauthenticated' }), guest: true, state: SHARED, notes: NOTES });
+    await screen.findByText(NOTES.summary);
+    await arloLeaves();
+    await screen.findByText(LEFT);
+    expectNotesKept();
+    expect(screen.getByRole('button', { name: 'Sign in to bring Arlo in' })).toBeInTheDocument();
+    for (const name of [BRING, ASK_HOST, 'Sign in to ask Arlo']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(sdk.startRTMS).not.toHaveBeenCalled();
+  });
+
+  test('an attendee\'s click asks once; the wait shows in place of the button and the notes stay', async () => {
+    const { sdk } = await readThenArloLeaves();
+    await userEvent.click(screen.getByRole('button', { name: ASK_HOST }));
+    const waiting = await screen.findByText(/Waiting for the host to allow Arlo…/);
+    expect(waiting.closest('[role="status"]')).not.toBeNull();
+    expect(sdk.startRTMS).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: ASK_HOST })).not.toBeInTheDocument();
+    expectNotesKept();
+    expectNothingToAskOfArlo();
+  });
+
+  test('the host\'s click starts once and leaves "who can ask" as it is', async () => {
+    const { sdk, fetchMock } = await readThenArloLeaves({ sdk: host(), state: { ...SHARED, whoCanAsk: 'anyone' } });
+    await userEvent.click(screen.getByRole('button', { name: BRING }));
+    expect(await screen.findByText('Bringing Arlo in…')).toBeInTheDocument();
+    expect(sdk.startRTMS).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('button', { name: BRING })).not.toBeInTheDocument();
+    expectNotesKept();
+
+    // Arlo is back and this person owns the stream: the notes screen, the setting untouched
+    await send(serverMessage.status('rtms_started'));
+    expect(screen.getByText(NOTES.summary)).toBeInTheDocument();
+    await send(serverMessage.arloState({ ...OWNER, ownerName: 'Ben', notesShared: true, whoCanAsk: 'anyone' }));
+    expect(await screen.findByText('Arlo is in the meeting')).toBeInTheDocument();
+    expect(screen.getByText(NOTES.summary)).toBeInTheDocument();
+    expect(screen.queryByText(LEFT)).not.toBeInTheDocument();
+    expect(callsTo(fetchMock, 'settings', 'PUT')).toHaveLength(0);
+  });
+
+  test('a start that fails says why, with the notes and the button still there', async () => {
+    const refused = async () => { throw Object.assign(new Error('not allowed'), { code: '10311' }); };
+    const { sdk } = await readThenArloLeaves({ sdk: attendee({ startRTMS: refused }) });
+    await userEvent.click(screen.getByRole('button', { name: ASK_HOST }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(sdk.startRTMS).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole('button', { name: ASK_HOST })).toBeInTheDocument();
+    expectNotesKept();
+  });
+
+  test('when Arlo is back the usual shared view returns', async () => {
+    await readThenArloLeaves();
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.arloState(SHARED));
+    await waitFor(() => expect(screen.queryByText(LEFT)).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: SHARING_HEADING })).toBeInTheDocument();
+    expect(screen.getByText(NOTES.summary)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: TAKE })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: ASK_HOST })).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ['an attendee', () => attendee(), false, ASK_HOST],
+    ['the host', () => host(), false, BRING],
+    ['a guest', () => attendee({ status: 'unauthenticated' }), true, null],
+  ])('%s opening or reloading the panel in that state reads the notes from the server', async (_who, makeSdk, guest, action) => {
+    const fetchMock = mockFetch({
+      [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...SHARED_ABSENT }),
+      [arloPath('notes')]: () => json({ notes: NOTES }),
+    }, { signedIn: !guest });
+    const { sdk } = renderInMeeting({ sdk: makeSdk(), guest });
+    expect(await screen.findByText(NOTES.summary)).toBeInTheDocument();
+    expect(callsTo(fetchMock, 'notes').length).toBeGreaterThan(0);
+    expectNotesKept();
+    expectNothingToAskOfArlo();
+    if (action) expectOneAction(action);
+    else expect(screen.queryByRole('button', { name: /Arlo/ })).not.toBeInTheDocument();
+    expect(sdk.startRTMS).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['an attendee', () => attendee(), 'Arlo isn\'t in this meeting yet', ASK_HOST],
+    ['the host', () => host(), BRING, BRING],
+  ])('sharing turned off while Arlo is out: %s is back on the usual screen, without the notes', async (_who, makeSdk, heading, action) => {
+    await readThenArloLeaves({ sdk: makeSdk() });
+    await send(serverMessage.arloState({ ...ANA_BROUGHT_ARLO, present: false }));
+    expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: action })).toBeInTheDocument();
+    expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument();
+    expect(screen.queryByText('Beta launch moves to March 3')).not.toBeInTheDocument();
+    expect(screen.queryByText(LEFT)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: SHARING_HEADING })).not.toBeInTheDocument();
+    // later notes are not kept either
+    await send(serverMessage.notes(LATER));
+    expect(screen.queryByText(LATER.summary)).not.toBeInTheDocument();
+  });
+
+  test('shared but nothing written yet: the usual screen when Arlo leaves', async () => {
+    await openAsParticipant({ state: SHARED });
+    await screen.findByText(NOT_YET);
+    await arloLeaves();
+    expect(await screen.findByRole('heading', { name: 'Arlo isn\'t in this meeting yet' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: ASK_HOST })).toBeInTheDocument();
+    expect(screen.queryByText(LEFT)).not.toBeInTheDocument();
+    expect(screen.queryByText(NOT_YET)).not.toBeInTheDocument();
+  });
+
+  test('the meeting ending afterwards leaves the notes as "Notes from this meeting"', async () => {
+    await readThenArloLeaves();
+    await act(async () => {
+      server().serverSend(serverMessage.status('rtms_stopped', { meetingEnded: true }));
+      server().serverSend(serverMessage.arloState({ present: false, role: 'participant', ownerName: null, notesShared: false }));
+    });
+    expect(await screen.findByRole('heading', { name: 'Notes from this meeting' })).toBeInTheDocument();
+    expect(screen.getByText(NOTES.summary)).toBeInTheDocument();
+    expect(screen.queryByText(LEFT)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: ASK_HOST })).not.toBeInTheDocument();
+  });
+});
+
 describe('the owner is asked to share with everyone', () => {
   const QUESTION = 'Share the notes with everyone in the meeting?';
 
