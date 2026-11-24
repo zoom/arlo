@@ -710,6 +710,8 @@ router.post('/broadcast', requireInternal, async (req, res) => {
   logger.debug(`Transcript segment kept and sent to ${sentCount} client(s)`);
   // The live notes are written from the stored lines, on the engine's own clock
   getNotesEngine().segmentStored(meetingId);
+  // A measurement (can a speaker be matched to an Arlo user?): counters only
+  getArloPresence().lineStored(meetingId, stored);
 
   res.status(200).json({ received: true, broadcast: sentCount });
 });

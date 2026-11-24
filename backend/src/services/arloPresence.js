@@ -21,6 +21,11 @@
  * those supplied names, lives
  * in the meeting store with the transcript and is deleted with it. Nothing
  * here is logged.
+ *
+ * A measurement lives here too (setIdentity, lineStored, identityCheck): an
+ * owner's panel says who Zoom's Apps SDK tells it they are in the meeting, and
+ * each stored transcript line's speaker is compared with that. Only counts are
+ * kept. It decides nothing: no behaviour depends on it.
  */
 const { cleanName } = require('../lib/displayName');
 
@@ -151,8 +156,58 @@ function createArloPresence({ store, streams, findUserByZoomId, streamStatus }) 
     return meta.ownerNames.get(userId) === name ? 'stored' : 'unchanged';
   }
 
+  /**
+   * Keep who an owner's panel says they are in the meeting
+   * ({ participantUUID?, participantId?, screenName? }, strings the caller
+   * validated). False for anyone who is not an owner of this meeting, or when
+   * nothing was kept.
+   */
+  function setIdentity(meetingId, userId, identity) {
+    if (!isOwner(meetingId, userId)) return false;
+    return store.setIdentity(meetingId, userId, identity) === true;
+  }
+
+  /**
+   * Compare one stored transcript line's speaker with every identity the
+   * owners' panels reported, and count: exact equality after trimming, the
+   * name whatever the case. Nothing is counted before the first report. Never
+   * throws, logs nothing, returns nothing: the line's path does not depend on it.
+   */
+  function lineStored(meetingId, line) {
+    try {
+      if (line === null || typeof line !== 'object') return;
+      const speakerId = typeof line.speakerId === 'string' ? line.speakerId.trim() : '';
+      const speakerName = typeof line.speakerLabel === 'string' ? line.speakerLabel.trim().toLowerCase() : '';
+      if (speakerId.length === 0 && speakerName.length === 0) return;
+      const identities = store.listIdentities(meetingId);
+      if (identities.length === 0) return;
+      const any = (test) => (identities.some(test) ? 1 : 0);
+      store.addIdentityCheck(meetingId, {
+        lines: 1,
+        idEqualsParticipantId: any((one) => speakerId.length > 0 && one.participantId === speakerId),
+        idEqualsParticipantUUID: any((one) => speakerId.length > 0 && one.participantUUID === speakerId),
+        nameEqualsScreenName: any((one) => speakerName.length > 0 && one.screenName?.toLowerCase() === speakerName),
+      });
+    } catch {
+      // A measurement only
+    }
+  }
+
+  /** The counters, and how many identities are held. Never an id or a name. */
+  const identityCheck = (meetingId) => store.getIdentityCheck(meetingId);
+
   return {
-    stateFor, setWhoCanAsk, setDisplayName, setNotesShared, notesShared, isOwner, ownerUserIds, liveStreamOperator,
+    stateFor,
+    setWhoCanAsk,
+    setDisplayName,
+    setNotesShared,
+    notesShared,
+    isOwner,
+    ownerUserIds,
+    liveStreamOperator,
+    setIdentity,
+    lineStored,
+    identityCheck,
   };
 }
 

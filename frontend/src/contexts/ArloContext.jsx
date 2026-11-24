@@ -4,6 +4,7 @@ import { useAuth } from './AuthContext';
 import { cleanNotes } from '../lib/notesText';
 import { readMeetingMessage } from '../lib/meetingMessage';
 import { usableName } from '../lib/ownerName';
+import { identityReport } from '../lib/arloIdentity';
 import { parseApproval } from '../lib/approvalKinds';
 import { useZoomSdk } from './ZoomSdkContext';
 
@@ -444,6 +445,27 @@ export function ArloProvider({ children }) {
       body: JSON.stringify({ displayName: screenName }),
     }).catch(() => {});
   }, [role, nameless, screenName, serverMeetingId, accessVerified]);
+
+  // A measurement: the owner's panel tells the server who Zoom says they are
+  // in this meeting, once per meeting, so the server can count how often a
+  // transcript line's speaker equals that. The answer is not read and a
+  // failure is silent.
+  const identityJson = useMemo(() => {
+    const report = identityReport(userContext);
+    return report ? JSON.stringify(report) : null;
+  }, [userContext]);
+  const identitySentForRef = useRef(null);
+  useEffect(() => {
+    if (role !== 'owner' || !identityJson || !serverMeetingId || !accessVerified) return;
+    if (identitySentForRef.current === serverMeetingId) return;
+    identitySentForRef.current = serverMeetingId;
+    fetch(arloUrl(serverMeetingId, 'identity'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: identityJson,
+    }).catch(() => {});
+  }, [role, identityJson, serverMeetingId, accessVerified]);
 
   const setWhoCanAsk = useCallback(async (value) => {
     const id = serverMeetingIdRef.current;

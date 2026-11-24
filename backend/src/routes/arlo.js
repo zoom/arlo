@@ -9,6 +9,9 @@
  *   POST /notes-request          {}: a participant asks the owners to share the notes with everyone
  *   POST /approvals/:approvalId  { approve }: an owner's answer, owners only; approving turns sharing on
  *   GET  /approvals              the open requests, owners only
+ *   POST /identity               { participantUUID?, participantId?, screenName? }: who Zoom tells an
+ *                                owner's panel they are in the meeting, owners only (a measurement)
+ *   GET  /identity-check         how often a transcript line's speaker equalled one: counters, owners only
  *
  * SECURITY
  * - Every route needs the meeting-access cookie for exactly this meeting
@@ -43,6 +46,11 @@ const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 const MAX_QUESTION_CHARS = 500;
 const MAX_DISPLAY_NAME_CHARS = 100;
 const SETTINGS_FIELDS = ['whoCanAsk', 'displayName', 'shareNotes'];
+const IDENTITY_FIELDS = ['participantUUID', 'participantId', 'screenName'];
+const MAX_IDENTITY_CHARS = 200;
+// C0 and C1 control characters and DEL
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 const MAX_TRANSCRIPT_CHARS = 12000;
 const MAX_ANSWER_CHARS = 4000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -368,6 +376,49 @@ router.get('/approvals', requireAuth, requireMeetingAccess, (req, res) => {
   return res.json({
     approvals: getApprovals().listOpen(meetingId).map((approval) => approvalMessageData(meetingId, approval)),
   });
+});
+
+/**
+ * POST /identity
+ * { participantUUID?, participantId?, screenName? } -> { stored: true }. At
+ * least one, nothing else; each a string of 1 to 200 characters without
+ * control characters. What Zoom's Apps SDK tells an owner's panel about its
+ * own user in this meeting. Kept with the meeting's data (one per owner) and
+ * deleted with it; compared with the speaker of each transcript line stored
+ * from then on, and only the counts are kept. Never logged, never returned.
+ */
+router.post('/identity', requireAuth, requireMeetingAccess, requireJson, (req, res) => {
+  const meetingId = req.params.zoomMeetingId;
+  const presence = getArloPresence();
+  if (!presence.isOwner(meetingId, req.user.id)) return forbidden(res, NOT_AN_OWNER);
+  const problem = `Send participantUUID, participantId, screenName, or several of them, each 1 to ${MAX_IDENTITY_CHARS} characters without control characters, and nothing else`;
+  if (!hasOnlySomeOf(req.body, IDENTITY_FIELDS)) return invalid(res, problem);
+  const identity = {};
+  for (const field of Object.keys(req.body)) {
+    const value = req.body[field];
+    if (typeof value !== 'string' || value.length > MAX_IDENTITY_CHARS || CONTROL_CHARS.test(value) || value.trim().length === 0) {
+      return invalid(res, problem);
+    }
+    identity[field] = value.trim();
+  }
+  // The meeting's data went between the two checks, or it holds as many as it takes
+  if (!presence.setIdentity(meetingId, req.user.id, identity)) return forbidden(res, NOT_AN_OWNER);
+  return res.json({ stored: true });
+});
+
+/**
+ * GET /identity-check
+ * { lines, idEqualsParticipantId, idEqualsParticipantUUID, nameEqualsScreenName, identities }
+ * Of the transcript lines stored since the first report (`lines`), how many
+ * had a speaker id equal to a reported participantId or participantUUID, and
+ * how many a speaker name equal to a reported screen name; `identities` is how
+ * many owners reported. Numbers only.
+ */
+router.get('/identity-check', requireAuth, requireMeetingAccess, (req, res) => {
+  const meetingId = req.params.zoomMeetingId;
+  const presence = getArloPresence();
+  if (!presence.isOwner(meetingId, req.user.id)) return forbidden(res, 'Only the person who brought Arlo in sees these.');
+  return res.json(presence.identityCheck(meetingId));
 });
 
 module.exports = router;

@@ -390,6 +390,60 @@ describe('participant', () => {
   });
 });
 
+describe('the owner\'s panel reports who Zoom says they are in the meeting (a measurement)', () => {
+  const reports = (fetchMock) => callsTo(fetchMock, arloPath('identity'));
+
+  test('once per meeting, with the three fields and nothing else', async () => {
+    const sdk = createZoomSdk({ screenName: '  Ana from Zoom ', participantUUID: 'UUID-1', participantId: 16778240 });
+    const { fetchMock } = await openArlo({ sdk, state: OWNER });
+    await waitFor(() => expect(reports(fetchMock)).toHaveLength(1));
+    const [url, init] = reports(fetchMock)[0];
+    expect(url).toBe(arloPath('identity'));
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
+    expect(JSON.parse(init.body)).toEqual({ participantUUID: 'UUID-1', participantId: '16778240', screenName: 'Ana from Zoom' });
+
+    await send(serverMessage.arloState({ ...OWNER, role: 'participant' }));
+    await send(serverMessage.arloState(OWNER));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reports(fetchMock)).toHaveLength(1);
+  });
+
+  test('only what Zoom gave, and nothing at all when it gave nothing usable', async () => {
+    const some = await openArlo({
+      sdk: createZoomSdk({ screenName: '   ', participantUUID: null, participantId: 'p\u0000', role: 'host' }), state: OWNER,
+    });
+    await screen.findByText('Arlo is in the meeting');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reports(some.fetchMock)).toHaveLength(0);
+    some.unmount();
+    resetHarness();
+
+    const one = await openArlo({
+      sdk: createZoomSdk({ screenName: 'x'.repeat(250), participantUUID: { id: 1 }, participantId: '77' }), state: OWNER,
+    });
+    await waitFor(() => expect(reports(one.fetchMock)).toHaveLength(1));
+    expect(JSON.parse(reports(one.fetchMock)[0][1].body)).toEqual({ participantId: '77' });
+  });
+
+  test('a participant\'s panel never reports, and a failure is silent', async () => {
+    const participant = await openArlo({ sdk: attendee(), state: { present: true, role: 'participant', ownerName: null } });
+    await screen.findByRole('heading', { name: 'Arlo is in this meeting' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reports(participant.fetchMock)).toHaveLength(0);
+    participant.unmount();
+    resetHarness();
+
+    const failing = await openArlo({
+      state: OWNER,
+      routes: { [`POST ${arloPath('identity')}`]: () => { throw new TypeError('Failed to fetch'); } },
+    });
+    await waitFor(() => expect(reports(failing.fetchMock)).toHaveLength(1));
+    expect(await screen.findByText('Arlo is in the meeting')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
 describe('the owner\'s panel supplies their Zoom screen name when the server has no name', () => {
   const NAMELESS_OWNER = { present: true, role: 'owner', ownerName: null };
   const nameCalls = (fetchMock) => callsTo(fetchMock, arloPath('settings'))

@@ -29,6 +29,11 @@ const MAX_ACTION_ITEMS = 30;
 // Names the owners' own panels supplied (see setMeta `ownerNameFor`): one per
 // owner, and a meeting has at most 20 streams
 const MAX_OWNER_NAMES = 20;
+// Who an owner's panel says they are in the meeting (see setIdentity):
+// one per owner, like the names above
+const MAX_IDENTITIES = 20;
+const IDENTITY_FIELDS = Object.freeze(['participantUUID', 'participantId', 'screenName']);
+const IDENTITY_COUNTERS = Object.freeze(['lines', 'idEqualsParticipantId', 'idEqualsParticipantUUID', 'nameEqualsScreenName']);
 const WHO_CAN_ASK = new Set(['owner', 'anyone']);
 
 const MAX_SEQ_NO = 2 ** 31;
@@ -47,11 +52,25 @@ const isText = (value) => typeof value === 'string' && value.length > 0;
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
+const zeroIdentityCheck = () => Object.fromEntries(IDENTITY_COUNTERS.map((key) => [key, 0]));
 const defaultMeta = () => ({
   ownerUserId: null, ownerName: null, whoCanAsk: 'owner', ownerNames: new Map(), notesShared: false,
 });
 /** A copy to hand out: the Map inside is copied too. */
 const copyMeta = (meta) => ({ ...meta, ownerNames: new Map(meta.ownerNames) });
+/**
+ * An identity rebuilt from its known fields, each a trimmed, bounded string or
+ * null; null when none of them is there.
+ */
+function readIdentity(raw) {
+  if (!isPlainObject(raw)) return null;
+  const identity = {};
+  for (const field of IDENTITY_FIELDS) {
+    const value = typeof raw[field] === 'string' ? bounded(raw[field].trim(), MAX_NAME_CHARS).trim() : '';
+    identity[field] = value.length > 0 ? value : null;
+  }
+  return IDENTITY_FIELDS.some((field) => identity[field] !== null) ? identity : null;
+}
 const copyNotes = (notes) => ({
   ...notes,
   decisions: [...notes.decisions],
@@ -75,7 +94,16 @@ function createMemoryMeetingStore(options = {}) {
       if (meetings.size >= limits.maxMeetings) {
         meetings.delete(meetings.keys().next().value);
       }
-      entry = { createdAt: now(), segments: [], events: [], nextSeqNo: 1, notes: null, meta: defaultMeta() };
+      entry = {
+        createdAt: now(),
+        segments: [],
+        events: [],
+        nextSeqNo: 1,
+        notes: null,
+        meta: defaultMeta(),
+        identities: new Map(),
+        identityCheck: zeroIdentityCheck(),
+      };
     }
     meetings.set(meetingId, entry);
     return entry;
@@ -210,6 +238,44 @@ function createMemoryMeetingStore(options = {}) {
 
   const getMeta = (meetingId) => copyMeta(meetings.get(meetingId)?.meta || defaultMeta());
 
+  /**
+   * Keep who one owner's panel says they are in the meeting
+   * ({ participantUUID?, participantId?, screenName? }): one per Arlo user id,
+   * at most 20 per meeting; when full, one for someone not held is not taken.
+   * Only for a meeting already held, like setNotes. Returns whether it is kept.
+   * A measurement (services/arloPresence.js lineStored): nothing else reads it.
+   */
+  function setIdentity(meetingId, userId, raw) {
+    const entry = meetings.get(meetingId);
+    const identity = readIdentity(raw);
+    if (!entry || !isMeetingId(userId) || !identity) return false;
+    if (!entry.identities.has(userId) && entry.identities.size >= MAX_IDENTITIES) return false;
+    entry.identities.set(userId, identity);
+    return true;
+  }
+
+  /** The identities held for a meeting, as copies, without whose they are. */
+  const listIdentities = (meetingId) => [...(meetings.get(meetingId)?.identities.values() || [])].map((one) => ({ ...one }));
+
+  /** Add whole numbers to the meeting's identity counters. Other keys and values are ignored. */
+  function addIdentityCheck(meetingId, counts) {
+    const entry = meetings.get(meetingId);
+    if (!entry || !isPlainObject(counts)) return false;
+    for (const key of IDENTITY_COUNTERS) {
+      const add = counts[key];
+      if (Number.isSafeInteger(add) && add > 0) {
+        entry.identityCheck[key] = Math.min(entry.identityCheck[key] + add, Number.MAX_SAFE_INTEGER);
+      }
+    }
+    return true;
+  }
+
+  /** The counters and how many identities are held: numbers only. */
+  function getIdentityCheck(meetingId) {
+    const entry = meetings.get(meetingId);
+    return { ...(entry ? entry.identityCheck : zeroIdentityCheck()), identities: entry ? entry.identities.size : 0 };
+  }
+
   const listSegments = (meetingId) => (meetings.get(meetingId)?.segments || []).map((s) => ({ ...s }));
   const listEvents = (meetingId) => (meetings.get(meetingId)?.events || []).map((e) => ({ ...e }));
   const has = (meetingId) => meetings.has(meetingId);
@@ -236,6 +302,7 @@ function createMemoryMeetingStore(options = {}) {
   return {
     appendSegment, appendEvent, listSegments, listEvents,
     setNotes, getNotes, setMeta, getMeta,
+    setIdentity, listIdentities, addIdentityCheck, getIdentityCheck,
     has, deleteMeeting, sweep, size,
   };
 }

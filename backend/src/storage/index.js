@@ -16,14 +16,23 @@
  *                                        (defaults: null, null, 'owner', an empty Map, false);
  *                                        notesShared takes true or false only;
  *                                        ownerNames is a Map of Arlo user id -> supplied name, a copy
+ *   setIdentity(meetingId, userId, identity)
+ *                                     -> boolean; keeps who one owner's panel says they are in the
+ *                                        meeting ({ participantUUID, participantId, screenName }, each a
+ *                                        string or null), at most 20 per meeting
+ *   listIdentities(meetingId)         -> identity[] (copies)
+ *   addIdentityCheck(meetingId, { lines?, idEqualsParticipantId?, idEqualsParticipantUUID?, nameEqualsScreenName? })
+ *                                     -> boolean; adds whole numbers to the meeting's counters
+ *   getIdentityCheck(meetingId)       -> those four counters and `identities` (how many are held)
  *   has(meetingId)                    -> boolean
  *   deleteMeeting(meetingId)          -> boolean
  *   sweep()                           -> number of meetings deleted
  *   size()                            -> number of meetings held
  *
- * setNotes and setMeta only work for a meeting already held (a segment or event
+ * setNotes, setMeta, setIdentity and addIdentityCheck only work for a meeting already held (a segment or event
  * was stored) and return null otherwise, so a late write cannot bring back a
- * meeting that was flushed. deleteMeeting and sweep remove notes and meta too.
+ * meeting that was flushed. deleteMeeting and sweep remove notes, meta, identities
+ * and counters too.
  *
  * Today there is one implementation: memory. In demo mode that is the design:
  * a meeting's data is held only while the meeting runs and is flushed when it

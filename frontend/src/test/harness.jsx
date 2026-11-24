@@ -32,6 +32,9 @@ export function createZoomSdk({
   status = 'authorized',
   role = 'host',
   screenName = 'Ana',
+  // Who Zoom says this user is in the meeting (the owner's panel reports them once)
+  participantUUID = 'PARTICIPANT-UUID-1',
+  participantId = '16778240',
   rtmsStatus = [],
   startRTMS = async () => ({ message: 'Success' }),
   runningContext = 'inMeeting',
@@ -51,7 +54,7 @@ export function createZoomSdk({
     getRunningContext: vi.fn(async () => ({ context: runningContext })),
     getUserContext: vi.fn(async () => {
       if (userContextFails) throw new Error('getUserContext is not available in this context');
-      return { status, role, screenName };
+      return { status, role, screenName, participantUUID, participantId };
     }),
     getMeetingUUID: vi.fn(async () => ({ meetingUUID })),
     getMeetingContext: vi.fn(async () => ({ meetingTopic: 'Planning', meetingID: '123456' })),
