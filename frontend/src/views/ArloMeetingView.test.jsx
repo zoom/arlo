@@ -1,6 +1,7 @@
 import { screen, waitFor, act, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
+import { INDICATOR_STYLES } from '../lib/dynamicIndicator';
 import {
   createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage,
   arloPath, ARLO_ABSENT,
@@ -993,7 +994,7 @@ describe('Zoom\'s indicator while Arlo is paused', () => {
     await send(serverMessage.status('rtms_paused'));
     await send(serverMessage.arloState({ ...OWNER, paused: true, myStreamPaused: true }));
     await waitFor(() => expect(lastText(sdk)).toBe('Arlo is paused'));
-    expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({ text: 'Arlo is paused' });
+    expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({ text: 'Arlo is paused', ...INDICATOR_STYLES.paused });
     expect(sdk.removeDynamicIndicator).not.toHaveBeenCalled();
 
     await send(serverMessage.status('rtms_resumed'));

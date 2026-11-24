@@ -19,7 +19,7 @@ import {
 } from '../lib/rtmsMachine';
 import { addSegment, mergeHistory } from '../lib/transcript';
 import { readMeetingMessage } from '../lib/meetingMessage';
-import { indicatorText } from '../lib/dynamicIndicator';
+import { indicatorTimer } from '../lib/indicatorTimer';
 import { useDynamicIndicator } from '../hooks/useDynamicIndicator';
 
 const MeetingContext = createContext();
@@ -130,6 +130,16 @@ export function MeetingProvider({ children }) {
   const [recordRetained, setRecordRetained] = useState(false);
   // Arlo is handling a request, as the server told this owner's panel (ArloContext reports it)
   const [arloThinking, setArloThinking] = useState(false);
+  // This owner has a sheet of Arlo's open: something waits for their OK (ArloContext reports it)
+  const [arloWaiting, setArloWaiting] = useState(false);
+  // The newest action Arlo finished while this panel was open: { id, tool } and
+  // nothing else of it (ArloContext reports it). For Zoom's indicator
+  const [arloDid, setArloDid] = useState(null);
+  const reportArloDid = useCallback((action) => {
+    const id = action?.id;
+    const tool = action?.tool;
+    if (typeof id === 'string' && typeof tool === 'string') setArloDid({ id, tool });
+  }, []);
 
   const meetingStartTimeRef = useRef(null);
   const autoStartAttemptedRef = useRef(false);
@@ -824,7 +834,7 @@ export function MeetingProvider({ children }) {
   useDynamicIndicator({
     zoomSdk,
     supported: dynamicIndicatorSupported,
-    text: indicatorText({
+    inputs: {
       phase: rtms.phase,
       pausedOnServer: ownPauseOnServer === true,
       startedHere: streamStartedHere,
@@ -832,7 +842,12 @@ export function MeetingProvider({ children }) {
       voiceEnabled: voiceState.enabled,
       voiceProcessing: voiceState.processing,
       thinking: arloThinking,
-    }),
+      waiting: arloWaiting,
+    },
+    did: arloDid,
+    // A countdown this panel started on the indicator ("set a five minute timer")
+    timer: indicatorTimer,
+    meetingKey: meetingId && !meetingEnded ? meetingId : null,
   });
   // Why the indicator is or is not shown, on every change (status only, no content)
   useEffect(() => {
@@ -1234,6 +1249,8 @@ export function MeetingProvider({ children }) {
     participantEvents: shownParticipantEvents,
     setRecordRetained,
     setArloThinking,
+    setArloWaiting,
+    reportArloDid,
     meetingAccess,
     verifyMeetingAccess,
     startRTMS,
@@ -1248,7 +1265,7 @@ export function MeetingProvider({ children }) {
     setWs,
     setTitleUserRenamed,
     reportVoiceState,
-  }), [reportVoiceState, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, verifiedMeetingId, startAskedHere, lastMeetingId, switchingMeeting, leftMeeting, shownMeetingEnded, viewers, shownSegments, shownParticipantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
+  }), [reportVoiceState, reportArloDid, rtmsActive, rtmsPaused, rtmsLoading, rtms.phase, rtms.error, rtms.waitingLong, rtmsRequestExpiresAt, ws, meetingId, verifiedMeetingId, startAskedHere, lastMeetingId, switchingMeeting, leftMeeting, shownMeetingEnded, viewers, shownSegments, shownParticipantEvents, meetingAccess, verifyMeetingAccess, startRTMS, stopRTMS, pauseRTMS, resumeRTMS, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError, connectWebSocket, setWs, setTitleUserRenamed]);
 
   return (
     <MeetingContext.Provider value={contextValue}>

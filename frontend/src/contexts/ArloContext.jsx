@@ -212,7 +212,7 @@ const arloUrl = (meetingId, name) => `/api/meetings/by-zoom-id/${encodeURICompon
 export function ArloProvider({ children }) {
   const {
     ws, meetingId, verifiedMeetingId, meetingAccess, meetingEnded, leftMeeting, lastMeetingId, switchingMeeting,
-    setRecordRetained, setArloThinking,
+    setRecordRetained, setArloThinking, setArloWaiting, reportArloDid,
   } = useMeeting();
   // The id for everything asked of the server and accepted from it; none before
   // access is verified or out of the meeting
@@ -577,9 +577,16 @@ export function ArloProvider({ children }) {
         case 'arlo.action':
           runAction(data);
           break;
-        case 'arlo.did':
+        case 'arlo.did': {
           addActions([data.action]);
+          // Done just now, while this panel is open: Zoom's indicator says so
+          // for a moment. Only the tool goes on: never the label or a name
+          const told = parseAction(data.action);
+          if (told !== null && told.status === 'done' && stateRef.current.role === 'owner' && signedInRef.current && !endedRef.current) {
+            reportArloDid({ id: told.id, tool: told.tool });
+          }
           break;
+        }
         case 'arlo.thinking':
           // For owners; anything but `true` is "off"
           if (data.on === true && stateRef.current.role === 'owner' && signedInRef.current && !endedRef.current) {
@@ -597,7 +604,7 @@ export function ArloProvider({ children }) {
       ws.removeEventListener('message', onMessage);
       setAwaitingState(false);
     };
-  }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval, runAction, addActions]);
+  }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval, runAction, addActions, reportArloDid]);
 
   // What Arlo did so far, once the server lets this panel ask and its state is
   // known. Again when the role changes (an owner gets their private ones),
@@ -947,6 +954,11 @@ export function ArloProvider({ children }) {
     () => (switchingMeeting || role !== 'owner' || meetingOver ? [] : approvals),
     [switchingMeeting, role, meetingOver, approvals],
   );
+  // A sheet of Arlo's is open on this owner's panel: Zoom's indicator says Arlo waits
+  const waitingForOk = shownApprovals.some((one) => one.kind === 'agent_action');
+  useEffect(() => {
+    setArloWaiting(waitingForOk);
+  }, [waitingForOk, setArloWaiting]);
   const shownNotesRequest = switchingMeeting ? null : notesRequest;
   // The meeting whose notes are still on screen after it is over, for the way
   // back to them. For a signed-in person: the way back is a signed-in route.

@@ -1,6 +1,7 @@
 import { screen, waitFor, act, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
+import { INDICATOR_STYLES, INDICATOR_STRINGS } from '../lib/dynamicIndicator';
 import {
   createZoomSdk, FakeWebSocket, json, mockFetch, renderInMeeting, resetHarness, serverMessage, serverMessagesFor,
   arloPath, arloAction, ARLO_ABSENT, pastSheetGuard,
@@ -757,6 +758,56 @@ describe('Arlo is thinking', () => {
       await send(serverMessage.thinking(true));
       await waitFor(() => expect(statusLine()).toHaveTextContent(THINKING));
       expect(lastIndicator(sdk)).toBe('Arlo is paused');
+    });
+
+    test('a sheet of Arlo\'s is open: "Arlo is waiting for an OK", in bold; answered: transcribing again', async () => {
+      const { sdk } = await broughtInHere();
+      await send(serverMessage.approval(ADMIT));
+      await waitFor(() => expect(lastIndicator(sdk)).toBe('Arlo is waiting for an OK'));
+      expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({ text: 'Arlo is waiting for an OK', ...INDICATOR_STYLES.waiting });
+      // waiting is said before thinking
+      await send(serverMessage.thinking(true));
+      await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 350); }); });
+      expect(lastIndicator(sdk)).toBe('Arlo is waiting for an OK');
+      await send(serverMessage.thinking(false));
+      await send(serverMessage.approvalClosed(ID1, 'declined'));
+      await waitFor(() => expect(lastIndicator(sdk)).toBe('Arlo is transcribing'));
+    });
+
+    test('a request for the notes is not Arlo waiting', async () => {
+      const { sdk } = await broughtInHere();
+      await send(serverMessage.approval({ id: ID2, kind: 'share_notes', askedBy: 'Ben' }));
+      await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 350); }); });
+      expect(lastIndicator(sdk)).toBe('Arlo is transcribing');
+    });
+
+    test('an action that ends as done while the panel is open: a fixed sentence without the name, then transcribing again', async () => {
+      const { sdk } = await broughtInHere();
+      const admitted = arloAction({ id: ID1, at: 1000, label: 'Admitted James from the waiting room', askedBy: 'Ben', tool: 'admit_from_waiting_room' });
+      await send(serverMessage.did({ ...admitted, status: 'waiting_approval' }));
+      await send(serverMessage.did(admitted));
+      await waitFor(() => expect(lastIndicator(sdk)).toBe('Arlo let someone in'));
+      expect(sdk.setDynamicIndicator).toHaveBeenLastCalledWith({ text: 'Arlo let someone in', ...INDICATOR_STYLES.did });
+      // not done: nothing is said
+      await send(serverMessage.did(arloAction({ id: ID2, at: 2000, label: 'Asked to mute Danny', tool: 'mute_participant', status: 'failed' })));
+      await waitFor(() => expect(lastIndicator(sdk)).toBe('Arlo is transcribing'), { timeout: 6000 });
+      const texts = sdk.setDynamicIndicator.mock.calls.map((call) => call[0]?.text);
+      expect(texts.filter((text) => !INDICATOR_STRINGS.has(text))).toEqual([]);
+      expect(JSON.stringify(sdk.setDynamicIndicator.mock.calls)).not.toMatch(/James|Ben|Danny|Admitted|muted a/);
+    }, 10000);
+
+    test('what was done before the panel opened is not said again', async () => {
+      const before = arloAction({ id: ID1, at: 1000, label: 'Admitted James from the waiting room', askedBy: 'Ben', tool: 'admit_from_waiting_room' });
+      mockFetch({ [arloPath('actions')]: () => json({ actions: [before] }) });
+      const { sdk } = renderInMeeting();
+      await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+      await userEvent.click(await screen.findByRole('button', { name: 'Bring Arlo into this meeting' }));
+      await send(serverMessage.status('rtms_started'));
+      await send(serverMessage.arloState(OWNER));
+      await waitFor(() => expect(arloDid()).toBeInTheDocument());
+      await waitFor(() => expect(lastIndicator(sdk)).toBe('Arlo is transcribing'));
+      await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 400); }); });
+      expect(sdk.setDynamicIndicator.mock.calls.map((call) => call[0].text)).toEqual(['Arlo is transcribing']);
     });
 
     test('an owner\'s panel that did not start the stream sets no indicator', async () => {
