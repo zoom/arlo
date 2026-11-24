@@ -8,6 +8,7 @@
  *   POST /ask       { question }: a typed request to Arlo; a question is answered from the stored
  *                   transcript, private to the asker
  *   GET  /actions   what Arlo was asked and did in this meeting, as far as this person may see it
+ *   POST /actions/:actionId/result  { ok, code? }: an owner's panel reports an action Arlo sent it
  *   POST /notes-request          {}: a participant asks the owners to share the notes with everyone
  *   POST /approvals/:approvalId  { approve }: an owner's answer, owners only; approving a request for
  *                                the notes turns sharing on, approving something Arlo was asked lets it run
@@ -40,6 +41,7 @@ const { broadcastArloState, sendApprovalOpened } = require('../services/websocke
 const { shareNotes } = require('../services/notesSharing');
 const { getAgentRuntime } = require('../services/agent');
 const { REPLIES, couldNot } = require('../services/agent/texts');
+const { RESULT_CODES } = require('../services/agent/hands');
 const { userStore } = require('../lib/memoryStore');
 const { newestLines } = require('../lib/transcriptLines');
 const { showableName, cleanName } = require('../lib/displayName');
@@ -305,6 +307,34 @@ router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, a
 router.get('/actions', optionalAuth, requireMeetingAccess, (req, res) => {
   const meetingId = req.params.zoomMeetingId;
   return res.json({ actions: getAgentRuntime().agent.actionsFor(meetingId, req.user?.id ?? null) });
+});
+
+/**
+ * POST /actions/:actionId/result
+ * { ok: true } | { ok: false, code? } -> { received: true }. The panel Arlo
+ * sent an action to (`arlo.action` on its socket, services/agent/hands.js)
+ * reports whether it did it. `code`, only with `ok: false`, is one of
+ * not_found, several_match, no_notes, sdk_error, unsupported, not_allowed.
+ * Owners only, and only the owner the action was sent to: 404 for an action
+ * that is unknown, finished, or someone else's. Nothing of it is logged.
+ */
+router.post('/actions/:actionId/result', requireAuth, requireMeetingAccess, requireJson, (req, res) => {
+  const meetingId = req.params.zoomMeetingId;
+  const owners = getArloPresence().ownerUserIds(meetingId);
+  const notFound = () => res.status(404).json({ error: 'not_found', message: 'That action is not waiting for a result.' });
+  // A meeting nobody owns (its data is deleted) has no actions left
+  if (owners.length === 0) return notFound();
+  if (!owners.includes(req.user.id)) return forbidden(res, 'Only the person who brought Arlo in can report this.');
+  const id = req.params.actionId;
+  if (typeof id !== 'string' || !UUID.test(id)) return invalid(res, 'Not an action id');
+  const body = req.body;
+  const problem = 'Send { ok: true } or { ok: false, code? } and nothing else';
+  if (!(hasExactly(body, ['ok']) || hasExactly(body, ['ok', 'code'])) || typeof body.ok !== 'boolean') return invalid(res, problem);
+  const hasCode = Object.prototype.hasOwnProperty.call(body, 'code');
+  if (hasCode && (body.ok || typeof body.code !== 'string' || !RESULT_CODES.includes(body.code))) return invalid(res, problem);
+  const report = body.ok ? { ok: true } : { ok: false, ...(hasCode && { code: body.code }) };
+  if (!getAgentRuntime().hands.result(meetingId, id, req.user.id, report)) return notFound();
+  return res.json({ received: true });
 });
 
 /**

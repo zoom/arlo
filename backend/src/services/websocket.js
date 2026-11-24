@@ -108,6 +108,10 @@ function initWebSocketServer(server) {
     ws.allowedMeetingId = meetingId;
     ws.isAlive = true;
     ws.isGuest = isGuest;
+    // For Arlo's hands (services/agent/hands.js): what this panel said it can
+    // do with the Zoom Apps SDK, and since when it is connected
+    ws.connectedAt = Date.now();
+    ws.arloHands = null;
 
     // Add to user connections (only for authenticated users)
     if (userId) {
@@ -275,6 +279,18 @@ async function handleWebSocketMessage(ws, data) {
         ws.meetingId = null;
       }
       break;
+
+    case 'arlo.hands': {
+      // What this panel can do for Arlo with the Zoom Apps SDK:
+      // { zoomRole, can: [tool names] }. Kept on the socket, the newest one
+      // counts. A claim only: whether this user is an owner of the meeting is
+      // checked when an action is sent (services/agent/hands.js). Someone not
+      // signed in has no hands, and what is not an announcement is ignored.
+      // eslint-disable-next-line global-require
+      const announced = require('./agent/hands').readHandsAnnouncement(payload);
+      if (announced !== null && ws.userId && ws.allowedMeetingId) ws.arloHands = announced;
+      break;
+    }
 
     case 'ping':
       // Respond to ping
@@ -514,6 +530,37 @@ function sendArloDid(meetingId, action, { everyone = false, userIds = [] } = {})
       ? { type: 'arlo.did', data: { meetingId, action } }
       : null
   ));
+}
+
+/**
+ * The open panels that announced hands (`arlo.hands`) and are verified to be
+ * in this meeting, each with a way to send it a message. Never a guest's
+ * socket, and never one verified for another meeting, though it may be listed
+ * under this one. Whether its user is an owner is for the caller to check.
+ */
+function handsPanels(meetingId) {
+  const clients = connections.get(meetingId);
+  if (!clients) return [];
+  const panels = [];
+  clients.forEach((ws) => {
+    if (ws.readyState !== WebSocket.OPEN || ws.allowedMeetingId !== meetingId || !ws.userId || !ws.arloHands) return;
+    panels.push({
+      userId: ws.userId,
+      zoomRole: ws.arloHands.zoomRole,
+      can: [...ws.arloHands.can],
+      since: ws.connectedAt,
+      send(message) {
+        if (ws.readyState !== WebSocket.OPEN) return false;
+        try {
+          ws.send(JSON.stringify(message));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    });
+  });
+  return panels;
 }
 
 /**
@@ -770,6 +817,7 @@ module.exports = {
   sendApprovalClosed,
   sendArloThinking,
   sendArloDid,
+  handsPanels,
   hasNotesReaderPanel,
   currentStreamStatus,
   broadcastRtmsRequestStatus,

@@ -13,15 +13,10 @@
 const { createAgent } = require('./agent');
 const { createCommandDetector } = require('./commandDetector');
 const { createSpeakerMatch } = require('./speakerMatch');
+const { getHands } = require('./hands');
 const { listTools } = require('./tools');
 
 let runtime = null;
-
-// Until a panel can be reached (services/agent/hands.js), nothing that needs one is done
-const noHands = Object.freeze({
-  run: async () => ({ ok: false, code: 'no_hands' }),
-  forget: () => {},
-});
 
 function getAgentRuntime() {
   if (!runtime) {
@@ -38,7 +33,7 @@ function getAgentRuntime() {
     const openrouter = require('../openrouter');
     /* eslint-enable global-require */
     const store = getMeetingStore();
-    const hands = noHands;
+    const hands = getHands();
 
     const agent = createAgent({
       store,

@@ -79,7 +79,7 @@ const NOTES_FRESH_WITHIN_LINES = 10;
 const BUSY_LINE_EVERY_MS = 2 * 60 * 1000;
 const SUMMARY_QUESTION = 'Summarize the meeting so far in a few sentences: what was discussed, what was decided, and what is still open.';
 // What the hands can report (services/agent/hands.js); anything else is 'error'
-const HANDS_CODES = new Set(['no_hands', 'timeout', 'gone', 'not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed']);
+const HANDS_CODES = new Set(['no_hands', 'timeout', 'gone', 'busy', 'not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed']);
 // The name the store gives a line without a speaker name: nobody's name
 const NO_SPEAKER_NAME = 'Speaker';
 
