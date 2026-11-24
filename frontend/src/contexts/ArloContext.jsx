@@ -8,6 +8,7 @@ import { identityReport } from '../lib/arloIdentity';
 import { parseApproval, approvalTimeLeft } from '../lib/approvalKinds';
 import { handsFor, runArloAction } from '../lib/arloActions';
 import { parseAction, mergeActions } from '../lib/arloDid';
+import { readThinkingStep, readThinkingChannel } from '../lib/thinkingStep';
 import { useZoomSdk } from './ZoomSdkContext';
 
 /**
@@ -88,7 +89,12 @@ import { useZoomSdk } from './ZoomSdkContext';
  *   someone who holds notes (the meeting record is kept on the same rule).
  * - `thinking`: Arlo is handling a request (`arlo.thinking`, to owners). Off
  *   when the server says so, and by itself THINKING_MS after the last "on".
- *   MeetingContext is told, for Zoom's indicator.
+ *   MeetingContext is told, for Zoom's indicator. `thinkingStep`: what the
+ *   server says Arlo is doing right now ("Writing an answer"), or null;
+ *   `thinkingChannel`: 'voice' when the request was said in the meeting,
+ *   'panel' when typed, or null. Both read as untrusted input
+ *   (lib/thinkingStep.js), replaced by every "on" and gone with "off". Zoom's
+ *   indicator never gets the step: everyone in the meeting sees it.
  * - `ask` answers { answer } or { answer, action: { id, tool, status } } when
  *   the request was something to do: status 'done', 'failed' or
  *   'waiting_approval'. `id` is the action's, as in `actions`.
@@ -240,8 +246,9 @@ export function ArloProvider({ children }) {
 
   // What Arlo was asked and did in this meeting, oldest first
   const [actions, setActions] = useState(NO_ACTIONS);
-  // Arlo is handling a request: { since } counts the "on"s, so each restarts the wait
-  const [thinkingSince, setThinkingSince] = useState(null);
+  // Arlo is handling a request: null, or { step, channel } as the last "on"
+  // said. A new object per "on", so each restarts the wait
+  const [thinkingNow, setThinkingNow] = useState(null);
   // The socket the server has spoken on about this meeting: it is subscribed
   const [liveSocket, setLiveSocket] = useState(null);
 
@@ -286,7 +293,7 @@ export function ArloProvider({ children }) {
     setNotesAnswered(false);
     setAwaitingState(false);
     setActions(NO_ACTIONS);
-    setThinkingSince(null);
+    setThinkingNow(null);
     ranActionsRef.current = new Set();
     dropApprovals();
   }, [meetingId, dropApprovals]);
@@ -306,7 +313,7 @@ export function ArloProvider({ children }) {
     setNotesAnswered(false);
     setAwaitingState(false);
     setActions(NO_ACTIONS);
-    setThinkingSince(null);
+    setThinkingNow(null);
     dropApprovals();
   }, [identity, dropApprovals]);
 
@@ -548,9 +555,9 @@ export function ArloProvider({ children }) {
         case 'arlo.thinking':
           // For owners; anything but `true` is "off"
           if (data.on === true && stateRef.current.role === 'owner' && signedInRef.current && !endedRef.current) {
-            setThinkingSince(Date.now());
+            setThinkingNow({ step: readThinkingStep(data.step), channel: readThinkingChannel(data.channel) });
           } else if (data.on === false) {
-            setThinkingSince(null);
+            setThinkingNow(null);
           }
           break;
         default:
@@ -588,11 +595,11 @@ export function ArloProvider({ children }) {
   // "Thinking" without an "off" ends by itself; a socket that is replaced may
   // have missed the "off"
   useEffect(() => {
-    if (thinkingSince === null) return undefined;
-    const timer = setTimeout(() => setThinkingSince(null), THINKING_MS);
+    if (thinkingNow === null) return undefined;
+    const timer = setTimeout(() => setThinkingNow(null), THINKING_MS);
     return () => clearTimeout(timer);
-  }, [thinkingSince]);
-  useEffect(() => () => setThinkingSince(null), [ws]);
+  }, [thinkingNow]);
+  useEffect(() => () => setThinkingNow(null), [ws]);
 
   // What this panel can do for Arlo, said to the server on a subscribed socket:
   // by an owner, and again when the Zoom role or the abilities change. Someone
@@ -893,10 +900,12 @@ export function ArloProvider({ children }) {
   }, [meetingId, holdsNotes]);
 
   // Only an owner is told, and not about a meeting that is over
-  const thinking = thinkingSince !== null && role === 'owner' && isAuthenticated && !meetingOver && !switchingMeeting;
+  const thinking = thinkingNow !== null && role === 'owner' && isAuthenticated && !meetingOver && !switchingMeeting;
   useEffect(() => {
     setArloThinking(thinking);
   }, [thinking, setArloThinking]);
+  const thinkingStep = thinking ? thinkingNow.step : null;
+  const thinkingChannel = thinking ? thinkingNow.channel : null;
   const shownActions = switchingMeeting ? NO_ACTIONS : actions;
 
   // The render between Zoom reporting another meeting and the reset above
@@ -943,7 +952,9 @@ export function ArloProvider({ children }) {
     requestingNotes,
     actions: shownActions,
     thinking,
-  }), [shownActions, thinking, shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, ask, asking,
+    thinkingStep,
+    thinkingChannel,
+  }), [shownActions, thinking, thinkingStep, thinkingChannel, shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, ask, asking,
     shownApprovals, answerApproval, shownNotesRequest, requestNotes, requestingNotes]);
 
   return (

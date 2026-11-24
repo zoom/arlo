@@ -252,6 +252,8 @@ export default function ArloMeetingView({ isGuestMode = false }) {
           onShareNotesChange={saveShareNotes}
           actions={arlo.actions}
           thinking={arlo.thinking}
+          thinkingStep={arlo.thinkingStep}
+          thinkingChannel={arlo.thinkingChannel}
         />
       );
       break;

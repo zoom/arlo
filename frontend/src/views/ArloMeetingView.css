@@ -184,6 +184,90 @@
   background: var(--color-warning);
 }
 
+/*
+ * Arlo is handling a request (StatusLine: data-thinking, and data-heard when
+ * the request was said in the meeting). The dot breathes and sends out a soft
+ * ring, the label has a slow sheen; a spoken request starts with one wider
+ * ring: "heard you". Colors are the dot's own and the text tokens. Nothing
+ * moves for someone who asked for reduced motion: the dot gets a still ring.
+ */
+.arlo-dot {
+  position: relative;
+}
+
+.arlo-status[data-thinking] .arlo-dot {
+  box-shadow: 0 0 0 3px var(--border);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .arlo-status[data-thinking] .arlo-dot {
+    box-shadow: none;
+    animation: arlo-breathe 1.8s ease-in-out infinite;
+  }
+
+  .arlo-status[data-thinking] .arlo-dot::after,
+  .arlo-status[data-heard] .arlo-dot::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: inherit;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .arlo-status[data-thinking] .arlo-dot::after {
+    animation: arlo-ripple 1.8s ease-out infinite;
+  }
+
+  /* Once, when a spoken request is taken up */
+  .arlo-status[data-heard] .arlo-dot::before {
+    animation: arlo-heard 0.7s ease-out 1;
+  }
+}
+
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  @media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+    .arlo-status[data-thinking] .arlo-status-text {
+      background-image: linear-gradient(
+        90deg,
+        var(--foreground) 0%,
+        var(--foreground) 40%,
+        var(--muted-foreground) 50%,
+        var(--foreground) 60%,
+        var(--foreground) 100%
+      );
+      background-size: 250% 100%;
+      background-repeat: no-repeat;
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      animation: arlo-sheen 2.4s linear infinite;
+    }
+  }
+}
+
+@keyframes arlo-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.8); opacity: 0.7; }
+}
+
+@keyframes arlo-ripple {
+  0% { transform: scale(1); opacity: 0.4; }
+  70%, 100% { transform: scale(2.6); opacity: 0; }
+}
+
+@keyframes arlo-heard {
+  0% { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(4.5); opacity: 0; }
+}
+
+/* The band sits outside the text at both ends, so the loop has no jump */
+@keyframes arlo-sheen {
+  from { background-position: 100% 0; }
+  to { background-position: 0% 0; }
+}
+
 .arlo-remove-confirm {
   color: var(--destructive);
 }

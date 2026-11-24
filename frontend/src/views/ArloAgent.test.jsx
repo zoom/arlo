@@ -567,6 +567,84 @@ describe('Arlo is thinking', () => {
     expect(screen.queryByText(THINKING)).not.toBeInTheDocument();
   });
 
+  describe('what Arlo is doing', () => {
+    const region = () => screen.getByRole('region', { name: 'Arlo' });
+    const step = (text, channel = 'panel') => serverMessage.thinking(true, undefined, { step: text, channel });
+
+    test('the step is shown in place of "Arlo is thinking…", and each new one replaces the last', async () => {
+      await openAsOwner();
+      await send(step('Working out what was asked'));
+      await waitFor(() => expect(statusLine()).toHaveTextContent('Working out what was asked'));
+      expect(statusLine()).not.toHaveTextContent(THINKING);
+      expect(statusLine()).toHaveAttribute('aria-live', 'polite');
+      await send(step('Admitting James from the waiting room'));
+      await waitFor(() => expect(statusLine()).toHaveTextContent('Admitting James from the waiting room'));
+      expect(statusLine()).not.toHaveTextContent('Working out what was asked');
+      // the actions stay those of the status
+      expect(screen.getByRole('button', { name: 'Pause' })).toBeInTheDocument();
+    });
+
+    test('a step that is not a short sentence is ignored: the line falls back to "Arlo is thinking…"', async () => {
+      await openAsOwner();
+      for (const bad of [7, { text: 'x' }, ['Writing'], '', '   ', '\u0000\u0001', 'x'.repeat(121)]) {
+        await send(step('Writing an answer'));
+        await waitFor(() => expect(statusLine()).toHaveTextContent('Writing an answer'));
+        await send(step(bad));
+        await waitFor(() => expect(statusLine()).toHaveTextContent(THINKING));
+        expect(statusLine()).not.toHaveTextContent('Writing an answer');
+      }
+    });
+
+    test('a step is text: control characters are removed and markup is not rendered', async () => {
+      await openAsOwner();
+      await send(step('Admitting <img src=x onerror=alert(1)>\u0000 <b>J</b>'));
+      await waitFor(() => expect(statusLine()).toHaveTextContent('Admitting <img src=x onerror=alert(1)> <b>J</b>'));
+      expect(statusLine().querySelector('img, b')).toBeNull();
+    });
+
+    test('"off" clears the step: the next "on" without one says "Arlo is thinking…"', async () => {
+      await openAsOwner();
+      await send(step('Posting to the meeting chat'));
+      await waitFor(() => expect(statusLine()).toHaveTextContent('Posting to the meeting chat'));
+      await send(serverMessage.thinking(false, undefined, { step: 'Writing an answer', channel: 'voice' }));
+      await waitFor(() => expect(statusLine()).toHaveTextContent('Arlo is in the meeting'));
+      await send(serverMessage.thinking(true));
+      await waitFor(() => expect(statusLine()).toHaveTextContent(THINKING));
+      expect(statusLine()).not.toHaveTextContent('Posting to the meeting chat');
+    });
+
+    test('the status line is marked while Arlo thinks, and as heard for a spoken request only', async () => {
+      await openAsOwner();
+      expect(region()).not.toHaveAttribute('data-thinking');
+      expect(region()).not.toHaveAttribute('data-heard');
+      await send(step('Heard a request', 'voice'));
+      await waitFor(() => expect(region()).toHaveAttribute('data-thinking', 'true'));
+      expect(region()).toHaveAttribute('data-heard', 'true');
+      // the mark stays through the steps of one request: the pulse does not start again
+      await send(step('Working out what was asked', 'voice'));
+      await waitFor(() => expect(statusLine()).toHaveTextContent('Working out what was asked'));
+      expect(region()).toHaveAttribute('data-heard', 'true');
+      await send(serverMessage.thinking(false));
+      await waitFor(() => expect(region()).not.toHaveAttribute('data-thinking'));
+      expect(region()).not.toHaveAttribute('data-heard');
+
+      for (const channel of ['panel', 'radio', 7, undefined]) {
+        await send(step('Working out what was asked', channel));
+        await waitFor(() => expect(region()).toHaveAttribute('data-thinking', 'true'));
+        expect(region()).not.toHaveAttribute('data-heard');
+        await send(serverMessage.thinking(false));
+        await waitFor(() => expect(region()).not.toHaveAttribute('data-thinking'));
+      }
+    });
+
+    test('a participant\'s panel shows no step', async () => {
+      await openAsParticipant();
+      await send(step('Admitting James from the waiting room', 'voice'));
+      await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
+      expect(screen.queryByText(/Admitting James/)).not.toBeInTheDocument();
+    });
+  });
+
   describe('in Zoom\'s indicator', () => {
     /** This panel brought Arlo in, and the stream is confirmed: it owns the indicator. */
     async function broughtInHere() {
@@ -587,6 +665,15 @@ describe('Arlo is thinking', () => {
       await waitFor(() => expect(lastIndicator(sdk)).toBe(THINKING));
       await send(serverMessage.thinking(false));
       await waitFor(() => expect(lastIndicator(sdk)).toBe('Arlo is transcribing'));
+    });
+
+    test('the indicator, which everyone sees, never carries the step', async () => {
+      const { sdk } = await broughtInHere();
+      await send(serverMessage.thinking(true, undefined, { step: 'Admitting James from the waiting room', channel: 'voice' }));
+      await waitFor(() => expect(lastIndicator(sdk)).toBe(THINKING));
+      await waitFor(() => expect(statusLine()).toHaveTextContent('Admitting James from the waiting room'));
+      const texts = sdk.setDynamicIndicator.mock.calls.map((call) => String(call[0]?.text));
+      expect(texts.some((text) => /James|Admitting/.test(text))).toBe(false);
     });
 
     test('paused wins over thinking', async () => {

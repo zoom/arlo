@@ -237,11 +237,13 @@ test('thinking for a typed request goes on and off on the asker\'s own panel onl
   await ask(m, 'When do we ship?');
   await h.wait(100);
 
-  const onAndOff = [
-    { type: 'arlo.thinking', data: { meetingId: m.meetingId, on: true } },
+  // with "on": what Arlo is doing and how it was asked; "off" carries neither
+  const thinking = (channel, ...steps) => [
+    ...steps.map((step) => ({ type: 'arlo.thinking', data: { meetingId: m.meetingId, on: true, step, channel } })),
     { type: 'arlo.thinking', data: { meetingId: m.meetingId, on: false } },
   ];
-  assert.deepEqual(of(anaPanel, 'arlo.thinking'), onAndOff);
+  const typedQuestion = thinking('panel', 'Working out what was asked', 'Writing an answer');
+  assert.deepEqual(of(anaPanel, 'arlo.thinking'), typedQuestion);
   // the other owner is not told that she asked something in private
   for (const ws of [cyPanel, benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.thinking'), []);
 
@@ -256,14 +258,15 @@ test('thinking for a typed request goes on and off on the asker\'s own panel onl
   await call('PUT', m.meetingId, 'settings', { headers: m.owner, body: { whoCanAsk: 'anyone' } });
   assert.equal((await ask(m, 'When do we ship?', m.participant)).status, 200);
   await h.wait(100);
-  assert.deepEqual(of(anaPanel, 'arlo.thinking'), onAndOff);
+  assert.deepEqual(of(anaPanel, 'arlo.thinking'), typedQuestion);
   for (const ws of [cyPanel, benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.thinking'), []);
   // something said in the meeting is heard by everyone: both owners' panels show it
   pick = async () => ({ tool: 'share_notes', args: {} });
   await say(m.meetingId, 'Arlo, share the notes with everyone.');
   await h.wait(150);
-  assert.deepEqual(of(anaPanel, 'arlo.thinking').slice(2), onAndOff);
-  assert.deepEqual(of(cyPanel, 'arlo.thinking'), onAndOff);
+  const spoken = thinking('voice', 'Heard a request', 'Working out what was asked');
+  assert.deepEqual(of(anaPanel, 'arlo.thinking').slice(3), spoken);
+  assert.deepEqual(of(cyPanel, 'arlo.thinking'), spoken);
   for (const ws of [benPanel, guestPanel]) assert.deepEqual(of(ws, 'arlo.thinking'), []);
   closeAll(anaPanel, cyPanel, benPanel, guestPanel);
 });
@@ -501,4 +504,31 @@ test('a spoken request reaches a model only while an owner has a panel open in t
   await h.wait(150);
   assert.equal(chosen.length, 2);
   closeAll(benPanel, guestPanel, ownerPanel);
+});
+
+test('sendArloThinking sends a step and a channel only as what they are, and never with "off"', async () => {
+  const { sendArloThinking } = require('../src/services/websocket');
+  const m = await meetingWith('AG-THINKING-STEP==');
+  const ownerPanel = await panel(m.meetingId, m.owner);
+  await h.wait(50);
+  const owners = [m.ana.user.id];
+  const before = of(ownerPanel, 'arlo.thinking').length;
+  sendArloThinking(m.meetingId, owners, true, { step: 'Writing an answer', channel: 'voice' });
+  sendArloThinking(m.meetingId, owners, true, { step: 'x'.repeat(121), channel: 'radio' });
+  sendArloThinking(m.meetingId, owners, true, { step: 'Line one\nline two', channel: 'panel' });
+  sendArloThinking(m.meetingId, owners, true, { step: { toString: () => 'no' }, channel: ['voice'] });
+  sendArloThinking(m.meetingId, owners, true, null);
+  sendArloThinking(m.meetingId, owners, true);
+  sendArloThinking(m.meetingId, owners, false, { step: 'Writing an answer', channel: 'voice' });
+  await h.wait(100);
+  assert.deepEqual(of(ownerPanel, 'arlo.thinking').slice(before).map((msg) => msg.data), [
+    { meetingId: m.meetingId, on: true, step: 'Writing an answer', channel: 'voice' },
+    { meetingId: m.meetingId, on: true },
+    { meetingId: m.meetingId, on: true, channel: 'panel' },
+    { meetingId: m.meetingId, on: true },
+    { meetingId: m.meetingId, on: true },
+    { meetingId: m.meetingId, on: true },
+    { meetingId: m.meetingId, on: false },
+  ]);
+  closeAll(ownerPanel);
 });

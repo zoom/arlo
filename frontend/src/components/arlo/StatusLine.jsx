@@ -61,11 +61,18 @@ function arloStatus({ phase, present, paused, myStreamPaused, ownLive, canContro
  * person's own stream is. `myStreamLive`: the server's word on whether this
  * person's own stream runs; when it did not say (null), this panel's phase
  * decides. Pause, Resume and Remove are for a stream of one's own that runs.
- * `thinking`: Arlo is handling a request (ArloContext `thinking`): the label
- * says "Arlo is thinking…" until it is done.
+ * `thinking`: Arlo is handling a request (ArloContext `thinking`): until it
+ * is done the label says what Arlo is doing (`thinkingStep`, a sentence from
+ * the server, already read as untrusted input and rendered as text), or
+ * "Arlo is thinking…" when the server did not say. The section is marked
+ * `data-thinking` meanwhile, and `data-heard` when the request was said in
+ * the meeting (`thinkingChannel` 'voice'): the dot and the label move by
+ * those marks, in CSS only (views/ArloMeetingView.css), and stand still for
+ * someone who asked for reduced motion.
  */
 export default function StatusLine({
   present, paused, myStreamPaused = false, myStreamLive = null, canControl, thinking = false,
+  thinkingStep = null, thinkingChannel = null,
 }) {
   const {
     rtmsPhase, rtmsActive, rtmsPaused, rtmsLoading, rtmsError, rtmsWaitingLong,
@@ -83,6 +90,7 @@ export default function StatusLine({
   const inMeeting = IN_MEETING.has(status);
   // While Arlo handles a request the line says so; the actions stay those of the status
   const showThinking = thinking === true && CAN_THINK.has(status);
+  const thinkingLabel = typeof thinkingStep === 'string' && thinkingStep.length > 0 ? thinkingStep : THINKING;
   // Why a control failed or the stream ended, in this screen's words
   const { message } = getTransportView({
     phase: rtmsPhase, active: rtmsActive, paused: rtmsPaused, hasContent: true, error: rtmsError, guest: !canControl,
@@ -110,11 +118,17 @@ export default function StatusLine({
   };
 
   return (
-    <section className="arlo-status" data-status={status} aria-label="Arlo">
+    <section
+      className="arlo-status"
+      data-status={status}
+      data-thinking={showThinking ? 'true' : undefined}
+      data-heard={showThinking && thinkingChannel === 'voice' ? 'true' : undefined}
+      aria-label="Arlo"
+    >
       <div className="arlo-status-row">
         <div className="arlo-status-label" role="status" aria-live="polite">
           <span className="arlo-dot" aria-hidden="true" />
-          <span>{showThinking ? THINKING : LABELS[status]}</span>
+          <span className="arlo-status-text">{showThinking ? thinkingLabel : LABELS[status]}</span>
         </div>
         {canControl && (
           <div className="arlo-status-actions">

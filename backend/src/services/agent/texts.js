@@ -10,10 +10,16 @@
  * question or a button: text a model wrote that is to be posted is the
  * sheet's `body`, shown as what it is.
  *
+ * What a panel is told Arlo is doing right now (STEPS, toolStep) is from this
+ * file too, picked by where the run is; the one thing filled in is the name
+ * of someone to admit, cleaned and cut here.
+ *
  * Arlo posts no line of its own to the chat: not "I am busy", not "the host
  * declined". A line nobody approved is unapproved content; those outcomes are
  * in the record only.
  */
+
+const { cleanName } = require('../../lib/displayName');
 
 // Never part of text that is shown or posted: control characters, invisible
 // format characters (a direction override turns the text around it),
@@ -172,6 +178,43 @@ const REPLIES = Object.freeze({
   waitingApproval: 'I asked the person who brought Arlo in to approve that.',
 });
 
+/**
+ * What an owner's panel is told Arlo is doing right now (`step` of
+ * `arlo.thinking`). A fixed table: where the run is picks the sentence, never
+ * a model, and no request, answer or transcript text is in one.
+ */
+const MAX_STEP_CHARS = 120;
+const MAX_STEP_NAME_CHARS = 60;
+const STEPS = Object.freeze({
+  // A spoken request was detected; no model has been asked yet
+  heard: 'Heard a request',
+  // A model picks a tool
+  choosing: 'Working out what was asked',
+  answering: 'Writing an answer',
+  summarizing: 'Writing a summary',
+  posting: 'Posting to the meeting chat',
+  sharing: 'Sharing the notes with everyone',
+  admittingSomeone: 'Admitting someone from the waiting room',
+});
+const TOOL_STEPS = Object.freeze({
+  answer_from_meeting: () => STEPS.answering,
+  summarize_so_far: () => STEPS.summarizing,
+  post_to_chat: () => STEPS.posting,
+  share_notes: () => STEPS.sharing,
+  admit_from_waiting_room: (args) => {
+    // The name came with the request: shown only when it is a name (lib/displayName.js), and short
+    const name = cleanName(args !== null && typeof args === 'object' ? args.name : null, MAX_STEP_NAME_CHARS);
+    return name.length > 0 ? `Admitting ${name} from the waiting room` : STEPS.admittingSomeone;
+  },
+});
+
+/** The step while this tool runs, or null for a tool that has none (then the step before it stays). */
+function toolStep(toolName, args) {
+  if (typeof toolName !== 'string' || !Object.prototype.hasOwnProperty.call(TOOL_STEPS, toolName)) return null;
+  const step = TOOL_STEPS[toolName](args);
+  return step.length <= MAX_STEP_CHARS ? step : null;
+}
+
 // What is posted to the meeting chat is this, then the text an owner approved or typed
 const CHAT_PREFIX = 'Arlo: ';
 
@@ -190,4 +233,7 @@ module.exports = {
   MAX_CHAT_MESSAGE_CHARS,
   MAX_SHEET_REQUEST_CHARS,
   MAX_SHEET_NAME_CHARS,
+  STEPS,
+  toolStep,
+  MAX_STEP_CHARS,
 };

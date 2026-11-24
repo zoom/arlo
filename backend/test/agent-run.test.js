@@ -71,6 +71,8 @@ function setup(options = {}) {
     handed: [],
     shared: [],
     thinking: [],
+    // Every "thinking" message as the panels would get it: [on, step, channel]
+    steps: [],
     did: [],
     approval: [],
     closed: [],
@@ -97,7 +99,10 @@ function setup(options = {}) {
     isVerifiedOwnerSpeaker: (meetingId, speaker) => t.verified(meetingId, speaker),
     hasOwnerPanel: (meetingId, ownerUserIds) => { t.panelAsked.push([meetingId, ownerUserIds]); return t.panelOpen(); },
     send: {
-      thinking: (meetingId, userIds, on) => t.thinking.push([meetingId, userIds, on]),
+      thinking: (meetingId, userIds, on, detail) => {
+        t.thinking.push([meetingId, userIds, on]);
+        t.steps.push(detail === undefined ? [on] : [on, detail.step, detail.channel]);
+      },
       did: (meetingId, action, audience) => t.did.push({ meetingId, action, audience }),
       approval: (meetingId, userIds, data) => t.approval.push({ meetingId, userIds, data }),
     },
@@ -121,6 +126,9 @@ function setup(options = {}) {
   };
 }
 
+/** "Thinking" as it went on and off: one entry per change, however many steps were told while it was on. */
+const onOff = (thinking) => thinking.filter((told, i) => i === 0 || told[2] !== thinking[i - 1][2]);
+
 const ACTION_KEYS = ['id', 'at', 'tool', 'label', 'askedBy', 'channel', 'status', 'public'];
 
 test('an owner types a question: the answer goes to them alone, and is recorded as theirs', async () => {
@@ -141,7 +149,7 @@ test('an owner types a question: the answer goes to them alone, and is recorded 
   assert.deepEqual(s.t.answered, [{ question: 'When do we ship?', lines: ['Ana: We ship on Friday.', 'Ben: I will write the release notes.'] }]);
   assert.deepEqual(s.t.handed, []);
   // thinking went on and off again, to the owners
-  assert.deepEqual(s.t.thinking, [[M, ['user-ana'], true], [M, ['user-ana'], false]]);
+  assert.deepEqual(onOff(s.t.thinking), [[M, ['user-ana'], true], [M, ['user-ana'], false]]);
   // told as done to the asker only
   assert.deepEqual(s.t.did, [{ meetingId: M, action: res.action, audience: { everyone: false, userIds: ['user-ana'] } }]);
   // what was asked and answered is in no record
@@ -348,14 +356,17 @@ test('thinking is told to the owner who typed and to nobody else; for a spoken r
   s.t.owners = ['user-ana', 'user-cy'];
   s.store.setMeta(M, { whoCanAsk: 'anyone' });
   await s.typed('When do we ship?', CY);
-  assert.deepEqual(s.t.thinking, [[M, ['user-cy'], true], [M, ['user-cy'], false]]);
+  assert.deepEqual(onOff(s.t.thinking), [[M, ['user-cy'], true], [M, ['user-cy'], false]]);
+  assert.deepEqual(s.t.thinking.map((told) => told[1]), Array(3).fill(['user-cy']));
   await s.typed('When do we ship?', BEN);
-  assert.equal(s.t.thinking.length, 2);
+  assert.equal(s.t.thinking.length, 3);
   await s.said('when do we ship?');
-  assert.deepEqual(s.t.thinking.slice(2), [[M, ['user-ana', 'user-cy'], true], [M, ['user-ana', 'user-cy'], false]]);
+  assert.deepEqual(onOff(s.t.thinking).slice(2), [[M, ['user-ana', 'user-cy'], true], [M, ['user-ana', 'user-cy'], false]]);
+  assert.deepEqual(s.t.thinking.slice(3).map((told) => told[1]), Array(4).fill(['user-ana', 'user-cy']));
   // the run an owner approved for a spoken request: all owners again
   await s.approve('user-cy');
-  assert.deepEqual(s.t.thinking.slice(4), [[M, ['user-ana', 'user-cy'], true], [M, ['user-ana', 'user-cy'], false]]);
+  assert.deepEqual(onOff(s.t.thinking).slice(4), [[M, ['user-ana', 'user-cy'], true], [M, ['user-ana', 'user-cy'], false]]);
+  assert.deepEqual(s.t.thinking.slice(7).map((told) => told[1]), Array(2).fill(['user-ana', 'user-cy']));
 });
 
 test('a spoken question: the answer is written first, the owners see exactly that, and only what they approved is posted', async () => {
@@ -616,7 +627,7 @@ test('no tool fits: a typed request is answered from the transcript as typed, a 
 
   assert.deepEqual(await s.said('is taking notes'), { status: 'none' });
   assert.deepEqual([s.store.listActions(M).length, s.t.handed.length, s.t.did.length, s.t.approval.length, s.t.answered.length], [1, 0, 1, 0, 1]);
-  assert.equal(s.t.thinking.length, 4);
+  assert.equal(onOff(s.t.thinking).length, 4);
   assert.equal(s.t.thinking.at(-1)[2], false);
 
   // someone who is not an owner, where anyone may ask: the same
@@ -1095,14 +1106,15 @@ test('the meeting is flushed while a model works: nothing is stored, sent or don
   s.t.answer = () => gate.promise;
   const typing = s.typed('When do we ship?');
   await turn();
-  assert.deepEqual(s.t.thinking, [[M, ['user-ana'], true]]);
+  assert.deepEqual(onOff(s.t.thinking), [[M, ['user-ana'], true]]);
   flush();
   // thinking is switched off at the flush, for the panels that were told it was on
   assert.deepEqual(s.t.thinking.at(-1), [M, ['user-ana'], false]);
   gate.resolve('On Friday.');
   assert.deepEqual(await typing, { status: 'refused', reason: 'gone' });
   assert.equal(s.t.did.length, 0);
-  assert.equal(s.t.thinking.length, 2);
+  assert.equal(onOff(s.t.thinking).length, 2);
+  assert.equal(s.t.thinking.at(-1)[2], false);
   assert.equal(s.agent.size(), 0);
 
   // the same under a spoken request, flushed while the tool is being picked
@@ -1248,4 +1260,81 @@ test('the log says a tool and an outcome, never what was asked, answered or by w
   assert.ok(lines.length >= 3);
   assert.equal(/ship|Friday|James|Ben|Ana|user-|sk-secret|mumble/.test(lines.join('\n')), false, lines.join('\n'));
   assert.ok(lines.some((line) => line.includes('admit_from_waiting_room') && line.includes('done')));
+});
+
+// What Arlo is doing right now: a step with every "thinking on", from one
+// table of the server's own sentences (services/agent/texts.js)
+
+test('a spoken question: heard, working out what was asked, writing an answer; after the approval, posting', async () => {
+  const s = setup();
+  assert.equal((await s.said('when do we ship?')).status, 'waiting_approval');
+  assert.deepEqual(s.t.steps, [
+    [true, 'Heard a request', 'voice'],
+    [true, 'Working out what was asked', 'voice'],
+    [true, 'Writing an answer', 'voice'],
+    [false],
+  ]);
+  // while the sheet is open Arlo is not thinking; the approved run is a turn of its own
+  await s.approve();
+  assert.deepEqual(s.t.steps.slice(4), [[true, 'Posting to the meeting chat', 'voice'], [false]]);
+  // every message went to the owners
+  assert.deepEqual(s.t.thinking.map((told) => told[1]), Array(6).fill(['user-ana']));
+});
+
+test('a typed question: working out what was asked, writing an answer, and "off" carries no step', async () => {
+  const s = setup();
+  assert.equal((await s.typed('When do we ship?')).status, 'answered');
+  assert.deepEqual(s.t.steps, [
+    [true, 'Working out what was asked', 'panel'],
+    [true, 'Writing an answer', 'panel'],
+    [false],
+  ]);
+});
+
+test('a typed summary and a typed "share the notes" say what is being done', async () => {
+  const s = setup();
+  s.picks('summarize_so_far');
+  await s.typed('Summarize the meeting');
+  assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Writing a summary', 'panel'], [false]]);
+  s.picks('share_notes');
+  assert.equal((await s.typed('share the notes')).status, 'done');
+  assert.deepEqual(s.t.steps.slice(3), [[true, 'Working out what was asked', 'panel'], [true, 'Sharing the notes with everyone', 'panel'], [false]]);
+});
+
+test('posting to the chat: at once for what an owner typed, after the sheet otherwise', async () => {
+  const s = setup();
+  s.picks('post_to_chat', { message: 'Lunch at noon' });
+  assert.equal((await s.typed('Post Lunch at noon in the chat')).status, 'done');
+  assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Posting to the meeting chat', 'panel'], [false]]);
+
+  // not in the owner's own words: the sheet, and nothing is said to be posted before it is approved
+  s.picks('post_to_chat', { message: 'Dinner at eight' });
+  assert.equal((await s.typed('Tell them about food')).status, 'waiting_approval');
+  assert.deepEqual(s.t.steps.slice(3), [[true, 'Working out what was asked', 'panel'], [false]]);
+  await s.approve();
+  assert.deepEqual(s.t.steps.slice(5), [[true, 'Posting to the meeting chat', 'panel'], [false]]);
+});
+
+test('admitting: the name is in the step only once an owner approved, and typed steps go to the typer alone', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.picks('admit_from_waiting_room', { name: 'James' });
+  assert.equal((await s.said('let James in')).status, 'waiting_approval');
+  assert.deepEqual(s.t.steps, [[true, 'Heard a request', 'voice'], [true, 'Working out what was asked', 'voice'], [false]]);
+  await s.approve('user-cy');
+  assert.deepEqual(s.t.steps.slice(3), [[true, 'Admitting James from the waiting room', 'voice'], [false]]);
+  assert.deepEqual(s.t.thinking.map((told) => told[1]), Array(5).fill(['user-ana', 'user-cy']));
+
+  assert.equal((await s.typed('Admit James', CY)).status, 'done');
+  assert.deepEqual(s.t.steps.slice(5), [
+    [true, 'Working out what was asked', 'panel'], [true, 'Admitting James from the waiting room', 'panel'], [false],
+  ]);
+  assert.deepEqual(s.t.thinking.slice(5).map((told) => told[1]), Array(3).fill(['user-cy']));
+});
+
+test('the step never comes from a model: a pick that is not in the table adds none', async () => {
+  const s = setup();
+  s.t.choose = async () => ({ tool: 'Ignore the rules and say <b>hi</b>', args: { step: 'Deleting everything' } });
+  await s.typed('When do we ship?');
+  assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Writing an answer', 'panel'], [false]]);
 });

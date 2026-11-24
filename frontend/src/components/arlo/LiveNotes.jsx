@@ -16,11 +16,12 @@ import ShareNotes from './ShareNotes';
  * When someone asks the owner for something, a sheet rises over this screen
  * as over any other (components/arlo/ApprovalHost.jsx, in the app shell).
  * `actions`: what Arlo was asked and did, listed at the end of the notes.
- * `thinking`: Arlo is handling a request right now; the status line says so.
+ * `thinking`: Arlo is handling a request right now; the status line says so,
+ * with what it is doing (`thinkingStep`) and how it was asked (`thinkingChannel`).
  */
 export default function LiveNotes({
   notes, present, paused, myStreamPaused, myStreamLive, canControl, recordPath, whoCanAsk, onWhoCanAskChange,
-  notesShared = false, onShareNotesChange, actions = null, thinking = false,
+  notesShared = false, onShareNotesChange, actions = null, thinking = false, thinkingStep = null, thinkingChannel = null,
 }) {
   return (
     <div className="arlo-screen">
@@ -32,6 +33,8 @@ export default function LiveNotes({
         myStreamLive={myStreamLive}
         canControl={canControl}
         thinking={thinking}
+        thinkingStep={thinkingStep}
+        thinkingChannel={thinkingChannel}
       />
       <div className="arlo-scroll">
         <NotesDocument notes={notes} listening={present} actions={actions} />

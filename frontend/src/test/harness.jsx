@@ -258,8 +258,8 @@ export const serverMessagesFor = (ofMeeting) => ({
   action: ({ actionId, tool, args }, meetingId = ofMeeting) => ({
     type: 'arlo.action', data: { meetingId, actionId, tool, args },
   }),
-  // Arlo is handling a request (owners only), or stopped
-  thinking: (on, meetingId = ofMeeting) => ({ type: 'arlo.thinking', data: { meetingId, on } }),
+  // Arlo is handling a request (owners only), or stopped. `detail`: { step, channel } with "on"
+  thinking: (on, meetingId = ofMeeting, detail = {}) => ({ type: 'arlo.thinking', data: { meetingId, on, ...detail } }),
   // How something Arlo was asked stands: see arloAction below
   did: (action, meetingId = ofMeeting) => ({ type: 'arlo.did', data: { meetingId, action } }),
   timelineEvent: (event) => ({ type: 'participant.event', data: { meetingId: ofMeeting, event } }),

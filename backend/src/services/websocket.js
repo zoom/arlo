@@ -569,18 +569,32 @@ function sendApprovalClosed(meetingId, ownerUserIds, askedByUserId, data) {
   ));
 }
 
+const MAX_THINKING_STEP_CHARS = 120;
+const CONTROL_CHARACTER = /\p{Cc}/u;
+
 /**
  * Tell these people's panels, each verified to be in this meeting, that Arlo
  * is handling a request, or that it stopped. Who they are is the agent's
  * decision (services/agent/agent.js): the owners for a request spoken in the
  * meeting; for a typed one only the owner who typed it, so another owner does
- * not learn that someone asked something in private.
+ * not learn that someone asked something in private. `detail`: { step, channel }
+ * with "on". Nothing of it is logged.
  */
-function sendArloThinking(meetingId, userIds, on) {
+function sendArloThinking(meetingId, userIds, on, detail) {
   const told = userIdSet(userIds);
   if (told.size === 0) return 0;
+  const data = { meetingId, on: on === true };
+  // With "on" only: what Arlo is doing right now, a sentence the server wrote
+  // (services/agent/texts.js), and how it was asked. Anything else is left out.
+  if (data.on && detail !== null && typeof detail === 'object') {
+    const { step, channel } = detail;
+    if (typeof step === 'string' && step.length > 0 && step.length <= MAX_THINKING_STEP_CHARS && !CONTROL_CHARACTER.test(step)) {
+      data.step = step;
+    }
+    if (channel === 'voice' || channel === 'panel') data.channel = channel;
+  }
   return sendToMeetingSockets(meetingId, (ws) => (
-    isOwnerPanel(ws, meetingId, told) ? { type: 'arlo.thinking', data: { meetingId, on: on === true } } : null
+    isOwnerPanel(ws, meetingId, told) ? { type: 'arlo.thinking', data } : null
   ));
 }
 

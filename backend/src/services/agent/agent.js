@@ -80,6 +80,11 @@
  * it stopped: for a spoken request the owners' panels; for a typed one only
  * the owner who typed it (another owner must not learn that someone asked
  * something in private), and nobody when the asker is not an owner.
+ * With "thinking" goes what Arlo is doing right now (`step`, a sentence from
+ * the table in services/agent/texts.js, picked by where the run is and never
+ * written by a model) and how it was asked (`channel`); when the step
+ * changes they are told again. While a sheet waits for an owner Arlo is not
+ * thinking: the approved run is a turn of its own, and says what it does.
  *
  * At most 5 sheets of the agent are open per meeting (services/approvals.js);
  * a request that would need one more is dropped and recorded as failed, "Too
@@ -118,6 +123,7 @@ const { approvalMessageData } = require('../approvals');
 const {
   TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, chatText, cleanLine, noHands, TOO_MANY_WAITING_LABEL,
   MAX_CHAT_ANSWER_CHARS, MAX_CHAT_MESSAGE_CHARS, MAX_SHEET_REQUEST_CHARS, MAX_SHEET_NAME_CHARS,
+  STEPS, toolStep,
 } = require('./texts');
 
 const MAX_ID_CHARS = 256;
@@ -198,7 +204,8 @@ function createAgent({
   // (meetingId, ownerUserIds) -> whether one of these owners has a panel open
   // in the meeting right now. Without it nothing spoken is heard.
   hasOwnerPanel = () => false,
-  // What the panels are told. `thinking(meetingId, userIds, on)`,
+  // What the panels are told. `thinking(meetingId, userIds, on, { step, channel })`
+  // (the fourth only with `on` true; `step` is a sentence of texts.js or null),
   // `did(meetingId, action, { everyone, userIds })`, `approval(meetingId, userIds, data)`
   send = {},
   // Passed to the tool table: { webSearch } (tests)
@@ -220,6 +227,7 @@ function createAgent({
   //   typed: Map(user id -> times of that person's typed requests in the last window),
   //   aborts: the AbortControllers of model calls that are running,
   //   thinkingFor: the user ids told "thinking" is on, or null,
+  //   thinkingStep, thinkingChannel: what they were told last, while it is on,
   //   privateAskers: Map(action id -> user id) for private answers,
   //   idle: resolvers waiting for the queue to drain }
   const meetings = new Map();
@@ -261,15 +269,34 @@ function createAgent({
     return owners.includes(req.userId) ? [req.userId] : [];
   }
 
-  function setThinking(meetingId, state, on, req) {
+  /** `step`: what Arlo does first, a sentence of services/agent/texts.js or null. */
+  function setThinking(meetingId, state, on, req, step = null) {
     if (on) {
       const told = thinkingAudience(meetingId, req);
       state.thinkingFor = told;
-      if (told.length > 0) tellPanels('thinking', meetingId, told, true);
+      state.thinkingStep = step;
+      state.thinkingChannel = req.channel;
+      if (told.length > 0) tellPanels('thinking', meetingId, told, true, { step, channel: req.channel });
     } else if (state.thinkingFor) {
       const told = state.thinkingFor;
       state.thinkingFor = null;
+      state.thinkingStep = null;
+      state.thinkingChannel = null;
       if (told.length > 0) tellPanels('thinking', meetingId, told, false);
+    }
+  }
+
+  /**
+   * Arlo does something else now: the panels that were told it is thinking
+   * are told what. Nothing when thinking is off, the step is the one they
+   * have, or there is none (null). The step is never logged.
+   */
+  function setStep(meetingId, state, step) {
+    if (typeof step !== 'string' || meetings.get(meetingId) !== state) return;
+    if (!state.thinkingFor || state.thinkingStep === step) return;
+    state.thinkingStep = step;
+    if (state.thinkingFor.length > 0) {
+      tellPanels('thinking', meetingId, state.thinkingFor, true, { step, channel: state.thinkingChannel });
     }
   }
 
@@ -296,7 +323,16 @@ function createAgent({
       // A backstop only: a meeting normally leaves through forget()
       if (meetings.size >= MAX_MEETINGS) forget(meetings.keys().next().value);
       state = {
-        busy: false, queue: [], spoken: [], typed: new Map(), aborts: new Set(), thinkingFor: null, privateAskers: new Map(), idle: [],
+        busy: false,
+        queue: [],
+        spoken: [],
+        typed: new Map(),
+        aborts: new Set(),
+        thinkingFor: null,
+        thinkingStep: null,
+        thinkingChannel: null,
+        privateAskers: new Map(),
+        idle: [],
       };
       meetings.set(meetingId, state);
     }
@@ -450,9 +486,10 @@ function createAgent({
   /** Do what the tool does: { ok: true, text? } or { ok: false, code }. Never throws. */
   async function runTool(ctx, actorUserId) {
     const {
-      meetingId, tool, args, req, asker,
+      meetingId, state, tool, args, req, asker,
     } = ctx;
     try {
+      setStep(meetingId, state, toolStep(tool.name, args));
       switch (tool.name) {
         case 'answer_from_meeting':
           // From the transcript only, which everyone in the meeting can read
@@ -522,10 +559,13 @@ function createAgent({
     return ended(ctx, action, result, text);
   }
 
-  /** One turn in the meeting's queue with "thinking" on, and off again whatever happens. */
-  async function thinkingWhile(meetingId, state, req, work) {
+  /**
+   * One turn in the meeting's queue with "thinking" on, and off again whatever
+   * happens. `step`: what Arlo does first in this turn.
+   */
+  async function thinkingWhile(meetingId, state, req, step, work) {
     if (meetings.get(meetingId) !== state || !store.has(meetingId)) return GONE;
-    setThinking(meetingId, state, true, req);
+    setThinking(meetingId, state, true, req, step);
     try {
       return await work();
     } finally {
@@ -540,12 +580,14 @@ function createAgent({
    */
   function ownersAnswered(ctx, action, outcome, byUserId, body) {
     const {
-      meetingId, state, req, tool, alive,
+      meetingId, state, req, tool, args, alive,
     } = ctx;
     if (outcome === 'forgotten' || !alive()) return;
     if (outcome === 'approved') {
+      // What the approved run does: posts the text the sheet showed, or runs the tool
+      const step = body === null ? toolStep(tool.name, args) : STEPS.posting;
       // A turn of its own: other requests were handled while the owners decided
-      enqueue(meetingId, state, () => thinkingWhile(meetingId, state, req, async () => {
+      enqueue(meetingId, state, () => thinkingWhile(meetingId, state, req, step, async () => {
         store.updateAction(meetingId, action.id, { status: 'pending' });
         // The owner who pressed the button: it runs on their panel, as them
         const approver = isId(byUserId) ? byUserId : null;
@@ -677,7 +719,10 @@ function createAgent({
     // or the notes, so what people said cannot steer the pick
     const request = cleanLine(req.text, MAX_REQUEST_CHARS);
     try {
-      if (request !== null) picked = await limited((signal) => choose({ request, signal }), chooseLimitMs, state);
+      if (request !== null) {
+        setStep(meetingId, state, STEPS.choosing);
+        picked = await limited((signal) => choose({ request, signal }), chooseLimitMs, state);
+      }
     } catch (error) {
       pickFailed = true;
       // The code only, and only one that looks like a code: a message can quote the request
@@ -802,8 +847,10 @@ function createAgent({
       if (state.busy && state.queue.length >= queueLimit) return refused('busy');
       budget.times.push(now());
       // Someone waits at a panel for a typed request: it goes ahead of the spoken ones
+      // A spoken request was heard; a typed one goes straight to the model that picks a tool
+      const step = req.channel === 'voice' ? STEPS.heard : STEPS.choosing;
       return await enqueue(
-        meetingId, state, () => thinkingWhile(meetingId, state, req, () => work(meetingId, state, req)), { first: req.channel === 'panel' },
+        meetingId, state, () => thinkingWhile(meetingId, state, req, step, () => work(meetingId, state, req)), { first: req.channel === 'panel' },
       );
     } catch {
       return { status: 'failed', code: 'error', action: null };
