@@ -291,7 +291,9 @@ router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, a
       console.error(`Arlo ask failed (${typeof result.code === 'string' ? result.code : 'error'})`);
       if (!ANSWER_TOOLS.has(result.tool) || result.code === 'unsupported') {
         // No panel of the asker's can do it: said as what to do about it
-        const sentence = result.code === 'no_hands' ? noHands(result.tool) : couldNot(result.code);
+        // A failure with a sentence of its own (services/agent/texts.js) says that
+        const own = typeof result.reply === 'string' && result.reply.length > 0 ? result.reply : null;
+        const sentence = own ?? (result.code === 'no_hands' ? noHands(result.tool) : couldNot(result.code));
         return res.json({ answer: sentence, ...actionSummary(result.action) });
       }
       if (result.code === 'model_rate_limited') return res.status(429).json({ error: RATE_LIMITED_MESSAGE });

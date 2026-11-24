@@ -1338,3 +1338,348 @@ test('the step never comes from a model: a pick that is not in the table adds no
   await s.typed('When do we ship?');
   assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Writing an answer', 'panel'], [false]]);
 });
+
+// --- inviting everyone, sending a reaction, muting someone ---------------------------
+
+const INVITE_NOT_SENT = 'Shared the notes. Couldn\'t send the invitation.';
+const NO_HOST_PANEL = 'Arlo needs the host\'s panel for that.';
+const NO_OWN_PANEL = 'Open Arlo to let it do that.';
+const EMOJI = {
+  thumbs_up: '\u{1F44D}', clap: '\u{1F44F}', heart: '❤️', joy: '\u{1F602}', tada: '\u{1F389}', open_mouth: '\u{1F62E}',
+};
+const lastAction = (s) => s.store.listActions(M).at(-1);
+
+test('inviting everyone, typed by an owner: the notes are shared first, then that owner\'s panel sends the invitation', async () => {
+  const s = setup();
+  s.picks('invite_everyone');
+  const order = [];
+  s.t.share = () => { order.push('share'); return true; };
+  s.t.hands = async (call) => { order.push(`panel:${call.tool}`); return { ok: true }; };
+  const res = await s.typed('Invite everyone to see the notes');
+  assert.equal(res.status, 'done');
+  assert.equal(res.reply, 'Done: shared the notes and invited everyone to open Arlo.');
+  assert.deepEqual(order, ['share', 'panel:invite_everyone']);
+  assert.deepEqual(s.t.shared, [[M, 'user-ana']]);
+  assert.deepEqual(s.t.handed, [{ meetingId: M, tool: 'invite_everyone', args: {}, userId: 'user-ana' }]);
+  assert.deepEqual([res.action.label, res.action.status, res.action.public], ['Shared the notes and invited everyone to open Arlo', 'done', true]);
+  assert.deepEqual(s.t.did.at(-1).audience, { everyone: true, userIds: ['user-ana'] });
+  assert.deepEqual(s.t.approval, []);
+  assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Inviting everyone to open Arlo', 'panel'], [false]]);
+});
+
+test('inviting everyone: the panel fails and the notes stay shared; sharing fails and nothing is sent to a panel', async () => {
+  const s = setup();
+  s.picks('invite_everyone');
+  // whatever the panel reports, a panel that is not there included
+  for (const code of ['no_hands', 'sdk_error', 'unsupported', 'not_allowed', 'timeout', 'busy']) {
+    s.t.hands = async () => ({ ok: false, code });
+    const shared = s.t.shared.length;
+    const failed = await s.typed('invite everyone');
+    assert.deepEqual([failed.status, failed.code, failed.reply], ['failed', code, INVITE_NOT_SENT], code);
+    assert.deepEqual([failed.action.status, failed.action.label, failed.action.public], ['failed', INVITE_NOT_SENT, true], code);
+    // sharing was turned on, once, and nothing turned it off again
+    assert.deepEqual(s.t.shared.slice(shared), [[M, 'user-ana']], code);
+  }
+  for (const hands of [async () => null, async () => { throw new Error('socket'); }]) {
+    s.t.hands = hands;
+    const failed = await s.typed('invite everyone');
+    assert.deepEqual([failed.status, failed.code, failed.action.label], ['failed', 'error', INVITE_NOT_SENT]);
+  }
+
+  // sharing cannot be turned on: no invitation, and the record does not claim the notes were shared
+  s.t.hands = async () => ({ ok: true });
+  const handed = s.t.handed.length;
+  for (const share of [() => false, () => 'yes', () => { throw new Error('down'); }]) {
+    s.t.share = share;
+    const refused = await s.typed('invite everyone');
+    assert.equal(refused.status, 'failed');
+    assert.equal('reply' in refused, false);
+    assert.deepEqual([refused.action.status, refused.action.label], ['failed', 'Asked to share the notes and invite everyone to open Arlo']);
+  }
+  assert.equal(s.t.handed.length, handed);
+});
+
+test('inviting everyone while the notes are shared already: the invitation is sent all the same', async () => {
+  const s = setup();
+  s.store.setMeta(M, { notesShared: true });
+  s.picks('invite_everyone');
+  // the one code path for sharing says "it was so already" as true (services/agent/index.js)
+  const res = await s.typed('invite everyone');
+  assert.equal(res.status, 'done');
+  assert.deepEqual(s.t.handed, [{ meetingId: M, tool: 'invite_everyone', args: {}, userId: 'user-ana' }]);
+});
+
+test('inviting everyone, spoken or not in what was typed: the sheet first, then shared and invited as the owner who agreed', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  s.picks('invite_everyone');
+  const asks = [
+    () => s.said('invite everyone to open Arlo'),
+    () => s.said('invite everyone', ANA_SPEAKING),
+    () => s.typed('what did we decide?'), // an owner, but not their words
+    () => s.typed('invite everyone', BEN), // not an owner, anyone may ask
+  ];
+  for (const ask of asks) {
+    const before = [s.t.shared.length, s.t.handed.length];
+    const res = await ask();
+    assert.equal(res.status, 'waiting_approval');
+    assert.deepEqual([s.t.shared.length, s.t.handed.length], before);
+    assert.deepEqual([s.sheet().question, s.sheet().primaryLabel, 'body' in s.sheet()],
+      ['Share the notes and invite everyone to open Arlo?', 'Share and invite', false]);
+    assert.deepEqual(s.t.approval.at(-1).userIds, ['user-ana', 'user-cy']);
+    assert.equal(res.action.label, 'Asked to share the notes and invite everyone to open Arlo');
+    await s.approve('user-cy');
+    assert.deepEqual(s.t.shared.at(-1), [M, 'user-cy']);
+    assert.deepEqual(s.t.handed.at(-1), { meetingId: M, tool: 'invite_everyone', args: {}, userId: 'user-cy' });
+    assert.deepEqual([lastAction(s).status, lastAction(s).label], ['done', 'Shared the notes and invited everyone to open Arlo']);
+  }
+  // "not now": nothing is shared and nobody is invited
+  await s.said('invite everyone please');
+  const before = [s.t.shared.length, s.t.handed.length];
+  s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+  await s.agent.whenIdle(M);
+  assert.deepEqual([s.t.shared.length, s.t.handed.length], before);
+  assert.equal(lastAction(s).status, 'declined');
+  // approved, and the panel fails: shared, not invited
+  await s.said('invite everyone once more');
+  s.t.hands = async () => ({ ok: false, code: 'no_hands' });
+  await s.approve('user-ana');
+  assert.deepEqual(s.t.shared.at(-1), [M, 'user-ana']);
+  assert.deepEqual([lastAction(s).status, lastAction(s).label], ['failed', INVITE_NOT_SENT]);
+});
+
+test('a reaction, typed by an owner in their own words: sent from their panel, the emoji from the server\'s table', async () => {
+  const s = setup();
+  const typed = {
+    thumbs_up: 'send a thumbs up', clap: 'give that a round of applause', heart: 'send a heart', joy: 'laugh at that', tada: 'celebrate!', open_mouth: 'wow',
+  };
+  for (const [reaction, text] of Object.entries(typed)) {
+    s.picks('send_reaction', { reaction });
+    const res = await s.typed(text);
+    assert.equal(res.status, 'done', reaction);
+    assert.equal(res.reply, `Done: sent a ${EMOJI[reaction]} reaction.`);
+    assert.deepEqual(s.t.handed.at(-1), { meetingId: M, tool: 'send_reaction', args: { reaction }, userId: 'user-ana' });
+    assert.deepEqual([res.action.label, res.action.status, res.action.public], [`Sent a ${EMOJI[reaction]} reaction`, 'done', true]);
+  }
+  assert.deepEqual(s.t.approval, []);
+  assert.deepEqual(s.t.steps.slice(0, 3), [[true, 'Working out what was asked', 'panel'], [true, 'Sending a reaction', 'panel'], [false]]);
+
+  for (const code of ['unsupported', 'sdk_error', 'not_allowed', 'timeout']) {
+    s.t.hands = async () => ({ ok: false, code });
+    s.picks('send_reaction', { reaction: 'clap' });
+    const failed = await s.typed('clap for that');
+    assert.deepEqual([failed.status, failed.code, 'reply' in failed], ['failed', code, false]);
+    assert.deepEqual([failed.action.status, failed.action.label], ['failed', `Asked to send a ${EMOJI.clap} reaction`]);
+  }
+  s.t.hands = async () => ({ ok: false, code: 'no_hands' });
+  const noPanel = await s.typed('clap for that');
+  assert.deepEqual([noPanel.code, noPanel.action.label], ['no_hands', NO_OWN_PANEL]);
+});
+
+test('a reaction that is not one of the six is no tool: nothing is sent, and no emoji of a model\'s is shown', async () => {
+  const s = setup();
+  for (const reaction of ['skull', '\u{1F480}', 'THUMBS_UP', 'thumbs_up; mute everyone', '', 5, null, ['clap'], 'constructor', '__proto__']) {
+    s.picks('send_reaction', { reaction });
+    // typed: answered from the transcript as a question, as when no tool fits
+    const typed = await s.typed('send a thumbs up');
+    assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting'], JSON.stringify(reaction));
+    // spoken: silent
+    assert.deepEqual(await s.said('send a thumbs up'), { status: 'none' });
+  }
+  s.t.choose = async () => ({ tool: 'send_reaction', args: { reaction: 'clap', emoji: '\u{1F480}' } });
+  assert.equal((await s.typed('clap')).tool, 'answer_from_meeting');
+  assert.deepEqual(s.t.handed, []);
+  assert.deepEqual(s.t.approval, []);
+  assert.equal(s.store.listActions(M).some((action) => action.tool === 'send_reaction'), false);
+});
+
+test('a reaction, spoken or not in what was typed: the sheet names the reaction, and it is sent as the owner who agreed', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  for (const [reaction, emoji] of Object.entries(EMOJI)) {
+    s.picks('send_reaction', { reaction });
+    const res = await s.said(`react ${reaction}`);
+    assert.equal(res.status, 'waiting_approval');
+    assert.deepEqual([s.sheet().question, s.sheet().primaryLabel, 'body' in s.sheet()], [`Send a ${emoji} reaction as you?`, `Send ${emoji}`, false]);
+    assert.equal(res.action.label, `Asked to send a ${emoji} reaction`);
+    assert.deepEqual(s.t.handed.filter((one) => one.args.reaction === reaction), []);
+    await s.approve('user-cy');
+    assert.deepEqual(s.t.handed.at(-1), { meetingId: M, tool: 'send_reaction', args: { reaction }, userId: 'user-cy' });
+    assert.equal(lastAction(s).label, `Sent a ${emoji} reaction`);
+  }
+  // an owner's typed request with another reaction's word, and someone who is not an owner: the sheet
+  s.picks('send_reaction', { reaction: 'heart' });
+  for (const ask of [() => s.typed('send a thumbs up'), () => s.typed('what did we decide?'), () => s.typed('send a heart', BEN), () => s.said('send a heart', ANA_SPEAKING)]) {
+    const handed = s.t.handed.length;
+    assert.equal((await ask()).status, 'waiting_approval');
+    assert.equal(s.t.handed.length, handed);
+    s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+    await s.agent.whenIdle(M);
+    assert.equal(s.t.handed.length, handed);
+    assert.equal(lastAction(s).status, 'declined');
+  }
+});
+
+test('muting, typed by an owner with the name and the word: done on their host panel, and each failure says what happened', async () => {
+  const s = setup();
+  s.picks('mute_participant', { name: ' Danny Reyes ' });
+  const res = await s.typed('Mute Danny Reyes');
+  assert.equal(res.status, 'done');
+  assert.equal(res.reply, 'Done: muted Danny Reyes.');
+  assert.deepEqual(s.t.handed, [{ meetingId: M, tool: 'mute_participant', args: { name: 'Danny Reyes' }, userId: 'user-ana' }]);
+  assert.deepEqual([res.action.label, res.action.status, res.action.public], ['Muted Danny Reyes', 'done', true]);
+  assert.deepEqual(s.t.approval, []);
+  assert.deepEqual(s.t.steps, [[true, 'Working out what was asked', 'panel'], [true, 'Muting Danny Reyes', 'panel'], [false]]);
+
+  const REPLY = {
+    not_found: 'I couldn\'t find Danny Reyes in the meeting.',
+    several_match: 'Several people in the meeting match Danny Reyes. Ask again with the full name.',
+  };
+  for (const code of ['not_found', 'several_match', 'unsupported', 'sdk_error', 'not_allowed', 'timeout']) {
+    s.t.hands = async () => ({ ok: false, code });
+    const failed = await s.typed('Mute Danny Reyes');
+    assert.deepEqual([failed.status, failed.code, failed.reply], ['failed', code, REPLY[code]], code);
+    assert.deepEqual([failed.action.status, failed.action.label], ['failed', 'Asked to mute Danny Reyes']);
+  }
+  s.t.hands = async () => ({ ok: false, code: 'no_hands' });
+  const noHost = await s.typed('Mute Danny Reyes');
+  assert.deepEqual([noHost.status, noHost.code, noHost.action.label], ['failed', 'no_hands', NO_HOST_PANEL]);
+});
+
+test('"unmute Danny" never mutes without a sheet, whatever the model picks', async () => {
+  const s = setup();
+  s.picks('mute_participant', { name: 'Danny' });
+  for (const text of ['unmute Danny', 'Unmute Danny please', 'un-mute Danny', 'un mute Danny', 'please UNMUTE danny now']) {
+    const res = await s.typed(text);
+    assert.equal(res.status, 'waiting_approval', text);
+    // the owner is shown what would be done: a mute, in so many words
+    assert.deepEqual([s.sheet().question, s.sheet().primaryLabel], ['Mute Danny?', 'Mute']);
+    s.approvals.answer(M, s.sheet().id, { byUserId: 'user-ana', approve: false });
+    await s.agent.whenIdle(M);
+  }
+  // spoken: the sheet, as everything spoken
+  assert.equal((await s.said('unmute Danny')).status, 'waiting_approval');
+  assert.deepEqual(s.t.handed, []);
+  assert.equal(s.store.listActions(M).some((action) => action.status === 'done'), false);
+});
+
+test('muting, spoken or not in what was typed: the sheet goes only to owners with a host\'s panel, and with none there is no sheet', async () => {
+  const s = setup();
+  s.t.owners = ['user-ana', 'user-cy'];
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+  s.picks('mute_participant', { name: 'Danny' });
+  const asked = [];
+  s.t.canDo = (tool, meetingId) => { asked.push([tool, meetingId]); return ['user-cy', 'user-ben']; };
+  for (const ask of [
+    () => s.said('mute Danny'), () => s.said('mute Danny', ANA_SPEAKING), () => s.typed('who is talking?'), () => s.typed('mute Danny', BEN),
+  ]) {
+    const handed = s.t.handed.length;
+    const res = await ask();
+    assert.equal(res.status, 'waiting_approval');
+    assert.deepEqual(asked.at(-1), ['mute_participant', M]);
+    // Cy's panel is a host's; Ana's is not, and Ben is not an owner
+    assert.deepEqual(s.t.approval.at(-1).userIds, ['user-cy']);
+    assert.deepEqual(s.approvals.get(M, s.sheet().id).forUserIds, ['user-cy']);
+    assert.deepEqual([s.sheet().question, s.sheet().primaryLabel, 'body' in s.sheet()], ['Mute Danny?', 'Mute', false]);
+    assert.equal(res.action.label, 'Asked to mute Danny');
+    assert.equal(s.t.handed.length, handed);
+    await s.approve('user-cy');
+    assert.deepEqual(s.t.handed.at(-1), { meetingId: M, tool: 'mute_participant', args: { name: 'Danny' }, userId: 'user-cy' });
+    assert.deepEqual([lastAction(s).status, lastAction(s).label], ['done', 'Muted Danny']);
+  }
+  assert.deepEqual(s.t.steps.slice(0, 5), [
+    [true, 'Heard a request', 'voice'], [true, 'Working out what was asked', 'voice'], [false], [true, 'Muting Danny', 'voice'], [false],
+  ]);
+
+  // declined, and left unanswered: nobody is muted
+  const handed = s.t.handed.length;
+  await s.said('mute Danny again');
+  s.approvals.answer(M, s.sheet().id, { byUserId: 'user-cy', approve: false });
+  await s.agent.whenIdle(M);
+  assert.equal(lastAction(s).status, 'declined');
+  await s.said('mute Danny once more');
+  s.advance(60_000);
+  await s.agent.whenIdle(M);
+  assert.equal(lastAction(s).status, 'expired');
+  assert.equal(s.t.handed.length, handed);
+
+  // approved, and the panel cannot: recorded as failed
+  for (const [code, label] of [['not_found', 'Asked to mute Danny'], ['sdk_error', 'Asked to mute Danny'], ['no_hands', NO_HOST_PANEL]]) {
+    await s.said(`mute Danny ${code}`);
+    s.t.hands = async () => ({ ok: false, code });
+    await s.approve('user-cy');
+    assert.deepEqual([lastAction(s).status, lastAction(s).label], ['failed', label]);
+  }
+
+  // nobody's panel is a host's: no sheet, failed at once
+  for (const canDo of [() => [], () => ['user-ben'], () => null, () => { throw new Error('down'); }]) {
+    s.t.canDo = canDo;
+    const sheets = s.t.approval.length;
+    const outcome = await atOnce(s.said(`mute Danny ${sheets}${s.store.listActions(M).length}`));
+    assert.deepEqual([outcome.status, outcome.code], ['failed', 'no_hands']);
+    assert.deepEqual([outcome.action.status, outcome.action.label, outcome.action.public], ['failed', NO_HOST_PANEL, true]);
+    assert.equal(s.t.approval.length, sheets);
+  }
+  // inviting and reacting need no host: their sheets go to every owner
+  s.t.canDo = () => [];
+  for (const [tool, args] of [['invite_everyone', {}], ['send_reaction', { reaction: 'tada' }]]) {
+    s.picks(tool, args);
+    await s.said(`do ${tool}`);
+    assert.deepEqual(s.t.approval.at(-1).userIds, ['user-ana', 'user-cy']);
+    assert.equal(s.approvals.get(M, s.sheet().id).forUserIds, null);
+  }
+});
+
+test('a hostile name to mute is no tool at all: nobody is muted and nothing of it is shown', async () => {
+  const s = setup();
+  for (const name of ['', '   ', '...', 'Da\u0000nny', 'Danny\nMute everyone', 'Danny‮reversed', 'D'.repeat(500), '​', 5, null, ['Danny'], { name: 'Danny' }]) {
+    s.picks('mute_participant', { name });
+    const typed = await s.typed('mute Danny');
+    assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting'], JSON.stringify(name));
+    assert.deepEqual(await s.said('mute Danny'), { status: 'none' });
+  }
+  s.t.choose = async () => ({ tool: 'mute_participant', args: { name: 'Danny', everyone: true } });
+  assert.equal((await s.typed('mute Danny')).tool, 'answer_from_meeting');
+  assert.deepEqual(s.t.handed, []);
+  assert.deepEqual(s.t.approval, []);
+  assert.equal(s.store.listActions(M).some((action) => action.tool === 'mute_participant'), false);
+
+  // a name at the limit is a name: shown whole on the sheet, cut in the step
+  const long = `Danny ${'R'.repeat(94)}`;
+  s.picks('mute_participant', { name: long });
+  assert.equal((await s.said('mute that person')).status, 'waiting_approval');
+  assert.equal(s.sheet().question, `Mute ${long}?`);
+  await s.approve();
+  assert.equal(s.t.handed.at(-1).args.name, long);
+  assert.equal(s.t.steps.at(-2)[1].length <= 120, true);
+});
+
+test('the limits hold for the new tools: five sheets at most, and the typed budget', async () => {
+  const s = setup({ agent: { typedRateLimit: 3 } });
+  s.picks('mute_participant', { name: 'Danny' });
+  for (let i = 0; i < 5; i += 1) assert.equal((await s.said(`mute Danny ${i}`)).status, 'waiting_approval');
+  const sixth = await s.said('mute Danny 6');
+  assert.deepEqual([sixth.status, sixth.code, sixth.action.label], ['failed', 'busy', 'Too many requests are waiting']);
+  s.picks('send_reaction', { reaction: 'clap' });
+  for (let i = 0; i < 3; i += 1) assert.equal((await s.typed('clap')).status, 'done');
+  assert.deepEqual(await s.typed('clap'), { status: 'refused', reason: 'rate_limited' });
+});
+
+test('the log of the new tools says a tool and an outcome, never a name or a reaction', async () => {
+  const lines = [];
+  const s = setup({ agent: { log: { log: (line) => lines.push(line), warn: (line) => lines.push(line) } } });
+  s.picks('mute_participant', { name: 'Danny Reyes' });
+  await s.typed('mute Danny Reyes');
+  await s.said('mute Danny Reyes');
+  await s.approve();
+  s.picks('send_reaction', { reaction: 'tada' });
+  await s.typed('party');
+  s.picks('invite_everyone');
+  s.t.hands = async () => ({ ok: false, code: 'sdk_error' });
+  await s.typed('invite everyone');
+  assert.equal(lines.length > 0, true);
+  assert.equal(/danny|reyes|tada|party|\u{1F389}/iu.test(lines.join('\n')), false);
+  assert.equal(lines.includes('Arlo agent: invite_everyone failed (sdk_error) (panel)'), true);
+});

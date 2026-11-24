@@ -14,12 +14,19 @@
  * `changesMeeting`: whether people in the meeting see an effect.
  * `needsHost`: the panel that runs it must be a host's or co-host's.
  *
+ * An argument is text within a length, or (`enum`) one of a fixed list of
+ * names, which is how a reaction is given: a model never writes the emoji.
+ *
  * This file has no code that runs a tool.
  */
 const { showableName } = require('../../lib/displayName');
-const { NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS } = require('./texts');
+const {
+  NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS, REACTION_NAMES,
+} = require('./texts');
 
 const text = (description, maxLength) => ({ type: 'string', description, maxLength });
+// One of a fixed list of names: the model is told the list, and the server checks it again
+const oneOf = (description, names) => ({ type: 'string', description, enum: [...names] });
 const parameters = (properties = {}) => ({
   type: 'object', properties, required: Object.keys(properties), additionalProperties: false,
 });
@@ -74,6 +81,30 @@ const TABLE = deepFreeze([
     changesMeeting: true,
   },
   {
+    name: 'invite_everyone',
+    // Two things in this order: the server shares the notes (as share_notes
+    // does), then an owner's panel sends Zoom's invitation to open the app
+    description: 'Share Arlo\'s notes with everyone and send everyone in the meeting an invitation to open Arlo. Use only when asked to invite people to Arlo or to the notes. Not for only sharing the notes, not for inviting someone to the meeting, and not for inviting one person.',
+    parameters: parameters(),
+    runs: 'panel',
+    changesMeeting: true,
+  },
+  {
+    name: 'send_reaction',
+    description: 'Send one emoji reaction in the meeting. Use only when asked to react, or for a thumbs up, applause, a heart, a laugh, a celebration or a wow. Not for posting text in the chat, not for raising a hand, and not when someone only says they like something.',
+    parameters: parameters({ reaction: oneOf('Which reaction: thumbs_up, clap (applause), heart (love), joy (laughing), tada (celebration), open_mouth (wow, surprise).', REACTION_NAMES) }),
+    runs: 'panel',
+    changesMeeting: true,
+  },
+  {
+    name: 'mute_participant',
+    description: 'Mute one named person in the meeting. Use only when asked to mute and the asker names the person. It mutes only: it can never unmute anyone, so do not use it when asked to unmute. One person at a time: not for muting everyone.',
+    parameters: parameters({ name: text('The name of the person to mute, exactly as the asker said it.', 100) }),
+    runs: 'panel',
+    changesMeeting: true,
+    needsHost: true,
+  },
+  {
     name: 'web_search',
     description: 'Look something up on the web. Use only for a question about the world outside this meeting.',
     parameters: parameters({ query: text('What to search for.', 200) }),
@@ -117,9 +148,19 @@ function getTool(name, options) {
 // message may be given with line breaks; they become spaces (chatText).
 const NOT_IN_A_MESSAGE = new RegExp(NOT_IN_TEXT.source.replace('\\u200D', '\\u200D\\n\\r\\t'), 'u');
 
-/** One argument, trimmed, or null when it is not allowed. */
-function readArgument(key, value, maxLength) {
+// No name of a list is longer; anything longer is not looked at
+const MAX_ENUM_VALUE_CHARS = 40;
+
+/** One argument, trimmed, or null when it is not allowed. `property`: its entry in the tool's parameters. */
+function readArgument(key, value, property) {
   if (typeof value !== 'string') return null;
+  if (Array.isArray(property.enum)) {
+    // One of the listed names, as listed: anything else is refused, never mapped to one
+    if (value.length > MAX_ENUM_VALUE_CHARS) return null;
+    const name = value.trim();
+    return property.enum.includes(name) ? name : null;
+  }
+  const { maxLength } = property;
   // A name is held to the rule for names shown to a meeting: a letter or digit in it
   const cleaned = key === 'name' ? showableName(value) : value.normalize('NFC').trim();
   if (cleaned.length === 0 || cleaned.length > maxLength) return null;
@@ -141,7 +182,7 @@ function validateToolCall(name, args, options) {
   if (given.length !== known.length || !given.every((key) => known.includes(key))) return { ok: false };
   const clean = {};
   for (const key of known) {
-    const value = readArgument(key, args[key], tool.parameters.properties[key].maxLength);
+    const value = readArgument(key, args[key], tool.parameters.properties[key]);
     if (value === null) return { ok: false };
     clean[key] = value;
   }

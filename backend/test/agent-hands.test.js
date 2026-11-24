@@ -152,6 +152,32 @@ test('admitting from the waiting room needs a host\'s or co-host\'s panel, and t
   assert.equal(attendee.got.length, 3);
 });
 
+test('muting needs a host\'s or co-host\'s panel like admitting; inviting and reacting run on any panel of the owner', async () => {
+  const s = setup();
+  const MUTE = { tool: 'mute_participant', args: { name: 'Danny' }, userId: 'user-ana' };
+  const attendee = s.panel('user-ana', 'attendee', ['mute_participant', 'invite_everyone', 'send_reaction'], 1);
+  s.panel('user-cy', 'host', ['mute_participant'], 2);
+  // her panel is an attendee's, and another owner's host panel is never used
+  assert.deepEqual(await settled(s.hands.run(M, MUTE)), { ok: false, code: 'no_hands' });
+  assert.deepEqual(s.hands.whoCan(M, 'mute_participant'), ['user-cy']);
+  assert.deepEqual(s.hands.whoCan(M, 'invite_everyone'), ['user-ana']);
+  assert.deepEqual(s.hands.whoCan(M, 'send_reaction'), ['user-ana']);
+
+  for (const call of [{ tool: 'invite_everyone', args: {} }, { tool: 'send_reaction', args: { reaction: 'clap' } }]) {
+    const running = s.hands.run(M, { ...call, userId: 'user-ana' });
+    const sent = attendee.got.at(-1);
+    assert.deepEqual([sent.type, sent.data.tool, sent.data.args], ['arlo.action', call.tool, call.args]);
+    assert.equal(s.hands.result(M, sent.data.actionId, 'user-ana', { ok: true }), true);
+    assert.deepEqual(await running, { ok: true });
+  }
+
+  const coHost = s.panel('user-ana', 'coHost', ['mute_participant'], 3);
+  const muting = s.hands.run(M, MUTE);
+  assert.deepEqual([coHost.got.at(-1).data.tool, coHost.got.at(-1).data.args], ['mute_participant', { name: 'Danny' }]);
+  assert.equal(s.hands.result(M, coHost.got.at(-1).data.actionId, 'user-ana', { ok: false, code: 'not_found' }), true);
+  assert.deepEqual(await muting, { ok: false, code: 'not_found' });
+});
+
 test('who can: the owners with a panel open that may run the tool', () => {
   const s = setup();
   s.panel('user-ana', 'attendee', ['post_to_chat', 'admit_from_waiting_room'], 1);
@@ -387,6 +413,11 @@ test('what a panel announces: a Zoom role and the panel tools it can run, nothin
   }
   // listed twice is listed once
   assert.deepEqual(read({ zoomRole: 'host', can: ['post_to_chat', 'post_to_chat'] }).can, ['post_to_chat']);
+  // every tool of the panel can be announced, all of them at once too
+  const all = ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant'];
+  assert.deepEqual(read({ zoomRole: 'host', can: all }), { zoomRole: 'host', can: all });
+  for (const name of all) assert.deepEqual(read({ zoomRole: 'attendee', can: [name] }), { zoomRole: 'attendee', can: [name] });
+  assert.deepEqual(read({ zoomRole: 'host', can: [...all, ...all] }).can, all);
   for (const bad of [
     null, undefined, 'host', [], ['host'],
     { zoomRole: 'host' }, { can: ['post_to_chat'] }, { zoomRole: 'host', can: 'post_to_chat' },
@@ -868,3 +899,114 @@ test('forgetting a meeting through the runtime ends what its hands and its detec
   closeAll(ownerPanel);
 });
 
+
+// --- inviting everyone, a reaction, muting: through the running server -----------
+
+const ALL_HANDS = { zoomRole: 'host', can: ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant'] };
+const state = (m, headers = m.owner) => call('GET', m.meetingId, 'state', { headers });
+
+test('"invite everyone": the notes are shared the one way they ever are, then the owner\'s panel is sent the invitation', async () => {
+  const m = await meetingWith('AH-INVITE==');
+  const ownerPanel = await panel(m.meetingId, m.owner, ALL_HANDS);
+  const benPanel = await panel(m.meetingId, m.participant, ALL_HANDS);
+  pick = async () => ({ tool: 'invite_everyone', args: {} });
+  assert.equal((await state(m)).body.notesShared, false);
+
+  const asking = ask(m, 'Invite everyone to see the notes');
+  const sent = await actionSent(ownerPanel);
+  assert.deepEqual(sent, { meetingId: m.meetingId, actionId: sent.actionId, tool: 'invite_everyone', args: {} });
+  // by the time the panel is asked to invite, sharing is on, and everyone's panel was told
+  assert.equal((await state(m, m.participant)).body.notesShared, true);
+  assert.equal(of(benPanel, 'arlo.state').at(-1).data.notesShared, true);
+  assert.deepEqual(of(benPanel, 'arlo.action'), []);
+
+  assert.equal((await report(m, sent.actionId, { ok: true })).status, 200);
+  const done = await asking;
+  assert.deepEqual(done.body, {
+    answer: 'Done: shared the notes and invited everyone to open Arlo.',
+    action: { id: done.body.action.id, tool: 'invite_everyone', status: 'done', label: 'Shared the notes and invited everyone to open Arlo' },
+  });
+
+  // shared already: only the invitation. The panel fails: sharing stays on, and the answer says both halves
+  const again = ask(m, 'invite everyone again');
+  const second = await actionSent(ownerPanel, 2);
+  assert.equal(second.tool, 'invite_everyone');
+  assert.equal((await report(m, second.actionId, { ok: false, code: 'unsupported' })).status, 200);
+  const failed = await again;
+  const notSent = 'Shared the notes. Couldn\'t send the invitation.';
+  assert.deepEqual(failed.body, { answer: notSent, action: { id: failed.body.action.id, tool: 'invite_everyone', status: 'failed', label: notSent } });
+  assert.equal((await state(m)).body.notesShared, true);
+  closeAll(ownerPanel, benPanel);
+});
+
+test('"invite everyone" with no panel that can: the notes are shared, and the answer says the invitation was not sent', async () => {
+  const m = await meetingWith('AH-INVITE-NOPANEL==');
+  // a panel that did not announce inviting (an older panel)
+  const ownerPanel = await panel(m.meetingId, m.owner, HOST);
+  pick = async () => ({ tool: 'invite_everyone', args: {} });
+  const res = await ask(m, 'invite everyone');
+  const notSent = 'Shared the notes. Couldn\'t send the invitation.';
+  assert.deepEqual([res.body.answer, res.body.action.status, res.body.action.label], [notSent, 'failed', notSent]);
+  assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
+  assert.equal((await state(m)).body.notesShared, true);
+  closeAll(ownerPanel);
+});
+
+test('a reaction and a mute through the panel: the arguments the panel gets, and what the asker is told when it fails', async () => {
+  const m = await meetingWith('AH-REACT-MUTE==');
+  const ownerPanel = await panel(m.meetingId, m.owner, ALL_HANDS);
+
+  pick = async () => ({ tool: 'send_reaction', args: { reaction: 'clap' } });
+  const clapping = ask(m, 'give that a round of applause');
+  const clap = await actionSent(ownerPanel, 1);
+  assert.deepEqual([clap.tool, clap.args], ['send_reaction', { reaction: 'clap' }]);
+  await report(m, clap.actionId, { ok: true });
+  const clapped = (await clapping).body;
+  assert.deepEqual([clapped.answer, clapped.action.label], ['Done: sent a \u{1F44F} reaction.', 'Sent a \u{1F44F} reaction']);
+
+  pick = async () => ({ tool: 'mute_participant', args: { name: 'Danny' } });
+  const cases = [
+    ['not_found', 'I couldn\'t find Danny in the meeting.'],
+    ['several_match', 'Several people in the meeting match Danny. Ask again with the full name.'],
+    ['unsupported', 'I couldn\'t do that: this version of Zoom or Arlo cannot do that.'],
+    ['sdk_error', 'I couldn\'t do that: Zoom did not do it.'],
+    ['not_allowed', 'I couldn\'t do that: that is not allowed here.'],
+  ];
+  for (let i = 0; i < cases.length; i += 1) {
+    const [code, sentence] = cases[i];
+    const asking = ask(m, 'Mute Danny');
+    const sent = await actionSent(ownerPanel, i + 2);
+    assert.deepEqual([sent.tool, sent.args], ['mute_participant', { name: 'Danny' }]);
+    assert.equal((await report(m, sent.actionId, { ok: false, code })).status, 200);
+    const { body } = await asking;
+    assert.deepEqual(body, { answer: sentence, action: { id: body.action.id, tool: 'mute_participant', status: 'failed', label: 'Asked to mute Danny' } });
+  }
+  const muting = ask(m, 'Mute Danny');
+  const sent = await actionSent(ownerPanel, cases.length + 2);
+  await report(m, sent.actionId, { ok: true });
+  assert.deepEqual((await muting).body.answer, 'Done: muted Danny.');
+
+  // "unmute Danny": the owner gets the sheet, and nothing is sent to the panel
+  const before = of(ownerPanel, 'arlo.action').length;
+  const unmute = await ask(m, 'unmute Danny');
+  assert.equal(unmute.body.action.status, 'waiting_approval');
+  await h.wait(50);
+  assert.equal(of(ownerPanel, 'arlo.action').length, before);
+  const sheet = of(ownerPanel, 'arlo.approval').at(-1).data;
+  assert.deepEqual([sheet.question, sheet.primaryLabel], ['Mute Danny?', 'Mute']);
+  closeAll(ownerPanel);
+});
+
+test('muting needs a host\'s panel: an owner who is an attendee is told so, and a reaction needs their own panel', async () => {
+  const m = await meetingWith('AH-MUTE-HOST==');
+  const ownerPanel = await panel(m.meetingId, m.owner, { ...ALL_HANDS, zoomRole: 'attendee' });
+  pick = async () => ({ tool: 'mute_participant', args: { name: 'Danny' } });
+  const res = await ask(m, 'mute Danny');
+  assert.deepEqual([res.body.answer, res.body.action.label], [NO_HOST_PANEL, NO_HOST_PANEL]);
+  assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
+  closeAll(ownerPanel);
+  await h.wait(50);
+  pick = async () => ({ tool: 'send_reaction', args: { reaction: 'heart' } });
+  const none = await ask(m, 'send a heart');
+  assert.deepEqual([none.body.answer, none.body.action.label], ['Open Arlo to let it do that.', 'Open Arlo to let it do that.']);
+});

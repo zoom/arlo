@@ -1,7 +1,8 @@
 /**
  * The hands: what Arlo can only do through the Zoom Apps SDK (post to the
- * meeting chat, admit someone from the waiting room) is sent to an owner's
- * open panel as an action; the panel runs it and reports the result.
+ * meeting chat, admit someone from the waiting room, invite everyone to open
+ * the app, send a reaction, mute someone) is sent to an owner's open panel as
+ * an action; the panel runs it and reports the result.
  *
  * WHOSE PANEL. An action runs only on a panel of the owner who typed the
  * request or who pressed the approval: run() is given that user, and no other
@@ -17,8 +18,9 @@
  * run(meetingId, { tool, args, userId }) picks one panel:
  *   - its user is `userId`, who is an owner of the meeting now, and it listed
  *     the tool;
- *   - for a tool that needs a host (`admit_from_waiting_room`) its Zoom role
- *     is host or co-host;
+ *   - for a tool that needs a host (`admit_from_waiting_room`,
+ *     `mute_participant`: `needsHost` in the tool table) its Zoom role is
+ *     host or co-host;
  *   - of several, the one connected longest.
  * It sends { type: 'arlo.action', data: { meetingId, actionId, tool, args } }
  * and waits for result(), which the route POST …/arlo/actions/:actionId/result
@@ -58,7 +60,7 @@ const MAX_ROLE_CHARS = 32;
 const MAX_ANNOUNCED_TOOLS = 10;
 // Zoom roles an announcement may carry; any other is an attendee's
 const ZOOM_ROLES = new Set(['host', 'coHost', 'attendee', 'panelist']);
-// Who may let people in from the waiting room
+// Who may let people in from the waiting room, and mute someone
 const MAY_ADMIT = new Set(['host', 'coHost']);
 // What a panel may report when it did not do it
 const RESULT_CODES = Object.freeze(['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed']);

@@ -12,7 +12,10 @@
  *
  * What a panel is told Arlo is doing right now (STEPS, toolStep) is from this
  * file too, picked by where the run is; the one thing filled in is the name
- * of someone to admit, cleaned and cut here.
+ * of someone to admit or mute, cleaned and cut here.
+ *
+ * The emoji of a reaction is from this file as well (REACTIONS): a model
+ * names one of six reactions, and never writes the character that is shown.
  *
  * Arlo posts no line of its own to the chat: not "I am busy", not "the host
  * declined". A line nobody approved is unapproved content; those outcomes are
@@ -88,6 +91,29 @@ function chatText(value, max) {
  *   primary(args)   the sheet's button that agrees
  *   reply(args)     what the panel of someone who typed the request is answered when it is done
  */
+/**
+ * The reactions Arlo can send, and the emoji each is shown as. The names are
+ * what a model may pick from (the tool table's enum, services/agent/tools.js)
+ * and what the panel is sent; the emoji is only ever taken from here.
+ */
+const REACTIONS = Object.freeze({
+  thumbs_up: '\u{1F44D}',
+  clap: '\u{1F44F}',
+  heart: '\u2764\uFE0F',
+  joy: '\u{1F602}',
+  tada: '\u{1F389}',
+  open_mouth: '\u{1F62E}',
+});
+const REACTION_NAMES = Object.freeze(Object.keys(REACTIONS));
+
+/** The emoji of the reaction in a tool call's arguments, or null when it is not one of the table's. */
+function reactionEmoji(args) {
+  const name = args !== null && typeof args === 'object' ? args.reaction : null;
+  return typeof name === 'string' && Object.prototype.hasOwnProperty.call(REACTIONS, name) ? REACTIONS[name] : null;
+}
+/** "a 👍 reaction", or "a reaction" for one that is not in the table (the tool table lets none through). */
+const aReaction = (args) => (reactionEmoji(args) === null ? 'a reaction' : `a ${reactionEmoji(args)} reaction`);
+
 // The sheet for text a model wrote (an answer, a summary): the text is the body
 const POST_ANSWER_QUESTION = 'Post Arlo\'s answer in the meeting chat?';
 const POST_ANSWER_PRIMARY = 'Post answer';
@@ -129,6 +155,28 @@ const TOOL_TEXTS = Object.freeze({
     primary: () => 'Share notes',
     reply: () => 'Done: shared the notes with everyone.',
   }),
+  invite_everyone: Object.freeze({
+    asked: () => 'Asked to share the notes and invite everyone to open Arlo',
+    done: () => 'Shared the notes and invited everyone to open Arlo',
+    question: () => 'Share the notes and invite everyone to open Arlo?',
+    primary: () => 'Share and invite',
+    reply: () => 'Done: shared the notes and invited everyone to open Arlo.',
+  }),
+  send_reaction: Object.freeze({
+    asked: (args) => `Asked to send ${aReaction(args)}`,
+    done: (args) => `Sent ${aReaction(args)}`,
+    // "as you": it is sent from the panel of the owner who agrees, under their name
+    question: (args) => `Send ${aReaction(args)} as you?`,
+    primary: (args) => (reactionEmoji(args) === null ? 'Send reaction' : `Send ${reactionEmoji(args)}`),
+    reply: (args) => `Done: sent ${aReaction(args)}.`,
+  }),
+  mute_participant: Object.freeze({
+    asked: (args) => `Asked to mute ${args.name}`,
+    done: (args) => `Muted ${args.name}`,
+    question: (args) => `Mute ${args.name}?`,
+    primary: () => 'Mute',
+    reply: (args) => `Done: muted ${args.name}.`,
+  }),
   web_search: Object.freeze({
     asked: () => 'Asked for a web search',
     done: () => 'Searched the web',
@@ -162,14 +210,50 @@ const REASONS = Object.freeze({
 const couldNot = (code) => `I couldn't do that: ${Object.prototype.hasOwnProperty.call(REASONS, code) ? REASONS[code] : 'something went wrong'}.`;
 
 /**
+ * What the asker's panel is answered when a tool failed in a way that has a
+ * sentence of its own, by tool and outcome code. Anything not here is
+ * answered with couldNot(code), or noHands(tool) for 'no_hands'.
+ */
+const TOOL_FAILURES = Object.freeze({
+  mute_participant: Object.freeze({
+    not_found: (args) => `I couldn't find ${args.name} in the meeting.`,
+    several_match: (args) => `Several people in the meeting match ${args.name}. Ask again with the full name.`,
+  }),
+});
+
+/** The sentence of its own for this tool and code, or null when there is none. */
+function failedReply(toolName, code, args) {
+  if (typeof toolName !== 'string' || typeof code !== 'string') return null;
+  if (!Object.prototype.hasOwnProperty.call(TOOL_FAILURES, toolName)) return null;
+  const byCode = TOOL_FAILURES[toolName];
+  return Object.prototype.hasOwnProperty.call(byCode, code) ? byCode[code](args) : null;
+}
+
+/**
+ * Inviting everyone is two things: the notes were shared, and then the
+ * invitation was not sent. Sharing stays on; the record and the asker's panel
+ * say both halves.
+ */
+const INVITE_NOT_SENT = 'Shared the notes. Couldn\'t send the invitation.';
+
+/**
  * No panel of the owner who typed or approved it can do it: what the record
  * and the asker's panel say. An action runs only on that owner's own panel.
  */
 const NO_HANDS = Object.freeze({
   host: 'Arlo needs the host\'s panel for that.',
   chat: 'Open Arlo to let it post in the chat.',
+  panel: 'Open Arlo to let it do that.',
 });
-const noHands = (toolName) => (toolName === 'admit_from_waiting_room' ? NO_HANDS.host : NO_HANDS.chat);
+// The tools only a host's or co-host's panel runs (`needsHost` in the tool
+// table; a test holds the two lists together), and the ones any panel of the
+// owner runs that post nothing to the chat
+const NEEDS_HOST_PANEL = new Set(['admit_from_waiting_room', 'mute_participant']);
+const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'send_reaction']);
+function noHands(toolName) {
+  if (NEEDS_HOST_PANEL.has(toolName)) return NO_HANDS.host;
+  return NEEDS_OWN_PANEL.has(toolName) ? NO_HANDS.panel : NO_HANDS.chat;
+}
 /** The record of a request that was dropped because the owners have as many sheets open as they take. */
 const TOO_MANY_WAITING_LABEL = 'Too many requests are waiting';
 
@@ -195,16 +279,27 @@ const STEPS = Object.freeze({
   posting: 'Posting to the meeting chat',
   sharing: 'Sharing the notes with everyone',
   admittingSomeone: 'Admitting someone from the waiting room',
+  inviting: 'Inviting everyone to open Arlo',
+  reacting: 'Sending a reaction',
+  mutingSomeone: 'Muting someone',
 });
+// The name came with the request: shown only when it is a name (lib/displayName.js), and short
+const stepName = (args) => cleanName(args !== null && typeof args === 'object' ? args.name : null, MAX_STEP_NAME_CHARS);
 const TOOL_STEPS = Object.freeze({
   answer_from_meeting: () => STEPS.answering,
   summarize_so_far: () => STEPS.summarizing,
   post_to_chat: () => STEPS.posting,
   share_notes: () => STEPS.sharing,
   admit_from_waiting_room: (args) => {
-    // The name came with the request: shown only when it is a name (lib/displayName.js), and short
-    const name = cleanName(args !== null && typeof args === 'object' ? args.name : null, MAX_STEP_NAME_CHARS);
+    const name = stepName(args);
     return name.length > 0 ? `Admitting ${name} from the waiting room` : STEPS.admittingSomeone;
+  },
+  invite_everyone: () => STEPS.inviting,
+  // Which reaction is not part of the step
+  send_reaction: () => STEPS.reacting,
+  mute_participant: (args) => {
+    const name = stepName(args);
+    return name.length > 0 ? `Muting ${name}` : STEPS.mutingSomeone;
   },
 });
 
@@ -225,6 +320,11 @@ module.exports = {
   CHAT_PREFIX,
   couldNot,
   noHands,
+  failedReply,
+  INVITE_NOT_SENT,
+  REACTIONS,
+  REACTION_NAMES,
+  NEEDS_HOST_PANEL,
   TOO_MANY_WAITING_LABEL,
   cleanLine,
   chatText,

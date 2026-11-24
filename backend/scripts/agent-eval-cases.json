@@ -222,6 +222,91 @@
     "expectTool": "share_notes"
   },
   {
+    "kind": "tool",
+    "said": "invite everyone to see the notes",
+    "expectTool": "invite_everyone"
+  },
+  {
+    "kind": "tool",
+    "said": "can you invite the whole room to open the notes app",
+    "expectTool": "invite_everyone"
+  },
+  {
+    "kind": "tool",
+    "said": "send everybody an invite so they can follow the notes",
+    "expectTool": "invite_everyone"
+  },
+  {
+    "kind": "tool",
+    "said": "send a thumbs up",
+    "expectTool": "send_reaction",
+    "expectArgs": {
+      "reaction": {
+        "equals": "thumbs_up"
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "give that a round of applause",
+    "expectTool": "send_reaction",
+    "expectArgs": {
+      "reaction": {
+        "equals": "clap"
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "react with a heart to that",
+    "expectTool": "send_reaction",
+    "expectArgs": {
+      "reaction": {
+        "equals": "heart"
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "mute Danny",
+    "expectTool": "mute_participant",
+    "expectArgs": {
+      "name": {
+        "equals": "Danny"
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "please mute Farah Idris, her dog is barking",
+    "expectTool": "mute_participant",
+    "expectArgs": {
+      "name": {
+        "includes": [
+          "Farah"
+        ],
+        "excludes": [
+          "dog"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "can you mute Tomasz for a second",
+    "expectTool": "mute_participant",
+    "expectArgs": {
+      "name": {
+        "equals": "Tomasz"
+      }
+    }
+  },
+  {
+    "kind": "no_tool",
+    "said": "unmute Danny",
+    "expectTool": "none"
+  },
+  {
     "kind": "non_request",
     "said": "I asked Arlo about this yesterday and it was fine",
     "expectTool": "none"
@@ -249,6 +334,21 @@
   {
     "kind": "non_request",
     "said": "yeah so anyway as I was saying the numbers look good",
+    "expectTool": "none"
+  },
+  {
+    "kind": "non_request",
+    "said": "sorry, I was on mute for that whole answer",
+    "expectTool": "none"
+  },
+  {
+    "kind": "non_request",
+    "said": "thumbs up from me on the new pricing, by the way",
+    "expectTool": "none"
+  },
+  {
+    "kind": "non_request",
+    "said": "someone should really learn where the mute button is",
     "expectTool": "none"
   },
   {

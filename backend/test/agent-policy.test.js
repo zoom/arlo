@@ -93,6 +93,89 @@ test('an owner\'s typed request covers a change only when what would be done is 
   }
 });
 
+// Inviting everyone, sending a reaction and muting someone change the meeting:
+// the policy treats each as a 'change', so what happens depends on who asked
+// and how, and for an owner's typed request on whether it is covered.
+const { getTool } = require('../src/services/agent/tools');
+
+test('the three tools that act in the meeting: sheet for speech and for someone who is not an owner, run only for a covered typed request', () => {
+  const calls = [
+    ['invite_everyone', {}, 'Invite everyone to see the notes', 'what did we decide?'],
+    ['send_reaction', { reaction: 'thumbs_up' }, 'send a thumbs up', 'what did we decide?'],
+    ['mute_participant', { name: 'Danny' }, 'mute Danny', 'who is talking?'],
+  ];
+  for (const [name, args, covered, notCovered] of calls) {
+    const tool = getTool(name);
+    assert.deepEqual([tool.runs, tool.changesMeeting], ['panel', true], name);
+    const toolKind = tool.changesMeeting ? 'change' : 'read';
+    // spoken: the sheet, whoever spoke and whatever the setting
+    for (const asker of ['owner', 'other']) {
+      for (const whoCanAsk of ['owner', 'anyone']) {
+        assert.equal(decide({ channel: 'voice', asker, whoCanAsk, toolKind, ownerPanelOpen: true }), 'sheet', name);
+        assert.equal(decide({ channel: 'voice', asker, whoCanAsk, toolKind, ownerPanelOpen: false }), 'silent', name);
+      }
+    }
+    // typed by an owner: run, and then only when covered
+    assert.equal(decide({ channel: 'panel', asker: 'owner', whoCanAsk: 'owner', toolKind }), 'run', name);
+    assert.equal(typedRequestCovers(covered, name, args), true, `${name} covered`);
+    assert.equal(typedRequestCovers(notCovered, name, args), false, `${name} not covered`);
+    // typed by someone who is not an owner: the sheet under "anyone", refused otherwise
+    assert.equal(decide({ channel: 'panel', asker: 'other', whoCanAsk: 'anyone', toolKind }), 'sheet', name);
+    assert.equal(decide({ channel: 'panel', asker: 'other', whoCanAsk: 'owner', toolKind }), 'refuse', name);
+  }
+});
+
+test('inviting is covered by the word "invite" in what was typed', () => {
+  const covers = (typed) => typedRequestCovers(typed, 'invite_everyone', {});
+  for (const typed of ['invite everyone', 'Please INVITE them all to open Arlo', 'can you invite the room', 'everyone should be invited']) {
+    assert.equal(covers(typed), true, typed);
+  }
+  for (const typed of ['share the notes', 'what did we decide?', 'uninvite everyone', 'disinvite them', 'in vite', '', 5, null]) {
+    assert.equal(covers(typed), false, String(typed));
+  }
+});
+
+test('a reaction is covered by a word for that reaction, and not by a word for another', () => {
+  const WORDS = {
+    thumbs_up: ['give that a thumbs up', 'THUMB it'],
+    clap: ['clap for her', 'a round of applause', 'Applaud that'],
+    heart: ['send a heart', 'I love that'],
+    joy: ['laugh at that', 'send the joy one', 'that deserves laughing'],
+    tada: ['celebrate that', 'party time', 'tada', 'Celebration please'],
+    open_mouth: ['wow', 'look surprised', 'what a surprise'],
+  };
+  for (const [reaction, typed] of Object.entries(WORDS)) {
+    for (const text of typed) {
+      for (const other of Object.keys(WORDS)) {
+        assert.equal(typedRequestCovers(text, 'send_reaction', { reaction: other }), other === reaction, `${text} / ${other}`);
+      }
+    }
+  }
+  // a reaction that is not in the table, or none, is never covered
+  for (const args of [{ reaction: 'skull' }, { reaction: 'constructor' }, { reaction: '__proto__' }, { reaction: 'toString' }, { reaction: 5 }, { reaction: null }, {}, null]) {
+    assert.equal(typedRequestCovers('send a thumbs up clap heart laugh party wow constructor toString', 'send_reaction', args), false, JSON.stringify(args));
+  }
+  assert.equal(typedRequestCovers('react to that', 'send_reaction', { reaction: 'thumbs_up' }), false);
+});
+
+test('muting is covered only when the name and the word "mute" are typed, and never by "unmute"', () => {
+  const covers = (typed, name = 'Danny') => typedRequestCovers(typed, 'mute_participant', { name });
+  assert.equal(covers('mute Danny'), true);
+  assert.equal(covers('Please MUTE   danny, he is loud'), true);
+  assert.equal(covers('mute Danny Reyes', 'danny  reyes'), true);
+  // the name without "mute", or "mute" without the name
+  assert.equal(covers('is Danny here?'), false);
+  assert.equal(covers('mute him'), false);
+  assert.equal(covers('mute Dan'), false);
+  // "unmute" is another thing: never covered, however it is written
+  for (const typed of ['unmute Danny', 'Unmute Danny please', 'UNMUTE danny', 'un-mute Danny', 'un mute Danny', 'mute Danny, no wait, unmute Danny', 'unmute Danny and mute Danny']) {
+    assert.equal(covers(typed), false, typed);
+  }
+  for (const [typed, args] of [['mute', { name: '' }], ['mute', { name: '  ' }], ['mute x', {}], ['mute x', { name: 5 }], ['mute x', null], [5, { name: '5' }]]) {
+    assert.equal(typedRequestCovers(typed, 'mute_participant', args), false, JSON.stringify([typed, args]));
+  }
+});
+
 test('a spoken request is heard only while an owner has a panel open', () => {
   assert.equal(voiceIsHeard({ ownerPanelOpen: true }), true);
   for (const ownerPanelOpen of [false, undefined, null, 'true', 1, {}]) assert.equal(voiceIsHeard({ ownerPanelOpen }), false);

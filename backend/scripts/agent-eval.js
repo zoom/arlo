@@ -12,7 +12,7 @@
  *
  * This calls OpenRouter: it needs AI_ENABLED=true and OPENROUTER_API_KEY, and
  * tests only models in OPENROUTER_MODELS. The key is never printed. Free
- * models are rate limited per minute and per day: 40 cases x 2 runs is 80
+ * models are rate limited per minute and per day: 53 cases x 2 runs is 106
  * requests per model, so name one or two models at a time with --models when
  * the daily limit is small. A model that is rate limited five times in a row
  * is stopped.

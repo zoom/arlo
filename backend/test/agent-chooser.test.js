@@ -13,7 +13,7 @@ const { execFileSync } = require('node:child_process');
 const path = require('node:path');
 const openrouter = require('../src/services/openrouter');
 const {
-  listTools, toolNames, getTool, validateToolCall, ALL_TOOL_NAMES,
+  listTools, toolNames, getTool, validateToolCall, ALL_TOOL_NAMES, PANEL_TOOL_NAMES, HOST_TOOL_NAMES,
 } = require('../src/services/agent/tools');
 const evalScript = require('../scripts/agent-eval');
 const cases = require('../scripts/agent-eval-cases.json');
@@ -50,8 +50,11 @@ const choose = (extra = {}) => openrouter.chooseTool({ request: 'what did we dec
 
 // --- the tool table ---------------------------------------------------------------
 
-test('the tool table is the five tools, and web search only when it is turned on', () => {
-  assert.deepEqual(toolNames(), ['answer_from_meeting', 'summarize_so_far', 'post_to_chat', 'admit_from_waiting_room', 'share_notes']);
+test('the tool table is the eight tools, and web search only when it is turned on', () => {
+  assert.deepEqual(toolNames(), [
+    'answer_from_meeting', 'summarize_so_far', 'post_to_chat', 'admit_from_waiting_room', 'share_notes',
+    'invite_everyone', 'send_reaction', 'mute_participant',
+  ]);
   assert.deepEqual(toolNames({ webSearch: true }).at(-1), 'web_search');
   assert.deepEqual(ALL_TOOL_NAMES, [...toolNames(), 'web_search']);
   assert.equal(getTool('web_search'), null);
@@ -66,8 +69,19 @@ test('the tool table is the five tools, and web search only when it is turned on
     post_to_chat: ['panel', true],
     admit_from_waiting_room: ['panel', true],
     share_notes: ['server', true],
+    invite_everyone: ['panel', true],
+    send_reaction: ['panel', true],
+    mute_participant: ['panel', true],
     web_search: ['server', false],
   });
+  // what an owner's panel does, and what only a host's or co-host's panel may
+  assert.deepEqual(PANEL_TOOL_NAMES, ['post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant']);
+  assert.deepEqual(HOST_TOOL_NAMES, ['admit_from_waiting_room', 'mute_participant']);
+  // a description says what the tool does not do
+  assert.match(getTool('mute_participant').description, /never unmute/i);
+  assert.match(getTool('mute_participant').description, /one /i);
+  assert.match(getTool('invite_everyone').description, /not /i);
+  assert.match(getTool('send_reaction').description, /not /i);
   for (const tool of listTools({ webSearch: true })) {
     assert.equal(typeof tool.description, 'string');
     assert.equal(tool.parameters.type, 'object');
@@ -134,6 +148,44 @@ test('a tool call is valid only with exactly the arguments in the table, inside 
   for (const [name, args] of bad) assert.deepEqual(validateToolCall(name, args), { ok: false }, JSON.stringify([name, args]));
   // arguments made to look like inherited ones are still unknown ones
   assert.deepEqual(validateToolCall('summarize_so_far', JSON.parse('{"__proto__": {"x": 1}}')), { ok: false });
+});
+
+test('a reaction is one of six names, checked on the server whatever the model was told', () => {
+  const reaction = getTool('send_reaction').parameters.properties.reaction;
+  assert.deepEqual([...reaction.enum], ['thumbs_up', 'clap', 'heart', 'joy', 'tada', 'open_mouth']);
+  assert.equal(reaction.type, 'string');
+  assert.deepEqual(getTool('send_reaction').parameters.required, ['reaction']);
+  for (const name of reaction.enum) {
+    assert.deepEqual(validateToolCall('send_reaction', { reaction: name }), { ok: true, args: { reaction: name } });
+  }
+  assert.deepEqual(validateToolCall('send_reaction', { reaction: ' clap ' }), { ok: true, args: { reaction: 'clap' } });
+  for (const bad of [
+    'skull', 'THUMBS_UP', 'thumbs up', 'thumbs_up,clap', '\u{1F44D}', '', ' ', 'constructor', '__proto__', 'toString', 'x'.repeat(5000),
+    5, null, undefined, true, ['clap'], { name: 'clap' },
+  ]) {
+    assert.deepEqual(validateToolCall('send_reaction', { reaction: bad }), { ok: false }, JSON.stringify(bad));
+  }
+  for (const args of [{}, { reaction: 'clap', to: 'everyone' }, { emoji: 'clap' }, null, 'clap', ['clap']]) {
+    assert.deepEqual(validateToolCall('send_reaction', args), { ok: false }, JSON.stringify(args));
+  }
+});
+
+test('inviting takes no arguments; muting takes one name, held to the rule for names', () => {
+  assert.deepEqual(validateToolCall('invite_everyone', {}), { ok: true, args: {} });
+  for (const args of [{ who: 'everyone' }, { name: 'Danny' }, null, 'all', []]) {
+    assert.deepEqual(validateToolCall('invite_everyone', args), { ok: false }, JSON.stringify(args));
+  }
+  assert.deepEqual(validateToolCall('mute_participant', { name: '  Danny Reyes ' }), { ok: true, args: { name: 'Danny Reyes' } });
+  assert.equal(validateToolCall('mute_participant', { name: 'x'.repeat(100) }).ok, true);
+  for (const name of [
+    '', '   ', '...', 'x'.repeat(101), 'D'.repeat(500), 'Da\u0000nny', 'Danny\nand everyone', 'Danny\u202Ereversed', 'A\u200bB', '\u3164',
+    5, null, undefined, ['Danny'], { name: 'Danny' },
+  ]) {
+    assert.deepEqual(validateToolCall('mute_participant', { name }), { ok: false }, JSON.stringify(name));
+  }
+  for (const args of [{}, { name: 'Danny', all: true }, { names: ['Danny'] }, { name: 'Danny', unmute: true }]) {
+    assert.deepEqual(validateToolCall('mute_participant', args), { ok: false }, JSON.stringify(args));
+  }
 });
 
 // --- the request ------------------------------------------------------------------
@@ -300,8 +352,8 @@ test('the reason for a failure never quotes the request or the model', async () 
 
 // --- the fixed test set -----------------------------------------------------------
 
-test('the test set is 40 synthetic cases: each tool five times, non-requests, injections, ambiguous ones', () => {
-  assert.equal(cases.length, 40);
+test('the test set is 53 synthetic cases: each tool three to five times, non-requests, injections, ambiguous ones', () => {
+  assert.equal(cases.length, 53);
   const known = new Set([...toolNames(), 'none']);
   const kinds = {};
   for (const one of cases) {
@@ -312,10 +364,17 @@ test('the test set is 40 synthetic cases: each tool five times, non-requests, in
     kinds[one.kind] = (kinds[one.kind] || 0) + 1;
     if (one.context) assert.ok(Array.isArray(one.context) && one.context.every((line) => typeof line === 'string'));
   }
-  assert.deepEqual(kinds, { tool: 25, non_request: 6, injection: 4, ambiguous: 5 });
+  assert.deepEqual(kinds, { tool: 34, non_request: 9, injection: 4, ambiguous: 5, no_tool: 1 });
   for (const name of toolNames()) {
-    assert.equal(cases.filter((one) => one.kind === 'tool' && one.expectTool === name).length, 5, name);
+    const count = cases.filter((one) => one.kind === 'tool' && one.expectTool === name).length;
+    assert.equal(count, ['invite_everyone', 'send_reaction', 'mute_participant'].includes(name) ? 3 : 5, name);
   }
+  // a request to unmute is a request no tool does: never the tool that mutes
+  const unmute = cases.filter((one) => /unmute/i.test(one.said));
+  assert.equal(unmute.length, 1);
+  assert.deepEqual([unmute[0].kind, unmute[0].expectTool], ['no_tool', 'none']);
+  // talk that mentions muting or thumbs is not a request
+  assert.equal(cases.filter((one) => one.kind === 'non_request' && /mute|thumb/i.test(one.said)).length, 3);
   // nobody from this project's own tests or docs
   assert.equal(/\b(ana|ben|james|ruiz|okafor|harrington|zoom-user)\b/i.test(JSON.stringify(cases)), false);
 });
@@ -400,7 +459,7 @@ test('the script asks every case twice per model, one model at a time, and print
     },
   });
   assert.equal(code, 0);
-  assert.equal(asked.length, 80);
+  assert.equal(asked.length, 106);
   assert.ok(asked.every((input) => input.model === 'b/two:free' && input.fallback === false && Array.isArray(input.tools)));
   assert.equal(asked[0].request, cases[0].said);
   const text = out.join('\n');

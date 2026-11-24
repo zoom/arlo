@@ -82,6 +82,22 @@ function decide(input) {
   return 'refuse';
 }
 
+// A word of the reaction must be in what was typed, by reaction (the names
+// are the tool table's, services/agent/tools.js)
+const REACTION_WORDS = Object.freeze({
+  thumbs_up: /thumb/i,
+  clap: /clap|applau/i,
+  heart: /heart|love/i,
+  joy: /laugh|joy/i,
+  tada: /celebrat|party|tada/i,
+  open_mouth: /wow|surpris/i,
+});
+// "invite", "invited", "invites": not "uninvite" or "disinvite"
+const INVITE_WORD = /(?<![\p{L}\p{N}_])invit/iu;
+const MUTE_WORD = /mute/i;
+// "unmute", "un-mute", "un mute": asked for the opposite of what the tool does
+const UNMUTE_WORD = /(?<![\p{L}\p{N}])un[\s\-\u2010-\u2015]*mut/iu;
+
 /** Compared without case and with every run of whitespace as one space. */
 const folded = (value) => value.normalize('NFC').replace(/\s+/gu, ' ').trim().toLowerCase();
 
@@ -93,6 +109,14 @@ const folded = (value) => value.normalize('NFC').replace(/\s+/gu, ' ').trim().to
  *   post_to_chat             the message appears in the typed text
  *   admit_from_waiting_room  the name appears in the typed text
  *   share_notes              the typed text has the word "share"
+ *   invite_everyone          the typed text has "invite" (the start of a word)
+ *   send_reaction            the typed text has a word of that reaction
+ *                            (REACTION_WORDS): "thumb" for thumbs_up, "clap"
+ *                            or "applau" for clap, and so on
+ *   mute_participant         the name appears in the typed text, and "mute",
+ *                            and nothing that reads as "unmute": the tool
+ *                            only mutes, so a typed "unmute Danny" that a
+ *                            model turned into a mute goes to the sheet
  * Any other tool, or anything that is not text: false.
  */
 function typedRequestCovers(typed, toolName, args) {
@@ -101,6 +125,13 @@ function typedRequestCovers(typed, toolName, args) {
   if (toolName === 'post_to_chat') return said(args.message);
   if (toolName === 'admit_from_waiting_room') return said(args.name);
   if (toolName === 'share_notes') return /(?<![\p{L}\p{N}_])share(?![\p{L}\p{N}_])/iu.test(typed);
+  if (toolName === 'invite_everyone') return INVITE_WORD.test(typed);
+  if (toolName === 'send_reaction') {
+    const { reaction } = args;
+    return typeof reaction === 'string' && Object.prototype.hasOwnProperty.call(REACTION_WORDS, reaction)
+      && REACTION_WORDS[reaction].test(typed);
+  }
+  if (toolName === 'mute_participant') return said(args.name) && MUTE_WORD.test(typed) && !UNMUTE_WORD.test(typed);
   return false;
 }
 

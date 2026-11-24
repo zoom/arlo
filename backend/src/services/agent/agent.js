@@ -62,9 +62,12 @@
  *      (services/agent/hands.js), and only to a panel of the owner who typed
  *      the request or pressed the approval, never to another owner's. When
  *      that owner has no panel that can do it, it fails as 'no_hands'. A
- *      sheet for a tool that needs a host's panel (admitting) is put only to
- *      the owners who have one open; with none there is no sheet and it
- *      fails at once. Each run has `runLimitMs`; a model call still running
+ *      sheet for a tool that needs a host's panel (admitting, muting) is put
+ *      only to the owners who have one open; with none there is no sheet and
+ *      it fails at once. Inviting everyone is both: the server shares the
+ *      notes first (the same way as for share_notes), then that owner's
+ *      panel sends the invitation; when the panel does not, the notes stay
+ *      shared and the action ends as failed, saying both. Each run has `runLimitMs`; a model call still running
  *      then, or when the meeting's data goes, is aborted (an AbortSignal).
  *   8. Recording: every request that got as far as a tool is an action in the
  *      meeting store, with a label from services/agent/texts.js. An answer to
@@ -96,7 +99,8 @@
  *   { status: 'answered', tool, answer, action }  typed only: the text, for the asker
  *   { status: 'done', tool, reply, action }       `reply`: a sentence for the asker's panel
  *   { status: 'waiting_approval', tool, action }
- *   { status: 'failed', tool, code, action }
+ *   { status: 'failed', tool, code, action, reply? }  `reply`: a sentence for the asker's panel,
+ *                                  when this failure has one of its own (services/agent/texts.js)
  * `action` is the stored action, or null when the record is full.
  *
  * Who sees an action (actionsFor, and the `did` message): a public one,
@@ -122,6 +126,7 @@ const {
 const { approvalMessageData } = require('../approvals');
 const {
   TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, chatText, cleanLine, noHands, TOO_MANY_WAITING_LABEL,
+  failedReply, INVITE_NOT_SENT,
   MAX_CHAT_ANSWER_CHARS, MAX_CHAT_MESSAGE_CHARS, MAX_SHEET_REQUEST_CHARS, MAX_SHEET_NAME_CHARS,
   STEPS, toolStep,
 } = require('./texts');
@@ -505,6 +510,15 @@ function createAgent({
           return isId(actorUserId) && shareNotes(meetingId, actorUserId) === true
             ? { ok: true }
             : { ok: false, code: 'not_allowed' };
+        case 'invite_everyone': {
+          // Two things, in this order. The notes are shared first, the same
+          // way share_notes does it and as the same owner ("it was so
+          // already" counts); when that cannot be done nothing goes to a panel
+          if (!isId(actorUserId) || shareNotes(meetingId, actorUserId) !== true) return { ok: false, code: 'not_allowed' };
+          const invited = await viaHands(meetingId, { tool: tool.name, args }, actorUserId);
+          // The invitation was not sent: the notes stay shared, and the outcome says both
+          return invited.ok ? invited : { ok: false, code: invited.code, sharedOnly: true };
+        }
         default:
           // A tool of the panel goes to the hands; a tool of the server that
           // is not above (web search) is not built
@@ -527,13 +541,20 @@ function createAgent({
     let failedLabel;
     if (!outcome.ok && outcome.code === 'no_hands') failedLabel = noHands(tool.name);
     if (!outcome.ok && outcome.code === 'busy') failedLabel = TOO_MANY_WAITING_LABEL;
+    // What the asker's panel is answered, when this failure has a sentence of its own
+    let reply = outcome.ok ? null : failedReply(tool.name, outcome.code, args);
+    if (!outcome.ok && outcome.sharedOnly === true) {
+      // Half of it was done: the record must not read as if nothing happened
+      failedLabel = INVITE_NOT_SENT;
+      reply = INVITE_NOT_SENT;
+    }
     const stored = action
       ? finish(meetingId, state, action.id, outcome.ok ? 'done' : 'failed', outcome.ok ? texts.done(args) : failedLabel)
       : null;
     log.log(`Arlo agent: ${tool.name} ${outcome.ok ? 'done' : `failed (${outcome.code})`} (${req.channel})`);
     if (!outcome.ok) {
       return {
-        status: 'failed', tool: tool.name, code: outcome.code, action: stored,
+        status: 'failed', tool: tool.name, code: outcome.code, action: stored, ...(reply !== null && { reply }),
       };
     }
     if (typeof text === 'string') {
