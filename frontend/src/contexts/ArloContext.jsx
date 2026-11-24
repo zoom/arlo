@@ -379,8 +379,13 @@ export function ArloProvider({ children }) {
         id: one.id,
         kind: one.kind,
         askedBy: one.askedBy,
+        // An 'agent_action''s texts, whole (lib/approvalKinds.js); null otherwise
         question: one.question,
         primaryLabel: one.primaryLabel,
+        body: one.body,
+        request: one.request,
+        askerVerified: one.askerVerified,
+        channel: one.channel,
         expiresAt: now + approvalTimeLeft(one, { now, fetched, serverNow }),
         serverExpiresAt: one.expiresAt,
       }))
@@ -435,7 +440,10 @@ export function ArloProvider({ children }) {
     if (ran.has(actionId)) return;
     if (ran.size >= MAX_ACTIONS_REMEMBERED) ran.delete(ran.values().next().value);
     ran.add(actionId);
-    runArloAction(zoomSdkRef.current, { tool: data.tool, args: data.args }, { zoomRole: zoomRoleRef.current })
+    // Asked again before Zoom acts on something that took time to prepare
+    const stillAllowed = () => stateRef.current.role === 'owner' && signedInRef.current && !endedRef.current
+      && serverMeetingIdRef.current === id;
+    runArloAction(zoomSdkRef.current, { tool: data.tool, args: data.args }, { zoomRole: zoomRoleRef.current, stillAllowed })
       .then((result) => fetch(arloUrl(id, `actions/${encodeURIComponent(actionId)}/result`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -6,8 +6,6 @@ import AskArlo from './AskArlo';
 import WhoCanAsk from './WhoCanAsk';
 import PostNotesToChat from './PostNotesToChat';
 import ShareNotes from './ShareNotes';
-import ApprovalSheet from './ApprovalSheet';
-import { firstShowableApproval } from '../../lib/approvalKinds';
 
 /**
  * The owner's screen while Arlo is (or was) in the meeting: the notes, and one
@@ -15,45 +13,36 @@ import { firstShowableApproval } from '../../lib/approvalKinds';
  * Under the notes, next to the record link, an owner can share them with
  * everyone in the meeting (live in their panels, until the owner stops) and
  * post them to the chat (a one-time copy).
- * When someone asks the owner for something (`approvals`, oldest first), a
- * sheet rises over the notes with the question; the notes wait behind it.
+ * When someone asks the owner for something, a sheet rises over this screen
+ * as over any other (components/arlo/ApprovalHost.jsx, in the app shell).
  * `actions`: what Arlo was asked and did, listed at the end of the notes.
  * `thinking`: Arlo is handling a request right now; the status line says so.
  */
 export default function LiveNotes({
   notes, present, paused, myStreamPaused, myStreamLive, canControl, recordPath, whoCanAsk, onWhoCanAskChange,
-  approvals = [], onAnswerApproval, notesShared = false, onShareNotesChange, actions = null, thinking = false,
+  notesShared = false, onShareNotesChange, actions = null, thinking = false,
 }) {
-  // The oldest request this panel can show; one at a time
-  const approval = canControl && onAnswerApproval ? firstShowableApproval(approvals) : null;
-  const asked = approval !== null;
   return (
-    <div className="arlo-screen arlo-sheet-host">
-      {/* Behind an open sheet the screen is dimmed and out of reach: `inert`
-          where the browser has it, hidden from assistive technology everywhere.
-          The sheet does the same for the rest of the app (the header) */}
-      <div className="arlo-screen arlo-behind-sheet" inert={asked ? '' : undefined} aria-hidden={asked ? 'true' : undefined}>
-        <h1 className="arlo-sr-only" tabIndex={-1} data-arlo-focus>Your notes</h1>
-        <StatusLine
-          present={present}
-          paused={paused}
-          myStreamPaused={myStreamPaused}
-          myStreamLive={myStreamLive}
-          canControl={canControl}
-          thinking={thinking}
-        />
-        <div className="arlo-scroll">
-          <NotesDocument notes={notes} listening={present} actions={actions} />
-        </div>
-        <div className="arlo-notes-actions">
-          <Link className="arlo-link" to={recordPath}>Meeting record</Link>
-          {canControl && onShareNotesChange && <ShareNotes shared={notesShared} onChange={onShareNotesChange} />}
-          {canControl && <PostNotesToChat notes={notes} />}
-        </div>
-        <AskArlo />
-        {canControl && <WhoCanAsk value={whoCanAsk} onChange={onWhoCanAskChange} />}
+    <div className="arlo-screen">
+      <h1 className="arlo-sr-only" tabIndex={-1} data-arlo-focus>Your notes</h1>
+      <StatusLine
+        present={present}
+        paused={paused}
+        myStreamPaused={myStreamPaused}
+        myStreamLive={myStreamLive}
+        canControl={canControl}
+        thinking={thinking}
+      />
+      <div className="arlo-scroll">
+        <NotesDocument notes={notes} listening={present} actions={actions} />
       </div>
-      {asked && <ApprovalSheet key={approval.id} approval={approval} onAnswer={onAnswerApproval} />}
+      <div className="arlo-notes-actions">
+        <Link className="arlo-link" to={recordPath}>Meeting record</Link>
+        {canControl && onShareNotesChange && <ShareNotes shared={notesShared} onChange={onShareNotesChange} />}
+        {canControl && <PostNotesToChat notes={notes} />}
+      </div>
+      <AskArlo />
+      {canControl && <WhoCanAsk value={whoCanAsk} onChange={onWhoCanAskChange} />}
     </div>
   );
 }

@@ -239,7 +239,7 @@ export const serverMessagesFor = (ofMeeting) => ({
   }),
   notes: (notes, meetingId = ofMeeting) => ({ type: 'notes.updated', data: { meetingId, notes } }),
   // A request for the owners' approval, as only their panels are told; it runs out in a minute unless given
-  // `extra`: what an 'agent_action' carries besides ({ question, primaryLabel })
+  // `extra`: what an 'agent_action' carries besides ({ question, primaryLabel, body, request, askerVerified, channel })
   approval: ({ id, kind = 'share_notes', askedBy = null, expiresAt = Date.now() + 60000, ...extra }, meetingId = ofMeeting) => ({
     type: 'arlo.approval', data: { meetingId, id, kind, askedBy, expiresAt, ...extra },
   }),

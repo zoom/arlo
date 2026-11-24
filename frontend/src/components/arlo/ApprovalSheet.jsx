@@ -1,24 +1,34 @@
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useToast } from '../../contexts/ToastContext';
 import useSecondsLeft from '../../hooks/useSecondsLeft';
 import { approvalTexts } from '../../lib/approvalKinds';
 import { makeOutsideInert } from '../../lib/outsideInert';
 import Button from '../ui/Button';
+import './ApprovalSheet.css';
 
 /** How long after it opens the sheet takes no answer, from a button or from Escape. */
 export const SHEET_GUARD_MS = 700;
 
+// How close to its end the text counts as scrolled to the end (rounding of zoomed layouts)
+const END_SLACK_PX = 2;
+
 /**
- * The owner is asked: a sheet that rises over the notes with one question,
+ * The owner is asked: a sheet that rises over the screen with one question,
  * who asked, a primary button and "Not now". Nothing else can be done until
  * it is answered or goes away (another owner answered, or it ran out).
  *
  * Agreeing reports the answer; the server does the work (for 'share_notes':
  * it shares the notes with everyone in the meeting who has Arlo open), and
  * the owner is told whether it did. For something Arlo was asked to do
- * ('agent_action') the question and the primary button's text are the
- * server's, and agreeing is all the panel does: the server runs it. The texts
- * come from lib/approvalKinds.js; an approval it has none for renders nothing.
+ * ('agent_action') the texts are the server's, shown whole, and agreeing is
+ * all the panel does: the server runs it. The texts come from
+ * lib/approvalKinds.js; an approval it has none for renders nothing.
+ *
+ * The owner approves exactly what they see. Text that will be posted (`body`)
+ * is shown in full in its own box, which scrolls when it is long; the primary
+ * button stays disabled until that box is on screen and, when the text is
+ * taller than the box, until it has been scrolled to its end once. Under it:
+ * who asked, as far as the server knows, and what they asked.
  *
  * Nothing is ever agreed to without a deliberate act. The sheet can open
  * while the owner is typing or clicking somewhere else, so:
@@ -31,12 +41,13 @@ export const SHEET_GUARD_MS = 700;
  *
  * While it is open everything outside it is out of reach: `inert` and hidden
  * from assistive technology (lib/outsideInert.js), and, for a browser without
- * `inert`, Tab goes round the sheet's buttons only, focus that lands outside
- * comes back, and a click outside does nothing.
+ * `inert`, Tab goes round the sheet's stops only (the text that will be
+ * posted, then the buttons), focus that lands outside comes back, and a click
+ * outside does nothing.
  *
  * `onAnswer(id, { approve })` reports the answer and resolves true when the
- * server took it. Mount one per approval (`key={approval.id}`): the focus
- * goes back to where it was when it closes.
+ * server took it. Mount one per approval (`key={approval.id}`). Where the
+ * focus goes when the last sheet closes is ApprovalHost's business.
  */
 export default function ApprovalSheet({ approval, onAnswer }) {
   const { addToast } = useToast();
@@ -48,14 +59,36 @@ export default function ApprovalSheet({ approval, onAnswer }) {
   const sheetRef = useRef(null);
   const primaryRef = useRef(null);
   const secondaryRef = useRef(null);
-  // Where the focus was, read before the sheet is in the document: making the
-  // screen behind it inert can take the focus away from there
-  const [focusBefore] = useState(() => document.activeElement);
+  const bodyRef = useRef(null);
   const secondsLeft = useSecondsLeft(approval.expiresAt);
   const kind = approvalTexts(approval);
+  const body = kind?.body ?? null;
+  // The whole of what will be posted has been on screen. Nothing to see: true
+  const [bodySeen, setBodySeen] = useState(body === null);
+  const bodySeenRef = useRef(bodySeen);
 
   /** True when an answer may be given now: past the guard, and none on its way. */
   const takesAnswer = () => armedRef.current && !busyRef.current;
+
+  // The text's box shows its end: all of it fits, or it was scrolled there
+  const noteBodyEnd = useCallback(() => {
+    const box = bodyRef.current;
+    if (!box || bodySeenRef.current) return;
+    if (box.scrollTop + box.clientHeight < box.scrollHeight - END_SLACK_PX) return;
+    bodySeenRef.current = true;
+    setBodySeen(true);
+  }, []);
+  // Measured once it is laid out, and again when its box changes size (a
+  // panel made wider can make all of it fit)
+  useLayoutEffect(() => {
+    const box = bodyRef.current;
+    if (!box) return undefined;
+    noteBodyEnd();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(noteBodyEnd);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [noteBodyEnd]);
 
   const decline = async () => {
     if (!takesAnswer()) return;
@@ -67,7 +100,7 @@ export default function ApprovalSheet({ approval, onAnswer }) {
   declineRef.current = decline;
 
   const agree = async () => {
-    if (!takesAnswer() || !kind) return;
+    if (!takesAnswer() || !kind || !bodySeenRef.current) return;
     busyRef.current = true;
     setBusy(true);
     let done = false;
@@ -102,6 +135,8 @@ export default function ApprovalSheet({ approval, onAnswer }) {
         return;
       }
       if (event.key === 'Enter' || event.key === ' ') {
+        // Space scrolls the text that will be posted
+        if (event.key === ' ' && bodyRef.current !== null && event.target === bodyRef.current) return;
         // Only a button of the sheet takes these, and not before it takes an answer
         const onButton = inside && event.target !== sheet && event.target.closest('button') !== null;
         if (!onButton || !armedRef.current) event.preventDefault();
@@ -109,8 +144,8 @@ export default function ApprovalSheet({ approval, onAnswer }) {
         return;
       }
       if (event.key !== 'Tab') return;
-      // Tab goes round the sheet's buttons
-      const buttons = [primaryRef.current, secondaryRef.current].filter((button) => button && !button.disabled);
+      // Tab goes round the sheet's stops: the text that will be posted, then the buttons
+      const buttons = [bodyRef.current, primaryRef.current, secondaryRef.current].filter((stop) => stop && !stop.disabled);
       event.preventDefault();
       if (buttons.length === 0) return;
       const at = buttons.indexOf(document.activeElement);
@@ -137,15 +172,10 @@ export default function ApprovalSheet({ approval, onAnswer }) {
     };
   }, []);
 
-  // The focus comes to the sheet, and goes back to where it was. In an effect,
-  // not a layout effect: by then what is behind the sheet is no longer inert.
+  // The focus comes to the sheet
   useEffect(() => {
     sheetRef.current?.focus();
-    return () => {
-      const before = focusBefore;
-      if (before && before !== document.body && before.isConnected && typeof before.focus === 'function') before.focus();
-    };
-  }, [focusBefore]);
+  }, []);
 
   if (!kind) return null;
 
@@ -159,14 +189,30 @@ export default function ApprovalSheet({ approval, onAnswer }) {
       tabIndex={-1}
       ref={sheetRef}
     >
-      <p className="arlo-sheet-question" id={questionId}>{kind.question}</p>
+      <h2 className="arlo-sheet-question" id={questionId}>{kind.question}</h2>
+      {body !== null && (
+        <div
+          className="arlo-sheet-body"
+          role="region"
+          aria-label="What will be posted"
+          tabIndex={0}
+          ref={bodyRef}
+          onScroll={noteBodyEnd}
+        >
+          {body}
+        </div>
+      )}
       <p className="arlo-sheet-detail" id={detailId}>{kind.detail}</p>
-      <Button className="arlo-sheet-button" ref={primaryRef} onClick={agree} disabled={busy}>
-        {kind.primary}
-      </Button>
-      <Button className="arlo-sheet-button" variant="ghost" ref={secondaryRef} onClick={decline} disabled={busy}>
-        {kind.secondary}
-      </Button>
+      {kind.request !== null && <p className="arlo-sheet-request">{`They asked: \u201c${kind.request}\u201d`}</p>}
+      {!bodySeen && <p className="arlo-sheet-hint">Scroll to the end of the message to continue.</p>}
+      <div className="arlo-sheet-buttons">
+        <Button className="arlo-sheet-button" ref={primaryRef} onClick={agree} disabled={busy || !bodySeen}>
+          {kind.primary}
+        </Button>
+        <Button className="arlo-sheet-button" variant="ghost" ref={secondaryRef} onClick={decline} disabled={busy}>
+          {kind.secondary}
+        </Button>
+      </div>
       {secondsLeft !== null && <p className="arlo-sheet-countdown">{`${secondsLeft}s`}</p>}
     </div>
   );

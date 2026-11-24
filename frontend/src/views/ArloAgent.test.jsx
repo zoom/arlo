@@ -1,4 +1,4 @@
-import { screen, waitFor, act, within } from '@testing-library/react';
+import { screen, waitFor, act, within, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import {
@@ -25,6 +25,22 @@ const ID2 = '22222222-2222-4222-8222-222222222222';
 const OTHER = serverMessagesFor('OTHER-MEETING==');
 const MEETING_2 = 'MEETING-2==';
 const ADMIT = { id: ID1, kind: 'agent_action', askedBy: 'Ben', question: 'Admit James from the waiting room?', primaryLabel: 'Admit James' };
+const ANSWER = 'Arlo: The beta moves to March 3 so billing can finish first.';
+const POST = {
+  id: ID1, kind: 'agent_action', askedBy: 'Ben', channel: 'voice', question: 'Post Arlo\'s answer in the meeting chat?', primaryLabel: 'Post it',
+  request: 'tell everyone when the beta is', body: ANSWER,
+};
+const UNVERIFIED_BEN = 'Someone shown as “Ben” asked by voice. Arlo can\'t confirm who spoke.';
+const nothingShows = async () => {
+  await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+};
+/** The box of the text that will be posted is `box` px high and its text `text` px (jsdom lays nothing out). */
+function layOutBody({ box, text }) {
+  const isBody = (node) => node.classList.contains('arlo-sheet-body');
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function clientHeight() { return isBody(this) ? box : 0; });
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function scrollHeight() { return isBody(this) ? text : 0; });
+}
 const THINKING = 'Arlo is thinking…';
 const WAITING = 'Waiting for approval…';
 const PLACEHOLDER = 'Ask Arlo, or say “Arlo, …”';
@@ -80,22 +96,194 @@ afterEach(() => {
 describe('the sheet for something Arlo was asked to do', () => {
   test('the server\'s question, who asked, the server\'s button, "Not now" and the seconds left', async () => {
     await openAsOwner();
-    await send(serverMessage.approval(ADMIT));
+    await send(serverMessage.approval({ ...ADMIT, askerVerified: true }));
     const dialog = await screen.findByRole('dialog', { name: 'Admit James from the waiting room?' });
+    expect(within(dialog).getByRole('heading', { name: 'Admit James from the waiting room?' })).toBeInTheDocument();
     expect(within(dialog).getByText('Ben asked Arlo to do this.')).toBeInTheDocument();
-    expect(within(dialog).getByRole('button', { name: 'Admit James' })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Admit James' })).toBeEnabled();
     expect(within(dialog).getByRole('button', { name: 'Not now' })).toBeInTheDocument();
     expect(within(dialog).getByText(/^\d+s$/)).toBeInTheDocument();
+    // Nothing is posted: no box for a text, and no line about a request that was not given
+    expect(within(dialog).queryByRole('region')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/^They asked:/)).not.toBeInTheDocument();
     // The focus is on the sheet, never on a button
     expect(dialog).toHaveFocus();
   });
 
-  test('nobody named, and no button text from the server: "Someone asked Arlo to do this." and "Do it"', async () => {
+  test('no button text from the server: "Do it"', async () => {
     await openAsOwner();
-    await send(serverMessage.approval({ id: ID1, kind: 'agent_action', question: 'Post this to the chat?' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Post this to the chat?' });
-    expect(within(dialog).getByText('Someone asked Arlo to do this.')).toBeInTheDocument();
+    await send(serverMessage.approval({ id: ID1, kind: 'agent_action', question: 'Post this in the meeting chat?' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Post this in the meeting chat?' });
     expect(within(dialog).getByRole('button', { name: 'Do it' })).toBeInTheDocument();
+  });
+
+  describe('who asked is said only as far as the server knows it', () => {
+    test.each([
+      ['a name the server verified', { askedBy: 'Ben', askerVerified: true, channel: 'panel' }, 'Ben asked Arlo to do this.'],
+      ['a spoken request with a display name', { askedBy: 'Ben', askerVerified: false, channel: 'voice' }, UNVERIFIED_BEN],
+      ['a name and no word on whether it is verified', { askedBy: 'Ben' }, UNVERIFIED_BEN],
+      ['"verified" that is not exactly true', { askedBy: 'Ben', askerVerified: 'true' }, UNVERIFIED_BEN],
+      ['a spoken request with no name', { askedBy: undefined, channel: 'voice' }, 'Someone in the meeting asked by voice.'],
+      ['a name that would show as a blank', { askedBy: '\u202e\u200b', channel: 'voice' }, 'Someone in the meeting asked by voice.'],
+      ['a typed request the server did not verify', { askedBy: 'Ben', channel: 'panel' }, 'Someone in the meeting asked.'],
+      ['a typed request with no name', { askedBy: undefined, channel: 'panel' }, 'Someone in the meeting asked.'],
+    ])('%s', async (_name, extra, detail) => {
+      await openAsOwner();
+      await send(serverMessage.approval({ ...ADMIT, ...extra }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText(detail)).toBeInTheDocument();
+      expect(dialog).toHaveAccessibleDescription(detail);
+    });
+  });
+
+  describe('what will be posted is shown whole', () => {
+    test('the question, the text in its own box, who asked, what they asked, the buttons, the seconds: in that order', async () => {
+      await openAsOwner();
+      await send(serverMessage.approval(POST));
+      const dialog = await screen.findByRole('dialog', { name: 'Post Arlo\'s answer in the meeting chat?' });
+      const box = within(dialog).getByRole('region', { name: 'What will be posted' });
+      expect(box.textContent).toBe(ANSWER);
+      const order = [
+        within(dialog).getByRole('heading', { name: 'Post Arlo\'s answer in the meeting chat?' }),
+        box,
+        within(dialog).getByText(UNVERIFIED_BEN),
+        within(dialog).getByText('They asked: “tell everyone when the beta is”'),
+        within(dialog).getByRole('button', { name: 'Post it' }),
+        within(dialog).getByRole('button', { name: 'Not now' }),
+        within(dialog).getByText(/^\d+s$/),
+      ];
+      order.slice(1).forEach((node, index) => {
+        expect(order[index].compareDocumentPosition(node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      });
+      // All of it fits its box: it has been on screen, so it can be approved
+      expect(within(dialog).getByRole('button', { name: 'Post it' })).toBeEnabled();
+    });
+
+    test('every character the server sends is on the sheet: 500 of text, 200 of question and request, 40 of button', async () => {
+      const body = `Line one\n\n  indented ${'x'.repeat(471)} THE-END`;
+      expect(body).toHaveLength(500);
+      const question = `${'q'.repeat(196)}TAIL`;
+      const request = `${'r'.repeat(196)}TAIL`;
+      const primaryLabel = `${'b'.repeat(36)}TAIL`;
+      await openAsOwner();
+      await send(serverMessage.approval({ ...POST, body, question, request, primaryLabel }));
+      const dialog = await screen.findByRole('dialog', { name: question });
+      // Exactly the text, line breaks and spaces included
+      expect(within(dialog).getByRole('region', { name: 'What will be posted' }).textContent).toBe(body);
+      expect(within(dialog).getByRole('button', { name: primaryLabel })).toBeInTheDocument();
+      expect(within(dialog).getByText(`They asked: “${request}”`)).toBeInTheDocument();
+    });
+
+    test.each([
+      ['a question over 200 characters', { question: 'q'.repeat(201) }],
+      ['a button text over 40 characters', { primaryLabel: 'b'.repeat(41) }],
+      ['a text to post over 500 characters', { body: 'x'.repeat(501) }],
+      ['a request over 200 characters', { request: 'r'.repeat(201) }],
+      ['a name over 60 characters', { askedBy: 'n'.repeat(61) }],
+      ['a button text that is not text', { primaryLabel: 7 }],
+      ['a text to post that is not text', { body: ['Arlo: hello'] }],
+      ['a text to post that is blank', { body: '  \n ' }],
+      ['a request that is not text', { request: { text: 'post it' } }],
+      ['a name that is not text', { askedBy: 42 }],
+    ])('%s: the request is not shown at all, never a shortened one', async (_name, extra) => {
+      const { fetchMock } = await openAsOwner();
+      await send(serverMessage.approval({ ...POST, ...extra }));
+      await nothingShows();
+      // Left to run out on the server: not answered for the owner
+      expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([]);
+    });
+
+    test('one that cannot be shown does not hold up one that can, read from the server or announced', async () => {
+      await openAsOwner({
+        routes: {
+          [arloPath('approvals')]: () => json({
+            approvals: [
+              { ...POST, body: 'x'.repeat(501), expiresAt: Date.now() + 50000 },
+              { ...ADMIT, id: ID2, expiresAt: Date.now() + 60000 },
+            ],
+          }),
+        },
+      });
+      expect(await screen.findByRole('dialog', { name: 'Admit James from the waiting room?' })).toBeInTheDocument();
+      expect(screen.getAllByRole('dialog')).toHaveLength(1);
+    });
+
+    test('a text taller than its box: it cannot be approved before its end has been scrolled into view', async () => {
+      const { fetchMock } = await openAsOwner();
+      layOutBody({ box: 120, text: 400 });
+      await send(serverMessage.approval(POST));
+      const dialog = await screen.findByRole('dialog');
+      const box = within(dialog).getByRole('region', { name: 'What will be posted' });
+      const post = within(dialog).getByRole('button', { name: 'Post it' });
+      expect(post).toBeDisabled();
+      expect(within(dialog).getByText('Scroll to the end of the message to continue.')).toBeInTheDocument();
+      await pastSheetGuard();
+      // Still not: the wait at the start is not what holds it
+      expect(post).toBeDisabled();
+      await userEvent.click(post);
+      fireEvent.scroll(box, { target: { scrollTop: 150 } });
+      expect(post).toBeDisabled();
+      // "Not now" never waits for the text
+      expect(within(dialog).getByRole('button', { name: 'Not now' })).toBeEnabled();
+      expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([]);
+
+      fireEvent.scroll(box, { target: { scrollTop: 280 } });
+      expect(post).toBeEnabled();
+      expect(within(dialog).queryByText('Scroll to the end of the message to continue.')).not.toBeInTheDocument();
+      // Scrolling back up does not take it away again
+      fireEvent.scroll(box, { target: { scrollTop: 0 } });
+      expect(post).toBeEnabled();
+      await userEvent.click(post);
+      await waitFor(() => expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: true }]));
+    });
+
+    test('scrolling to the end does not answer early: the first 700 ms still take no answer', async () => {
+      const { fetchMock } = await openAsOwner();
+      layOutBody({ box: 120, text: 400 });
+      await send(serverMessage.approval(POST));
+      const dialog = await screen.findByRole('dialog');
+      fireEvent.scroll(within(dialog).getByRole('region'), { target: { scrollTop: 280 } });
+      await userEvent.click(within(dialog).getByRole('button', { name: 'Post it' }));
+      expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([]);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    test('the next sheet starts over: its own text must be seen', async () => {
+      await openAsOwner();
+      layOutBody({ box: 120, text: 400 });
+      await send(serverMessage.approval({ ...POST, expiresAt: Date.now() + 50000 }));
+      await send(serverMessage.approval({ ...POST, id: ID2, body: 'Arlo: A second answer.', expiresAt: Date.now() + 60000 }));
+      const first = await screen.findByRole('dialog');
+      fireEvent.scroll(within(first).getByRole('region'), { target: { scrollTop: 280 } });
+      expect(within(first).getByRole('button', { name: 'Post it' })).toBeEnabled();
+      await send(serverMessage.approvalClosed(ID1, 'declined'));
+      await screen.findByText('Arlo: A second answer.');
+      expect(screen.getByRole('button', { name: 'Post it' })).toBeDisabled();
+    });
+
+    test('Tab reaches the text first, so it can be scrolled with the keys, then the buttons', async () => {
+      await openAsOwner();
+      await send(serverMessage.approval(POST));
+      const dialog = await screen.findByRole('dialog');
+      await pastSheetGuard();
+      await userEvent.tab();
+      expect(within(dialog).getByRole('region', { name: 'What will be posted' })).toHaveFocus();
+      await userEvent.tab();
+      expect(within(dialog).getByRole('button', { name: 'Post it' })).toHaveFocus();
+      await userEvent.tab();
+      expect(within(dialog).getByRole('button', { name: 'Not now' })).toHaveFocus();
+      await userEvent.tab();
+      expect(within(dialog).getByRole('region', { name: 'What will be posted' })).toHaveFocus();
+    });
+
+    test('markup in the text to post and in the request is shown as text', async () => {
+      await openAsOwner();
+      await send(serverMessage.approval({ ...POST, body: 'Arlo: <img src=x onerror=alert(1)> done', request: '<b>post</b> it' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByRole('region').textContent).toBe('Arlo: <img src=x onerror=alert(1)> done');
+      expect(within(dialog).getByText('They asked: “<b>post</b> it”')).toBeInTheDocument();
+      expect(dialog.querySelector('img, b')).toBeNull();
+    });
   });
 
   test('approving reports { approve: true } and nothing else: the panel itself does nothing', async () => {
@@ -139,16 +327,7 @@ describe('the sheet for something Arlo was asked to do', () => {
   ])('one with %s is ignored', async (_name, extra) => {
     await openAsOwner();
     await send(serverMessage.approval({ ...ADMIT, ...extra }));
-    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-
-  test('long texts from the server are cut: 300 characters of question, 60 of button', async () => {
-    await openAsOwner();
-    await send(serverMessage.approval({ ...ADMIT, question: `${'q'.repeat(300)}TAIL`, primaryLabel: `${'b'.repeat(60)}TAIL` }));
-    const dialog = await screen.findByRole('dialog', { name: 'q'.repeat(300) });
-    expect(within(dialog).getByRole('button', { name: 'b'.repeat(60) })).toBeInTheDocument();
-    expect(dialog).not.toHaveTextContent('TAIL');
+    await nothingShows();
   });
 
   test('markup in the server\'s texts is shown as text', async () => {
@@ -176,6 +355,36 @@ describe('the sheet for something Arlo was asked to do', () => {
     expect(await screen.findByRole('dialog', { name: 'Admit James from the waiting room?' })).toBeInTheDocument();
   });
 
+  test('after two sheets in a row the focus is back where it was before the first', async () => {
+    await openAsOwner();
+    const input = screen.getByRole('textbox', { name: 'Ask Arlo' });
+    input.focus();
+    await send(serverMessage.approval({ ...ADMIT, expiresAt: Date.now() + 50000 }));
+    await send(serverMessage.approval({ ...POST, id: ID2, expiresAt: Date.now() + 60000 }));
+    await screen.findByRole('dialog', { name: 'Admit James from the waiting room?' });
+    await pastSheetGuard();
+    await userEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    const second = await screen.findByRole('dialog', { name: 'Post Arlo\'s answer in the meeting chat?' });
+    expect(second).toHaveFocus();
+    await pastSheetGuard();
+    await userEvent.click(within(second).getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('textbox', { name: 'Ask Arlo' })).toHaveFocus();
+  });
+
+  test('when what had the focus is gone, the focus goes to the heading of the screen', async () => {
+    await openAsOwner();
+    const clear = document.createElement('button');
+    screen.getByRole('textbox', { name: 'Ask Arlo' }).after(clear);
+    clear.focus();
+    await send(serverMessage.approval(ADMIT));
+    await screen.findByRole('dialog');
+    clear.remove();
+    await send(serverMessage.approvalClosed(ID1, 'approved'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Your notes' })).toHaveFocus();
+  });
+
   test('a participant is never shown one, and one for another meeting is ignored', async () => {
     await openAsParticipant();
     await send(serverMessage.approval(ADMIT));
@@ -186,6 +395,85 @@ describe('the sheet for something Arlo was asked to do', () => {
     await send(OTHER.approval(ADMIT));
     await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});
+
+describe('the owner is asked on whatever screen they are on', () => {
+  const ownerRoutes = { [arloPath('state')]: () => json({ ...ARLO_ABSENT, ...OWNER }) };
+  /** The panel knows this person is an owner once it has read the open requests. */
+  const knowsOwner = (fetchMock) => waitFor(() => expect(callsTo(fetchMock, 'approvals')).not.toHaveLength(0));
+
+  test('on the meeting record: the sheet shows, the record waits behind it, and the answer is reported', async () => {
+    const fetchMock = mockFetch(ownerRoutes);
+    renderInMeeting({ page: 'record' });
+    const heading = await screen.findByRole('heading', { name: 'Meeting record' });
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    await knowsOwner(fetchMock);
+    await send(serverMessage.approval(POST));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Post Arlo\'s answer in the meeting chat?' });
+    expect(dialog).toHaveFocus();
+    expect(within(dialog).getByRole('region', { name: 'What will be posted' }).textContent).toBe(ANSWER);
+    expect(heading.closest('[inert]')).not.toBeNull();
+    expect(heading.closest('[aria-hidden="true"]')).not.toBeNull();
+    expect(heading.closest('[inert]')).not.toContainElement(dialog);
+    expect(screen.queryByRole('heading', { name: 'Meeting record' })).not.toBeInTheDocument();
+
+    await pastSheetGuard();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Post it' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: true }]);
+    // The record is in reach again; nothing had the focus, so its heading takes it
+    expect(heading.closest('[inert]')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Meeting record' })).toHaveFocus();
+  });
+
+  test('in Settings: a request for the notes shows there too, and "Not now" declines it', async () => {
+    const { fetchMock } = await openAsOwner();
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByRole('heading', { name: 'Settings' });
+    expect(screen.queryByText(NOTES.summary)).not.toBeInTheDocument();
+    await send(serverMessage.approval({ id: ID1, askedBy: 'Ben Okafor' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Share the notes with everyone in the meeting?' });
+    expect(within(dialog).getByText('Ben Okafor asked to see them.')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Settings' })).not.toBeInTheDocument();
+    await pastSheetGuard();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Not now' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: false }]);
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    expect(window.location.hash).toBe('#/settings');
+  });
+
+  test('in Settings: something Arlo was asked to do shows, and agreeing reports it', async () => {
+    const { fetchMock } = await openAsOwner();
+    await userEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByRole('heading', { name: 'Settings' });
+    await send(serverMessage.approval({ ...ADMIT, askerVerified: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Admit James from the waiting room?' });
+    await pastSheetGuard();
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Admit James' }));
+    await waitFor(() => expect(posted(fetchMock, `approvals/${ID1}`)).toEqual([{ approve: true }]));
+  });
+
+  test('on the classic dashboard too', async () => {
+    const fetchMock = mockFetch(ownerRoutes);
+    renderInMeeting({ page: 'classic' });
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    await knowsOwner(fetchMock);
+    await send(serverMessage.approval(ADMIT));
+    expect(await screen.findByRole('dialog', { name: 'Admit James from the waiting room?' })).toBeInTheDocument();
+  });
+
+  test('a guest on the meeting record is never asked, whatever their panel is told', async () => {
+    mockFetch(ownerRoutes, { signedIn: false });
+    renderInMeeting({ page: 'record', guest: true, sdk: attendee({ status: 'unauthenticated' }) });
+    await screen.findByRole('heading', { name: 'Meeting record' });
+    await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
+    await send(serverMessage.arloState(OWNER));
+    await send(serverMessage.approval(ADMIT));
+    await nothingShows();
   });
 });
 

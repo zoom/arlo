@@ -9,25 +9,84 @@ import { usableName } from './ownerName';
  *
  *   question, primary, secondary   the sheet's texts
  *   detail(askedBy)                who asked; `askedBy` is a usable name or null
- *   doneToast, failedToast         what the owner is told after agreeing (null: nothing)
+ *   doneToast, failedToast, unsentToast   what the owner is told after agreeing (null: nothing)
  *
  * 'agent_action' is something Arlo was asked to do ("Arlo, let James in") by
- * someone whose request needs an owner's approval. Its question and the text
- * of its primary button are the server's (templates it fills with checked
- * arguments), shown as text and cut to MAX_QUESTION_CHARS / MAX_PRIMARY_CHARS;
- * one without a question is not an approval. When the owner agrees the server
- * runs it and says how it ended (`arlo.did`), so no toast says "done" here.
+ * someone whose request needs an owner's approval. Its texts are the server's:
+ *
+ *   question       a short template it fills with checked arguments (required)
+ *   primaryLabel   the primary button's text ("Do it" when it gives none)
+ *   body           the exact text that will be posted to the chat, when it posts
+ *   request        what was asked, for context
+ *   askedBy        who asked; for a spoken request the speaker's Zoom display
+ *                  name, which anyone can set. `askerVerified` is true only
+ *                  when the server knows who asked; `channel` says how.
+ *
+ * The owner approves exactly what they see, so none of these is ever cut or
+ * changed: one whose question is missing, or where any of these texts is not
+ * text or is longer than its limit, is not an approval. It is not shown and
+ * not answered. When the owner agrees the server runs it and says how it
+ * ended (`arlo.did`), so no toast says "done" here.
+ *
+ *   failedToast    the server took the answer and could not do it
+ *   unsentToast    the answer did not reach the server
  */
 export const AGENT_ACTION = 'agent_action';
-const MAX_QUESTION_CHARS = 300;
-const MAX_PRIMARY_CHARS = 60;
+/** The longest texts of an 'agent_action' this panel shows (the server's own limits). */
+export const AGENT_LIMITS = Object.freeze({
+  question: 200, primaryLabel: 40, body: 500, request: 200, askedBy: 60,
+});
+const CHANNELS = new Set(['voice', 'panel']);
 const AGENT_TEXTS = Object.freeze({
-  detail: (askedBy) => (askedBy ? `${askedBy} asked Arlo to do this.` : 'Someone asked Arlo to do this.'),
   primary: 'Do it',
   secondary: 'Not now',
   doneToast: null,
-  failedToast: 'Arlo didn\'t get your answer.',
+  failedToast: 'Arlo couldn\'t do that.',
+  unsentToast: 'Arlo didn\'t get your answer. Try again.',
 });
+
+/**
+ * Who asked, as far as the server knows. A name the server did not verify is
+ * shown as what it is: what Zoom displayed for the speaker.
+ */
+function agentDetail({ askedBy, askerVerified, channel }) {
+  if (askerVerified === true && askedBy) return `${askedBy} asked Arlo to do this.`;
+  if (channel === 'panel') return 'Someone in the meeting asked.';
+  return askedBy
+    ? `Someone shown as \u201c${askedBy}\u201d asked by voice. Arlo can't confirm who spoke.`
+    : 'Someone in the meeting asked by voice.';
+}
+
+/**
+ * The server's texts of an 'agent_action', whole: { question, primaryLabel,
+ * body, request, askedBy, askerVerified, channel } with null for a text it did
+ * not give. null when it is not one this panel may show: no question, or a
+ * text that is not text, is blank where it must say something (question,
+ * body), or is longer than its limit. Nothing is cut.
+ */
+function agentFields(data) {
+  const fields = {};
+  for (const [name, max] of Object.entries(AGENT_LIMITS)) {
+    const value = data[name];
+    if (value === undefined || value === null) {
+      fields[name] = null;
+    } else if (typeof value !== 'string' || value.length > max) {
+      return null;
+    } else {
+      fields[name] = value;
+    }
+  }
+  if (fields.question === null || fields.question.trim().length === 0) return null;
+  if (fields.body !== null && fields.body.trim().length === 0) return null;
+  // Blank is "not given" for the texts the sheet can do without
+  if (fields.primaryLabel !== null && fields.primaryLabel.trim().length === 0) fields.primaryLabel = null;
+  if (fields.request !== null && fields.request.trim().length === 0) fields.request = null;
+  return {
+    ...fields,
+    askerVerified: data.askerVerified === true,
+    channel: CHANNELS.has(data.channel) ? data.channel : null,
+  };
+}
 
 export const APPROVAL_KINDS = Object.freeze({
   share_notes: Object.freeze({
@@ -37,6 +96,7 @@ export const APPROVAL_KINDS = Object.freeze({
     secondary: 'Not now',
     doneToast: 'Notes are now shared with everyone',
     failedToast: 'Couldn\'t share the notes. Try again.',
+    unsentToast: 'Couldn\'t share the notes. Try again.',
   }),
 });
 
@@ -50,40 +110,39 @@ const MAX_TIME_LEFT_MS = 10 * 60 * 1000;
 // A response's `Date` header is in whole seconds
 const SERVER_CLOCK_SLACK_MS = 1000;
 
-/** A text of the server's, cut to `max` characters; null when it is not text or is empty. */
-function serverText(value, max) {
-  if (typeof value !== 'string') return null;
-  const text = value.trim().slice(0, max).trim();
-  return text.length > 0 ? text : null;
-}
-
 /**
  * An approval as the server sends it (`arlo.approval`, GET …/arlo/approvals),
- * rebuilt from known fields: { id, kind, askedBy, expiresAt, expiresInMs,
- * question, primaryLabel } (the last two for an 'agent_action', else null).
+ * rebuilt from known fields: { id, kind, askedBy, expiresAt, expiresInMs } and,
+ * for an 'agent_action', its texts whole ({ question, primaryLabel, body,
+ * request, askerVerified, channel }; null for the other kinds).
  * `expiresAt` is by the server's clock; `expiresInMs` is the time left as the
- * server gave it, or null (it does not today). null when it is not one.
+ * server gave it, or null (it does not today). null when it is not one, and
+ * for an 'agent_action' this panel may not show (see above).
  */
 export function parseApproval(data) {
   if (data === null || typeof data !== 'object') return null;
-  const question = serverText(data.question, MAX_QUESTION_CHARS);
-  if (data.kind === AGENT_ACTION && question === null) return null;
   const { id, kind, expiresAt, expiresInMs } = data;
   if (typeof id !== 'string' || id.length === 0 || id.length > MAX_ID_CHARS) return null;
   if (typeof kind !== 'string' || kind.length === 0 || kind.length > MAX_KIND_CHARS) return null;
   if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt)) return null;
+  const agent = kind === AGENT_ACTION ? agentFields(data) : null;
+  if (kind === AGENT_ACTION && agent === null) return null;
   const timeLeft = typeof expiresInMs === 'number' && Number.isFinite(expiresInMs)
     ? Math.min(Math.max(0, expiresInMs), MAX_TIME_LEFT_MS)
     : null;
   return {
     id,
     kind,
-    askedBy: usableName(data.askedBy),
+    // A name that would show as a blank is no name
+    askedBy: usableName(agent ? agent.askedBy : data.askedBy),
     expiresAt,
     expiresInMs: timeLeft,
-    // The server's texts, for an 'agent_action' only
-    question: kind === AGENT_ACTION ? question : null,
-    primaryLabel: kind === AGENT_ACTION ? serverText(data.primaryLabel, MAX_PRIMARY_CHARS) : null,
+    question: agent?.question ?? null,
+    primaryLabel: agent?.primaryLabel ?? null,
+    body: agent?.body ?? null,
+    request: agent?.request ?? null,
+    askerVerified: agent?.askerVerified === true,
+    channel: agent?.channel ?? null,
   };
 }
 
@@ -121,23 +180,26 @@ export const approvalKind = (kind) => (
 
 /**
  * The sheet's texts for one approval: { question, detail, primary, secondary,
- * doneToast, failedToast }, or null for one this panel cannot show (a kind it
- * does not know, or an 'agent_action' without a question).
+ * doneToast, failedToast, unsentToast, body, request } (`body` and `request`
+ * null unless an 'agent_action' has them), or null for one this panel cannot
+ * show: a kind it does not know, or an 'agent_action' it may not show.
  */
 export function approvalTexts(approval) {
   if (approval === null || typeof approval !== 'object') return null;
   if (approval.kind === AGENT_ACTION) {
-    const question = serverText(approval.question, MAX_QUESTION_CHARS);
-    if (question === null) return null;
+    const agent = agentFields(approval);
+    if (agent === null) return null;
     return {
       ...AGENT_TEXTS,
-      question,
-      detail: AGENT_TEXTS.detail(approval.askedBy),
-      primary: serverText(approval.primaryLabel, MAX_PRIMARY_CHARS) ?? AGENT_TEXTS.primary,
+      question: agent.question,
+      body: agent.body,
+      request: agent.request,
+      detail: agentDetail({ ...agent, askedBy: usableName(agent.askedBy) }),
+      primary: agent.primaryLabel ?? AGENT_TEXTS.primary,
     };
   }
   const kind = approvalKind(approval.kind);
-  return kind ? { ...kind, detail: kind.detail(approval.askedBy) } : null;
+  return kind ? { ...kind, body: null, request: null, detail: kind.detail(approval.askedBy) } : null;
 }
 
 /** The oldest approval this panel can show, or null. */

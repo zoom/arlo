@@ -7,7 +7,10 @@ const sdkWith = (participants = []) => ({
   admitParticipantFromWaitingRoom: vi.fn(async () => ({ message: 'Success' })),
 });
 const waiting = (screenName, participantUUID) => ({ screenName, participantUUID, role: 'attendee' });
-const admit = (sdk, name, zoomRole = 'host') => runArloAction(sdk, { tool: 'admit_from_waiting_room', args: { name } }, { zoomRole });
+const yes = () => true;
+const admit = (sdk, name, zoomRole = 'host', stillAllowed = yes) => (
+  runArloAction(sdk, { tool: 'admit_from_waiting_room', args: { name } }, { zoomRole, stillAllowed })
+);
 
 describe('handsFor: what a panel announces', () => {
   test('chat when the client has it; the waiting room only for a host or co-host whose client has it', () => {
@@ -40,12 +43,20 @@ describe('post_to_chat', () => {
     ['no message', {}],
     ['an empty message', { message: '   ' }],
     ['a message that is not text', { message: 7 }],
-    ['a message over 300 characters', { message: 'x'.repeat(301) }],
+    ['a message over 510 characters', { message: 'x'.repeat(511) }],
     ['no arguments', undefined],
   ])('%s is not sent', async (_name, args) => {
     const sdk = sdkWith();
     expect(await runArloAction(sdk, { tool: 'post_to_chat', args })).toEqual({ ok: false, code: 'unsupported' });
     expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
+  });
+
+  test('"Arlo: " and an answer of 500 characters, 510 in all, is sent whole', async () => {
+    const sdk = sdkWith();
+    const message = `Arlo: ${'x'.repeat(504)}`;
+    expect(message).toHaveLength(510);
+    expect(await runArloAction(sdk, { tool: 'post_to_chat', args: { message } })).toEqual({ ok: true });
+    expect(sdk.sendMessageToChat).toHaveBeenCalledWith({ message });
   });
 
   test('a client without the chat API: unsupported', async () => {
@@ -62,16 +73,45 @@ describe('admit_from_waiting_room', () => {
     expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledWith({ participantUUID: 'u-1' });
   });
 
-  test('a first name only one person has: admitted', async () => {
-    const sdk = sdkWith([waiting('James Smith', 'u-1'), waiting('Bo Lee', 'u-2')]);
-    expect(await admit(sdk, 'James', 'coHost')).toEqual({ ok: true });
+  test('the same name written another way (composed or not, other spacing): still that person', async () => {
+    const sdk = sdkWith([waiting('Jose\u0301  Nu\u0301n\u0303ez', 'u-1'), waiting('Bo Lee', 'u-2')]);
+    expect(await admit(sdk, 'jos\u00e9 n\u00fa\u00f1ez', 'coHost')).toEqual({ ok: true });
     expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledWith({ participantUUID: 'u-1' });
   });
 
-  test('a full name wins over the same first name of someone else', async () => {
+  test('a first name alone admits nobody, even when only one person has it: several_match', async () => {
+    const sdk = sdkWith([waiting('Sam Stranger', 'u-1'), waiting('Bo Lee', 'u-2')]);
+    expect(await admit(sdk, 'Sam')).toEqual({ ok: false, code: 'several_match' });
+    expect(await admit(sdk, 'Sam', 'coHost')).toEqual({ ok: false, code: 'several_match' });
+    expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+  });
+
+  test('part of a name that is not its first word is nobody: not_found', async () => {
+    const sdk = sdkWith([waiting('Sam Stranger', 'u-1')]);
+    expect(await admit(sdk, 'Stranger')).toEqual({ ok: false, code: 'not_found' });
+    expect(await admit(sdk, 'Sa')).toEqual({ ok: false, code: 'not_found' });
+    expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+  });
+
+  test('someone whose whole name it is, beside someone it is the first name of: the one whose name it is', async () => {
     const sdk = sdkWith([waiting('James', 'u-1'), waiting('James Jones', 'u-2')]);
     expect(await admit(sdk, 'James')).toEqual({ ok: true });
+    expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledTimes(1);
     expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledWith({ participantUUID: 'u-1' });
+  });
+
+  test('the panel may no longer act once the list is back: not_allowed, nobody admitted', async () => {
+    const sdk = sdkWith([waiting('James', 'u-1')]);
+    let allowed = true;
+    sdk.getWaitingRoomParticipants = vi.fn(async () => { allowed = false; return { participants: [waiting('James', 'u-1')] }; });
+    expect(await admit(sdk, 'James', 'host', () => allowed)).toEqual({ ok: false, code: 'not_allowed' });
+    expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    // Nothing to ask whether it still may: nobody is admitted
+    const unasked = sdkWith([waiting('James', 'u-1')]);
+    expect(await runArloAction(unasked, { tool: 'admit_from_waiting_room', args: { name: 'James' } }, { zoomRole: 'host' }))
+      .toEqual({ ok: false, code: 'not_allowed' });
+    expect(await admit(unasked, 'James', 'host', () => 'yes')).toEqual({ ok: false, code: 'not_allowed' });
+    expect(unasked.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
   });
 
   test('nobody by that name: not_found, nobody admitted', async () => {

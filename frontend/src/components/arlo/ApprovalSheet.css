@@ -1,0 +1,109 @@
+/* The owner is asked: a sheet over whatever screen they are on. The app shell
+   renders it (components/arlo/ApprovalHost.jsx); the screen dims and waits
+   behind it. */
+.app-shell > [inert] {
+  opacity: 0.35;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 0.15s ease;
+}
+
+.arlo-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  padding: 14px 12px 12px;
+  background: var(--card);
+  color: var(--card-foreground);
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  box-shadow: var(--shadow-lg);
+  animation: arlo-sheet-rise 0.18s ease-out;
+}
+
+/* The focus lands on the sheet itself when it opens: a place to start from, not a control */
+.arlo-sheet:focus {
+  outline: none;
+}
+
+@keyframes arlo-sheet-rise {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .arlo-sheet { animation: none; }
+  .app-shell > [inert] { transition: none; }
+}
+
+.arlo-sheet-question {
+  margin: 0;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* What will be posted, whole: its own box, which scrolls when the text is long.
+   Nothing is cut and nothing is hidden behind an ellipsis. */
+.arlo-sheet-body {
+  flex-shrink: 0;
+  max-height: min(34vh, 220px);
+  overflow-y: auto;
+  padding: 8px 10px;
+  background: var(--muted);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.arlo-sheet-body:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+
+.arlo-sheet-detail,
+.arlo-sheet-request,
+.arlo-sheet-hint {
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.arlo-sheet-request,
+.arlo-sheet-hint {
+  font-size: 0.75rem;
+}
+
+.arlo-sheet-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.arlo-sheet-button {
+  width: 100%;
+}
+
+.arlo-sheet-countdown {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}

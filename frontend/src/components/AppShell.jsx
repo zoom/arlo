@@ -6,6 +6,7 @@ import { useArlo } from '../contexts/ArloContext';
 import ArloLogo from './ArloLogo';
 import Button from './ui/Button';
 import LiveMeetingBanner from './LiveMeetingBanner';
+import ApprovalHost from './arlo/ApprovalHost';
 import './AppShell.css';
 
 export default function AppShell() {
@@ -182,6 +183,9 @@ export default function AppShell() {
       <main className="app-main">
         <Outlet />
       </main>
+
+      {/* A request for the owner's approval, over whatever screen they are on */}
+      <ApprovalHost />
     </div>
   );
 }

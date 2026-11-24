@@ -175,10 +175,10 @@ describe('an action from the server', () => {
     expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
   });
 
-  test('admit from the waiting room: the one person by that name is admitted', async () => {
+  test('admit from the waiting room: the one person by that whole name is admitted', async () => {
     const sdk = createZoomSdk({ waitingRoom: [{ screenName: 'James Smith', participantUUID: 'W-1' }, { screenName: 'Bo', participantUUID: 'W-2' }] });
     const { fetchMock } = await openAsOwner({ sdk });
-    await send(serverMessage.action({ actionId: A1, tool: 'admit_from_waiting_room', args: { name: 'james' } }));
+    await send(serverMessage.action({ actionId: A1, tool: 'admit_from_waiting_room', args: { name: 'james smith' } }));
     await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
     expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledTimes(1);
     expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledWith({ participantUUID: 'W-1' });
@@ -188,6 +188,82 @@ describe('an action from the server', () => {
     await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
     expect(results(fetchMock)[1].body).toEqual({ ok: false, code: 'not_found' });
     expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledTimes(1);
+  });
+
+  test('a first name is not enough: the only "Sam" waiting is not let in, and Arlo is told several match', async () => {
+    const sdk = createZoomSdk({ waitingRoom: [{ screenName: 'Sam Stranger', participantUUID: 'W-1' }] });
+    const { fetchMock } = await openAsOwner({ sdk });
+    await send(serverMessage.action({ actionId: A1, tool: 'admit_from_waiting_room', args: { name: 'Sam' } }));
+    await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+    expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'several_match' });
+    expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+  });
+
+  describe('what changed while Zoom was listing the waiting room', () => {
+    /** An admit whose waiting-room list is held back until `release()`. */
+    async function admitHeld(options = {}) {
+      const sdk = createZoomSdk({ waitingRoom: [{ screenName: 'James', participantUUID: 'W-1' }] });
+      let release;
+      sdk.getWaitingRoomParticipants.mockImplementation(() => new Promise((resolve) => {
+        release = () => resolve({ participants: [{ screenName: 'James', participantUUID: 'W-1' }] });
+      }));
+      const opened = await openAsOwner({ sdk, ...options });
+      await send(serverMessage.action({ actionId: A1, tool: 'admit_from_waiting_room', args: { name: 'James' } }));
+      await waitFor(() => expect(sdk.getWaitingRoomParticipants).toHaveBeenCalledTimes(1));
+      return { ...opened, sdk, release: () => act(async () => { release(); }) };
+    }
+
+    test('nothing: the person is admitted', async () => {
+      const { sdk, fetchMock, release } = await admitHeld();
+      await release();
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+      expect(results(fetchMock)[0].body).toEqual({ ok: true });
+      expect(sdk.admitParticipantFromWaitingRoom).toHaveBeenCalledWith({ participantUUID: 'W-1' });
+    });
+
+    test('this person is no longer an owner: nobody is admitted, "not_allowed"', async () => {
+      const { sdk, fetchMock, release } = await admitHeld();
+      await send(serverMessage.arloState(ANA_BROUGHT_ARLO));
+      await release();
+      await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
+      expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'not_allowed' });
+      expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    });
+
+    test('the meeting ended: nobody is admitted', async () => {
+      const { sdk, release } = await admitHeld();
+      await send(serverMessage.status('rtms_stopped', { meetingEnded: true }));
+      await release();
+      await settle();
+      expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    });
+
+    test('the session ended: nobody is admitted', async () => {
+      let sessionValid = true;
+      const { sdk, release } = await admitHeld({
+        routes: {
+          '/api/auth/me': () => (sessionValid ? json({ user: { id: 'user-1', displayName: 'Ana' } }) : json({ error: 'Not authenticated' }, 401)),
+          '/api/highlights': () => json({ error: 'Unauthorized' }, 401),
+        },
+      });
+      sessionValid = false;
+      await act(async () => { await fetch('/api/highlights', { credentials: 'include' }); });
+      await waitFor(() => expect(screen.queryByText('Arlo is in the meeting')).not.toBeInTheDocument());
+      await release();
+      await settle();
+      expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    });
+
+    test('the panel is in another meeting: nobody is admitted', async () => {
+      const { sdk, release } = await admitHeld();
+      await act(async () => {
+        sdk.getMeetingUUID.mockResolvedValue({ meetingUUID: 'MEETING-2==' });
+        sdk.emit('onRunningContextChange', { runningContext: 'inMeeting' });
+      });
+      await release();
+      await settle();
+      expect(sdk.admitParticipantFromWaitingRoom).not.toHaveBeenCalled();
+    });
   });
 
   test('an owner who is an attendee in Zoom is asked to admit someone: "not_allowed"', async () => {
