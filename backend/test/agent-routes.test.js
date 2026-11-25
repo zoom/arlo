@@ -423,21 +423,50 @@ test('AGENT_SPEAKER_MATCH=participant_id: a speaker whose id an owner\'s panel r
   closeAll(ownerPanel);
 });
 
-test('talk about Arlo, and a wake word no tool fits, do nothing anyone sees', async () => {
+test('talk about Arlo does nothing at all; a wake word no tool fits is recorded for the owners only', async () => {
   const m = await meetingWith('AG-VOICE-SILENT==');
   const ownerPanel = await panel(m.meetingId, m.owner);
+  const benPanel = await panel(m.meetingId, m.participant);
+  const guestPanel = await panel(m.meetingId, m.guest);
+  const others = [benPanel, guestPanel];
+  // talk about Arlo is no request: no model is asked, nothing is recorded, nobody is told
   await say(m.meetingId, 'I asked Arlo about this yesterday.');
   await say(m.meetingId, 'Arlo is taking notes for us.');
   await h.wait(100);
   assert.equal(chosen.length, 0);
+  assert.deepEqual((await actions(m, m.owner)).body.actions, []);
+  assert.deepEqual(getMeetingStore().listActions(m.meetingId), []);
+  for (const type of ['arlo.did', 'arlo.thinking', 'arlo.approval', 'arlo.action']) {
+    assert.deepEqual([ownerPanel, ...others].flatMap((ws) => of(ws, type)), [], type);
+  }
+
+  // a request no tool fits: nothing in the meeting, one private failed line for the owners
   pick = async () => ({ tool: 'none' });
   await say(m.meetingId, 'Arlo, you are great today.');
   await h.wait(150);
   assert.equal(chosen.length, 1);
-  assert.deepEqual((await actions(m, m.owner)).body.actions, []);
+  const mine = (await actions(m, m.owner)).body.actions;
+  assert.equal(mine.length, 1);
+  assert.deepEqual(Object.keys(mine[0]), ACTION_KEYS);
+  assert.match(mine[0].id, UUID);
+  assert.deepEqual(
+    { ...mine[0], id: null, at: null },
+    { id: null, at: null, tool: 'none', label: 'Could not understand a request', askedBy: 'Ben', channel: 'voice', status: 'failed', public: false },
+  );
+  // the owner's panel is told once how it ended; no sheet, and nothing for a panel to do
+  assert.deepEqual(of(ownerPanel, 'arlo.did').map((msg) => msg.data.action), mine);
   assert.deepEqual(of(ownerPanel, 'arlo.approval'), []);
-  assert.deepEqual(of(ownerPanel, 'arlo.did'), []);
-  closeAll(ownerPanel);
+  assert.deepEqual(of(ownerPanel, 'arlo.action'), []);
+  assert.equal(of(ownerPanel, 'arlo.thinking').at(-1).data.on, false);
+  assert.deepEqual((await call('GET', m.meetingId, 'approvals', { headers: m.owner })).body, { approvals: [] });
+  // nobody else sees it: not in the record everyone reads, not on their sockets
+  for (const headers of [m.participant, m.guest]) assert.deepEqual((await actions(m, headers)).body.actions, []);
+  for (const type of ['arlo.did', 'arlo.thinking', 'arlo.approval', 'arlo.action']) {
+    assert.deepEqual(others.flatMap((ws) => of(ws, type)), [], type);
+  }
+  // and nothing of what was said is in what the owner's panel was told
+  assert.equal(JSON.stringify([of(ownerPanel, 'arlo.did'), of(ownerPanel, 'arlo.thinking')]).includes('great'), false);
+  closeAll(ownerPanel, ...others);
 });
 
 test('when the meeting ends nothing of the agent is left, and a model that answers late changes nothing', async () => {

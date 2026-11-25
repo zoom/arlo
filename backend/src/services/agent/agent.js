@@ -833,6 +833,21 @@ function createAgent({
         args = call.args;
       }
     }
+    if (tool === null && !pickFailed && request !== null && req.channel === 'voice') {
+      // Heard, and nothing can be done with it. Not silent for the owners:
+      // their panel said "thinking", so it also says how that ended. Nothing
+      // in the meeting. The log gets the reason and a tool's name only when
+      // it is one of ours (a model's other words are never logged)
+      const named = isPlainObject(picked) && typeof picked.tool === 'string' && getTool(picked.tool, toolOptions) !== null;
+      log.log(`Arlo agent: nothing to do for a spoken request (${named ? `invalid call of ${picked.tool}` : 'no tool fits'})`);
+      const stored = store.appendAction(meetingId, {
+        tool: NO_TOOL_NAME, label: NOT_UNDERSTOOD_LABEL, askedBy: req.name, channel: 'voice', status: 'failed', public: false,
+      });
+      if (stored) tellDid(meetingId, state, stored);
+      return {
+        status: 'failed', tool: NO_TOOL_NAME, code: 'no_tool', action: stored,
+      };
+    }
 
     const toolKind = tool === null ? 'none' : (tool.changesMeeting ? 'change' : 'read');
     const asker = askerOf(meetingId, req);

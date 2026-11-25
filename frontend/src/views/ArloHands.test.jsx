@@ -671,7 +671,8 @@ describe('a timer on Zoom\'s indicator', () => {
   });
 
   test('started on an owner\'s panel that does not own the indicator: it starts, and that panel sends no status of its own', async () => {
-    const { sdk, fetchMock } = await openAsOwner();
+    // an owner whose own stream does not run: Arlo is here through another person's
+    const { sdk, fetchMock } = await openAsOwner({ state: { ...OWNER, myStreamLive: false } });
     await send(serverMessage.action({ actionId: A1, tool: 'set_timer', args: { minutes: 1 } }));
     await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
     expect(results(fetchMock)[0].body).toEqual({ ok: true });

@@ -183,6 +183,11 @@ export function MeetingProvider({ children }) {
   const ownPauseOnServerRef = useRef(null);
   // The same, as state, for what is rendered from it (Zoom's indicator)
   const [ownPauseOnServer, setOwnPauseOnServer] = useState(null);
+  // The server says a stream of this person's own runs in the meeting right
+  // now (`arlo.state`: an owner with `myStreamLive: true`). A panel that was
+  // reloaded has forgotten that it started the stream; this is how it knows
+  // the stream is its user's, and sets Zoom's indicator again.
+  const [ownStreamLiveOnServer, setOwnStreamLiveOnServer] = useState(false);
   // The server says Arlo is in the meeting and no stream of this person's own
   // runs: it is here through someone else's. A start asked for then is this
   // person's own, beside that stream (see lib/rtmsMachine.js `alongside`).
@@ -444,6 +449,7 @@ export function MeetingProvider({ children }) {
     // A new socket (another meeting, or a reconnect): the server says it again
     ownPauseOnServerRef.current = null;
     setOwnPauseOnServer(null);
+    setOwnStreamLiveOnServer(false);
     besideAnotherStreamRef.current = false;
     arloStateKnownRef.current = false;
     // A retry still waiting would replace the socket about to be opened
@@ -535,6 +541,7 @@ export function MeetingProvider({ children }) {
           // here only through another person's stream; a participant has none.
           // A server that does not send it: an owner's stream is taken to run.
           arloStateKnownRef.current = true;
+          setOwnStreamLiveOnServer(data.present === true && data.role === 'owner' && data.myStreamLive === true);
           if (data.present === true && (data.role === 'owner' || data.role === 'participant')) {
             const ownStreamLive = data.role === 'owner' && data.myStreamLive !== false;
             besideAnotherStreamRef.current = !ownStreamLive;
@@ -839,7 +846,7 @@ export function MeetingProvider({ children }) {
     inputs: {
       phase: rtms.phase,
       pausedOnServer: ownPauseOnServer === true,
-      startedHere: streamStartedHere,
+      startedHere: streamStartedHere || ownStreamLiveOnServer,
       guest: isGuest,
       voiceEnabled: voiceState.enabled,
       voiceProcessing: voiceState.processing,
@@ -857,10 +864,10 @@ export function MeetingProvider({ children }) {
       supported: dynamicIndicatorSupported,
       phase: rtms.phase,
       pausedOnServer: ownPauseOnServer === true,
-      startedHere: streamStartedHere,
+      startedHere: streamStartedHere || ownStreamLiveOnServer,
       guest: isGuest,
     });
-  }, [dynamicIndicatorSupported, rtms.phase, ownPauseOnServer, streamStartedHere, isGuest]);
+  }, [dynamicIndicatorSupported, rtms.phase, ownPauseOnServer, streamStartedHere, ownStreamLiveOnServer, isGuest]);
   const reportVoiceState = useCallback((enabled, processing) => {
     setVoiceState((prev) => (
       prev.enabled === enabled && prev.processing === processing ? prev : { enabled, processing }

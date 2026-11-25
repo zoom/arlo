@@ -197,6 +197,23 @@ describe('a start of one\'s own that the server confirms', () => {
     expect(startCalls(sdk)).toHaveLength(1);
   });
 
+  test('a reloaded panel never clicked: the server says this owner\'s own stream runs, so the indicator is set again, and nothing else', async () => {
+    const sdk = createZoomSdk();
+    await open({ sdk, state: { ...OWNER, myStreamLive: true } });
+    await send(serverMessage.status('rtms_started'));
+    await send(serverMessage.arloState({ ...OWNER, myStreamLive: true }));
+    await waitFor(() => expect(lastIndicator(sdk)).toBe('Arlo is transcribing'));
+    await send(serverMessage.segment(1, 'a line after the reload'));
+    await send(serverMessage.segment(2, 'and another'));
+    expect(startCalls(sdk)).toHaveLength(0);
+    expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
+
+    // the stream stops: the indicator goes
+    await send(serverMessage.status('rtms_stopped'));
+    await send(serverMessage.arloState({ ...OWNER, present: false, myStreamLive: false }));
+    await waitFor(() => expect(sdk.removeDynamicIndicator).toHaveBeenCalled());
+  });
+
   test('alone in the meeting, as before: the indicator, one chat notice, and the restart after a fault', async () => {
     const sdk = createZoomSdk();
     await open({ sdk });

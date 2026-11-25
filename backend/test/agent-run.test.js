@@ -131,6 +131,24 @@ const onOff = (thinking) => thinking.filter((told, i) => i === 0 || told[2] !== 
 
 const ACTION_KEYS = ['id', 'at', 'tool', 'label', 'askedBy', 'channel', 'status', 'public'];
 
+/**
+ * A spoken request that no tool fits ended as it must: nothing in the meeting
+ * (the caller checks hands and sheets), and one private failed line with the
+ * server's fixed words, stored last and told to the owners only.
+ */
+function assertNotUnderstood(s, res, message) {
+  assert.deepEqual([res.status, res.tool, res.code], ['failed', 'none', 'no_tool'], message);
+  assert.deepEqual(Object.keys(res).sort(), ['action', 'code', 'status', 'tool'], message);
+  assert.deepEqual(
+    { ...res.action, id: null, at: null },
+    { id: null, at: null, tool: 'none', label: 'Could not understand a request', askedBy: 'Ben', channel: 'voice', status: 'failed', public: false },
+    message,
+  );
+  assert.deepEqual(s.store.listActions(M).at(-1), res.action, message);
+  assert.deepEqual(s.t.did.at(-1), { meetingId: M, action: res.action, audience: { everyone: false, userIds: [...s.t.owners] } }, message);
+  assert.equal(s.t.thinking.at(-1)[2], false, message);
+}
+
 test('an owner types a question: the answer goes to them alone, and is recorded as theirs', async () => {
   const s = setup();
   const res = await s.typed('When do we ship?');
@@ -609,7 +627,7 @@ test('the notes feed a summary only for an owner in private, or while they are s
   assert.equal((await stopped.typed('Summarize so far', BEN)).answer, 'From the transcript.');
 });
 
-test('no tool fits: a typed request is answered from the transcript as typed, a spoken one is silent', async () => {
+test('no tool fits: a typed request is answered from the transcript as typed, a spoken one is recorded for the owners only', async () => {
   const s = setup();
   s.picks('none');
   const res = await s.typed('  hello there, anything about Friday?  ');
@@ -625,8 +643,10 @@ test('no tool fits: a typed request is answered from the transcript as typed, a 
   );
   assert.deepEqual(s.t.did.at(-1).audience, { everyone: false, userIds: ['user-ana'] });
 
-  assert.deepEqual(await s.said('is taking notes'), { status: 'none' });
-  assert.deepEqual([s.store.listActions(M).length, s.t.handed.length, s.t.did.length, s.t.approval.length, s.t.answered.length], [1, 0, 1, 0, 1]);
+  // spoken: nothing in the meeting, no sheet, no answer written; one private failed line for the owners
+  assertNotUnderstood(s, await s.said('is taking notes'));
+  assert.deepEqual([s.store.listActions(M).length, s.t.handed.length, s.t.did.length, s.t.approval.length, s.t.answered.length], [2, 0, 2, 0, 1]);
+  assert.equal(s.store.listActions(M).some((action) => action.public === true), false);
   assert.equal(onOff(s.t.thinking).length, 4);
   assert.equal(s.t.thinking.at(-1)[2], false);
 
@@ -731,7 +751,7 @@ test('the sheet for a chat message shows the whole message as its body, and that
   // one character more is not a tool call: nothing is posted or asked
   s.picks('post_to_chat', { message: `${message}!` });
   const before = s.t.approval.length;
-  await s.said('post that to the chat');
+  assertNotUnderstood(s, await s.said('post that to the chat'));
   assert.equal(s.t.approval.length, before);
   assert.equal(s.t.handed.length, 1);
 
@@ -740,7 +760,9 @@ test('the sheet for a chat message shows the whole message as its body, and that
   await s.said('post it');
   assert.equal(s.sheet().body, 'The host says leave now.');
   s.picks('post_to_chat', { message: 'Arlo:' });
-  assert.deepEqual(await s.said('post it again'), { status: 'none' });
+  const sheets = s.t.approval.length;
+  assertNotUnderstood(s, await s.said('post it again'));
+  assert.deepEqual([s.t.approval.length, s.t.handed.length], [sheets, 1]);
 });
 
 test('a typed request goes ahead of waiting spoken ones, never ahead of the one being handled or of an earlier typed one', async () => {
@@ -822,12 +844,19 @@ test('what a model picks is checked against the tool table: anything else is no 
     const typed = await s.typed('do something');
     assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting'], JSON.stringify(pick));
     assert.equal(s.t.answered.at(-1).question, 'do something');
-    assert.deepEqual(await s.said('do something'), { status: 'none' }, JSON.stringify(pick));
+    // spoken: one private failed line with the server's words, nothing of the pick
+    assertNotUnderstood(s, await s.said('do something'), JSON.stringify(pick));
     s.advance(60 * 1000);
   }
   // nothing but those answers: nothing done in the meeting, nothing asked of the owners
   assert.deepEqual([s.t.handed.length, s.t.answered.length, s.t.approval.length], [0, picks.length, 0]);
-  assert.deepEqual([...new Set(s.store.listActions(M).map((action) => `${action.tool} ${action.channel} ${action.public}`))], ['answer_from_meeting panel false']);
+  assert.deepEqual(
+    [...new Set(s.store.listActions(M).map((action) => `${action.tool} ${action.channel} ${action.public} ${action.label}`))],
+    ['answer_from_meeting panel false Answered a question', 'none voice false Could not understand a request'],
+  );
+  // and no panel was told anything for everyone
+  assert.equal(s.t.did.some((told) => told.audience.everyone !== false), false);
+  assert.equal(/delete_everything|web_search|weather|__proto__/.test(JSON.stringify([s.store.listActions(M), s.t.did])), false);
 });
 
 test('what people said never reaches the model that picks a tool', async () => {
@@ -899,6 +928,41 @@ test('the model that picks fails: a typed question is still answered, a spoken r
   await turn();
   s.advance(20000);
   assert.equal((await hanging).code, 'chooser');
+});
+
+test('a spoken request no tool fits: the log says why, with a tool\'s name only when it is one of ours', async () => {
+  const lines = [];
+  const s = setup({ agent: { log: { log: (line) => lines.push(String(line)), warn: (line) => lines.push(String(line)) } } });
+  s.store.setMeta(M, { whoCanAsk: 'anyone' });
+
+  // a tool of ours, called with arguments that are not allowed: its name, and nothing of the arguments
+  s.picks('post_to_chat', { message: 'SECRET-MESSAGE', to: 'everyone' });
+  assertNotUnderstood(s, await s.said('post the SPOKEN-WORDS to the chat'));
+  assert.deepEqual(lines, ['Arlo agent: nothing to do for a spoken request (invalid call of post_to_chat)']);
+
+  // a name that is no tool of ours is a model's own word: never logged
+  for (const pick of [
+    { tool: 'delete_everything_now', args: {} },
+    { tool: 'post_to_chat\nArlo agent: share_notes done (voice)', args: {} },
+    { tool: 'web_search', args: { query: 'weather' } }, // a tool, turned off in this deployment
+    { tool: 'none' },
+    { tool: 42, args: {} },
+    'delete_everything_now',
+    null,
+  ]) {
+    lines.length = 0;
+    s.t.choose = async () => pick;
+    assertNotUnderstood(s, await s.said('do the SPOKEN-WORDS thing'), JSON.stringify(pick));
+    assert.deepEqual(lines, ['Arlo agent: nothing to do for a spoken request (no tool fits)'], JSON.stringify(pick));
+  }
+
+  // a typed request no tool fits is answered as before, and logs no such line
+  lines.length = 0;
+  s.picks('delete_everything_now');
+  assert.equal((await s.typed('do the TYPED-WORDS thing')).status, 'answered');
+  assert.equal(lines.some((line) => line.includes('nothing to do for a spoken request')), false);
+  assert.equal(/delete_everything|TYPED-WORDS|SPOKEN-WORDS|SECRET-MESSAGE|Ben|Ana/.test(lines.join('\n')), false);
+  assert.deepEqual([s.t.handed, s.t.approval], [[], []]);
 });
 
 test('the model that answers fails: reported by code, never by its words', async () => {
@@ -1016,7 +1080,7 @@ test('typed: at most 30 per person per meeting in ten minutes; spoken: at most 2
   s.t.owners = ['user-ana', 'user-cy'];
   s.picks('none');
   // 20 spoken requests, none of which any tool fits, and then some
-  for (let i = 0; i < 20; i += 1) assert.deepEqual(await s.said(`mumble ${i}`), { status: 'none' });
+  for (let i = 0; i < 20; i += 1) assertNotUnderstood(s, await s.said(`mumble ${i}`));
   assert.deepEqual(await s.said('one more'), { status: 'refused', reason: 'rate_limited' });
   assert.equal(s.t.chosen.length, 20);
   for (let i = 0; i < 30; i += 1) await s.said(`and more ${i}`);
@@ -1033,7 +1097,10 @@ test('typed: at most 30 per person per meeting in ten minutes; spoken: at most 2
 
   s.advance(10 * 60 * 1000 + 1);
   assert.equal((await s.typed('later')).status, 'answered');
-  assert.deepEqual(await s.said('later'), { status: 'none' });
+  assertNotUnderstood(s, await s.said('later'));
+  // still nothing in the chat, no sheet, and nothing in the record for everyone
+  assert.deepEqual([s.t.handed, s.t.approval], [[], []]);
+  assert.equal(s.store.listActions(M).some((action) => action.public === true), false);
 });
 
 test('the limits can be set, are counted per meeting, and are gone with the meeting', async () => {
@@ -1048,7 +1115,7 @@ test('the limits can be set, are counted per meeting, and are gone with the meet
   s.agent.forget(M);
   assert.equal(s.agent.size(), 0);
   assert.equal((await s.typed('one again')).status, 'answered');
-  assert.deepEqual(await s.said('one again'), { status: 'none' });
+  assertNotUnderstood(s, await s.said('one again'));
 });
 
 test('the queue limit holds exactly: one handled, `queueLimit` waiting, the next turned away at once', async () => {
@@ -1629,14 +1696,17 @@ test('a reaction that is not one of the six is no tool: nothing is sent, and no 
     // typed: answered from the transcript as a question, as when no tool fits
     const typed = await s.typed('send a thumbs up');
     assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting'], JSON.stringify(reaction));
-    // spoken: silent
-    assert.deepEqual(await s.said('send a thumbs up'), { status: 'none' });
+    // spoken: nothing in the meeting; the owners' record gets the server's fixed line
+    assertNotUnderstood(s, await s.said('send a thumbs up'), JSON.stringify(reaction));
   }
   s.t.choose = async () => ({ tool: 'send_reaction', args: { reaction: 'clap', emoji: '\u{1F480}' } });
   assert.equal((await s.typed('clap')).tool, 'answer_from_meeting');
+  assertNotUnderstood(s, await s.said('clap'));
   assert.deepEqual(s.t.handed, []);
   assert.deepEqual(s.t.approval, []);
-  assert.equal(s.store.listActions(M).some((action) => action.tool === 'send_reaction'), false);
+  assert.equal(s.store.listActions(M).some((action) => action.tool === 'send_reaction' || action.public === true), false);
+  // no emoji and no word of a model's in the record, or in what the panels were told
+  assert.equal(/\u{1F480}|skull|thumbs|mute|constructor|__proto__/iu.test(JSON.stringify([s.store.listActions(M), s.t.did, s.t.steps])), false);
 });
 
 test('a reaction, spoken or not in what was typed: the sheet names the reaction, and it is sent as the owner who agreed', async () => {
@@ -1787,13 +1857,16 @@ test('a hostile name to mute is no tool at all: nobody is muted and nothing of i
     s.picks('mute_participant', { name });
     const typed = await s.typed('mute Danny');
     assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting'], JSON.stringify(name));
-    assert.deepEqual(await s.said('mute Danny'), { status: 'none' });
+    assertNotUnderstood(s, await s.said('mute Danny'), JSON.stringify(name));
   }
   s.t.choose = async () => ({ tool: 'mute_participant', args: { name: 'Danny', everyone: true } });
   assert.equal((await s.typed('mute Danny')).tool, 'answer_from_meeting');
+  assertNotUnderstood(s, await s.said('mute Danny'));
   assert.deepEqual(s.t.handed, []);
   assert.deepEqual(s.t.approval, []);
-  assert.equal(s.store.listActions(M).some((action) => action.tool === 'mute_participant'), false);
+  assert.equal(s.store.listActions(M).some((action) => action.tool === 'mute_participant' || action.public === true), false);
+  // nothing of the name in the record, in what the panels were told, or in a step
+  assert.equal(/Danny|reversed|Mute everyone|DDDD/.test(JSON.stringify([s.store.listActions(M), s.t.did, s.t.steps])), false);
 
   // a name at the limit is a name: shown whole on the sheet, cut in the step
   const long = `Danny ${'R'.repeat(94)}`;
@@ -1950,7 +2023,8 @@ test('a ticket, spoken or not in what was typed: the sheet says what opens, and 
   assert.deepEqual([lastAction(s).status, lastAction(s).label], ['expired', 'Asked to open a ticket']);
   assert.equal(s.t.handed.length, 2);
   // nothing in the record, or in what the panels were told an action ended as, has a key
-  assert.equal(/PROJ|OPS|123/i.test(JSON.stringify([s.store.listActions(M), s.t.did])), false);
+  // (ids are random and can contain "123" by chance: left out)
+  assert.equal(/PROJ|OPS|123/i.test(JSON.stringify([s.store.listActions(M), s.t.did], (key, value) => (key === 'id' ? undefined : value))), false);
 });
 
 test('a ticket key that is not one, or a URL from a model, is no tool: nothing is opened', async () => {
@@ -1970,12 +2044,14 @@ test('a ticket key that is not one, or a URL from a model, is no tool: nothing i
     // typed: answered from the transcript as a question, as when no tool fits
     const typed = await s.typed('open PROJ-123 and share it');
     assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting'], JSON.stringify(args));
-    // spoken: silent
-    assert.deepEqual(await s.said('open PROJ-123 and share it'), { status: 'none' });
+    // spoken: nothing in the meeting; the owners' record gets the server's fixed line
+    assertNotUnderstood(s, await s.said('open PROJ-123 and share it'), JSON.stringify(args));
   }
   assert.deepEqual(s.t.handed, []);
   assert.deepEqual(s.t.approval, []);
-  assert.equal(s.store.listActions(M).some((action) => action.tool === 'open_ticket'), false);
+  assert.equal(s.store.listActions(M).some((action) => action.tool === 'open_ticket' || action.public === true), false);
+  // no key and no URL in the record, in what the panels were told, or in a step
+  assert.equal(/PROJ|ROJ-|evil|https?:|browse/i.test(JSON.stringify([s.store.listActions(M), s.t.did, s.t.steps])), false);
 });
 
 test('without a Jira base URL there is no such tool, whatever a model picks', async () => {
@@ -1983,9 +2059,10 @@ test('without a Jira base URL there is no such tool, whatever a model picks', as
     s.picks('open_ticket', { key: 'PROJ-123', share: true });
     const typed = await s.typed('open PROJ-123 and share it');
     assert.deepEqual([typed.status, typed.tool], ['answered', 'answer_from_meeting']);
-    assert.deepEqual(await s.said('open PROJ-123 and share it'), { status: 'none' });
+    assertNotUnderstood(s, await s.said('open PROJ-123 and share it'));
     assert.deepEqual(s.t.handed, []);
     assert.deepEqual(s.t.approval, []);
+    assert.equal(/PROJ|open_ticket|jira/i.test(JSON.stringify([s.store.listActions(M), s.t.did, s.t.steps])), false);
   }
 });
 
