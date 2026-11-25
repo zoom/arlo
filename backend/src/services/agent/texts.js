@@ -17,11 +17,11 @@
  * The emoji of a reaction is from this file as well (REACTIONS): a model
  * names one of six reactions, and never writes the character that is shown.
  *
- * A ticket's key in a sentence is the one the tool table rebuilt (lib/jira.js);
- * anything else is "a ticket". Its URL is in no sentence. The record, which
- * everyone in the meeting reads, never has the key: it says "a ticket". The
- * key is in what the owners see (the sheet, the step) and in what the asker's
- * own panel is answered.
+ * An issue's number in a sentence is the one the tool table rebuilt
+ * (lib/github.js); anything else is "an issue". Its URL and the repository
+ * are in no sentence. The record, which everyone in the meeting reads, never
+ * has the number: it says "an issue". The number is in what the owners see
+ * (the sheet, the step) and in what the asker's own panel is answered.
  *
  * Arlo posts no line of its own to the chat: not "I am busy", not "the host
  * declined". A line nobody approved is unapproved content; those outcomes are
@@ -29,7 +29,7 @@
  */
 
 const { cleanName } = require('../../lib/displayName');
-const { isTicketKey } = require('../../lib/jira');
+const { isIssueNumber } = require('../../lib/github');
 
 // Never part of text that is shown or posted: control characters, invisible
 // format characters (a direction override turns the text around it),
@@ -121,9 +121,10 @@ function reactionEmoji(args) {
 /** "a 👍 reaction", or "a reaction" for one that is not in the table (the tool table lets none through). */
 const aReaction = (args) => (reactionEmoji(args) === null ? 'a reaction' : `a ${reactionEmoji(args)} reaction`);
 
-/** The ticket's key as it is shown: the rebuilt key, or "a ticket" for anything else. */
-const ticketName = (args) => (args !== null && typeof args === 'object' && isTicketKey(args.key) ? args.key : 'a ticket');
-/** Whether the share dialog is opened after the ticket. */
+/** The issue as it is shown: "issue #42" with the rebuilt number, or "an issue" for anything else. */
+const AN_ISSUE = 'an issue';
+const issueName = (args) => (args !== null && typeof args === 'object' && isIssueNumber(args.number) ? `issue #${args.number}` : AN_ISSUE);
+/** Whether the share dialog is opened after the issue. */
 const sharesToo = (args) => args !== null && typeof args === 'object' && args.share === true;
 
 // A timer runs for whole minutes, from one to two hours
@@ -220,14 +221,14 @@ const TOOL_TEXTS = Object.freeze({
     primary: () => 'Stop timer',
     reply: () => 'Done: stopped the timer.',
   }),
-  open_ticket: Object.freeze({
-    // The record is read by everyone in the meeting: no key in it
-    asked: () => 'Asked to open a ticket',
-    done: (args) => `Opened a ticket${sharesToo(args) ? ' and opened the share dialog' : ''}`,
+  open_issue: Object.freeze({
+    // The record is read by everyone in the meeting: no number in it
+    asked: () => 'Asked to open an issue',
+    done: (args) => `Opened an issue${sharesToo(args) ? ' and opened the share dialog' : ''}`,
     // "your": it opens on the panel of the owner who agrees, and they pick what is shared
-    question: (args) => `Open ${ticketName(args)} in your browser${sharesToo(args) ? ' and share your screen' : ''}?`,
+    question: (args) => `Open ${issueName(args)} in your browser${sharesToo(args) ? ' and share your screen' : ''}?`,
     primary: (args) => (sharesToo(args) ? 'Open and share' : 'Open'),
-    reply: (args) => `Done: opened ${ticketName(args)}${sharesToo(args) ? ' and opened the share dialog' : ''}.`,
+    reply: (args) => `Done: opened ${issueName(args)}${sharesToo(args) ? ' and opened the share dialog' : ''}.`,
   }),
   web_search: Object.freeze({
     asked: () => 'Asked for a web search',
@@ -271,9 +272,9 @@ const TOOL_FAILURES = Object.freeze({
     not_found: (args) => `I couldn't find ${args.name} in the meeting.`,
     several_match: (args) => `Several people in the meeting match ${args.name}. Ask again with the full name.`,
   }),
-  open_ticket: Object.freeze({
-    // Half of it was done: the ticket is open in the browser. null when no share was asked for
-    share_failed: (args) => (sharesToo(args) ? ticketShareFailed(args) : null),
+  open_issue: Object.freeze({
+    // Half of it was done: the issue is open in the browser. null when no share was asked for
+    share_failed: (args) => (sharesToo(args) ? issueShareFailed(args) : null),
   }),
 });
 
@@ -286,14 +287,14 @@ function failedReply(toolName, code, args) {
 }
 
 /**
- * Opening a ticket and sharing is two things: the browser opened the ticket,
+ * Opening an issue and sharing is two things: the browser opened the issue,
  * and then Zoom's share dialog did not come up. The asker's panel is told
- * both halves with the key; the record says them without it.
+ * both halves with the number; the record says them without it.
  */
-function ticketShareFailed(args) {
-  return `Opened ${ticketName(args)}. Couldn't open the share dialog.`;
+function issueShareFailed(args) {
+  return `Opened ${issueName(args)}. Couldn't open the share dialog.`;
 }
-const TICKET_SHARE_FAILED_LABEL = 'Opened a ticket. Couldn\'t open the share dialog.';
+const ISSUE_SHARE_FAILED_LABEL = 'Opened an issue. Couldn\'t open the share dialog.';
 
 /**
  * Inviting everyone is two things: the notes were shared, and then the
@@ -322,7 +323,7 @@ const NO_HANDS = Object.freeze({
 // table; a test holds the two lists together), and the ones any panel of the
 // owner runs that post nothing to the chat
 const NEEDS_HOST_PANEL = new Set(['admit_from_waiting_room', 'mute_participant']);
-const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'open_notes_for_everyone', 'send_reaction', 'open_ticket', 'set_timer', 'stop_timer']);
+const NEEDS_OWN_PANEL = new Set(['invite_everyone', 'open_notes_for_everyone', 'send_reaction', 'open_issue', 'set_timer', 'stop_timer']);
 function noHands(toolName) {
   if (NEEDS_HOST_PANEL.has(toolName)) return NO_HANDS.host;
   return NEEDS_OWN_PANEL.has(toolName) ? NO_HANDS.panel : NO_HANDS.chat;
@@ -358,7 +359,7 @@ const STEPS = Object.freeze({
   openingNotes: 'Opening the notes for everyone',
   reacting: 'Sending a reaction',
   mutingSomeone: 'Muting someone',
-  openingTicket: 'Opening a ticket',
+  openingIssue: 'Opening an issue',
   stoppingTimer: 'Stopping the timer',
 });
 // The name came with the request: shown only when it is a name (lib/displayName.js), and short
@@ -383,8 +384,8 @@ const TOOL_STEPS = Object.freeze({
   // The minutes only as the tool table gives them
   set_timer: (args) => `Starting ${aTimer(args)}`,
   stop_timer: () => STEPS.stoppingTimer,
-  // The key only as the tool table rebuilt it; whether it is shared is not part of the step
-  open_ticket: (args) => (ticketName(args) === 'a ticket' ? STEPS.openingTicket : `Opening ${ticketName(args)}`),
+  // The number only as the tool table rebuilt it; whether it is shared is not part of the step
+  open_issue: (args) => (issueName(args) === AN_ISSUE ? STEPS.openingIssue : `Opening ${issueName(args)}`),
 });
 
 /** The step while this tool runs, or null for a tool that has none (then the step before it stays). */
@@ -407,8 +408,8 @@ module.exports = {
   failedReply,
   INVITE_NOT_SENT,
   NOTES_NOT_OPENED,
-  ticketShareFailed,
-  TICKET_SHARE_FAILED_LABEL,
+  issueShareFailed,
+  ISSUE_SHARE_FAILED_LABEL,
   REACTIONS,
   REACTION_NAMES,
   TIMER_MIN_MINUTES,

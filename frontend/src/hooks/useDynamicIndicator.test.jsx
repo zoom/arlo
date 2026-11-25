@@ -376,7 +376,7 @@ describe('useDynamicIndicator', () => {
       { inputs: ACTIVE, did: { id: 'a-1', tool: 'mute_participant', label: 'Muted Danny Reyes', askedBy: 'Priya' } },
       { inputs: ACTIVE, did: { id: 'a-2', tool: 'Muted Danny Reyes' } },
       { inputs: { ...ACTIVE, waiting: true, question: 'Admit Danny Reyes?' }, did: null },
-      { inputs: ACTIVE, did: { id: 'a-3', tool: 'open_ticket', label: 'Opened PROJ-123' } },
+      { inputs: ACTIVE, did: { id: 'a-3', tool: 'open_issue', label: 'Opened issue #123 in acme/arlo-app' } },
       { inputs: { ...ACTIVE, phase: 'paused', text: 'Buy now' }, did: null },
     ];
     for (const given of hostile) {

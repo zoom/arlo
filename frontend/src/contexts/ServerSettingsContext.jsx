@@ -17,8 +17,8 @@ const defaultFeatures = {
   aiChat: false,
   autoStart: false,
   ownStream: false,
-  // The deployment's Jira (JIRA_BASE_URL on the server), where Arlo opens a ticket; none by default
-  jira: { baseUrl: null },
+  // The deployment's GitHub repository ("owner/name"), where Arlo opens an issue; none by default
+  github: { repo: null },
 };
 
 export function ServerSettingsProvider({ children }) {
@@ -31,14 +31,14 @@ export function ServerSettingsProvider({ children }) {
   });
 
   // Read again when someone signs in or out: the server tells the
-  // deployment's Jira only to a request with a valid session
+  // deployment's GitHub repository only to a request with a valid session
   const { isAuthenticated } = useAuth();
   useEffect(() => {
     let cancelled = false;
     // Signed out: what only a signed-in person is told goes at once
     if (!isAuthenticated) {
-      setSettings((prev) => (prev.features?.jira?.baseUrl
-        ? { ...prev, features: { ...prev.features, jira: { baseUrl: null } } }
+      setSettings((prev) => (prev.features?.github?.repo
+        ? { ...prev, features: { ...prev.features, github: { repo: null } } }
         : prev));
     }
     async function fetchSettings() {

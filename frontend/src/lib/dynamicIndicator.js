@@ -85,7 +85,7 @@ export const INDICATOR_TEXT = Object.freeze({
 
 /**
  * What Arlo just did, by the tool of the action. Never who or what: "someone",
- * "a participant", "a ticket". A tool that is not here has no such state (a
+ * "a participant", "an issue". A tool that is not here has no such state (a
  * reaction is seen as it is; an answer or a summary is the asker's own; a
  * timer is on the indicator itself).
  */
@@ -96,7 +96,7 @@ export const DID_TEXT = Object.freeze({
   invite_everyone: 'Arlo invited everyone to the notes',
   open_notes_for_everyone: 'Arlo opened the notes for everyone',
   mute_participant: 'Arlo muted a participant',
-  open_ticket: 'Arlo opened a ticket',
+  open_issue: 'Arlo opened an issue',
 });
 
 const muted = { textColor: COLORS.mutedText, borderColor: COLORS.mutedBorder, backgroundColor: COLORS.mutedBackground };

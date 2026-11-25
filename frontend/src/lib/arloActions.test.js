@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { runArloAction, handsFor, REACTIONS, comparable } from './arloActions';
+import { runArloAction, handsFor, githubRepoOf, REACTIONS, comparable } from './arloActions';
 import { createIndicatorTimer } from './indicatorTimer';
 import { INDICATOR_STRINGS } from './dynamicIndicator';
 
@@ -71,10 +71,10 @@ describe('handsFor: what a panel announces', () => {
   test('never more names than the server takes: a host whose client has everything announces nine', () => {
     const all = {
       chatSupported: true, waitingRoomSupported: true, invitationSupported: true, reactionSupported: true, muteSupported: true,
-      openUrlSupported: true, jiraBaseUrl: 'https://jira.example.test', indicatorSupported: true, collaborateSupported: true,
+      openUrlSupported: true, githubRepo: 'acme/arlo-app', indicatorSupported: true, collaborateSupported: true,
     };
     expect(handsFor({ ...all, zoomRole: 'host' })).toEqual([
-      'post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant', 'open_ticket', 'set_timer', 'stop_timer',
+      'post_to_chat', 'admit_from_waiting_room', 'invite_everyone', 'send_reaction', 'mute_participant', 'open_issue', 'set_timer', 'stop_timer',
       'open_notes_for_everyone',
     ]);
     expect(handsFor({ ...all, zoomRole: 'host' }).length).toBeLessThanOrEqual(10);
@@ -663,183 +663,219 @@ describe('mute_participant', () => {
   });
 });
 
-describe('open_ticket', () => {
-  const BASE = 'https://jira.example.test';
-  const URL_123 = `${BASE}/browse/PROJ-123`;
+describe('open_issue', () => {
+  const REPO = 'acme/arlo-app';
+  const URL_123 = `https://github.com/${REPO}/issues/123`;
   const browserSdk = () => ({
     openUrl: vi.fn(async () => ({ message: 'Success' })),
     promptShareScreen: vi.fn(async () => ({ message: 'Success' })),
   });
-  const openTicket = (sdk, args, extra = {}) => (
-    runArloAction(sdk, { tool: 'open_ticket', args }, { stillAllowed: yes, jiraBaseUrl: BASE, ...extra })
+  const openIssue = (sdk, args, extra = {}) => (
+    runArloAction(sdk, { tool: 'open_issue', args }, { stillAllowed: yes, githubRepo: REPO, ...extra })
   );
-  const ticket = (extra = {}) => ({ url: URL_123, key: 'PROJ-123', share: false, ...extra });
+  const issue = (extra = {}) => ({ url: URL_123, number: 123, share: false, ...extra });
 
-  test('opens the ticket in the browser, and nothing else when no share was asked for', async () => {
+  test('opens the issue in the browser, and nothing else when no share was asked for', async () => {
     const sdk = browserSdk();
-    expect(await openTicket(sdk, ticket())).toEqual({ ok: true });
+    expect(await openIssue(sdk, issue())).toEqual({ ok: true });
     expect(sdk.openUrl).toHaveBeenCalledTimes(1);
     expect(sdk.openUrl).toHaveBeenCalledWith({ url: URL_123 });
     expect(sdk.promptShareScreen).not.toHaveBeenCalled();
   });
 
-  test('with share: the ticket first, then Zoom\'s share dialog, with no options', async () => {
+  test('with share: the issue first, then Zoom\'s share dialog, with no options', async () => {
     const sdk = browserSdk();
     const order = [];
     sdk.openUrl.mockImplementation(async () => { order.push('open'); });
     sdk.promptShareScreen.mockImplementation(async (...given) => { order.push(['share', given]); });
-    expect(await openTicket(sdk, ticket({ share: true }))).toEqual({ ok: true });
+    expect(await openIssue(sdk, issue({ share: true }))).toEqual({ ok: true });
     expect(order).toEqual(['open', ['share', []]]);
     expect(sdk.openUrl).toHaveBeenCalledWith({ url: URL_123 });
   });
 
-  test('a base URL with a context path: the URL is that base, "/browse/", the key', async () => {
+  test('the URL is github.com, the settings\' repository, "/issues/", the number', async () => {
     const sdk = browserSdk();
-    const base = 'https://tools.example.test/jira';
-    expect(await openTicket(sdk, { url: `${base}/browse/AB-1`, key: 'AB-1', share: false }, { jiraBaseUrl: base })).toEqual({ ok: true });
-    expect(sdk.openUrl).toHaveBeenCalledWith({ url: `${base}/browse/AB-1` });
-    // and not the same path on the host alone
-    expect(await openTicket(sdk, { url: 'https://tools.example.test/browse/AB-1', key: 'AB-1', share: false }, { jiraBaseUrl: base }))
+    const repo = 'A-b9/My_repo.js';
+    expect(await openIssue(sdk, { url: `https://github.com/${repo}/issues/1`, number: 1, share: false }, { githubRepo: repo })).toEqual({ ok: true });
+    expect(sdk.openUrl).toHaveBeenCalledWith({ url: `https://github.com/${repo}/issues/1` });
+    expect(await openIssue(sdk, { url: `https://github.com/${repo}/issues/9999999`, number: 9999999, share: false }, { githubRepo: repo }))
+      .toEqual({ ok: true });
+    // and not the same issue number in another repository
+    expect(await openIssue(sdk, { url: `https://github.com/${REPO}/issues/1`, number: 1, share: false }, { githubRepo: repo }))
       .toEqual({ ok: false, code: 'unsupported' });
-    expect(sdk.openUrl).toHaveBeenCalledTimes(1);
+    expect(sdk.openUrl).toHaveBeenCalledTimes(2);
   });
 
   test.each([
-    ['another host', 'https://evil.example/browse/PROJ-123'],
-    ['a host that only starts like it', 'https://jira.example.test.evil.example/browse/PROJ-123'],
-    ['http', 'http://jira.example.test/browse/PROJ-123'],
-    ['another scheme', 'javascript:alert(1)//jira.example.test/browse/PROJ-123'],
-    ['an extra path', 'https://jira.example.test/browse/PROJ-123/../../secure/admin'],
-    ['a path before it', 'https://jira.example.test/x/browse/PROJ-123'],
-    ['another path', 'https://jira.example.test/secure/PROJ-123'],
-    ['a trailing slash', 'https://jira.example.test/browse/PROJ-123/'],
-    ['a query', 'https://jira.example.test/browse/PROJ-123?next=https://evil.example'],
-    ['a fragment', 'https://jira.example.test/browse/PROJ-123#x'],
-    ['another key than the one named', 'https://jira.example.test/browse/PROJ-124'],
-    ['the key in lower case', 'https://jira.example.test/browse/proj-123'],
-    ['credentials', 'https://user:secret@jira.example.test/browse/PROJ-123'],
-    ['a user name', 'https://jira.example.test@evil.example/browse/PROJ-123'],
-    ['a port', 'https://jira.example.test:8443/browse/PROJ-123'],
-    ['the host in upper case', 'https://JIRA.example.test/browse/PROJ-123'],
-    ['a space around it', ' https://jira.example.test/browse/PROJ-123'],
-    ['a line break in it', 'https://jira.example.test/browse/PROJ-123\n'],
-    ['backslashes', 'https:\\\\jira.example.test\\browse\\PROJ-123'],
+    ['another host', 'https://evil.example/acme/arlo-app/issues/123'],
+    ['a host that only starts like it', 'https://github.com.evil.com/acme/arlo-app/issues/123'],
+    ['a subdomain', 'https://gist.github.com/acme/arlo-app/issues/123'],
+    ['http', 'http://github.com/acme/arlo-app/issues/123'],
+    ['another scheme', 'javascript:alert(1)//github.com/acme/arlo-app/issues/123'],
+    ['an extra path', 'https://github.com/acme/arlo-app/issues/123/../../settings'],
+    ['a path before it', 'https://github.com/x/acme/arlo-app/issues/123'],
+    ['another path', 'https://github.com/acme/arlo-app/pull/123'],
+    ['a trailing slash', 'https://github.com/acme/arlo-app/issues/123/'],
+    ['a query', 'https://github.com/acme/arlo-app/issues/123?next=https://evil.example'],
+    ['a fragment', 'https://github.com/acme/arlo-app/issues/123#x'],
+    ['another number than the one named', 'https://github.com/acme/arlo-app/issues/124'],
+    ['the number with a leading zero', 'https://github.com/acme/arlo-app/issues/0123'],
+    ['another repository', 'https://github.com/acme/other/issues/123'],
+    ['another owner', 'https://github.com/evil/arlo-app/issues/123'],
+    ['the repository in another case', 'https://github.com/Acme/arlo-app/issues/123'],
+    ['credentials', 'https://user:secret@github.com/acme/arlo-app/issues/123'],
+    ['a user name', 'https://github.com@evil.example/acme/arlo-app/issues/123'],
+    ['a port', 'https://github.com:8443/acme/arlo-app/issues/123'],
+    ['the host in upper case', 'https://GITHUB.com/acme/arlo-app/issues/123'],
+    ['a dot after the host', 'https://github.com./acme/arlo-app/issues/123'],
+    ['a space around it', ' https://github.com/acme/arlo-app/issues/123'],
+    ['a line break in it', 'https://github.com/acme/arlo-app/issues/123\n'],
+    ['backslashes', 'https:\\\\github.com\\acme\\arlo-app\\issues\\123'],
     ['nothing', ''],
-    ['more than 300 characters', `https://jira.example.test/browse/PROJ-123${'/'.repeat(300)}`],
-    ['something that is not text', { href: 'https://jira.example.test/browse/PROJ-123' }],
+    ['more than 300 characters', `https://github.com/acme/arlo-app/issues/123${'/'.repeat(300)}`],
+    ['something that is not text', { href: 'https://github.com/acme/arlo-app/issues/123' }],
   ])('a URL with %s is not opened: unsupported', async (_name, url) => {
     const sdk = browserSdk();
-    expect(await openTicket(sdk, ticket({ url, share: true }))).toEqual({ ok: false, code: 'unsupported' });
+    expect(await openIssue(sdk, issue({ url, share: true }))).toEqual({ ok: false, code: 'unsupported' });
     expect(sdk.openUrl).not.toHaveBeenCalled();
     expect(sdk.promptShareScreen).not.toHaveBeenCalled();
   });
 
-  test('arguments that are not exactly { url, key, share }: unsupported, nothing opened', async () => {
+  test('arguments that are not exactly { url, number, share }: unsupported, nothing opened', async () => {
     const sdk = browserSdk();
+    const at = (n) => `https://github.com/${REPO}/issues/${n}`;
     const bad = [
-      null, undefined, 'PROJ-123', [], {},
-      { url: URL_123, key: 'PROJ-123' },
+      null, undefined, '123', 123, [], {},
+      { url: URL_123, number: 123 },
       { url: URL_123, share: false },
-      { key: 'PROJ-123', share: false },
-      { url: URL_123, key: 'PROJ-123', share: 'true' },
-      { url: URL_123, key: 'PROJ-123', share: 1 },
-      { url: URL_123, key: 'PROJ-123', share: null },
-      { url: URL_123, key: 'PROJ-123', share: false, target: '_self' },
-      { url: URL_123, key: 'PROJ-123', share: false, shareSound: true },
-      { url: URL_123, key: 5, share: false },
-      { url: `${BASE}/browse/proj-123`, key: 'proj-123', share: false },
-      { url: `${BASE}/browse/PROJ 123`, key: 'PROJ 123', share: false },
-      { url: `${BASE}/browse/P-1`, key: 'P-1', share: false },
-      { url: `${BASE}/browse/ABCDEFGHIJK-1`, key: 'ABCDEFGHIJK-1', share: false },
-      { url: `${BASE}/browse/PROJ-12345678`, key: 'PROJ-12345678', share: false },
-      { url: `${BASE}/browse/PROJ-123/../x`, key: 'PROJ-123/../x', share: false },
-      { url: `${BASE}/browse/\u0420ROJ-123`, key: '\u0420ROJ-123', share: false },
-      { url: `${BASE}/browse/PROJ-123\n`, key: 'PROJ-123\n', share: false },
+      { number: 123, share: false },
+      { url: URL_123, number: 123, share: 'true' },
+      { url: URL_123, number: 123, share: 1 },
+      { url: URL_123, number: 123, share: null },
+      { url: URL_123, number: 123, share: false, target: '_self' },
+      { url: URL_123, number: 123, share: false, shareSound: true },
+      { url: URL_123, number: 123, share: false, key: 'PROJ-123' },
+      { url: URL_123, key: 'PROJ-123', share: false },
+      // the number: a JS integer from 1 to 9999999, never text
+      { url: URL_123, number: '123', share: false },
+      { url: URL_123, number: [123], share: false },
+      { url: URL_123, number: { valueOf: () => 123 }, share: false },
+      { url: URL_123, number: null, share: false },
+      { url: URL_123, number: true, share: false },
+      { url: URL_123, number: 123n, share: false },
+      { url: at(0), number: 0, share: false },
+      { url: at(-1), number: -1, share: false },
+      { url: at(1.5), number: 1.5, share: false },
+      { url: at(10000000), number: 10000000, share: false },
+      { url: at(1e21), number: 1e21, share: false },
+      { url: at(NaN), number: NaN, share: false },
+      { url: at(Infinity), number: Infinity, share: false },
+      { url: at('123/../x'), number: '123/../x', share: false },
+      { url: at('123\n'), number: '123\n', share: false },
     ];
     for (const args of bad) {
-      expect(await openTicket(sdk, args)).toEqual({ ok: false, code: 'unsupported' });
+      expect(await openIssue(sdk, args)).toEqual({ ok: false, code: 'unsupported' });
     }
     expect(sdk.openUrl).not.toHaveBeenCalled();
   });
 
-  test('without the deployment\'s base URL, or with one that is not a base URL, nothing is opened', async () => {
+  test('without the settings\' repository, or with one that is not "owner/name", nothing is opened', async () => {
     const sdk = browserSdk();
-    const bases = [
-      undefined, null, '', 5, {}, 'http://jira.example.test', `${BASE}/`, `${BASE}?x=1`, `${BASE}#x`, 'https://user:secret@jira.example.test',
-      'jira.example.test', 'https://', ` ${BASE}`,
+    const repos = [
+      undefined, null, '', 5, {}, ['acme/arlo-app'],
+      'acme', 'acme/', '/arlo-app', 'acme/arlo-app/', 'acme/arlo-app/issues', 'acme//arlo-app',
+      'acme/.', 'acme/..', '../arlo-app', './arlo-app', '-acme/arlo-app', 'acme-/arlo-app', 'ac.me/arlo-app', 'ac_me/arlo-app',
+      `${'a'.repeat(40)}/arlo-app`, `acme/${'a'.repeat(101)}`,
+      ' acme/arlo-app', 'acme/arlo-app ', 'acme/arlo-app\n', 'acme/arlo app', 'acme/arlo-app?x=1', 'acme/arlo-app#x', 'acme/arlo%2Fapp',
+      'acme\\arlo-app', 'user:secret@acme/arlo-app', 'acme/arlo-app@evil.example', 'https://github.com/acme/arlo-app',
+      'github.com/acme/arlo-app', 'acme/\u0430rlo-app',
     ];
-    for (const jiraBaseUrl of bases) {
-      const base = typeof jiraBaseUrl === 'string' ? jiraBaseUrl : BASE;
-      expect(await openTicket(sdk, ticket({ url: `${base}/browse/PROJ-123` }), { jiraBaseUrl })).toEqual({ ok: false, code: 'unsupported' });
+    for (const githubRepo of repos) {
+      expect(githubRepoOf(githubRepo)).toBeNull();
+      const repo = typeof githubRepo === 'string' ? githubRepo : REPO;
+      expect(await openIssue(sdk, issue({ url: `https://github.com/${repo}/issues/123` }), { githubRepo })).toEqual({ ok: false, code: 'unsupported' });
     }
-    expect(await runArloAction(sdk, { tool: 'open_ticket', args: ticket() }, { stillAllowed: yes })).toEqual({ ok: false, code: 'unsupported' });
+    expect(await runArloAction(sdk, { tool: 'open_issue', args: issue() }, { stillAllowed: yes })).toEqual({ ok: false, code: 'unsupported' });
     expect(sdk.openUrl).not.toHaveBeenCalled();
+    for (const good of ['acme/arlo-app', 'a/b', 'A-b9/My_repo.js', 'acme/...', 'acme/.github', `${'a'.repeat(39)}/${'b'.repeat(100)}`]) {
+      expect(githubRepoOf(good)).toBe(good);
+    }
   });
 
   test('the panel may no longer act: not_allowed, nothing opened and nothing shared', async () => {
     for (const stillAllowed of [() => false, () => 'yes', null, undefined]) {
       const sdk = browserSdk();
-      expect(await openTicket(sdk, ticket({ share: true }), { stillAllowed })).toEqual({ ok: false, code: 'not_allowed' });
+      expect(await openIssue(sdk, issue({ share: true }), { stillAllowed })).toEqual({ ok: false, code: 'not_allowed' });
       expect(sdk.openUrl).not.toHaveBeenCalled();
       expect(sdk.promptShareScreen).not.toHaveBeenCalled();
     }
   });
 
-  test('the panel stops being allowed while the browser opens: the ticket is open, the share dialog is not asked for', async () => {
+  test('the panel stops being allowed while the browser opens: the issue is open, the share dialog is not asked for', async () => {
     const sdk = browserSdk();
     let allowed = true;
     sdk.openUrl.mockImplementation(async () => { allowed = false; });
-    expect(await openTicket(sdk, ticket({ share: true }), { stillAllowed: () => allowed })).toEqual({ ok: false, code: 'share_failed' });
+    expect(await openIssue(sdk, issue({ share: true }), { stillAllowed: () => allowed })).toEqual({ ok: false, code: 'share_failed' });
     expect(sdk.openUrl).toHaveBeenCalledTimes(1);
     expect(sdk.promptShareScreen).not.toHaveBeenCalled();
   });
 
-  test('share asked for and this client has no share dialog: the ticket is opened, and share_failed says the rest was not', async () => {
+  test('stillAllowed is asked before the browser opens and again before the share dialog', async () => {
     const sdk = browserSdk();
-    delete sdk.promptShareScreen;
-    expect(await openTicket(sdk, ticket({ share: true }))).toEqual({ ok: false, code: 'share_failed' });
-    expect(sdk.openUrl).toHaveBeenCalledWith({ url: URL_123 });
-    // without share it is simply done
-    expect(await openTicket(sdk, ticket())).toEqual({ ok: true });
+    const order = [];
+    sdk.openUrl.mockImplementation(async () => { order.push('open'); });
+    sdk.promptShareScreen.mockImplementation(async () => { order.push('share'); });
+    const stillAllowed = () => { order.push('allowed?'); return true; };
+    expect(await openIssue(sdk, issue({ share: true }), { stillAllowed })).toEqual({ ok: true });
+    expect(order).toEqual(['allowed?', 'open', 'allowed?', 'share']);
   });
 
-  test('the share dialog rejects, or throws at once: share_failed, and the ticket was opened once', async () => {
+  test('share asked for and this client has no share dialog: the issue is opened, and share_failed says the rest was not', async () => {
+    const sdk = browserSdk();
+    delete sdk.promptShareScreen;
+    expect(await openIssue(sdk, issue({ share: true }))).toEqual({ ok: false, code: 'share_failed' });
+    expect(sdk.openUrl).toHaveBeenCalledWith({ url: URL_123 });
+    // without share it is simply done
+    expect(await openIssue(sdk, issue())).toEqual({ ok: true });
+  });
+
+  test('the share dialog rejects, or throws at once: share_failed, and the issue was opened once', async () => {
     const sdk = browserSdk();
     sdk.promptShareScreen.mockRejectedValueOnce(Object.assign(new Error('Failed to prompt share screen'), { code: '10143' }));
-    expect(await openTicket(sdk, ticket({ share: true }))).toEqual({ ok: false, code: 'share_failed' });
+    expect(await openIssue(sdk, issue({ share: true }))).toEqual({ ok: false, code: 'share_failed' });
     sdk.promptShareScreen.mockImplementationOnce(() => { throw new Error('not in a meeting'); });
-    expect(await openTicket(sdk, ticket({ share: true }))).toEqual({ ok: false, code: 'share_failed' });
+    expect(await openIssue(sdk, issue({ share: true }))).toEqual({ ok: false, code: 'share_failed' });
     expect(sdk.openUrl).toHaveBeenCalledTimes(2);
   });
 
   test('the browser cannot be opened (the domain is not on the app\'s allowlist), or throws: sdk_error, and nothing is shared', async () => {
     const sdk = browserSdk();
     sdk.openUrl.mockRejectedValueOnce(Object.assign(new Error('Request to open URL failed'), { code: '10015' }));
-    expect(await openTicket(sdk, ticket({ share: true }))).toEqual({ ok: false, code: 'sdk_error' });
+    expect(await openIssue(sdk, issue({ share: true }))).toEqual({ ok: false, code: 'sdk_error' });
     sdk.openUrl.mockImplementationOnce(() => { throw new Error('boom'); });
-    expect(await openTicket(sdk, ticket({ share: true }))).toEqual({ ok: false, code: 'sdk_error' });
+    expect(await openIssue(sdk, issue({ share: true }))).toEqual({ ok: false, code: 'sdk_error' });
     expect(sdk.promptShareScreen).not.toHaveBeenCalled();
   });
 
   test('a client without openUrl: unsupported', async () => {
     const sdk = browserSdk();
     delete sdk.openUrl;
-    expect(await openTicket(sdk, ticket({ share: true }))).toEqual({ ok: false, code: 'unsupported' });
+    expect(await openIssue(sdk, issue({ share: true }))).toEqual({ ok: false, code: 'unsupported' });
     expect(sdk.promptShareScreen).not.toHaveBeenCalled();
   });
 
-  test('announced when the client opens URLs and the deployment has a Jira; the share dialog is not needed for it', () => {
-    expect(handsFor({ openUrlSupported: true, jiraBaseUrl: BASE, zoomRole: 'attendee' })).toEqual(['open_ticket']);
-    expect(handsFor({ openUrlSupported: true, jiraBaseUrl: 'https://tools.example.test/jira', zoomRole: null })).toEqual(['open_ticket']);
-    expect(handsFor({ chatSupported: true, openUrlSupported: true, jiraBaseUrl: BASE, zoomRole: 'host' })).toEqual(['post_to_chat', 'open_ticket']);
-    expect(handsFor({ openUrlSupported: false, jiraBaseUrl: BASE, zoomRole: 'host' })).toEqual([]);
-    expect(handsFor({ openUrlSupported: 'yes', jiraBaseUrl: BASE, zoomRole: 'host' })).toEqual([]);
-    for (const jiraBaseUrl of [undefined, null, '', 'http://jira.example.test', `${BASE}/`, `${BASE}?x=1`, 'nonsense', 5, {}]) {
-      expect(handsFor({ openUrlSupported: true, jiraBaseUrl, zoomRole: 'host' })).toEqual([]);
+  test('announced when the client opens URLs and the settings name a repository; the share dialog is not needed for it', () => {
+    expect(handsFor({ openUrlSupported: true, githubRepo: REPO, zoomRole: 'attendee' })).toEqual(['open_issue']);
+    expect(handsFor({ openUrlSupported: true, githubRepo: 'A-b9/My_repo.js', zoomRole: null })).toEqual(['open_issue']);
+    expect(handsFor({ chatSupported: true, openUrlSupported: true, githubRepo: REPO, zoomRole: 'host' })).toEqual(['post_to_chat', 'open_issue']);
+    expect(handsFor({ openUrlSupported: false, githubRepo: REPO, zoomRole: 'host' })).toEqual([]);
+    expect(handsFor({ openUrlSupported: 'yes', githubRepo: REPO, zoomRole: 'host' })).toEqual([]);
+    for (const githubRepo of [undefined, null, '', 'acme', 'acme/..', 'acme/.', `${REPO}/`, `https://github.com/${REPO}`, 'nonsense', 5, {}]) {
+      expect(handsFor({ openUrlSupported: true, githubRepo, zoomRole: 'host' })).toEqual([]);
     }
     const all = {
       chatSupported: true, waitingRoomSupported: true, invitationSupported: true, reactionSupported: true, muteSupported: true,
-      openUrlSupported: true, jiraBaseUrl: BASE,
+      openUrlSupported: true, githubRepo: REPO,
     };
     expect(handsFor({ ...all, zoomRole: 'host' })).toHaveLength(6);
   });

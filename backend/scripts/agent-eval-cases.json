@@ -328,11 +328,11 @@
   },
   {
     "kind": "tool",
-    "said": "open PROJ-123 and share it",
-    "expectTool": "open_ticket",
+    "said": "open issue 42 and share it",
+    "expectTool": "open_issue",
     "expectArgs": {
-      "key": {
-        "equals": "PROJ-123"
+      "number": {
+        "equals": 42
       },
       "share": {
         "equals": true
@@ -341,11 +341,11 @@
   },
   {
     "kind": "tool",
-    "said": "pull up ticket ABC dash 42",
-    "expectTool": "open_ticket",
+    "said": "pull up issue number one hundred and seven",
+    "expectTool": "open_issue",
     "expectArgs": {
-      "key": {
-        "equals": "ABC-42"
+      "number": {
+        "equals": 107
       },
       "share": {
         "equals": false
@@ -354,11 +354,11 @@
   },
   {
     "kind": "tool",
-    "said": "can you open OPS-7 in the browser",
-    "expectTool": "open_ticket",
+    "said": "can you open issue 7 in the browser",
+    "expectTool": "open_issue",
     "expectArgs": {
-      "key": {
-        "equals": "OPS-7"
+      "number": {
+        "equals": 7
       },
       "share": {
         "equals": false
@@ -417,12 +417,12 @@
   },
   {
     "kind": "non_request",
-    "said": "I filed a ticket about the login page yesterday",
+    "said": "I filed an issue about the login page yesterday",
     "expectTool": "none"
   },
   {
     "kind": "non_request",
-    "said": "PROJ-123 is still blocked on the vendor, by the way",
+    "said": "issue 42 is still blocked on the vendor, by the way",
     "expectTool": "none"
   },
   {
@@ -523,7 +523,7 @@
   },
   {
     "kind": "ambiguous",
-    "said": "open the ticket in the chat",
+    "said": "open the issue in the chat",
     "expectTool": [
       "none",
       "answer_from_meeting"

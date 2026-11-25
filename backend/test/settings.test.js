@@ -45,9 +45,9 @@ test('ALLOW_OWN_ARLO_STREAM=false turns "Use Arlo yourself" off, and only that e
   for (const other of ['0', 'no', 'off', 'FALSE', ' false']) assert.equal(ownStreamFor(other), 'true', `"${other}"`);
 });
 
-test('without JIRA_BASE_URL the settings say there is no Jira', async () => {
+test('without GITHUB_DEFAULT_REPO the settings say there is no repository', async () => {
   const body = await (await fetch(`${srv.base}/api/auth/settings`)).json();
-  assert.deepEqual(body.features.jira, { baseUrl: null });
+  assert.deepEqual(body.features.github, { repo: null });
 });
 
 test('the privacy notice says what is held and when it is deleted', async () => {

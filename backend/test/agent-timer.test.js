@@ -5,7 +5,7 @@ const h = require('./helpers');
 
 h.setTestEnv({ RTMS_SERVICE_URL: 'http://127.0.0.1:9' });
 delete process.env.WEB_SEARCH_ENABLED;
-delete process.env.JIRA_BASE_URL;
+delete process.env.GITHUB_DEFAULT_REPO;
 
 const test = require('node:test');
 const assert = require('node:assert/strict');

@@ -261,21 +261,21 @@ test('admitting is covered only by a plain "admit <the whole name>" or "let <the
   assert.equal(covers('ad\u00ADmit James\u200B Carter'), true);
 });
 
-test('opening a ticket with the share dialog is not covered when the typed text says not to', () => {
-  const covers = (typed, share) => typedRequestCovers(typed, 'open_ticket', { key: 'PROJ-123', share });
-  assert.equal(covers('open PROJ-123 and share it', true), true);
-  assert.equal(covers('open PROJ-123', false), true);
-  assert.equal(covers('open PROJ-123', true), false);
+test('opening an issue with the share dialog is not covered when the typed text says not to', () => {
+  const covers = (typed, share) => typedRequestCovers(typed, 'open_issue', { number: 42, share });
+  assert.equal(covers('open issue 42 and share it', true), true);
+  assert.equal(covers('open issue 42', false), true);
+  assert.equal(covers('open issue 42', true), false);
   for (const typed of [
-    'open PROJ-123, don\'t share', 'open PROJ-123 but do not share it', 'open PROJ-123 and never share it', 'open PROJ-123, no share',
-    'open PROJ-123 and stop sharing', 'open PROJ-123, don’t share', 'open PROJ-123, dont share', 'open PROJ-123 without sharing',
-    'open PROJ-123, do n\u00ADot share',
+    'open issue 42, don\'t share', 'open issue 42 but do not share it', 'open issue 42 and never share it', 'open issue 42, no share',
+    'open issue 42 and stop sharing', 'open issue 42, don’t share', 'open issue 42, dont share', 'open issue 42 without sharing',
+    'open issue 42, do n\u00ADot share',
   ]) {
     assert.equal(covers(typed, true), false, typed);
   }
   // a word that turns the request around: the sheet, with or without the share dialog
-  assert.equal(covers('open PROJ-123, don\'t share', false), false);
-  assert.equal(covers('open PROJ-123 and share it', false), true);
+  assert.equal(covers('open issue 42, don\'t share', false), false);
+  assert.equal(covers('open issue 42 and share it', false), true);
 });
 
 test('sharing the notes is covered only by the plain request, whole', () => {
@@ -315,34 +315,44 @@ test('posting is covered only when the typed text is a verb, the message once, t
   ]) assert.equal(covers(typed, message), false, typed);
 });
 
-test('opening a ticket needs a word that opens, and sharing the word "share" itself', () => {
-  const covers = (typed, share, key = 'PROJ-123') => typedRequestCovers(typed, 'open_ticket', { key, share });
-  for (const typed of ['open PROJ-123', 'pull up PROJ-123', 'bring up PROJ-123 please', 'show PROJ-123', 'Hey Arlo, show me proj-123']) {
+test('opening an issue needs a word that opens, and sharing the word "share" itself', () => {
+  const covers = (typed, share, number = 42) => typedRequestCovers(typed, 'open_issue', { number, share });
+  for (const typed of ['open issue 42', 'pull up issue 42', 'bring up issue 42 please', 'show issue 42', 'Hey Arlo, show me issue #42']) {
     assert.equal(covers(typed, false), true, typed);
   }
   for (const typed of [
-    'close PROJ-123', 'what is PROJ-123 about', 'PROJ-123', 'reopen PROJ-123', 'who opened PROJ-123', 'dont open PROJ-123',
-    'open PROJ-123 unless it is closed', 'never show PROJ-123', 'open nothing but PROJ-123', 'delete PROJ-123',
+    'close issue 42', 'what is issue 42 about', 'issue 42', 'reopen issue 42', 'who opened issue 42', 'dont open issue 42',
+    'open issue 42 unless it is closed', 'never show issue 42', 'open nothing but issue 42', 'delete issue 42',
   ]) {
     assert.equal(covers(typed, false), false, typed);
     assert.equal(covers(`${typed} and share it`, true), false, typed);
   }
   for (const typed of [
-    'open PROJ-123 and share it', 'open PROJ-123 and start sharing', 'open PROJ-123 and screen share it', 'open PROJ-123 and screenshare',
-    'open PROJ-123, screen-share it', 'show PROJ-123 and share my screen',
+    'open issue 42 and share it', 'open issue 42 and start sharing', 'open issue 42 and screen share it', 'open issue 42 and screenshare',
+    'open issue 42, screen-share it', 'show issue 42 and share my screen',
   ]) assert.equal(covers(typed, true), true, typed);
   for (const typed of [
-    'open PROJ-123 on the shared drive', 'open PROJ-123 from the shares list', 'open PROJ-123 for the shareholders', 'open PROJ-123',
-    'open PROJ-123 and un-share', 'open PROJ-123 and unshare', 'open PROJ-123 and stop sharing', 'open PROJ-123 instead of sharing',
-    'share PROJ-123',
+    'open issue 42 on the shared drive', 'open issue 42 from the shares list', 'open issue 42 for the shareholders', 'open issue 42',
+    'open issue 42 and un-share', 'open issue 42 and unshare', 'open issue 42 and stop sharing', 'open issue 42 instead of sharing',
+    'share issue 42',
   ]) assert.equal(covers(typed, true), false, typed);
-  // words and a number are not a key
-  assert.equal(covers('open PROJ-12 in 5 minutes', false, 'IN-5'), false);
-  assert.equal(covers('open PROJ-12 in 5 minutes', false, 'PROJ-12'), true);
-  assert.equal(covers('open ticket 42', false, 'TICKET-42'), false);
-  assert.equal(covers('show version 2', false, 'VERSION-2'), false);
-  assert.equal(covers('open PROJ 123', false), true);
-  assert.equal(covers('open proj 123', false), false);
+  // a number that is not said to be an issue is none, and a second number is one too many
+  assert.equal(covers('open ticket 42', false), false);
+  assert.equal(covers('open 42', false), false);
+  assert.equal(covers('show version 42', false), false);
+  assert.equal(covers('open issue 42 in 5 minutes', false), false);
+  assert.equal(covers('open issue 42 in 5 minutes', false, 5), false);
+  assert.equal(covers('open issue 42 and 43', false), false);
+  assert.equal(covers('open issue 42 and 43', false, 43), false);
+  assert.equal(covers('open issue forty two', false), false);
+  // the number is the tool call's, as a number
+  assert.equal(covers('open issue 42', false, 43), false);
+  assert.equal(covers('open issue 42', false, '42'), false);
+  assert.equal(covers('open issue #42', false), true);
+  assert.equal(covers('open #42', false), true);
+  // "issue no. 42" names the issue: its "no" turns nothing around
+  assert.equal(covers('open issue no. 42', false), true);
+  assert.equal(covers('no, open issue no. 42', false), false);
 });
 
 test('the words that turn a request around, with and without an apostrophe', () => {
@@ -352,7 +362,7 @@ test('the words that turn a request around, with and without an apostrophe', () 
     'none', 'neither', 'nor',
   ]) {
     assert.equal(typedRequestCovers(`${word} clap`, 'send_reaction', { reaction: 'clap' }), false, word);
-    assert.equal(typedRequestCovers(`open PROJ-123 ${word}`, 'open_ticket', { key: 'PROJ-123', share: false }), false, word);
+    assert.equal(typedRequestCovers(`open issue 42 ${word}`, 'open_issue', { number: 42, share: false }), false, word);
   }
   // not a part of another word
   for (const typed of ['clap for the notary', 'clap, north side', 'nonesuch clap']) {

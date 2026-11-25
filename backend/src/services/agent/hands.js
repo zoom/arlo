@@ -1,7 +1,7 @@
 /**
  * The hands: what Arlo can only do through the Zoom Apps SDK (post to the
  * meeting chat, admit someone from the waiting room, invite everyone to open
- * the app, send a reaction, mute someone, open a ticket in the browser and
+ * the app, send a reaction, mute someone, open an issue in the browser and
  * bring up the share dialog) is sent to an owner's open panel as an action;
  * the panel runs it and reports the result.
  *
@@ -64,7 +64,7 @@ const ZOOM_ROLES = new Set(['host', 'coHost', 'attendee', 'panelist']);
 // Who may let people in from the waiting room, and mute someone
 const MAY_ADMIT = new Set(['host', 'coHost']);
 // What a panel may report when it did not do it
-// 'share_failed': a ticket was opened and the share dialog was not (open_ticket)
+// 'share_failed': an issue was opened and the share dialog was not (open_issue)
 const RESULT_CODES = Object.freeze(['not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 

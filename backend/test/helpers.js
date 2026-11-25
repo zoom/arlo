@@ -47,7 +47,7 @@ function setTestEnv(extra = {}) {
     ...extra,
   });
   // The tool table depends on it: only a test that sets it has it
-  if (!Object.prototype.hasOwnProperty.call(extra, 'JIRA_BASE_URL')) delete process.env.JIRA_BASE_URL;
+  if (!Object.prototype.hasOwnProperty.call(extra, 'GITHUB_DEFAULT_REPO')) delete process.env.GITHUB_DEFAULT_REPO;
   delete process.env.INTERNAL_API_SECRET;
   delete process.env.ALLOW_DEV_AUTH_BYPASS;
   delete process.env.ENABLE_DEBUG_ROUTES;

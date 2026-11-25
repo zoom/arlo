@@ -17,11 +17,12 @@
  * An argument is text within a length, or (`enum`) one of a fixed list of
  * names, which is how a reaction is given: a model never writes the emoji.
  *
- * A ticket's key (`key` of open_ticket) is rebuilt by lib/jira.js: letters, a
- * dash, a number, or the call is refused. `share` is a boolean and nothing
- * else. No tool takes a URL: the one URL there is, is built by the server from
- * the deployment's Jira base URL and that key. Without a base URL
- * (JIRA_BASE_URL) the tool is not in the table.
+ * An issue's number (`number` of open_issue) is rebuilt by lib/github.js: a
+ * whole number from 1 to 9999999, or the same as plain digits, or the call is
+ * refused. `share` is a boolean and nothing else. No tool takes a URL or a
+ * repository: the one URL there is, is built by the server from the
+ * deployment's GitHub repository and that number. Without a repository
+ * (GITHUB_DEFAULT_REPO) the tool is not in the table.
  *
  * A timer's length (`minutes` of set_timer) is a whole number from 1 to 120:
  * a JSON integer, or the same written as plain digits ("5"), rebuilt as the
@@ -30,7 +31,7 @@
  * This file has no code that runs a tool.
  */
 const { showableName } = require('../../lib/displayName');
-const { readJiraBaseUrl, normalizeTicketKey } = require('../../lib/jira');
+const { readGithubRepo, normalizeIssueNumber, MAX_ISSUE_NUMBER } = require('../../lib/github');
 const {
   NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS, REACTION_NAMES, TIMER_MIN_MINUTES, TIMER_MAX_MINUTES,
 } = require('./texts');
@@ -149,13 +150,13 @@ const TABLE = deepFreeze([
     changesMeeting: true,
   },
   {
-    name: 'open_ticket',
-    // The panel of the owner who typed or approved it opens the ticket in the
+    name: 'open_issue',
+    // The panel of the owner who typed or approved it opens the issue in the
     // system browser and, when asked, Zoom's share dialog, where that owner
-    // picks the window. Only with JIRA_BASE_URL (listTools below)
-    description: 'Open one ticket of the issue tracker in the browser, and bring up screen sharing when that is asked too. Use only when asked to open, pull up or show a ticket or issue and the asker gives its key, like PROJ-123. Not when no key is given, not for a link or a web page, and not when a ticket is only talked about.',
+    // picks the window. Only with GITHUB_DEFAULT_REPO (listTools below)
+    description: 'Open one issue of the team\'s GitHub repository in the browser, by its number, and bring up screen sharing when that is asked too. Use only when asked to open, pull up or show an issue and the asker gives its number, like issue 42. Not when no number is given, not for a link, a web page or another repository, and not when an issue is only talked about.',
     parameters: parameters({
-      key: text('The ticket key as the asker gave it: letters, a dash, a number, like PROJ-123. Never a link.', 40),
+      number: whole('The issue number as digits, from 1 to 9999999. A number that was spoken as words ("forty two") is given as digits (42). Never a link.', 1, MAX_ISSUE_NUMBER),
       share: yesNo('true only when the asker also asked to share it or to share the screen. Otherwise false.'),
     }),
     runs: 'panel',
@@ -188,29 +189,29 @@ function webSearchOn(options) {
 }
 
 /**
- * The deployment's Jira base URL (JIRA_BASE_URL as config accepted it), or
- * null. Read when asked, like web search. `{ jiraBaseUrl }` overrides the
- * setting (tests, the evaluation script): a base URL in the form config keeps
- * it in, anything else is none.
+ * The deployment's GitHub repository (GITHUB_DEFAULT_REPO as config accepted
+ * it, "owner/name"), or null. Read when asked, like web search.
+ * `{ githubRepo }` overrides the setting (tests, the evaluation script): a
+ * repository as config accepts one, anything else is none.
  */
-function jiraBaseUrl(options) {
-  if (options && Object.prototype.hasOwnProperty.call(options, 'jiraBaseUrl')) {
-    const given = options.jiraBaseUrl;
-    return typeof given === 'string' && readJiraBaseUrl(given).url === given ? given : null;
+function githubRepo(options) {
+  if (options && Object.prototype.hasOwnProperty.call(options, 'githubRepo')) {
+    const given = options.githubRepo;
+    return typeof given === 'string' && readGithubRepo(given).repo === given ? given : null;
   }
   // eslint-disable-next-line global-require
-  const configured = require('../../config').jiraBaseUrl;
-  return typeof configured === 'string' && configured.length > 0 ? configured : null;
+  const configured = require('../../config').githubRepo;
+  return typeof configured === 'string' && readGithubRepo(configured).repo === configured ? configured : null;
 }
 
 /**
  * The tools of this deployment, in the table's order. Frozen.
- * `{ webSearch, jiraBaseUrl }` override the settings (tests).
+ * `{ webSearch, githubRepo }` override the settings (tests).
  */
 function listTools(options) {
   const search = webSearchOn(options);
-  const tickets = jiraBaseUrl(options) !== null;
-  return TABLE.filter((tool) => (tool.name !== 'web_search' || search) && (tool.name !== 'open_ticket' || tickets));
+  const issues = githubRepo(options) !== null;
+  return TABLE.filter((tool) => (tool.name !== 'web_search' || search) && (tool.name !== 'open_issue' || issues));
 }
 
 const toolNames = (options) => listTools(options).map((tool) => tool.name);
@@ -232,14 +233,14 @@ const MAX_ENUM_VALUE_CHARS = 40;
 function readArgument(key, value, property) {
   // true or false as such: "true", 1 or "yes" is refused, never read as one
   if (property.type === 'boolean') return typeof value === 'boolean' ? value : null;
+  // An issue number is rebuilt, or it is not one (lib/github.js)
+  if (key === 'number') return normalizeIssueNumber(value);
   if (property.type === 'integer') {
     // A whole number, or the same as plain digits; never rounded or read out of a word
     const number = typeof value === 'string' && /^[1-9][0-9]{0,2}$/.test(value) ? Number(value) : value;
     return Number.isInteger(number) && number >= property.minimum && number <= property.maximum ? number : null;
   }
   if (typeof value !== 'string') return null;
-  // A ticket key is rebuilt, or it is not one (lib/jira.js)
-  if (key === 'key') return value.length <= property.maxLength ? normalizeTicketKey(value) : null;
   if (Array.isArray(property.enum)) {
     // One of the listed names, as listed: anything else is refused, never mapped to one
     if (value.length > MAX_ENUM_VALUE_CHARS) return null;
@@ -276,5 +277,5 @@ function validateToolCall(name, args, options) {
 }
 
 module.exports = {
-  listTools, toolNames, getTool, validateToolCall, jiraBaseUrl, ALL_TOOL_NAMES, NO_TOOL_NAME, PANEL_TOOL_NAMES, HOST_TOOL_NAMES,
+  listTools, toolNames, getTool, validateToolCall, githubRepo, ALL_TOOL_NAMES, NO_TOOL_NAME, PANEL_TOOL_NAMES, HOST_TOOL_NAMES,
 };

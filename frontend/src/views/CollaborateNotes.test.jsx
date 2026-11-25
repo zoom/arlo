@@ -318,7 +318,7 @@ describe('the notes as a document while the app runs in Collaborate', () => {
     expect(document.body.textContent).not.toMatch(NOTHING_OF_IT);
   });
 
-  test('Arlo thinking on the shared view: only for a spoken request, and never the step, which can name a person or a ticket', async () => {
+  test('Arlo thinking on the shared view: only for a spoken request, and never the step, which can name a person or an issue', async () => {
     await open({ sdk: inCollaborate(), state: { ...OWNER, notesShared: true } });
     await screen.findByRole('heading', { level: 1, name: 'Meeting notes' });
     await send(serverMessage.thinking(true, undefined, { step: 'Opening PROJ-123', channel: 'voice' }));

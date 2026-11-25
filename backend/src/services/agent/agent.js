@@ -74,9 +74,9 @@
  *      action ends as failed, saying both. Opening the notes for
  *      everyone goes the same way with that owner's panel starting Zoom's
  *      Collaborate mode; a panel that could not does nothing in its
- *      place, and the action ends as failed. Opening a ticket
+ *      place, and the action ends as failed. Opening an issue
  *      sends that owner's panel one URL, built here from the deployment's
- *      Jira base URL and the key the tool table rebuilt (lib/jira.js); when
+ *      GitHub repository and the number the tool table rebuilt (lib/github.js); when
  *      the panel opened it and could not bring up the share dialog
  *      ('share_failed'), the action ends as failed, saying both. Each run has `runLimitMs`; a model call still running
  *      then, or when the meeting's data goes, is aborted (an AbortSignal).
@@ -132,16 +132,16 @@
 const { newestLines } = require('../../lib/transcriptLines');
 const { cleanName } = require('../../lib/displayName');
 const {
-  getTool, validateToolCall, jiraBaseUrl, NO_TOOL_NAME,
+  getTool, validateToolCall, githubRepo, NO_TOOL_NAME,
 } = require('./tools');
-const { ticketUrl } = require('../../lib/jira');
+const { issueUrl } = require('../../lib/github');
 const {
   decide, panelMayAsk, voiceIsHeard, typedRequestCovers,
 } = require('./policy');
 const { approvalMessageData } = require('../approvals');
 const {
   TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, isTimerMinutes, chatText, cleanLine, noHands, TOO_MANY_WAITING_LABEL,
-  failedReply, INVITE_NOT_SENT, NOTES_NOT_OPENED, TICKET_SHARE_FAILED_LABEL,
+  failedReply, INVITE_NOT_SENT, NOTES_NOT_OPENED, ISSUE_SHARE_FAILED_LABEL,
   MAX_CHAT_ANSWER_CHARS, MAX_CHAT_MESSAGE_CHARS, MAX_SHEET_REQUEST_CHARS, MAX_SHEET_NAME_CHARS,
   STEPS, toolStep,
 } = require('./texts');
@@ -228,7 +228,7 @@ function createAgent({
   // (the fourth only with `on` true; `step` is a sentence of texts.js or null),
   // `did(meetingId, action, { everyone, userIds })`, `approval(meetingId, userIds, data)`
   send = {},
-  // Passed to the tool table: { webSearch, jiraBaseUrl } (tests)
+  // Passed to the tool table: { webSearch, githubRepo } (tests)
   toolOptions,
   now = Date.now,
   schedule = defaultSchedule,
@@ -551,13 +551,14 @@ function createAgent({
           // Not opened as a shared document: the notes stay shared, and the outcome says both
           return opened.ok ? opened : { ok: false, code: opened.code, sharedOnly: true };
         }
-        case 'open_ticket': {
-          // The one URL there is: the deployment's base, "/browse/", the key
-          // the tool table rebuilt. Nothing a model or a speaker gave is in it
-          // but that key. No base (the setting went), no URL: nothing is sent
-          const url = ticketUrl(jiraBaseUrl(toolOptions), args.key);
+        case 'open_issue': {
+          // The one URL there is: GitHub, the deployment's repository,
+          // "/issues/", the number the tool table rebuilt. Nothing a model or
+          // a speaker gave is in it but that number. No repository (the
+          // setting went), no URL: nothing is sent
+          const url = issueUrl(githubRepo(toolOptions), args.number);
           if (url === null || typeof args.share !== 'boolean') return { ok: false, code: 'unsupported' };
-          return await viaHands(meetingId, { tool: tool.name, args: { url, key: args.key, share: args.share } }, actorUserId);
+          return await viaHands(meetingId, { tool: tool.name, args: { url, number: args.number, share: args.share } }, actorUserId);
         }
         case 'set_timer':
           // The minutes once more, as the panel is sent them and nothing with them
@@ -595,10 +596,10 @@ function createAgent({
       failedLabel = half;
       reply = half;
     }
-    if (!outcome.ok && tool.name === 'open_ticket' && outcome.code === 'share_failed' && reply !== null) {
-      // The ticket is open and the share dialog is not: the record says both,
-      // without the key (everyone reads it); the asker's own answer has the key
-      failedLabel = TICKET_SHARE_FAILED_LABEL;
+    if (!outcome.ok && tool.name === 'open_issue' && outcome.code === 'share_failed' && reply !== null) {
+      // The issue is open and the share dialog is not: the record says both,
+      // without the number (everyone reads it); the asker's own answer has the number
+      failedLabel = ISSUE_SHARE_FAILED_LABEL;
     }
     const stored = action
       ? finish(meetingId, state, action.id, outcome.ok ? 'done' : 'failed', outcome.ok ? texts.done(args) : failedLabel)

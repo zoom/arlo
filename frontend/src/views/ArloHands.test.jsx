@@ -423,23 +423,24 @@ describe('an action from the server', () => {
     expect(sdk.setEmojiReaction).toHaveBeenCalledTimes(1);
   });
 
-  describe('a ticket', () => {
-    const BASE = 'https://jira.example.test';
-    const withJira = { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true, jira: { baseUrl: BASE } } }) };
-    const TICKET = { url: `${BASE}/browse/PROJ-123`, key: 'PROJ-123', share: true };
+  describe('an issue', () => {
+    const REPO = 'acme/arlo-app';
+    const ISSUE_URL = `https://github.com/${REPO}/issues/123`;
+    const withRepo = { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true, github: { repo: REPO } } }) };
+    const ISSUE = { url: ISSUE_URL, number: 123, share: true };
 
-    test('announced only when the deployment\'s settings name a Jira', async () => {
-      await openAsOwner({ routes: withJira });
-      await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS.slice(0, 5), 'open_ticket', ...TIMERS, OPEN_NOTES] }));
+    test('announced only when the deployment\'s settings name a repository', async () => {
+      await openAsOwner({ routes: withRepo });
+      await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: [...HOST_HANDS.slice(0, 5), 'open_issue', ...TIMERS, OPEN_NOTES] }));
     });
 
-    test('the settings are read again when someone signs in, and the Jira they then name is announced', async () => {
-      // As the server answers: the Jira only to a request that has a session
+    test('the settings are read again when someone signs in, and the repository they then name is announced', async () => {
+      // As the server answers: the repository only to a request that has a session
       let reads = 0;
       const fetchMock = mockFetch({
         '/api/auth/settings': () => {
           reads += 1;
-          return json({ demoMode: true, features: { autoStart: true, ownStream: true, jira: { baseUrl: reads === 1 ? null : BASE } } });
+          return json({ demoMode: true, features: { autoStart: true, ownStream: true, github: { repo: reads === 1 ? null : REPO } } });
         },
       });
       renderInMeeting();
@@ -447,15 +448,19 @@ describe('an action from the server', () => {
       await send(serverMessage.subscribed());
       await send(serverMessage.status('rtms_started'));
       await send(serverMessage.arloState(OWNER));
-      await waitFor(() => expect(lastHands()?.can).toContain('open_ticket'));
+      await waitFor(() => expect(lastHands()?.can).toContain('open_issue'));
       const settingsReads = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/auth/settings'));
       expect(settingsReads.length).toBeGreaterThanOrEqual(2);
       for (const [, init] of settingsReads) expect(init).toMatchObject({ credentials: 'include' });
     });
 
-    test('not announced when the settings name none, one that is not https, or the client cannot open URLs', async () => {
-      for (const [jira, sdkOptions] of [[{ baseUrl: null }, {}], [{ baseUrl: 'http://jira.example.test' }, {}], [{ baseUrl: BASE }, { unsupportedApis: ['openUrl'] }]]) {
-        const routes = { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true, jira } }) };
+    test('not announced when the settings name none, one that is not "owner/name", or the client cannot open URLs', async () => {
+      const cases = [
+        [{ repo: null }, {}], [{ repo: 'acme/..' }, {}], [{ repo: `https://github.com/${REPO}` }, {}], [{ repo: { owner: 'acme', name: 'arlo-app' } }, {}],
+        [undefined, {}], [{ repo: REPO }, { unsupportedApis: ['openUrl'] }],
+      ];
+      for (const [github, sdkOptions] of cases) {
+        const routes = { '/api/auth/settings': () => json({ demoMode: true, features: { autoStart: true, ownStream: true, github } }) };
         const view = await openAsOwner({ sdk: createZoomSdk(sdkOptions), routes });
         await waitFor(() => expect(lastHands()).toEqual({ zoomRole: 'host', can: HOST_HANDS }));
         await settle();
@@ -465,37 +470,37 @@ describe('an action from the server', () => {
       }
     });
 
-    test('open and share: the ticket at the deployment\'s Jira opens in the browser, then Zoom\'s share dialog', async () => {
-      const { sdk, fetchMock } = await openAsOwner({ sdk: createZoomSdk({ role: 'attendee' }), routes: withJira });
-      await waitFor(() => expect(lastHands()?.can).toContain('open_ticket'));
-      await send(serverMessage.action({ actionId: A1, tool: 'open_ticket', args: TICKET }));
+    test('open and share: the issue in the deployment\'s repository opens in the browser, then Zoom\'s share dialog', async () => {
+      const { sdk, fetchMock } = await openAsOwner({ sdk: createZoomSdk({ role: 'attendee' }), routes: withRepo });
+      await waitFor(() => expect(lastHands()?.can).toContain('open_issue'));
+      await send(serverMessage.action({ actionId: A1, tool: 'open_issue', args: ISSUE }));
       await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
       expect(sdk.openUrl).toHaveBeenCalledTimes(1);
-      expect(sdk.openUrl).toHaveBeenCalledWith({ url: `${BASE}/browse/PROJ-123` });
+      expect(sdk.openUrl).toHaveBeenCalledWith({ url: ISSUE_URL });
       expect(sdk.promptShareScreen).toHaveBeenCalledTimes(1);
       expect(sdk.promptShareScreen).toHaveBeenCalledWith();
       expect(results(fetchMock)[0].body).toEqual({ ok: true });
     });
 
-    test('a URL that is not that Jira\'s is not opened; a share dialog that fails is reported as share_failed', async () => {
-      const { sdk, fetchMock } = await openAsOwner({ routes: withJira });
-      await waitFor(() => expect(lastHands()?.can).toContain('open_ticket'));
-      await send(serverMessage.action({ actionId: A1, tool: 'open_ticket', args: { ...TICKET, url: 'https://evil.example/browse/PROJ-123' } }));
+    test('a URL that is not that repository\'s is not opened; a share dialog that fails is reported as share_failed', async () => {
+      const { sdk, fetchMock } = await openAsOwner({ routes: withRepo });
+      await waitFor(() => expect(lastHands()?.can).toContain('open_issue'));
+      await send(serverMessage.action({ actionId: A1, tool: 'open_issue', args: { ...ISSUE, url: 'https://github.com.evil.com/acme/arlo-app/issues/123' } }));
       await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
       expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'unsupported' });
       expect(sdk.openUrl).not.toHaveBeenCalled();
       expect(sdk.promptShareScreen).not.toHaveBeenCalled();
 
       sdk.promptShareScreen.mockRejectedValueOnce(new Error('Failed to prompt share screen'));
-      await send(serverMessage.action({ actionId: A2, tool: 'open_ticket', args: TICKET }));
+      await send(serverMessage.action({ actionId: A2, tool: 'open_issue', args: ISSUE }));
       await waitFor(() => expect(results(fetchMock)).toHaveLength(2));
       expect(sdk.openUrl).toHaveBeenCalledTimes(1);
       expect(results(fetchMock)[1].body).toEqual({ ok: false, code: 'share_failed' });
     });
 
-    test('a deployment without a Jira opens nothing, whatever the server sends', async () => {
+    test('a deployment without a repository opens nothing, whatever the server sends', async () => {
       const { sdk, fetchMock } = await openAsOwner();
-      await send(serverMessage.action({ actionId: A1, tool: 'open_ticket', args: TICKET }));
+      await send(serverMessage.action({ actionId: A1, tool: 'open_issue', args: ISSUE }));
       await waitFor(() => expect(results(fetchMock)).toHaveLength(1));
       expect(results(fetchMock)[0].body).toEqual({ ok: false, code: 'unsupported' });
       expect(sdk.openUrl).not.toHaveBeenCalled();

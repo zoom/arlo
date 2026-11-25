@@ -22,7 +22,7 @@ const NO_NOTES_YET = 'Notes appear after the first minute or so.';
  * controls, and "Close for everyone": it ends Collaborate for the meeting and
  * leaves sharing the notes as it is. The status line is told that Arlo is
  * thinking only for a request said aloud in the meeting, and never the step
- * it is at (a step can name who is admitted or which ticket is opened).
+ * it is at (a step can name who is admitted or which issue is opened).
  * (A request for the owner's approval rises over this view as a reduced
  * sheet that says nothing of the request: see ApprovalHost.)
  *
@@ -76,7 +76,7 @@ export default function CollaborateNotes({
           <StatusLine
             {...status}
             thinking={status.thinking === true && status.thinkingChannel === 'voice'}
-            // The step can name a person or a ticket: not on everyone's screen
+            // The step can name a person or an issue: not on everyone's screen
             thinkingStep={null}
           />
         )}

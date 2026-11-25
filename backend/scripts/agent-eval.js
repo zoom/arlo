@@ -18,8 +18,8 @@
  * is stopped.
  *
  * A tool that a deployment turns on with a setting is tested too: the table
- * given to the models has open_ticket also when JIRA_BASE_URL is not set (a
- * line says so; the base URL is never part of what a model is given). A case
+ * given to the models has open_issue also when GITHUB_DEFAULT_REPO is not set (a
+ * line says so; the repository is never part of what a model is given). A case
  * that needs a tool the table does not have is left out, and that is printed.
  *
  * A case: { kind, said, expectTool, expectArgs?, context? }
@@ -221,18 +221,18 @@ if (require.main === module) {
   /* eslint-disable global-require */
   const config = require('../src/config');
   const { chooseTool } = require('../src/services/openrouter');
-  const { listTools, validateToolCall, jiraBaseUrl } = require('../src/services/agent/tools');
+  const { listTools, validateToolCall, githubRepo } = require('../src/services/agent/tools');
   const cases = require(path.join(__dirname, 'agent-eval-cases.json'));
   /* eslint-enable global-require */
   // The client's own failure lines (model and status) would bury the table
   console.error = () => {};
   console.warn = () => {};
   const log = (line) => process.stdout.write(`${line}\n`);
-  // open_ticket is in the table only with a Jira base URL. Which one makes no
-  // difference to a model (it is in nothing a model is given), so without
-  // JIRA_BASE_URL a stand-in puts the tool in the table for this run
-  const toolOptions = jiraBaseUrl() === null ? { jiraBaseUrl: 'https://jira.invalid' } : undefined;
-  if (toolOptions) log('JIRA_BASE_URL is not set: open_ticket is tested all the same, with a stand-in base URL that no model sees.');
+  // open_issue is in the table only with a GitHub repository. Which one makes
+  // no difference to a model (it is in nothing a model is given), so without
+  // GITHUB_DEFAULT_REPO a stand-in puts the tool in the table for this run
+  const toolOptions = githubRepo() === null ? { githubRepo: 'stand-in/stand-in' } : undefined;
+  if (toolOptions) log('GITHUB_DEFAULT_REPO is not set: open_issue is tested all the same, with a stand-in repository that no model sees.');
   main({
     argv: process.argv.slice(2),
     config,

@@ -83,8 +83,8 @@ const REACTION_CAPABILITIES = [
   'setEmojiReaction',
 ];
 
-// The share dialog: after Arlo opened a ticket in the browser ("Arlo, open
-// PROJ-123 and share it"), the owner's panel brings up Zoom's share dialog and
+// The share dialog: after Arlo opened an issue in the browser ("Arlo, open
+// issue 123 and share it"), the owner's panel brings up Zoom's share dialog and
 // the owner picks the window (lib/arloActions.js). Only promptShareScreen is
 // called, so only it is asked for. Desktop 5.13.5, older than the reactions
 // (5.14.5), so it is asked for in the reactions' tier and not in one of its

@@ -44,7 +44,7 @@
  *
  * Anything unknown takes the stricter way: never 'run'.
  */
-const { isTicketKey, ticketKeysIn } = require('../../lib/jira');
+const { isIssueNumber, onlyIssueIn } = require('../../lib/github');
 const { isTimerMinutes } = require('./texts');
 
 const ASKERS = new Set(['owner', 'other']);
@@ -119,7 +119,7 @@ const REACTION_EMOJI = Object.freeze({
 // "share" or "sharing" as a word of its own, or as "screen share", "screen-share",
 // "screenshare": not "shared" (a shared drive), "shareholder", "un-share"
 const SHARE_WORD = /(?<![\p{L}\p{N}_-])(?:share|sharing)(?![\p{L}\p{N}_-])|(?<![\p{L}\p{N}_-])screen[ -]?(?:share|sharing)(?![\p{L}\p{N}_-])/u;
-// What opening a ticket is asked with
+// What opening an issue is asked with
 const OPEN_WORD = words('open|pull up|bring up|show');
 
 // A word that turns a request around ("don't share", "no heart", "stop",
@@ -313,12 +313,17 @@ function asksForTimer(text) {
  *                            muting Danny go to the sheet
  *   admit_from_waiting_room  the same, for "admit <name>" or "let <name> in",
  *                            each with or without "from the waiting room"
- *   open_ticket              the key is one of the ticket keys in the typed
- *                            text (ticketKeysIn, lib/jira.js), the text has
- *                            "open", "pull up", "bring up" or "show" as a
- *                            word and no NEGATION word; and when the share
- *                            dialog would be opened too, "share" or "sharing"
- *                            as a word ("screen share" too; not "shared")
+ *   open_issue               the typed text names exactly one issue, it is
+ *                            the tool call's number, and the text has no
+ *                            other digit (onlyIssueIn, lib/github.js: "issue
+ *                            42", "issue #42", "issue number 42", "issue no.
+ *                            42", "#42"; not "open 42", "ticket 42", "issue
+ *                            forty two", "issue 42 and 43"); before it the
+ *                            text has "open", "pull up", "bring up" or "show"
+ *                            as a word, and nowhere a NEGATION word; and when the
+ *                            share dialog would be opened too, "share" or
+ *                            "sharing" as a word ("screen share" too; not
+ *                            "shared")
  *   set_timer                the typed text has the word "timer"; a verb that
  *                            starts one (set, start, put, give) or is the
  *                            bare form ("5 minute timer", "timer for 5
@@ -362,11 +367,18 @@ function typedRequestCovers(typed, toolName, args) {
       `admit ${name} from the waiting room`, `let ${name} in from the waiting room`, `admit ${name}`, `let ${name} in`,
     ]);
   }
-  if (toolName === 'open_ticket') {
-    const { key, share } = args;
-    if (!isTicketKey(key) || typeof share !== 'boolean') return false;
-    if (!ticketKeysIn(typed).includes(key) || !OPEN_WORD.test(text) || NEGATION.test(text)) return false;
-    return share === false || SHARE_WORD.test(text);
+  if (toolName === 'open_issue') {
+    const { number, share } = args;
+    if (!isIssueNumber(number) || typeof share !== 'boolean') return false;
+    // Read from the text as it was typed: a digit of another script, or one
+    // behind an invisible character, is not made a plain digit first
+    const named = onlyIssueIn(typed);
+    if (named === null || named.number !== number) return false;
+    // The words that name the issue are not part of the request around it
+    // and the word that opens stands before them ("is issue 42 open?" asks nothing)
+    const around = plain(named.around);
+    if (!OPEN_WORD.test(plain(named.before)) || NEGATION.test(around)) return false;
+    return share === false || SHARE_WORD.test(around);
   }
   if (toolName === 'set_timer') {
     const { minutes } = args;

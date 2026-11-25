@@ -309,15 +309,15 @@ module.exports = {
   // unless WEB_SEARCH_ENABLED is exactly "true": it needs a paid model plugin
   webSearchEnabled: process.env.WEB_SEARCH_ENABLED === 'true',
 
-  // Where "Arlo, open PROJ-123" opens a ticket: the base URL of the
-  // deployment's Jira (https, a host, an optional context path; lib/jira.js).
-  // Not set: Arlo has no such tool. A value that is not accepted is ignored
-  // with one warning, which does not print it.
-  jiraBaseUrl: (() => {
+  // Where "Arlo, open issue 42" opens an issue: the deployment's GitHub
+  // repository as "owner/name" (lib/github.js). No token: nothing calls
+  // GitHub. Not set: Arlo has no such tool. A value that is not accepted is
+  // ignored with one warning, which does not print it.
+  githubRepo: (() => {
     // eslint-disable-next-line global-require
-    const { url, known } = require('./lib/jira').readJiraBaseUrl(process.env.JIRA_BASE_URL);
-    if (!known) console.warn('JIRA_BASE_URL must be an https URL of at most 200 characters without user name, password, query or fragment; ignoring it.');
-    return url;
+    const { repo, known } = require('./lib/github').readGithubRepo(process.env.GITHUB_DEFAULT_REPO);
+    if (!known) console.warn('GITHUB_DEFAULT_REPO must be a GitHub repository written as owner/name; ignoring it.');
+    return repo;
   })(),
 
   // Feature Flags

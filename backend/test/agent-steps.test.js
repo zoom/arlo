@@ -17,7 +17,7 @@ test('the steps are a fixed table of short sentences', () => {
     openingNotes: 'Opening the notes for everyone',
     reacting: 'Sending a reaction',
     mutingSomeone: 'Muting someone',
-    openingTicket: 'Opening a ticket',
+    openingIssue: 'Opening an issue',
     stoppingTimer: 'Stopping the timer',
   });
   assert.equal(Object.isFrozen(STEPS), true);

@@ -9,8 +9,8 @@
  *   invite_everyone          {}            the app invitation, to everyone in the meeting
  *   send_reaction            { reaction }  one of REACTIONS, as this person's own reaction
  *   mute_participant         { name }      host or co-host only; mutes, never unmutes
- *   open_ticket              { url, key, share }  the ticket in the system browser, then
- *                                          Zoom's share dialog when `share` is true
+ *   open_issue               { url, number, share }  the GitHub issue in the system browser,
+ *                                          then Zoom's share dialog when `share` is true
  *   set_timer                { minutes }   a countdown on Zoom's Dynamic Indicator, for everyone
  *   stop_timer               {}            takes it down again
  *   open_notes_for_everyone  {}            Zoom's Collaborate mode: Arlo opens for everyone in
@@ -25,7 +25,7 @@
  * the name is how someone else's begins, or it mixes look-alike scripts: Arlo
  * then asks for the full name), 'sdk_error' (Zoom refused or failed, or the
  * list of people is longer than is looked through), 'share_failed' (the
- * ticket was opened in the browser and the share dialog was not).
+ * issue was opened in the browser and the share dialog was not).
  *
  * Opening the notes for everyone: the server has shared the notes before it
  * asks. Collaborate is started with the screen share (lib/collaborate.js,
@@ -34,11 +34,11 @@
  * that is 'sdk_error' and nothing is done in its place: the owner agreed to
  * "open the notes for everyone", and the sheet said nothing of an invitation.
  *
- * A ticket's URL is never taken as it comes: this panel builds it again from
- * the deployment's Jira base URL (the server's settings, given as
- * `jiraBaseUrl`), "/browse/" and the key, and opens it only when the two are
- * the same text. Zoom's SDK cannot pick the window that is shared: the share
- * dialog opens and this person picks the browser.
+ * An issue's URL is never taken as it comes: this panel builds it again from
+ * "https://github.com/", the deployment's repository (the server's settings,
+ * given as `githubRepo`), "/issues/" and the number, and opens it only when
+ * the two are the same text. Zoom's SDK cannot pick the window that is
+ * shared: the share dialog opens and this person picks the browser.
  *
  * A timer is Zoom's own countdown on the Dynamic Indicator. What is sent for
  * it (the unit of `timer.start`, the text beside it) is a guess, kept with
@@ -69,7 +69,7 @@ export const HAND_TOOLS = Object.freeze({
   invite: 'invite_everyone',
   reaction: 'send_reaction',
   mute: 'mute_participant',
-  ticket: 'open_ticket',
+  issue: 'open_issue',
   setTimer: 'set_timer',
   stopTimer: 'stop_timer',
   openNotes: 'open_notes_for_everyone',
@@ -116,11 +116,13 @@ const MAX_NAME_CHARS = 100;
 const MAX_WAITING = 1000;
 const MAX_PARTICIPANTS = 1000;
 
-// A ticket key as the server rebuilds it (backend lib/jira.js): a project of
-// 2 to 10 letters and digits that starts with a letter, a dash, a number
-const TICKET_KEY = /^[A-Z][A-Z0-9]{1,9}-\d{1,7}$/;
-const MAX_TICKET_URL_CHARS = 300;
-const MAX_JIRA_BASE_CHARS = 200;
+// The one site an issue is opened at, and a repository there as "owner/name":
+// an owner of 1 to 39 letters, digits and inner hyphens, a name of 1 to 100
+// letters, digits, "_", "." and "-" (never "." or "..", which are path steps)
+const GITHUB_HOST = 'github.com';
+const GITHUB_REPO = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\/[A-Za-z0-9_.-]{1,100}$/;
+const MAX_ISSUE_NUMBER = 9999999;
+const MAX_ISSUE_URL_CHARS = 300;
 
 const ok = Object.freeze({ ok: true });
 const fail = (code) => ({ ok: false, code });
@@ -138,32 +140,30 @@ function httpsUrl(value) {
 }
 
 /**
- * The deployment's Jira base URL as the server's settings give it
- * (`features.jira.baseUrl`), or null when it is not one in exactly the form
- * the server keeps: https, a host, an optional path, no trailing slash, no
- * user name, password, query or fragment.
+ * The deployment's GitHub repository as the server's settings give it
+ * (`features.github.repo`), or null when it is not "owner/name" in exactly
+ * that form. Untrusted like everything from the server: it becomes part of a
+ * URL this panel opens.
  */
-export function jiraBaseOf(value) {
-  if (typeof value !== 'string' || value.length === 0 || value.length > MAX_JIRA_BASE_CHARS) return null;
-  if (!/^[\x21-\x7E]+$/.test(value) || /[\\?#@]/.test(value)) return null;
-  const parsed = httpsUrl(value);
-  if (parsed === null || parsed.search !== '' || parsed.hash !== '') return null;
-  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}` === value ? value : null;
+export function githubRepoOf(value) {
+  if (typeof value !== 'string' || !GITHUB_REPO.test(value)) return null;
+  const name = value.slice(value.indexOf('/') + 1);
+  return name === '.' || name === '..' ? null : value;
 }
 
 /**
  * What this panel tells the server it can do (`arlo.hands`): the chat, the
  * invitation and a reaction when the client accepted each; the waiting room
  * and muting when the client accepted their APIs and Zoom says this person is
- * the host or a co-host; a ticket when the client opens URLs and the
- * deployment has a Jira (the share dialog is not needed to announce it: a
- * ticket can be opened without it); a timer, to start and to stop, when the
+ * the host or a co-host; an issue when the client opens URLs and the
+ * settings name a GitHub repository (the share dialog is not needed to
+ * announce it: an issue can be opened without it); a timer, to start and to stop, when the
  * client accepted the Dynamic Indicator APIs; opening the notes for everyone
  * when the client accepted startCollaborate (whether Zoom then starts it is
  * only known when it is tried). At most nine names (the server takes ten).
  */
 export function handsFor({
-  chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl,
+  chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, githubRepo,
   indicatorSupported, collaborateSupported, zoomRole,
 }) {
   const can = [];
@@ -172,7 +172,7 @@ export function handsFor({
   if (invitationSupported === true) can.push(HAND_TOOLS.invite);
   if (reactionSupported === true) can.push(HAND_TOOLS.reaction);
   if (muteSupported === true && MAY_MUTE.has(zoomRole)) can.push(HAND_TOOLS.mute);
-  if (openUrlSupported === true && jiraBaseOf(jiraBaseUrl) !== null) can.push(HAND_TOOLS.ticket);
+  if (openUrlSupported === true && githubRepoOf(githubRepo) !== null) can.push(HAND_TOOLS.issue);
   if (indicatorSupported === true) can.push(HAND_TOOLS.setTimer, HAND_TOOLS.stopTimer);
   if (collaborateSupported === true) can.push(HAND_TOOLS.openNotes);
   return can;
@@ -303,18 +303,23 @@ async function muteParticipant(zoomSdk, args, zoomRole, stillAllowed, selfPartic
   return ok;
 }
 
-async function openTicket(zoomSdk, args, stillAllowed, jiraBaseUrl) {
+async function openIssue(zoomSdk, args, stillAllowed, githubRepo) {
   // Exactly these three: anything else is something nobody approved
   if (args === null || typeof args !== 'object' || Array.isArray(args)) return fail('unsupported');
   const keys = Object.keys(args);
-  if (keys.length !== 3 || !['url', 'key', 'share'].every((name) => keys.includes(name))) return fail('unsupported');
-  const { url, key, share } = args;
-  if (typeof share !== 'boolean' || typeof key !== 'string' || !TICKET_KEY.test(key)) return fail('unsupported');
-  if (typeof url !== 'string' || url.length > MAX_TICKET_URL_CHARS) return fail('unsupported');
-  // The one URL this panel opens: the deployment's base, "/browse/", the key.
-  // Built here again and compared as text; it must also parse as plain https
-  const base = jiraBaseOf(jiraBaseUrl);
-  if (base === null || httpsUrl(url) === null || url !== `${base}/browse/${key}`) return fail('unsupported');
+  if (keys.length !== 3 || !['url', 'number', 'share'].every((name) => keys.includes(name))) return fail('unsupported');
+  const { url, number, share } = args;
+  if (typeof share !== 'boolean') return fail('unsupported');
+  // A number as such, never text that reads like one: it becomes part of the URL
+  if (typeof number !== 'number' || !Number.isInteger(number) || number < 1 || number > MAX_ISSUE_NUMBER) return fail('unsupported');
+  if (typeof url !== 'string' || url.length > MAX_ISSUE_URL_CHARS) return fail('unsupported');
+  // The one URL this panel opens: github.com, the deployment's repository,
+  // "/issues/", the number. Built here again and compared as text; it must
+  // also parse as plain https at exactly that host, and read the same parsed
+  const repo = githubRepoOf(githubRepo);
+  if (repo === null || url !== `https://${GITHUB_HOST}/${repo}/issues/${number}`) return fail('unsupported');
+  const parsed = httpsUrl(url);
+  if (parsed === null || parsed.hostname !== GITHUB_HOST || parsed.port !== '' || parsed.href !== url) return fail('unsupported');
   if (!has(zoomSdk, 'openUrl')) return fail('unsupported');
   if (typeof stillAllowed !== 'function' || stillAllowed() !== true) return fail('not_allowed');
 
@@ -324,7 +329,7 @@ async function openTicket(zoomSdk, args, stillAllowed, jiraBaseUrl) {
   await zoomSdk.openUrl({ url });
   if (!share) return ok;
 
-  // From here the ticket is open: whatever keeps the share dialog from
+  // From here the issue is open: whatever keeps the share dialog from
   // coming up is 'share_failed', never a plain failure
   if (!has(zoomSdk, 'promptShareScreen') || stillAllowed() !== true) return fail('share_failed');
   try {
@@ -404,13 +409,13 @@ async function openNotesForEveryone(zoomSdk, args, stillAllowed) {
  * which is not over); asked again after anything that takes time and before
  * Zoom acts. Without it nobody is admitted or muted and nothing is opened. `selfParticipantUUID`:
  * this person's participant UUID in the meeting, when Zoom gave one.
- * `jiraBaseUrl`: the deployment's Jira base URL from the server's settings;
- * without it no ticket is opened. `indicatorTimer`: this panel's record of a
+ * `githubRepo`: the deployment's GitHub repository ("owner/name") from the
+ * server's settings; without it no issue is opened. `indicatorTimer`: this panel's record of a
  * countdown it started (lib/indicatorTimer.js); without it no timer is
  * started or stopped. Never rejects.
  */
 export async function runArloAction(zoomSdk, action, {
-  zoomRole = null, stillAllowed = null, selfParticipantUUID = null, jiraBaseUrl = null, indicatorTimer = null,
+  zoomRole = null, stillAllowed = null, selfParticipantUUID = null, githubRepo = null, indicatorTimer = null,
 } = {}) {
   try {
     switch (action?.tool) {
@@ -424,8 +429,8 @@ export async function runArloAction(zoomSdk, action, {
         return await sendReaction(zoomSdk, action.args);
       case HAND_TOOLS.mute:
         return await muteParticipant(zoomSdk, action.args, zoomRole, stillAllowed, selfParticipantUUID);
-      case HAND_TOOLS.ticket:
-        return await openTicket(zoomSdk, action.args, stillAllowed, jiraBaseUrl);
+      case HAND_TOOLS.issue:
+        return await openIssue(zoomSdk, action.args, stillAllowed, githubRepo);
       case HAND_TOOLS.setTimer:
         return await setTimer(zoomSdk, action.args, stillAllowed, indicatorTimer);
       case HAND_TOOLS.stopTimer:

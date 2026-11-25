@@ -94,7 +94,7 @@ describe('indicatorState: the state table', () => {
       invite_everyone: 'Arlo invited everyone to the notes',
       open_notes_for_everyone: 'Arlo opened the notes for everyone',
       mute_participant: 'Arlo muted a participant',
-      open_ticket: 'Arlo opened a ticket',
+      open_issue: 'Arlo opened an issue',
     });
     for (const [tool, sentence] of Object.entries(DID_TEXT)) expect(state({ didTool: tool }).text).toBe(sentence);
     for (const tool of ['send_reaction', 'answer_from_meeting', 'summarize_so_far', 'web_search', 'set_timer', 'stop_timer',
@@ -128,7 +128,7 @@ describe('indicatorState: the state table', () => {
     expect([...INDICATOR_STRINGS].sort()).toEqual([
       'Arlo invited everyone to the notes', 'Arlo is paused', 'Arlo is thinking…', 'Arlo is transcribing',
       'Arlo is transcribing · Say "Hey Arlo"', 'Arlo is waiting for an OK', 'Arlo let someone in', 'Arlo muted a participant',
-      'Arlo opened a ticket', 'Arlo opened the notes for everyone', 'Arlo posted to the chat', 'Arlo shared the notes', 'Timer',
+      'Arlo opened an issue', 'Arlo opened the notes for everyone', 'Arlo posted to the chat', 'Arlo shared the notes', 'Timer',
     ].sort());
     const hostile = ['Danny Reyes', 'Muting Danny Reyes', 'Asked to admit Priya from the waiting room', 'PROJ-123', 'Buy now', { name: 'Danny' }];
     const styles = new Set([null, ...Object.values(INDICATOR_STYLES)]);

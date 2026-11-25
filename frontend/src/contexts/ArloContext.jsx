@@ -227,12 +227,12 @@ export function ArloProvider({ children }) {
     userContext, zoomSdk, chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported,
     dynamicIndicatorSupported, collaborateSupported,
   } = useZoomSdk();
-  // The deployment's Jira, from the server's settings: a ticket is opened only
+  // The deployment's GitHub repository, from the server's settings: an issue is opened only
   // there (lib/arloActions.js checks the value and the URL the server sends)
   const { features } = useServerSettings();
-  const jiraBaseUrl = typeof features?.jira?.baseUrl === 'string' ? features.jira.baseUrl : null;
-  const jiraBaseUrlRef = useRef(jiraBaseUrl);
-  jiraBaseUrlRef.current = jiraBaseUrl;
+  const githubRepo = typeof features?.github?.repo === 'string' ? features.github.repo : null;
+  const githubRepoRef = useRef(githubRepo);
+  githubRepoRef.current = githubRepo;
   // This person's role in the Zoom meeting, as Zoom reports it
   const zoomRole = typeof userContext?.role === 'string' && userContext.role.length > 0
     && userContext.role.length <= MAX_ZOOM_ROLE_CHARS ? userContext.role : 'attendee';
@@ -516,7 +516,7 @@ export function ArloProvider({ children }) {
       zoomRole: zoomRoleRef.current,
       stillAllowed,
       selfParticipantUUID: selfParticipantUUIDRef.current,
-      jiraBaseUrl: jiraBaseUrlRef.current,
+      githubRepo: githubRepoRef.current,
       // A countdown on Zoom's indicator: the same record the status hook reads (MeetingContext)
       indicatorTimer,
     })
@@ -651,10 +651,10 @@ export function ArloProvider({ children }) {
   // who announced and is no longer an owner (or whose meeting is over) clears it.
   const hands = useMemo(
     () => handsFor({
-      chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl,
+      chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, githubRepo,
       indicatorSupported: dynamicIndicatorSupported, collaborateSupported, zoomRole,
     }),
-    [chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, jiraBaseUrl,
+    [chatSupported, waitingRoomSupported, invitationSupported, reactionSupported, muteSupported, openUrlSupported, githubRepo,
       dynamicIndicatorSupported, collaborateSupported, zoomRole],
   );
   const hasHands = state.role === 'owner' && isAuthenticated && !meetingOver;
