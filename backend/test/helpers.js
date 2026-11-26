@@ -48,6 +48,10 @@ function setTestEnv(extra = {}) {
   });
   // The tool table depends on it: only a test that sets it has it
   if (!Object.prototype.hasOwnProperty.call(extra, 'GITHUB_DEFAULT_REPO')) delete process.env.GITHUB_DEFAULT_REPO;
+  // A developer's shell often has a real GITHUB_TOKEN: a test never reads it
+  for (const name of ['GITHUB_TOKEN', 'GITHUB_MCP_URL']) {
+    if (!Object.prototype.hasOwnProperty.call(extra, name)) delete process.env[name];
+  }
   delete process.env.INTERNAL_API_SECRET;
   delete process.env.ALLOW_DEV_AUTH_BYPASS;
   delete process.env.ENABLE_DEBUG_ROUTES;

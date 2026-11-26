@@ -319,6 +319,25 @@ module.exports = {
     if (!known) console.warn('GITHUB_DEFAULT_REPO must be a GitHub repository written as owner/name; ignoring it.');
     return repo;
   })(),
+  // The GitHub connector (services/connectors/): Arlo lists, reads and creates
+  // issues in githubRepo through GitHub's MCP server with the deployment's
+  // token. The connector is configured only when token and repository are
+  // both valid; "open issue 42" above needs the repository alone. The token is
+  // a secret: never logged, never sent to a browser, never put in a URL.
+  githubToken: (() => {
+    // eslint-disable-next-line global-require
+    const { token, known } = require('./services/connectors/githubConfig').readGithubToken(process.env.GITHUB_TOKEN);
+    if (!known) console.warn('GITHUB_TOKEN does not look like a GitHub token; ignoring it.');
+    return token;
+  })(),
+  // Where GitHub's MCP server is: https, a host of the connector's fixed
+  // list, a path under /mcp. Not set: the hosted server's issues toolset.
+  githubMcpUrl: (() => {
+    // eslint-disable-next-line global-require
+    const { url, known } = require('./services/connectors/githubConfig').readGithubMcpUrl(process.env.GITHUB_MCP_URL);
+    if (!known) console.warn('GITHUB_MCP_URL must be an https URL of GitHub\'s MCP server (a path under /mcp, nothing else); using the default.');
+    return url;
+  })(),
 
   // Feature Flags
   extractionEnabled: process.env.EXTRACTION_ENABLED === 'true',
