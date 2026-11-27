@@ -17,6 +17,7 @@ const oauthState = require('../services/oauthState');
 const apiTokens = require('../lib/apiTokens');
 const { createDeeplink } = require('../services/deeplink');
 const { setRestoreCookie, clearRestoreCookie } = require('../services/sessionRestore');
+const { forgetGithubUser } = require('../services/connectors/githubConnections');
 
 const router = express.Router();
 
@@ -568,6 +569,9 @@ router.post('/logout', async (req, res) => {
     // Delete user tokens from memory, and revoke their API tokens
     tokenStore.delete(req.user.id);
     apiTokens.revokeAllFor(req.user.id);
+    // Their GitHub connection goes with the session (and a connect flow they
+    // had started). The grant at GitHub is left: "Disconnect" revokes it
+    forgetGithubUser(req.user.id);
 
     // Their open panels stop being theirs now: the sockets are closed, and a
     // panel that reconnects comes back as a guest.

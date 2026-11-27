@@ -723,6 +723,27 @@ function broadcastToUser(userId, message) {
 }
 
 /**
+ * Tell a user's own panels that what they have connected changed (they
+ * connected GitHub in their browser): `connectors.updated`, with no content.
+ * The panel reads GET /api/connectors again. Only to sockets that are this
+ * signed-in user's right now (userOf drops one whose session ended); never to
+ * a meeting, a guest or another user.
+ */
+function sendConnectorsUpdated(userId) {
+  const clients = typeof userId === 'string' && userId.length > 0 ? userConnections.get(userId) : null;
+  if (!clients) return 0;
+  const message = JSON.stringify({ type: 'connectors.updated' });
+  let sent = 0;
+  for (const ws of [...clients]) {
+    if (ws.readyState === WebSocket.OPEN && userOf(ws) === userId) {
+      ws.send(message);
+      sent += 1;
+    }
+  }
+  return sent;
+}
+
+/**
  * Broadcast new transcript segment
  */
 function broadcastTranscriptSegment(meetingId, segment) {
@@ -929,6 +950,7 @@ module.exports = {
   currentStreamStatus,
   broadcastRtmsRequestStatus,
   disconnectUser,
+  sendConnectorsUpdated,
   crossRegisterUser,
   getStats,
 };

@@ -330,6 +330,27 @@ module.exports = {
     if (!known) console.warn('GITHUB_TOKEN does not look like a GitHub token; ignoring it.');
     return token;
   })(),
+  // "Connect GitHub" (routes/connectors.js): the GitHub App a signed-in user
+  // connects their own GitHub account through. The client secret is a secret:
+  // never logged, never sent to a browser, never put in a URL. Either one that
+  // is set and not accepted is ignored with one warning that prints no value.
+  githubAppClientId: (() => {
+    // eslint-disable-next-line global-require
+    const { clientId, known } = require('./services/connectors/githubConfig').readGithubAppClientId(process.env.GITHUB_APP_CLIENT_ID);
+    if (!known) console.warn('GITHUB_APP_CLIENT_ID does not look like a GitHub App client ID; ignoring it.');
+    return clientId;
+  })(),
+  githubAppClientSecret: (() => {
+    // eslint-disable-next-line global-require
+    const { clientSecret, known } = require('./services/connectors/githubConfig').readGithubAppClientSecret(process.env.GITHUB_APP_CLIENT_SECRET);
+    if (!known) console.warn('GITHUB_APP_CLIENT_SECRET does not look like a GitHub App client secret; ignoring it.');
+    return clientSecret;
+  })(),
+  // Connecting GitHub is available when the app's client ID and secret are
+  // both set and the deployment has a repository
+  get githubConnectAvailable() {
+    return Boolean(this.githubAppClientId && this.githubAppClientSecret && this.githubRepo);
+  },
   // Where GitHub's MCP server is: https, a host of the connector's fixed
   // list, a path under /mcp. Not set: the hosted server's issues toolset.
   githubMcpUrl: (() => {

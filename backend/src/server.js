@@ -12,6 +12,7 @@ const { initWebSocketServer } = require('./services/websocket');
 const config = require('./config');
 const logger = require('./lib/logger');
 const { isInternalRequest } = require('./lib/internalAuth');
+const { accessLog } = require('./lib/accessLog');
 const { version } = require('../package.json');
 const rateLimit = require('express-rate-limit');
 
@@ -91,13 +92,10 @@ if (logger.isDebug) {
 
 // HTTP request logging (morgan)
 if (config.nodeEnv !== 'test') {
-  // Use 'dev' format in debug mode for more readable output, 'combined' otherwise
-  // Log paths without query strings: OAuth codes, state and tokens travel in
-  // query parameters and must not reach logs.
-  morgan.token('path-only', (req) => (req.originalUrl || req.url || '').split('?')[0]);
-  app.use(morgan(logger.isDebug
-    ? ':method :path-only :status :response-time ms - :res[content-length]'
-    : ':remote-addr - :remote-user [:date[clf]] ":method :path-only HTTP/:http-version" :status :res[content-length] ":referrer" ":user-agent"'));
+  // Paths without query strings: OAuth codes, state and the GitHub connect
+  // flow's ticket travel in query parameters and must not reach logs
+  // (lib/accessLog.js; the short format in debug mode, 'combined' otherwise).
+  app.use(accessLog(morgan, { debug: logger.isDebug }));
 }
 
 // =============================================================================
@@ -127,6 +125,8 @@ const authLimiter = rateLimit({
   message: { error: 'Too many authentication attempts' },
 });
 app.use('/api/auth/', authLimiter);
+// Connecting GitHub (routes/connectors.js) is an authorization flow too: the same limit
+app.use('/api/connectors', authLimiter);
 
 // Poll-code endpoint needs a higher ceiling for temporary OAuth polling bursts.
 const authPollLimiter = rateLimit({
@@ -169,6 +169,7 @@ app.use('/api/home', require('./routes/home'));
 app.use('/api/preferences', require('./routes/preferences'));
 app.use('/api/zoom-meetings', require('./routes/zoom-meetings'));
 app.use('/api/tokens', require('./routes/tokens'));
+app.use('/api/connectors', require('./routes/connectors'));
 
 // =============================================================================
 // FRONTEND PROXY (with friendly startup page)
@@ -405,6 +406,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`Default Model: ${config.defaultModel}`);
   // That it is set, never which one
   if (config.githubRepo) console.log('GitHub issues: configured');
+  if (config.githubConnectAvailable) console.log('Connect GitHub: available');
   console.log(`Log Level: ${logger.level}${logger.isDebug ? ' (request shapes are logged, never their content)' : ''}`);
   console.log('='.repeat(60));
   console.log(`Health check: http://localhost:${PORT}/health`);
