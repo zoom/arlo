@@ -151,8 +151,7 @@ const repoOf = (result) => (result !== null && typeof result === 'object' && typ
 /**
  * What the sheet for a new GitHub issue shows, and so what is sent: the
  * title, and when there is a description a blank line and the description.
- * (GitHub also gets one fixed last line that says Arlo opened it,
- * services/connectors/github.js.)
+ * GitHub gets those two and nothing else (services/connectors/github.js).
  */
 function issueSheetBody(args) {
   if (args === null || typeof args !== 'object' || typeof args.title !== 'string') return '';

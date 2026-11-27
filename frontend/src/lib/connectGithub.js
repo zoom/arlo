@@ -17,6 +17,8 @@ const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 
 /** How long "Finish in your browser…" waits for word that the account is connected. */
 export const CONNECT_WAIT_MS = 5 * 60 * 1000;
+/** How often the server is asked meanwhile whether the account is connected. */
+export const CONNECT_POLL_MS = 3000;
 
 /** The server's URL when it is the one this panel may open, else null. */
 export function connectStartUrl(url, origin = window.location.origin) {

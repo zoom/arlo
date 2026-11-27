@@ -16,11 +16,12 @@ const {
   createGithubRest, GithubRestError, API_ORIGIN, API_VERSION, CALL_TIMEOUT_MS, MAX_ANSWER_BYTES,
 } = require('../src/services/connectors/githubRest');
 const {
-  createGithubConnector, readArgs, TOOL_NAMES, CREATED_BY_ARLO,
+  createGithubConnector, readArgs, TOOL_NAMES,
 } = require('../src/services/connectors/github');
 const { githubStatus, createGithub } = require('../src/services/connectors');
 const { createGithubConnections } = require('../src/services/connectors/githubConnections');
 const githubConfig = require('../src/services/connectors/githubConfig');
+const { issueSheetBody } = require('../src/services/agent/texts');
 const check = require('../scripts/connector-check');
 
 const PREFIX = `https://github.com/${REPO}/issues/`;
@@ -629,9 +630,10 @@ test('get: a pull request, no such issue, or no access is not_found; an answer a
 
 // --- create ----------------------------------------------------------------------------
 
-test('create: the title and the description as given, the fixed last line, sent once, and the new issue\'s number', async () => {
+test('create: exactly the title and the description the sheet showed, sent once, and the new issue\'s number', async () => {
   const { call, calls } = connectorWith(() => json(issue(128, { title: 'GitHub\'s own copy of the title is not used' }), 201));
-  assert.deepEqual(await call('github_create_issue', { title: 'Checkout fails on Safari', body: 'Seen on Safari 19.\nCart stays empty.' }), {
+  const args = { title: 'Checkout fails on Safari', body: 'Seen on Safari 19.\nCart stays empty.' };
+  assert.deepEqual(await call('github_create_issue', args), {
     ok: true,
     result: {
       kind: 'github_issue_created', repo: REPO, number: 128, title: 'Checkout fails on Safari',
@@ -640,15 +642,19 @@ test('create: the title and the description as given, the fixed last line, sent 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, ISSUES_URL);
   assert.equal(calls[0].method, 'POST');
-  assert.deepEqual(JSON.parse(calls[0].body), {
-    title: 'Checkout fails on Safari',
-    body: 'Seen on Safari 19.\nCart stays empty.\n\nOpened by Arlo during a Zoom meeting at the request of a meeting participant.',
-  });
-  assert.equal(CREATED_BY_ARLO, 'Opened by Arlo during a Zoom meeting at the request of a meeting participant.');
+  // nothing but these two fields is ever sent (no labels, assignees or milestone), and no line of Arlo's own
+  const sent = JSON.parse(calls[0].body);
+  assert.deepEqual(sent, { title: 'Checkout fails on Safari', body: 'Seen on Safari 19.\nCart stays empty.' });
+  // what the owner approved on the sheet is what GitHub gets, to the character
+  assert.equal(`${sent.title}\n\n${sent.body}`, issueSheetBody(args));
+  assert.equal(require('../src/services/connectors/github').CREATED_BY_ARLO, undefined);
 
+  // no description: the title alone, and no body field
   await call('github_create_issue', { title: 'No body given' });
-  // nothing but these two fields is ever sent: no labels, assignees or milestone
-  assert.deepEqual(JSON.parse(calls[1].body), { title: 'No body given', body: CREATED_BY_ARLO });
+  assert.deepEqual(JSON.parse(calls[1].body), { title: 'No body given' });
+  assert.equal(JSON.parse(calls[1].body).title, issueSheetBody({ title: 'No body given', body: null }));
+  await call('github_create_issue', { title: 'An empty body', body: '  ' });
+  assert.deepEqual(JSON.parse(calls[2].body), { title: 'An empty body' });
 });
 
 test('create: an answer without the new issue of this repository is bad_response', async () => {

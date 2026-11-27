@@ -1,4 +1,4 @@
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import App from '../App';
@@ -22,14 +22,18 @@ const CONNECTORS_UPDATED = { type: 'connectors.updated', data: { github: { conne
 
 /**
  * Open Settings. `connectors`: what GET /api/connectors answers, as a value
- * the test can change (`current.github = …`).
+ * the test can change (`current.github = …`); `current.reply`, when set,
+ * answers instead (a slow read).
  */
 async function openSettings({
   github = NOT_CONNECTED, sdk = createZoomSdk(), signedIn = true, routes = {}, ticket = () => json({ url: START }), viaMeeting = false,
 } = {}) {
   const current = { github };
   const fetchMock = mockFetch({
-    '/api/connectors': () => (signedIn ? json({ github: current.github }) : json({ error: 'Not authenticated' }, 401)),
+    '/api/connectors': () => {
+      if (current.reply) return current.reply();
+      return signedIn ? json({ github: current.github }) : json({ error: 'Not authenticated' }, 401);
+    },
     'POST /api/connectors/github/ticket': ticket,
     'DELETE /api/connectors/github': () => { current.github = NOT_CONNECTED; return json({ connected: false }); },
     [arloPath('state')]: () => json({ ...ARLO_ABSENT }),
@@ -42,13 +46,13 @@ async function openSettings({
   localStorage.setItem('arlo-auto-start', 'false');
   // The socket is the meeting's: it is opened by the meeting's screen and stays when Settings is opened from there
   window.location.hash = viaMeeting ? `#/meeting/${encodeURIComponent(MEETING)}` : '#/settings';
-  render(<App />);
+  const view = render(<App />);
   if (viaMeeting) {
     await waitFor(() => expect(server()?.readyState).toBe(FakeWebSocket.OPEN));
     await act(async () => { window.location.hash = '#/settings'; });
   }
   if (signedIn) await screen.findByRole('heading', { name: 'Settings' });
-  return { sdk, current, fetchMock };
+  return { sdk, current, fetchMock, unmount: view.unmount };
 }
 
 const becomeVisible = () => act(async () => {
@@ -182,15 +186,17 @@ describe('connecting', () => {
     expect(await screen.findByText('Connected as octo-ana')).toBeInTheDocument();
   });
 
-  test('back in view and still not connected: the wait is over and it can be tried again', async () => {
-    const { sdk } = await openSettings();
+  test('back in view and still not connected: the server is asked, and the row keeps waiting', async () => {
+    const { sdk, fetchMock } = await openSettings();
     await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }));
     await screen.findByText('Finish in your browser…');
+    const before = connectorReads(fetchMock);
 
     await becomeVisible();
-    expect(await screen.findByText('Not connected')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }));
-    await waitFor(() => expect(sdk.openUrl).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(connectorReads(fetchMock)).toBe(before + 1));
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 50); }); });
+    expect(screen.getByText('Finish in your browser…')).toBeInTheDocument();
+    expect(sdk.openUrl).toHaveBeenCalledTimes(1);
   });
 
   test('five minutes without word: "That took too long. Try again.", not before', async () => {
@@ -208,6 +214,114 @@ describe('connecting', () => {
     expect(screen.getByText('That took too long. Try again.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeEnabled();
     expect(screen.queryByText('Finish in your browser…')).not.toBeInTheDocument();
+  });
+
+  describe('asking the server while it waits (no socket, the panel never loses the focus)', () => {
+    /** Settings outside a meeting, "Connect GitHub" clicked, the clock in the test's hands. */
+    async function waiting(options) {
+      const opened = await openSettings(options);
+      await screen.findByRole('button', { name: 'Connect GitHub' });
+      vi.useFakeTimers();
+      fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(screen.getByText('Finish in your browser…')).toBeInTheDocument();
+      expect(FakeWebSocket.instances).toHaveLength(0);
+      return { ...opened, reads: () => connectorReads(opened.fetchMock) };
+    }
+    const pass = (ms) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+    test('every 3 seconds; connected on the third read, and then it stops asking', async () => {
+      const { current, reads } = await waiting();
+      const before = reads();
+
+      await pass(2900);
+      expect(reads()).toBe(before);
+      await pass(100);
+      expect(reads()).toBe(before + 1);
+      expect(screen.getByText('Finish in your browser…')).toBeInTheDocument();
+      await pass(3000);
+      expect(reads()).toBe(before + 2);
+      expect(screen.getByText('Finish in your browser…')).toBeInTheDocument();
+
+      current.github = CONNECTED;
+      await pass(3000);
+      expect(reads()).toBe(before + 3);
+      expect(screen.getByText('Connected as octo-ana')).toBeInTheDocument();
+      expect(screen.queryByText('Finish in your browser…')).not.toBeInTheDocument();
+
+      await pass(30000);
+      expect(reads()).toBe(before + 3);
+    });
+
+    test('a read that fails is passed over without a word, and the next one is still made', async () => {
+      const { current, reads } = await waiting();
+      const before = reads();
+      current.reply = () => json({ error: 'Internal error' }, 500);
+      await pass(3000);
+      current.reply = () => { throw new TypeError('Failed to fetch'); };
+      await pass(3000);
+      expect(reads()).toBe(before + 2);
+      expect(screen.getByText('Finish in your browser…')).toBeInTheDocument();
+      expect(screen.queryByText(/Couldn't/)).not.toBeInTheDocument();
+
+      current.reply = null;
+      current.github = CONNECTED;
+      await pass(3000);
+      expect(screen.getByText('Connected as octo-ana')).toBeInTheDocument();
+    });
+
+    test('a slow read: no second one is sent while it is out, and none is owed after it', async () => {
+      const { current, reads } = await waiting();
+      const before = reads();
+      let answer;
+      current.reply = () => new Promise((resolve) => { answer = resolve; });
+
+      await pass(3000);
+      expect(reads()).toBe(before + 1);
+      await pass(12000);
+      expect(reads()).toBe(before + 1);
+
+      current.reply = null;
+      await act(async () => { answer(json({ github: NOT_CONNECTED })); await vi.advanceTimersByTimeAsync(0); });
+      expect(reads()).toBe(before + 1);
+      expect(screen.getByText('Finish in your browser…')).toBeInTheDocument();
+      await pass(3000);
+      expect(reads()).toBe(before + 2);
+    });
+
+    test('five minutes of "not connected": it took too long, and nothing is asked after that', async () => {
+      const { reads } = await waiting();
+      await pass(5 * 60 * 1000 - 1000);
+      expect(screen.getByText('Finish in your browser…')).toBeInTheDocument();
+      await pass(1000);
+      expect(screen.getByText('That took too long. Try again.')).toBeInTheDocument();
+
+      const after = reads();
+      await pass(30000);
+      expect(reads()).toBe(after);
+    });
+
+    test('signed out while it waits: nothing is asked any more', async () => {
+      const { fetchMock, reads } = await waiting();
+      // The session is gone: the next API call is refused and the app checks who is signed in
+      fetchMock.mockImplementation(async () => json({ error: 'Not authenticated' }, 401));
+      await pass(3000);
+      await pass(0);
+      expect(screen.queryByText('Finish in your browser…')).not.toBeInTheDocument();
+
+      const after = reads();
+      await pass(30000);
+      expect(reads()).toBe(after);
+    });
+
+    test('the app goes away while it waits: nothing is asked any more', async () => {
+      const { unmount, reads } = await waiting();
+      await pass(3000);
+      const after = reads();
+      unmount();
+      await pass(30000);
+      expect(reads()).toBe(after);
+    });
   });
 
   test('a change told on the socket without a connect under way is read too (connected elsewhere)', async () => {

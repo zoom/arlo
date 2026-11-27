@@ -3,7 +3,7 @@ import { useAuth } from './AuthContext';
 import { useMeeting } from './MeetingContext';
 import { useZoomSdk } from './ZoomSdkContext';
 import {
-  CONNECT_WAIT_MS, disconnectGithub as disconnectOnServer, readConnectors, startGithubConnect,
+  CONNECT_POLL_MS, CONNECT_WAIT_MS, disconnectGithub as disconnectOnServer, readConnectors, startGithubConnect,
 } from '../lib/connectGithub';
 
 const ConnectorsContext = createContext();
@@ -14,8 +14,10 @@ const ConnectorsContext = createContext();
  * someone else is signed in, and read again when the server says it changed
  * (`connectors.updated` on the meeting's socket: about the person, not about
  * a meeting, and nothing in it is used) and when the panel comes back into
- * view or gets the focus back (the account is connected in the system
- * browser; outside a meeting there is no socket to say so).
+ * view or gets the focus back. While it waits for the browser it also asks
+ * every CONNECT_POLL_MS: the account is connected in the system browser,
+ * outside a meeting there is no socket to say so, and inside Zoom the panel
+ * may never lose the focus.
  *
  *   github          null (not known), or { available, connected, login }
  *   githubConnect   null | 'starting' (a ticket is asked for) | 'waiting'
@@ -24,7 +26,9 @@ const ConnectorsContext = createContext();
  *   connectGithub() 'opened' | 'failed' | 'refused' | 'busy'
  *   disconnectGithub() true when the server disconnected the account
  *
- * The wait ends when one of those re-reads has answered, whatever it said.
+ * The wait ends only when a read says the account is connected, or when
+ * CONNECT_WAIT_MS has passed. A read that says "not connected" (someone
+ * glanced back at the panel before finishing) or that fails changes nothing.
  * The GitHub login is for Settings only: no meeting view reads this context.
  */
 export function ConnectorsProvider({ children }) {
@@ -65,20 +69,16 @@ export function ConnectorsProvider({ children }) {
         // Signed out or someone else meanwhile: not theirs
         if (identityRef.current !== asked) continue;
         if (answer === 'signed_out') setGithub(null);
-        else if (answer !== null) setGithub(answer.github);
+        else if (answer !== null) {
+          setGithub(answer.github);
+          // Word that the account is connected: the wait for the browser is over
+          if (answer.github.connected && connectRef.current === 'waiting') putConnect(null);
+        }
       } while (againRef.current);
     };
     readingRef.current = run().finally(() => { readingRef.current = null; });
     return readingRef.current;
-  }, []);
-
-  /** Read again; a wait for the browser is over once the answer is here. */
-  const settle = useCallback(() => {
-    const asked = identityRef.current;
-    refresh().then(() => {
-      if (identityRef.current === asked && connectRef.current === 'waiting') putConnect(null);
-    });
-  }, [refresh, putConnect]);
+  }, [putConnect]);
 
   // Signed in: read. Signed out, or another person: nothing of the one before stays
   useEffect(() => {
@@ -97,29 +97,38 @@ export function ConnectorsProvider({ children }) {
       } catch {
         return;
       }
-      if (message?.type === 'connectors.updated') settle();
+      if (message?.type === 'connectors.updated') refresh();
     };
     ws.addEventListener('message', onMessage);
     return () => ws.removeEventListener('message', onMessage);
-  }, [ws, identity, settle]);
+  }, [ws, identity, refresh]);
 
   // Back from the browser
   useEffect(() => {
     if (identity === null) return undefined;
-    const onVisible = () => { if (document.visibilityState === 'visible') settle(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
     document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', settle);
+    window.addEventListener('focus', refresh);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', settle);
+      window.removeEventListener('focus', refresh);
     };
-  }, [identity, settle]);
+  }, [identity, refresh]);
 
+  // Waiting for the browser: ask now and then, and give up after CONNECT_WAIT_MS.
+  // Over (connected, timed out, signed out, unmounted): nothing is asked any more
   useEffect(() => {
     if (githubConnect !== 'waiting') return undefined;
+    const poll = setInterval(() => {
+      // Never two at once, and a slow read is not followed by one more for each tick it took
+      if (!readingRef.current) refresh();
+    }, CONNECT_POLL_MS);
     const timer = setTimeout(() => putConnect('timeout'), CONNECT_WAIT_MS);
-    return () => clearTimeout(timer);
-  }, [githubConnect, putConnect]);
+    return () => {
+      clearInterval(poll);
+      clearTimeout(timer);
+    };
+  }, [githubConnect, putConnect, refresh]);
 
   const connectGithub = useCallback(async () => {
     const asked = identityRef.current;

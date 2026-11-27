@@ -62,8 +62,6 @@ const PAGE_SIZE = 100;
 // out), so its answer may be longer than the 200 KB of the other calls
 const MAX_LIST_BYTES = 2 * 1024 * 1024;
 
-const CREATED_BY_ARLO = 'Opened by Arlo during a Zoom meeting at the request of a meeting participant.';
-
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
@@ -251,9 +249,11 @@ function createGithubConnector({ rest, connections, defaultRepo } = {}) {
     },
   });
 
+  // What is sent is what the owner saw on the sheet (`issueSheetBody`): the
+  // title and the description, and no line of Arlo's own
   const createIssue = ({ title, body }) => ({
     send: (token) => rest.request({
-      method: 'POST', path: issuesPath, body: { title, body: body ? `${body}\n\n${CREATED_BY_ARLO}` : CREATED_BY_ARLO }, token,
+      method: 'POST', path: issuesPath, body: body ? { title, body } : { title }, token,
     }),
     read: (data) => {
       // The new issue is one of this repository, with a number: nothing else is believed
@@ -327,5 +327,5 @@ function createGithubConnector({ rest, connections, defaultRepo } = {}) {
 }
 
 module.exports = {
-  createGithubConnector, readArgs, TOOL_NAMES, CREATED_BY_ARLO, MAX_ISSUES, MAX_TITLE_CHARS, MAX_BODY_SENT_CHARS,
+  createGithubConnector, readArgs, TOOL_NAMES, MAX_ISSUES, MAX_TITLE_CHARS, MAX_BODY_SENT_CHARS,
 };
