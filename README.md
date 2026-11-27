@@ -4,13 +4,13 @@
 
 # Arlo Meeting Assistant
 
-**Build Real-Time Meeting Intelligence with Zoom RTMS**
+**An AI agent for Zoom meetings, built on RTMS and the Zoom Apps SDK**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22+-green.svg)](https://nodejs.org/)
 [![Zoom RTMS](https://img.shields.io/badge/Zoom-RTMS-2D8CFF.svg)](https://www.zoom.com/en/realtime-media-streams/)
 
-[Get Started](#quick-start) · [See Demos](#see-it-in-action) · [Features](#features) · [Troubleshooting](#troubleshooting)
+[Get Started](#quick-start) · [What You See](#what-you-see-in-a-meeting) · [Asking Arlo](#asking-arlo-to-do-things) · [Known Limits](#known-limits) · [Troubleshooting](#troubleshooting)
 
 </div>
 
@@ -18,219 +18,139 @@
 
 ## What is Arlo?
 
-Arlo is an **open-source reference implementation** that demonstrates the power of Zoom's RTMS (Real-Time Media Streams) APIs. It shows developers how to build meeting assistants that capture **live transcripts without requiring a bot in the meeting**.
+Arlo is an open-source reference implementation of an AI agent that you bring into a Zoom meeting. It is a Zoom App, not a meeting bot: no extra participant joins.
 
-<table>
-<tr>
-<td width="50%">
+- **It hears the meeting through RTMS** (Real-Time Media Streams): the live transcript arrives on the server over a WebSocket.
+- **It acts through the Zoom Apps SDK**: posting to chat, muting, admitting, reactions, timers and screen sharing are SDK calls made by the open Arlo panel of the person who allowed them.
+- **One screen at a time, no dashboard.** The panel shows the one thing that matters now: bring Arlo in, the live notes, or what a participant may see.
 
-### Use This Project To
+What it does in a meeting:
 
-- **Learn** how RTMS webhooks, WebSockets, and transcript streaming work
-- **Fork and customize** for your specific use case
-- **Prototype** meeting intelligence applications
-- **Understand** Zoom Apps authentication and best practices
+| | |
+|---|---|
+| **Live notes** | A summary, decisions and action items, rewritten about every 45 seconds while people talk |
+| **Ask Arlo** | Type a question or a request, or say "Arlo, …" in the meeting |
+| **Meeting record** | The transcript and what happened since Arlo joined, for everyone in the meeting |
+| **Sharing notes** | The notes belong to the people who brought Arlo in. They can share them with everyone, post them to chat, or open them as a document for the whole meeting |
 
-</td>
-<td width="50%">
-
-### What You'll Build
-
-- Live transcription with < 1 second latency
-- AI-powered summaries and action items
-- Full-text search across meetings
-- Industry-specific modes (Healthcare, Legal, Sales)
-
-</td>
-</tr>
-</table>
-
-> **Note:** This is a starting point for developers. The industry verticals are illustrative examples showing what's possible with RTMS.
+Use this project to learn how RTMS webhooks, transcript streaming, in-client OAuth and the Apps SDK fit together, or fork it as a starting point.
 
 ### Demo Mode (No Database)
 
-This version of Arlo runs in **secure demo mode**, with no database. A meeting's transcript and notes are held **in memory only while that meeting runs** and are deleted when it ends:
+This version has no database. A meeting's transcript, notes and record are held **in memory only while that meeting runs** and are deleted when it ends.
 
-- **Live transcription**, live notes and AI features work fully during active meetings
-- **Catch-up for late joiners:** someone who opens Arlo mid-meeting, or reconnects, sees what was said so far
-- **Nothing between meetings:** when a meeting ends its transcript and notes are deleted, so nothing from one meeting (or one customer demo) is available in the next
-- **Nothing on disk:** no database and no files; a server restart also clears everything
-- **No database setup:** configure Zoom credentials and go
+- Someone who opens Arlo mid-meeting, or reconnects, sees what was said so far.
+- Nothing is written to disk. Nothing carries from one meeting to the next. A server restart clears everything.
+- Meeting history, search across transcripts, highlights, export and the upcoming-meetings list need stored data and are off.
+- Transcript text is sent to the configured AI provider (OpenRouter) to write notes and answers. That provider's retention terms apply to what it receives.
 
-**Want to add persistence?** If you're building a production app and need to store meeting history, search transcripts, or enable features like auto-open meetings, you'll want to add a database. We recommend:
-
-1. **Choose a database** — MySQL, PostgreSQL, or your preferred data store
-2. **Add an ORM** — Prisma works well with Node.js
-3. **Store selectively** — Only persist what users consent to store
-
-See the [Architecture docs](./docs/ARCHITECTURE.md) for database schema recommendations.
-
----
-
-## See It In Action
-
-<div align="center">
-
-![Arlo Vertical Selector](./docs/images/vertical-selector.png)
-
-*Choose your workflow — each vertical is tailored to your industry*
-
-### Video Demos
-
-| Healthcare | Sales | Support |
-|:----------:|:-----:|:-------:|
-| [![Healthcare Demo](https://img.youtube.com/vi/F496oIqo6ls/mqdefault.jpg)](https://youtu.be/F496oIqo6ls) | [![Sales Demo](https://img.youtube.com/vi/LKpZAe5_A8o/mqdefault.jpg)](https://youtu.be/LKpZAe5_A8o) | [![Support Demo](https://img.youtube.com/vi/1N6hs88nOhA/mqdefault.jpg)](https://youtu.be/1N6hs88nOhA) |
-| [Watch Demo](https://youtu.be/F496oIqo6ls) | [Watch Demo](https://youtu.be/LKpZAe5_A8o) | [Watch Demo](https://youtu.be/1N6hs88nOhA) |
-
-| Legal | Notes |
-|:-----:|:-----:|
-| [![Legal Demo](https://img.youtube.com/vi/WNM5YxRTrIU/mqdefault.jpg)](https://youtu.be/WNM5YxRTrIU) | [![Notes Demo](https://img.youtube.com/vi/4N-g5TgGRz0/mqdefault.jpg)](https://youtu.be/4N-g5TgGRz0) |
-| [Watch Demo](https://youtu.be/WNM5YxRTrIU) | [Watch Demo](https://youtu.be/4N-g5TgGRz0) |
-
-</div>
+To add persistence, put a database behind the meeting store interface in `backend/src/storage/` and store only what users consent to.
 
 ---
 
 ## What You See in a Meeting
 
-Arlo shows one screen at a time. Which one depends on whether Arlo is in the meeting and on who you are.
+Which screen you get depends on whether Arlo is in the meeting and on who you are. An **owner** is an Arlo user who runs a transcript stream of their own in the meeting; the server decides this, not the panel.
 
 | Screen | Who sees it | What it does |
 |--------|-------------|--------------|
-| **Bring Arlo into this meeting** | The host or a co-host, signed in to Arlo | Choose who can ask Arlo ("Only I can ask" or "Anyone can ask"), then one button. Nothing is requested from Zoom before the click. |
-| **Ask the host to bring Arlo in** | Other signed-in users | One button. Zoom asks the host; the screen waits for the answer. |
-| **Live notes** | Each person using Arlo (they started it for themselves) | A summary, decisions and action items, rewritten about every 45 seconds while people talk. A status line with Pause, Resume and Remove Arlo while your own Arlo runs; if yours has stopped and someone else's still runs, the notes continue and the line offers "Bring Arlo back". An input, "Ask Arlo, or say “Arlo, …”": a question is answered from the transcript and only you see the answer; a request ("post the date to the chat", "let James in") is done, and the answer says so. While Arlo works on a request the status line says "Arlo is thinking…". What Arlo did is listed at the end of the notes under "Arlo did" ("Admitted James from the waiting room · Ben asked"). **Share notes with everyone** makes the notes live in the Arlo panel of everyone in the meeting, until you click **Stop sharing**. **Post notes to chat** is a one-time copy: it puts the current notes into the Zoom meeting chat for everyone, after you confirm. When a participant asks for the notes, a sheet over the notes asks "Share the notes with everyone in the meeting?": **Share notes** turns sharing on, **Not now** declines, and it goes away by itself after a minute. When someone else asks Arlo to do something that changes the meeting, the same kind of sheet asks you first ("Admit James from the waiting room?", "Ben asked Arlo to do this."): the primary button lets Arlo do it, **Not now** declines. |
-| **Participant view** | Everyone else, including people not signed in | Who brought Arlo in and what Arlo does. The notes only while the person who brought Arlo in shares them: then they are live in this panel too, read-only, under "… is sharing Arlo's notes", with what Arlo did for everyone listed under "Arlo did", and they disappear when sharing stops. If Arlo leaves while the meeting goes on, shared notes stay on screen under "Arlo has left the meeting. These are the notes so far.", with one button below them to bring Arlo back in (**Bring Arlo into this meeting** for the host or a co-host, **Ask the host to bring Arlo in** for other signed-in people). "Ask Arlo" appears when the owner chose "Anyone can ask" and you are signed in; otherwise it says "Only people using Arlo can ask in this meeting." Signed-in people have two choices: **Ask … to share notes with everyone** (the person who brought Arlo in is asked, and if they agree the notes appear in everyone's panel), and **Take notes yourself** (unless the deployment sets `ALLOW_OWN_ARLO_STREAM=false`): it starts Arlo for you too, under your own permission (the host may have to allow it), and you then get the notes screen and can ask. |
-| **Meeting record** | Everyone in the meeting | What was said and what happened since Arlo joined, in time order, including what Arlo was asked to do and how it ended (done, "declined", "no answer", "couldn't do it"). A toggle shows only Arlo's own actions. |
-| **After the meeting** | Each person who used Arlo, and anyone who was reading shared notes | The notes stay on screen with a "Copy notes" button. In demo mode they are not stored anywhere else. |
+| **Bring Arlo in** | The host or a co-host, signed in | Choose who can ask Arlo ("Only I" or "Anyone"), then one button. Nothing is requested from Zoom before the click. |
+| **Ask the host** | Other signed-in users | One button. Zoom asks the host; the screen waits for the answer. |
+| **Live notes** | Each owner | The notes. A status line with Pause, Resume and Remove Arlo. The Ask Arlo input. What Arlo did, listed under "Arlo did". Three actions for the notes: **Share notes with everyone** (live in everyone's Arlo panel until **Stop sharing**), **Post notes to chat** (a one-time copy, after a confirm), **Open notes for everyone** (see below). |
+| **Approval sheet** | An owner, over the notes | Rises when someone asks for the notes or asks Arlo for something that changes the meeting. It shows what will happen, a primary button and **Not now**, and closes by itself after a minute. |
+| **Participant view** | Everyone else, including guests | Who brought Arlo in and a link to the meeting record. The notes only while an owner shares them, read-only. Ask Arlo when the owner chose "Anyone" and you are signed in. Signed-in people can **ask the owner to share the notes** or **take notes themselves** (start a stream of their own). |
+| **Notes for everyone** | Everyone, while Zoom's Collaborate mode runs | The notes as a wide document. Nothing private is on it, because Zoom shows the owner's view as a screen share to people who cannot join Collaborate. **Close for everyone** ends it. |
+| **Meeting record** | Everyone in the meeting | What was said and what happened, in time order, including what Arlo was asked to do and how it ended. A toggle shows only Arlo's actions. |
+| **After the meeting** | Whoever holds notes | The notes stay on screen with **Copy notes**. They are not stored anywhere else. |
 
 How it works:
 
-- **Who gets the notes.** Each Arlo user who runs a transcript stream of their own in the meeting gets the notes. Everyone else gets the participant view, without the notes unless one of those users shares them: sharing shows the notes live to everyone in the meeting who has Arlo open, signed in or not, until it is stopped. Pause, Resume and Remove Arlo are shown only to those users, because they act on the user's own stream. A host stops someone else's stream with Zoom's own controls.
-- **Several streams, one transcript.** Several users can each run a stream in the same meeting. The server stores one transcript: a line from any of the streams is stored, unless the same line (same speaker, same words, close in time) was just stored from another stream. No stream is preferred, so a stream that stops, falls behind or goes silent loses nothing. Pause is per stream: the meeting shows as paused only when every running stream is paused.
-- **Known gap: several people using Arlo at once.** Arlo learns of a stream, and of whose it is, from Zoom's `meeting.rtms_started` webhook. In a test with two users of the app in one meeting (2026-11-23), the second person's start produced no second webhook, only a session-added event on the first person's RTMS connection, which does not say whose session it is. Without that webhook Arlo cannot tell whose stream it is, so the second person does not get the notes. "Take notes yourself" is offered by default all the same: when no webhook arrives, the second person sees a message that Arlo has not joined, ending in "Try again", and stays on the participant view; the first person's Arlo is not affected. Set `ALLOW_OWN_ARLO_STREAM=false` to hide the action.
-- **When the meeting ends.** The server deletes the transcript, the notes and the record of who brought Arlo in. A panel that is still open keeps showing the notes it already has.
-- **Later: shared notes outside the meeting.** Opening shared notes from a link outside the meeting is not built. Shared notes are seen in the Arlo panel, inside the meeting.
-- **The earlier dashboard** (tabs, vertical cards, suggestions) is still in the app. While in a meeting, open Settings and choose **Classic dashboard**.
+- **Who gets the notes.** Owners always. Everyone else only while an owner shares them; sharing stops delivery at once when it is turned off.
+- **Controls are per person.** Pause, Resume and Remove act on your own stream, so only owners see them. A host stops someone else's stream with Zoom's own controls.
+- **Several streams, one transcript.** Several users can each run a stream. The server stores one transcript and drops a line only when it is known to be a copy (same speaker, same words, close in time) of one just stored from another stream.
+- **Reconnection.** The RTMS service follows Zoom's failover signals and rejoins with a backoff; the panel shows "Reconnecting…". See `rtms/src/sessions.js`.
+- **When the meeting ends.** The server deletes the transcript, the notes and the record of who brought Arlo in. A panel that is still open keeps the notes it already has.
 
 ---
 
-## Features
+## Asking Arlo to Do Things
 
-> The table lists everything in the code base. The in-meeting panels it mentions (voice command responses, vertical cards, suggestions, drag-and-drop layout) are on the classic dashboard. Search, history, highlights and export need a database and are off in demo mode.
+Ask in two ways:
 
-| Feature | Description |
-|---------|-------------|
-| **Live Transcription** | Real-time captions via RTMS (< 1 second latency) |
-| **Voice Commands** | Say "Arlo, summarize" or "Arlo, action items" during meetings |
-| **AI Insights** | Summaries, action items, and next steps powered by OpenRouter |
-| **Full-Text Search** | Search across all your meeting transcripts instantly |
-| **Chat with Transcripts** | Ask questions about your meetings using AI |
-| **Meeting Highlights** | Create bookmarks with timestamps for key moments |
-| **Export Options** | Download WebVTT files or Markdown summaries |
-| **Dark Mode** | Automatic OS detection with manual toggle |
-| **Filler Word Coach** | Real-time detection of filler words with audio alerts (Sales vertical) |
-| **AI Sentiment Analysis** | Real-time customer sentiment tracking with trend visualization (Support vertical) |
-| **Compliance Advisor** | Real-time compliance monitoring for regulated industries |
-| **Guest Access** | Non-authenticated users can view transcripts via meeting links |
-| **Collapsible UI Cards** | Expandable/collapsible cards for cleaner interface management |
-| **Drag-and-Drop Layout** | Reorder and customize card positions in the meeting view |
-| **Show AI Prompts** | Developer tool to inspect the AI prompts powering each feature |
-| **Industry Verticals** | Specialized modes: Arlo for Notes, Healthcare, Legal, Sales, and Support |
+- **Spoken:** start a sentence with "Arlo, …" or "Hey Arlo, …". The server finds the request in the transcript. It is heard only while an owner has Arlo open.
+- **Typed:** the Ask Arlo input in the panel. For owners, and for other signed-in people when the owner chose "Anyone can ask". Answers to typed questions are private to the asker.
 
-> **AI features work out of the box** — no API key required! Arlo uses [OpenRouter](https://openrouter.ai/) with free models (Gemini, Llama). Optional: add your own `OPENROUTER_API_KEY` for higher rate limits.
+A model picks one tool from a fixed table (`backend/src/services/agent/tools.js`). The server validates the call and decides whether it may run. When no tool fits, a typed request is answered from the transcript.
+
+| Arlo can | Example | Notes |
+|---|---|---|
+| Answer a question about the meeting | "Arlo, what did we decide about the launch date?" | From the stored transcript |
+| Summarize so far | "Arlo, give me a recap" | |
+| Post to the meeting chat | "Arlo, post the launch date in the chat" | At most 300 characters, posted as "Arlo: …" |
+| Share the notes | "Arlo, share the notes with everyone" | Visible in Arlo for everyone who has it open |
+| Invite everyone | "Arlo, invite everyone to the notes" | Shares the notes and sends Zoom's invitation to open Arlo |
+| Open the notes for everyone | "Arlo, open the notes for everyone" | Shares the notes and starts Collaborate mode. People who cannot join see the owner's Arlo view as a screen share |
+| Send a reaction | "Arlo, give that a thumbs up" | One of 👍 👏 ❤️ 😂 🎉 😮, sent as the owner |
+| Mute a participant | "Arlo, mute Danny Lee" | Host or co-host only. One named person. Never unmutes |
+| Admit from the waiting room | "Arlo, let Danny Lee in" | Host or co-host only. One named person |
+| Set a timer | "Arlo, set a five minute timer" | 1 to 120 minutes. A countdown everyone sees |
+| Stop the timer | "Arlo, stop the timer" | |
+| Open a GitHub issue | "Arlo, open issue 42 and share it" | Only with `GITHUB_DEFAULT_REPO` set. Opens the issue in the owner's browser; "share" brings up Zoom's share dialog, where the owner picks the window |
+
+
+To open an issue, Arlo takes a number and nothing else. The server builds the URL from the configured repository; a model or a speaker never supplies a URL or a repository. Nothing calls the GitHub API.
+
+### The Approval Rule
+
+A transcript is text that anyone in the meeting can speak into, and a model's output is untrusted. So:
+
+> **Nothing is posted to the chat, and nothing else changes the meeting, unless an owner has seen exactly what will be posted or done and pressed the button on their own panel, or typed the request themselves in their own panel.**
+
+In practice:
+
+- **Everything spoken goes to an approval sheet**, also a spoken question. The answer is written first and shown on the sheet; approving posts that text as it is, with no second model call.
+- **An owner's typed request runs without a sheet only when what it does is plainly in what they typed.** The check is strict (`typedRequestCovers` in `backend/src/services/agent/policy.js`): "mute Danny Lee" runs, "don't mute Danny Lee" and "mute everyone except Danny Lee" get the sheet. Inviting everyone and opening the notes for everyone always get the sheet.
+- **The model that picks the tool sees only the request**, not the transcript or the notes, so tool arguments can only come from what was asked.
+- **Names, numbers and messages are rebuilt and checked by the server.** A call that fails the check is refused, not repaired.
+- **Declined or expired requests leave no trace in the chat.** They appear in the meeting record only.
+- **Limits** apply per meeting: spoken and typed requests are rate limited, one request is handled at a time, and at most five sheets are open.
+
+### The Hands
+
+The server cannot act in a Zoom meeting; only the Apps SDK inside a running panel can. So an action that needs the SDK runs on the open panel of the owner who typed the request or pressed the approval, never on another person's.
+
+Each panel announces which actions its Zoom client supports and whether it is a host's. If that owner has no panel open that can do it, the action fails with a plain sentence ("Open Arlo to let it do that.", "Arlo needs the host's panel for that."). The panel reports back whether it did the thing, and the result is listed under "Arlo did" and in the meeting record.
 
 ---
 
-## Voice Commands
+## Dynamic Indicator and Timer
 
-Control Arlo hands-free during meetings. Just say the wake word followed by a command:
+Zoom's Dynamic Indicator is a status in the meeting window that everyone sees. The panel that started the stream sets it, only for confirmed state:
 
-| Command | What It Does |
-|---------|--------------|
-| "Arlo, summarize" | Generate a meeting summary |
-| "Arlo, action items" | Extract action items and to-dos |
-| "Arlo, highlight this" | Create a bookmark at the current moment |
-| "Arlo, decisions" | Show key decisions made |
-| "Arlo, questions" | Show open/unanswered questions |
-| "Arlo, send to chat" | Send summary to meeting chat |
-| "Arlo, help" | Show available commands |
+| State | Text |
+|---|---|
+| The owner's stream is paused | "Arlo is paused" |
+| An approval sheet is open | "Arlo is waiting for an OK" |
+| A spoken request is being handled | "Arlo is thinking…" |
+| For 4 seconds after an action | A fixed sentence, for example "Arlo posted to the chat" |
+| Otherwise | "Arlo is transcribing" |
 
-**Alternate wake words:** "Hey Arlo", "Hi Arlo"
+Everyone reads the indicator, so it never carries a name, a request or any text from the meeting: every sentence it can show is in a fixed set (`frontend/src/lib/dynamicIndicator.js`).
 
-Responses appear inline in the meeting view. You can toggle response visibility in Settings.
-
----
-
-## Settings
-
-Access settings via the gear icon in the app. Available options:
-
-### Transcription
-
-| Setting | Description |
-|---------|-------------|
-| **Auto-open in meetings** | Automatically open Arlo when you join scheduled meetings |
-| **Auto-start transcription** | Begin transcription immediately when the app opens |
-
-### Demo Mode
-
-| Setting | Description |
-|---------|-------------|
-| **Show sample data** | Display example data to demonstrate features. Turn off to only see real meeting data. |
-
-### Classic dashboard
-
-| Setting | Description |
-|---------|-------------|
-| **Classic dashboard** | Shown only while in a meeting. Opens the earlier dashboard, kept while the new screens are tried. |
-
-### Chat Notifications
-
-| Setting | Description |
-|---------|-------------|
-| **Enable Chat Notifications** | Send automatic messages to Zoom chat when transcription events occur |
-| **Event toggles** | Choose which events trigger notifications (start, pause, resume, stop, restart) |
-| **Message templates** | Customize the message text for each event. Use `[meeting-id]` as a placeholder. |
-
-### Voice Commands
-
-| Setting | Description |
-|---------|-------------|
-| **Show Arlo Responses** | Display voice command responses in the meeting view. Turn off for cleaner demos. |
-
-### Developer Tools
-
-| Setting | Description |
-|---------|-------------|
-| **Start/Stop via REST API** | Test RTMS control using Zoom's participant REST API instead of the client SDK. Useful for automation and testing. |
-
-### AI Configuration
-
-| Setting | Description |
-|---------|-------------|
-| **AI Provider** | Choose between OpenRouter (default, free), Anthropic, OpenAI, or Custom |
-| **API Key** | Your API key (stored locally, never sent to Arlo's servers) |
-| **Model** | Select which AI model to use for summaries and insights |
+A timer is Zoom's countdown on the same indicator. While one runs, Arlo sends no status; when it ends or is stopped, the status returns. Any owner's panel can stop it.
 
 ---
 
 ## Prerequisites
 
-Before you begin, ensure you have:
-
 | Requirement | Why You Need It |
 |-------------|-----------------|
-| **[Node.js 20+](https://nodejs.org/)** | Runtime for backend services |
+| **[Node.js 22+](https://nodejs.org/)** | Runtime for the services |
 | **[Docker Desktop](https://www.docker.com/products/docker-desktop/)** | Runs all services in containers |
-| **[ngrok](https://ngrok.com/)** | Creates secure tunnels for Zoom webhooks |
+| **[ngrok](https://ngrok.com/)** | A public HTTPS URL for Zoom webhooks |
 | **[Zoom Account](https://marketplace.zoom.us/)** | To create and configure your Zoom App |
 
-### RTMS Access Required
-
-> **This app requires RTMS access from Zoom.** RTMS (Real-Time Media Streams) enables live transcript streaming.
->
-> **[Request RTMS Access](https://www.zoom.com/en/realtime-media-streams/#form)** — Apply early, approval may take a few days.
+> **This app requires RTMS access from Zoom.** **[Request RTMS Access](https://www.zoom.com/en/realtime-media-streams/#form)** early; approval may take a few days.
 
 ---
 
@@ -239,47 +159,42 @@ Before you begin, ensure you have:
 ### 1. Clone & Set Up ngrok
 
 ```bash
-# Clone the repository
 git clone https://github.com/zoom/arlo.git
 cd arlo
 ```
 
-Start ngrok to create a public URL for Zoom webhooks:
-
 ```bash
-# Option A: Static domain (recommended - free, doesn't change)
+# Static domain (recommended: free, does not change)
 ngrok http 3000 --domain=your-name.ngrok-free.app
 
-# Option B: Random domain (changes each restart)
+# Or a random domain (changes each restart)
 ngrok http 3000
 ```
 
-> **Tip:** Get a free static domain at [ngrok dashboard → Domains](https://dashboard.ngrok.com/domains) to avoid reconfiguring Zoom settings.
-
-**Keep this terminal running** and note your URL (e.g., `https://your-name.ngrok-free.app`).
+Keep this terminal running and note your URL. A free static domain from the [ngrok dashboard](https://dashboard.ngrok.com/domains) saves reconfiguring Zoom after each restart.
 
 ---
 
 ### 2. Create Your Zoom App
 
 1. Go to **[Zoom Marketplace](https://marketplace.zoom.us/)** → Develop → Build App
-2. Select **General App** → name it (e.g., "Arlo Meeting Assistant")
+2. Select **General App** and name it
 3. Copy your **Client ID** and **Client Secret**
-4. *(Optional)* Set the app icon: click the icon next to the app name and upload the 160×160 PNGs in [`docs/assets/marketplace/`](./docs/assets/marketplace/). Use `arlo-icon-160.png` for light mode and `arlo-icon-160-dark.png` for dark mode. You have to upload the icon yourself because the manifest has no icon field.
+4. *(Optional)* Set the app icon: upload the 160×160 PNGs in [`docs/assets/marketplace/`](./docs/assets/marketplace/) (`arlo-icon-160.png` for light mode, `arlo-icon-160-dark.png` for dark mode). The manifest has no icon field.
 
 #### Optional: configure the app from the manifest
 
-[`zoom-app-manifest.json`](./zoom-app-manifest.json) contains every setting from [Step 4](#4-configure-zoom-app-settings): scopes, Zoom Apps SDK APIs, OAuth, domain allow list, and event subscriptions. If your account can upload app manifests (a Marketplace beta), you can upload it instead of configuring each setting by hand.
+[`zoom-app-manifest.json`](./zoom-app-manifest.json) contains the settings from [Step 4](#4-configure-zoom-app-settings): scopes, Zoom Apps SDK APIs, OAuth, domain allow list, Collaborate mode and event subscriptions. If your account can upload app manifests (a Marketplace beta), you can upload it instead of configuring each setting by hand. It does not contain `github.com` in the domain allow list or the deauthorization URL: add those by hand if you need them.
 
-> **Before uploading, replace the ngrok URL everywhere it appears in the manifest.** The placeholder `your-ngrok-url.ngrok-free.app` appears 8 times: OAuth redirect URIs, OAuth allow list, home URLs, domain allow list, and webhook URLs. If you miss one, OAuth, the app panel, or RTMS webhooks will fail. Replace only the hostname; the manifest already includes `https://` and the paths.
+> **Before uploading, replace the ngrok URL everywhere it appears in the manifest.** The placeholder `your-ngrok-url.ngrok-free.app` appears 8 times. Replace only the hostname; the manifest already includes `https://` and the paths.
 >
 > ```bash
-> # Writes a filled-in copy and leaves the template unchanged. Use your full ngrok hostname (it may end in .ngrok-free.dev).
+> # Writes a filled-in copy and leaves the template unchanged
 > sed 's/your-ngrok-url\.ngrok-free\.app/YOUR-NAME.ngrok-free.app/g' zoom-app-manifest.json > my-zoom-app-manifest.json
 > grep -c 'your-ngrok-url' my-zoom-app-manifest.json   # should print 0
 > ```
 >
-> Upload the filled-in copy, not the template, and don't commit it. If your ngrok URL changes later, update the same 8 fields in the Marketplace.
+> Upload the filled-in copy, not the template, and don't commit it.
 
 ---
 
@@ -289,31 +204,46 @@ ngrok http 3000
 cp .env.example .env
 ```
 
-Edit `.env` with your values:
+Required:
 
 ```bash
-# From Zoom Marketplace (Step 2)
 ZOOM_CLIENT_ID=your_client_id
 ZOOM_CLIENT_SECRET=your_client_secret
-ZOOM_WEBHOOK_TOKEN=your_secret_token   # Features → Access → Secret Token (required for RTMS webhooks)
-
-# Your ngrok URL (Step 1)
+ZOOM_WEBHOOK_TOKEN=your_secret_token   # Features → Access → Secret Token
 PUBLIC_URL=https://your-name.ngrok-free.app
 
-# Generate secrets (run these commands, paste the output)
-SESSION_SECRET=            # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-TOKEN_ENCRYPTION_KEY=      # node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# Generate each with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+SESSION_SECRET=
+TOKEN_ENCRYPTION_KEY=                  # 64 hex characters (AES-256-GCM)
 
-# Optional: live notes
-NOTES_MODEL=               # Model that writes the notes; one of OPENROUTER_MODELS, otherwise DEFAULT_MODEL
-NOTES_INTERVAL_MS=45000    # How often the notes are rewritten while people talk (15000 to 600000)
+DEMO_MODE=true
+AI_ENABLED=true                        # Without it there are no notes and Arlo answers nothing
 ```
+
+Optional:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `OPENROUTER_API_KEY` | none | Free models work without a key, with lower rate limits |
+| `OPENROUTER_MODELS` | see `.env.example` | The models the server may use, comma separated |
+| `DEFAULT_MODEL`, `FALLBACK_MODEL` | see `.env.example` | Must be in `OPENROUTER_MODELS` |
+| `NOTES_MODEL` | `DEFAULT_MODEL` | The model that writes the live notes and answers questions. Must be in `OPENROUTER_MODELS` |
+| `AGENT_MODEL` | `DEFAULT_MODEL` | The model that picks a tool when someone asks Arlo for something. Must be in `OPENROUTER_MODELS`. Choose it with the [model test](#choosing-the-agents-model) |
+| `NOTES_INTERVAL_MS` | `45000` | How often the notes are rewritten while people talk (15000 to 600000). Each run is a model call |
+| `APPROVAL_EXPIRY_MS` | `60000` | How long an approval sheet waits for an answer (100 to 600000) |
+| `GITHUB_DEFAULT_REPO` | none | `owner/name`. With it Arlo can open an issue of that repository by number. Without it there is no such tool |
+| `AUTO_START_RTMS` | `false` | `true` requests transcription as soon as someone opens Arlo. Off by default: a person clicks first |
+| `ALLOW_OWN_ARLO_STREAM` | `true` | `false` hides "Take notes yourself" for people in a meeting where someone else runs Arlo. See [Known Limits](#known-limits) |
+| `MEETING_FLUSH_GRACE_MS` | `120000` | How long a meeting's data is kept after its stream stopped and the last panel disconnected |
+| `LOG_LEVEL` | `info` | `debug` adds request shapes. No level logs transcript text, names or tokens |
+
+A value outside its range is ignored with a warning and the default is used.
 
 ---
 
 ### 4. Configure Zoom App Settings
 
-In [Zoom Marketplace](https://marketplace.zoom.us/) → Your App:
+In [Zoom Marketplace](https://marketplace.zoom.us/) → Your App. Replace `YOUR-NGROK-URL` with your ngrok hostname.
 
 <details>
 <summary><strong>Basic Information</strong></summary>
@@ -328,22 +258,44 @@ In [Zoom Marketplace](https://marketplace.zoom.us/) → Your App:
 <details>
 <summary><strong>Scopes</strong></summary>
 
-Add these OAuth scopes (granular):
 - `zoomapp:inmeeting` — Run the app inside meetings
 - `meeting:read:meeting` — Read meeting details
 - `meeting:read:meeting_transcript` — Receive live transcripts via RTMS (search "RTMS"; requires RTMS access)
 - `meeting:read:list_meetings` — List upcoming meetings
-- `meeting:write:open_app` / `meeting:delete:open_app` — Register/unregister auto-open in a meeting (optional)
 - `user:read:user` — Read user profile (optional)
+- `meeting:write:open_app` / `meeting:delete:open_app` — Auto-open in a meeting (optional; needs the database version)
+- `meeting:update:participant_rtms_app_status` — Start and stop RTMS through Zoom's REST API (optional; used by the developer tools)
+
 </details>
 
 <details>
 <summary><strong>Features → Zoom App SDK</strong></summary>
 
-- Click **Add APIs** and enable required capabilities, including `startRTMS`, `stopRTMS`, `pauseRTMS`, `resumeRTMS`, and `getAppContext`
-- Optional: `setDynamicIndicator` and `removeDynamicIndicator`, to show Arlo's status ("Arlo is transcribing") in Zoom's meeting window for everyone in the meeting
-- Optional: `getWaitingRoomParticipants` and `admitParticipantFromWaitingRoom`, so Arlo can let someone in from the waiting room when asked (through the panel of someone using Arlo who is the host or a co-host)
-- Enable **In-client OAuth** and **Guest mode**
+Click **Add APIs**. The full list is in [`zoom-app-manifest.json`](./zoom-app-manifest.json). The panel asks only for APIs it calls and works without the optional ones: an action whose API is missing is not offered.
+
+| For | APIs |
+|---|---|
+| Running and signing in | `getAppContext`, `getMeetingContext`, `getMeetingUUID`, `getRunningContext`, `getUserContext`, `getMeetingParticipants`, `authorize`, `onAuthorized`, `promptAuthorize`, `onRunningContextChange`, `onMyUserContextChange`, `showNotification` |
+| Transcription | `startRTMS`, `stopRTMS`, `pauseRTMS`, `resumeRTMS`, `getRTMSStatus`, `onRTMSStatusChange` |
+| Status and timer | `setDynamicIndicator`, `removeDynamicIndicator` |
+| Post to chat | `sendMessageToChat` |
+| Admit from the waiting room | `getWaitingRoomParticipants`, `admitParticipantFromWaitingRoom` |
+| Mute | `toggleParticipantMediaAudio` |
+| Reactions | `setEmojiReaction` |
+| Open an issue and share | `openUrl`, `promptShareScreen` |
+| Invite everyone | `sendAppInvitationToAllParticipants`, `sendAppInvitation`, `showAppInvitationDialog`, `onSendAppInvitation` |
+| Notes for everyone | `startCollaborate`, `endCollaborate`, `joinCollaborate`, `leaveCollaborate`, `onCollaborateChange` |
+
+`promptShareScreen` is requested in the same capability tier as the reactions: a configuration without it loses the reactions too.
+
+Also enable **In-client OAuth** and **Guest mode**.
+
+</details>
+
+<details>
+<summary><strong>Features → Collaborate mode</strong></summary>
+
+Switch Collaborate mode on for the app (Zoom asks for a resubmission for review). Without it Zoom refuses `startCollaborate`: "Open notes for everyone" then says it could not, and the notes stay shared in the panels.
 
 </details>
 
@@ -353,21 +305,20 @@ Add these OAuth scopes (granular):
 | Setting | Value |
 |---------|-------|
 | Home URL | `https://YOUR-NGROK-URL` |
-| Domain Allow List | `https://YOUR-NGROK-URL` |
+| Domain Allow List | `YOUR-NGROK-URL`, `appssdk.zoom.us`, and `github.com` when `GITHUB_DEFAULT_REPO` is set (Zoom opens only allowlisted domains) |
 
 </details>
 
 <details>
-<summary><strong>Features → Event Subscriptions</strong></summary>
+<summary><strong>Features → Event Subscriptions and Deauthorization</strong></summary>
 
 | Setting | Value |
 |---------|-------|
 | Event notification endpoint | `https://YOUR-NGROK-URL/api/rtms/webhook` |
-| Events to subscribe | `meeting.rtms_started`, `meeting.rtms_stopped`, `meeting.rtms_interrupted` |
+| Events | `meeting.rtms_started`, `meeting.rtms_stopped`, `meeting.rtms_interrupted`; optional `rtms.request_status` (shows why a stream request failed) |
+| Deauthorization Notification Endpoint URL | The same `https://YOUR-NGROK-URL/api/rtms/webhook`. On deauthorization the server deletes the user's record and tokens and closes their sockets |
 
 </details>
-
-> Replace `YOUR-NGROK-URL` with your actual ngrok URL (e.g., `your-name.ngrok-free.app`)
 
 ---
 
@@ -377,136 +328,94 @@ Add these OAuth scopes (granular):
 docker-compose up --build
 ```
 
-Wait for all services to start:
-- Backend API (port 3000)
-- Frontend (port 3001)
-- RTMS service (port 3002)
+Three services start: backend (port 3000, the one ngrok points at), frontend (3001 on the host) and the RTMS service (internal to the Docker network).
 
 ---
 
 ### 6. Test in Zoom
 
-1. Start or join a Zoom meeting
-2. Click **Apps** in the toolbar
-3. Find and open your app
-4. As the host, click **"Bring Arlo into this meeting"**
-5. Talk for a minute: the notes appear (Summary, Decisions, Action items)
-6. Type a question into **Ask Arlo**
+1. Start a Zoom meeting, click **Apps**, open your app
+2. As the host, click **Bring Arlo into this meeting**
+3. Talk for a minute: the notes appear (Summary, Decisions, Action items)
+4. Type a question into **Ask Arlo**
+5. Type "post hello team in the chat": it is posted as "Arlo: hello team"
+6. Say "Arlo, set a five minute timer": a sheet asks "Start a 5 minute timer for everyone?"
 7. Open **Meeting record** to see the transcript and what Arlo did
-8. Open Arlo from a second account in the same meeting to see the participant view
-9. From that second account, click **"Ask … to share notes with everyone"**: the first account gets a sheet, and **Share notes** makes the notes appear in the second account's panel (and in everyone else's)
-10. From that second account, click **"Take notes yourself"**: Arlo starts for that person too and they get the notes (see the known gap above: this can end on "Try again")
-11. On the first account, click **Stop sharing** under the notes: they disappear from the second account's panel. **Share notes with everyone** brings them back
+8. Open Arlo from a second account in the same meeting to see the participant view, and click **Ask … to share notes with everyone**: the first account gets a sheet
+9. On the first account, click **Stop sharing**: the notes disappear from the second account's panel
 
 ---
 
-## Industry Verticals
+### Choosing the Agent's Model
 
-Arlo includes specialized modes demonstrating RTMS capabilities for different industries. Each vertical shows how real-time transcription can power domain-specific features.
+Free models differ a lot in how well they pick a tool. The repository has a test for it:
 
-### Arlo for Notes
-**Full-Featured Note-Taking** — Meeting summaries, key decisions, action items, and open questions tracked automatically.
+```bash
+docker-compose exec backend node scripts/agent-eval.js
+docker-compose exec backend node scripts/agent-eval.js --models model-a,model-b --runs 2
+```
 
-[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/4N-g5TgGRz0)
+It asks each model the synthetic requests in `backend/scripts/agent-eval-cases.json` and prints, per model, how often the tool and the arguments were right and the median time. It calls OpenRouter: it needs `AI_ENABLED=true` and `OPENROUTER_API_KEY`, and tests only models in `OPENROUTER_MODELS`. Free models are rate limited per day, so name one or two models at a time. Set the winner as `AGENT_MODEL`.
+
+---
+
+## Settings
+
+The gear icon opens Settings. Most of it belongs to the classic dashboard.
+
+| Setting | What it does |
+|---------|--------------|
+| **Show sample data** | Shown only in demo mode. Example data for the classic dashboard; off by default |
+| **Auto-open in meetings** | Needs the database version |
+| **Start transcription when you open this app** | Shown only when the deployment sets `AUTO_START_RTMS=true` |
+| **AI Configuration** | The provider is OpenRouter. The model chosen here is tried first for the classic dashboard's AI features; the live notes and the agent use the server's `NOTES_MODEL` and `AGENT_MODEL` |
+| **Chat Notifications** | Messages your panel sends to the Zoom chat when your transcription starts, pauses, resumes, stops or restarts, with editable texts |
+| **Show Arlo Responses** | Classic dashboard: show or hide its voice command responses |
+| **Start/Stop via REST API** | Developer tool: control RTMS through Zoom's REST API instead of the client SDK |
+| **Show AI Prompts** | Developer tool: an info icon next to the classic dashboard's AI components shows the prompt used |
+| **Compliance Advisor** | Classic dashboard: flags possible compliance risks by vertical |
+| **Classic dashboard** | Shown only while in a meeting. Opens the earlier dashboard |
+
+---
+
+## The Classic Dashboard and Industry Verticals
+
+The earlier dashboard (tabs, vertical cards, suggestions) is still in the app: while in a meeting, open Settings and choose **Classic dashboard**. It has five illustrative modes that show what a domain-specific app can do with a live transcript. The screenshots and videos below show this dashboard, not the screens described above.
+
+<div align="center">
+
+![Arlo Vertical Selector](./docs/images/vertical-selector.png)
+
+</div>
+
+| Vertical | What it shows | Demo |
+|---|---|---|
+| **Notes** | Summary, decisions, action items, open questions | [Video](https://youtu.be/4N-g5TgGRz0) |
+| **Healthcare** | SOAP notes, medication and symptom detection | [Video](https://youtu.be/F496oIqo6ls) |
+| **Legal** | Contradiction detection, billable time, exhibits | [Video](https://youtu.be/WNM5YxRTrIU) |
+| **Sales** | BANT qualification, competitor mentions, a filler word coach | [Video](https://youtu.be/LKpZAe5_A8o) |
+| **Support** | Customer sentiment with trend | [Video](https://youtu.be/1N6hs88nOhA) |
 
 <p align="center">
 <img src="./docs/images/notetaker-summary.png" alt="Meeting Summary" width="45%">
-<img src="./docs/images/notetaker-decisions.png" alt="Decisions & Questions" width="45%">
-</p>
-
----
-
-### Arlo for Healthcare
-**Clinical Documentation** — SOAP notes auto-generation, medication and symptom detection, clinical terminology highlighting.
-
-[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/F496oIqo6ls)
-
-<p align="center">
-<img src="./docs/images/healthcare-transcript.png" alt="Healthcare Transcript" width="45%">
 <img src="./docs/images/healthcare-soap-notes.png" alt="SOAP Notes" width="45%">
 </p>
-
----
-
-### Arlo for Legal
-**Deposition Assistance** — Real-time contradiction detection, billable time tracking with export, and exhibit management.
-
-[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/WNM5YxRTrIU)
-
 <p align="center">
-<img src="./docs/images/legal-billable-time.png" alt="Billable Time Tracking" width="45%">
 <img src="./docs/images/legal-contradictions.png" alt="Contradiction Detection" width="45%">
+<img src="./docs/images/support-sentiment.png" alt="Customer Sentiment" width="45%">
 </p>
 
----
-
-### Arlo for Sales
-**Deal Intelligence** — BANT qualification tracking (Budget, Authority, Need, Timeline), competitor mentions, and commitment detection.
-
-[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/LKpZAe5_A8o)
-
-<p align="center">
-<img src="./docs/images/sales-qualification.png" alt="Deal Qualification" width="70%">
-</p>
-
-#### Filler Word Coach
-
-Real-time filler word detection with audio alerts to help improve speaking cadence during sales calls and pitches.
-
-| Feature | Description |
-|---------|-------------|
-| **Live Detection** | Detects filler words ("um", "like", "you know", "basically", etc.) in real-time |
-| **Audio Alerts** | Plays a subtle beep when filler words are detected (can be muted) |
-| **Statistics** | Tracks frequency of each filler word with visual breakdown |
-| **Customizable** | Add or remove words from the detection list |
-| **Recent History** | Shows your last 5 detections with timestamps |
-
-**Default tracked words:** "so", "like", "you know", "basically", "actually", "literally", "um", "uh", "er", "ah", "right", "okay so", "i mean", "kind of", "sort of"
-
----
-
-### Arlo for Support
-**Agent Assistance** — Live customer sentiment meter with trend analysis and emotional shift tracking.
-
-[![Watch Demo](https://img.shields.io/badge/Watch_Demo-YouTube-red?logo=youtube)](https://youtu.be/1N6hs88nOhA)
-
-<p align="center">
-<img src="./docs/images/support-sentiment.png" alt="Customer Sentiment" width="70%">
-</p>
-
-> **Building your own vertical?** Fork this repo and customize the frontend components in `frontend/src/features/` for your specific use case.
+To build your own vertical, start from the components in `frontend/src/features/`.
 
 ---
 
 ## Developer Tools
 
-Arlo includes built-in tools to help developers understand how the AI features work.
+- **Show AI Prompts** (Settings): see the prompts behind the classic dashboard's AI features. Also `GET /api/ai/prompts` and `GET /api/ai/prompts/:id`.
+- **RTMS through REST**: `POST /api/rtms/start` forwards start, stop, pause and resume to Zoom's REST API with the user's token, and `GET /api/rtms/events` returns a timeline of requests, webhooks and join results for the caller's meetings. A script authenticates with a short-lived token from `POST /api/tokens`.
+- **Drop the stream on purpose**: set `CHAOS_DROP_STREAM_AFTER_SEC=15` and restart the rtms service to watch reconnection in a real meeting. Remove it afterwards.
 
-### Show AI Prompts
-
-Enable this setting to reveal the exact prompts powering each AI feature. When enabled, small info icons appear next to AI-powered components (Meeting Summary, SOAP Notes, Sentiment Meter, etc.). Click the icon to see:
-
-- **System Prompt** — The instructions given to the AI
-- **User Prompt Template** — How user input is formatted
-- **Output Format** — Expected response structure
-- **Copy to Clipboard** — Easily copy prompts for your own experiments
-
-**To enable:**
-1. Go to **Settings** (gear icon)
-2. Scroll to **Developer Tools** section
-3. Toggle **"Show AI Prompts"** on
-
-This is useful for:
-- Understanding how Arlo's AI features work under the hood
-- Learning prompt engineering techniques
-- Customizing prompts for your own fork
-
-### API Endpoints for Prompts
-
-```
-GET /api/ai/prompts          # List all available prompts
-GET /api/ai/prompts/:id      # Get specific prompt (summary, sentiment, soapNotes, etc.)
-```
+[`CLAUDE.md`](./CLAUDE.md) documents the REST routes, the WebSocket protocol and the agent's rules in detail.
 
 ---
 
@@ -515,51 +424,38 @@ GET /api/ai/prompts/:id      # Get specific prompt (summary, sentiment, soapNote
 <details>
 <summary><strong>Clean Restart</strong></summary>
 
-If you're having persistent issues:
-
 ```bash
-# Stop everything and remove volumes
 docker-compose down -v
-
-# Rebuild with fresh node_modules
-docker-compose up --build -V
+docker-compose up --build -V    # Rebuild with fresh node_modules
 ```
 
 </details>
 
 <details>
-<summary><strong>ngrok Issues</strong></summary>
+<summary><strong>App stops working after restarting ngrok</strong></summary>
 
-**App stops working after restarting ngrok?**
-
-If using a random domain:
-1. Copy the new ngrok URL
-2. Update `PUBLIC_URL` in `.env`
-3. Update all URLs in Zoom Marketplace settings
-4. Restart: `docker-compose restart backend`
-
-> **Pro tip:** Use a [static ngrok domain](https://dashboard.ngrok.com/domains) (free) to avoid this!
+With a random domain: update `PUBLIC_URL` in `.env`, update all URLs in the Zoom Marketplace settings, then `docker-compose restart backend`. A static ngrok domain avoids this.
 
 </details>
 
 <details>
-<summary><strong>More Help</strong></summary>
+<summary><strong>A change does not show up</strong></summary>
 
-See the full [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for additional issues.
+- The frontend container serves a built bundle that is rebuilt on change. Reload the Zoom panel.
+- The rtms container does not reload: `docker-compose restart rtms` after editing `rtms/src`.
 
 </details>
 
----
+<details>
+<summary><strong>No notes, or Arlo does not answer</strong></summary>
 
-## Documentation
+- `AI_ENABLED=true` must be set.
+- Notes are written only while an owner (or, when shared, anyone) has Arlo open.
+- Free models are rate limited. Add an `OPENROUTER_API_KEY` or wait.
 
-| Document | Description |
-|----------|-------------|
-| [Architecture](./docs/ARCHITECTURE.md) | System design and data flow |
-| [Project Status](./docs/PROJECT_STATUS.md) | Roadmap and current progress |
-| [Specification](./SPEC.md) | Feature spec and milestones |
-| [Troubleshooting](./docs/TROUBLESHOOTING.md) | Common issues and fixes |
-| [CLAUDE.md](./CLAUDE.md) | Quick reference for AI assistants |
+</details>
+
+See [docs/TROUBLESHOOTING.md](./docs/TROUBLESHOOTING.md) for more. Parts of it describe the database version.
 
 ---
 
@@ -568,139 +464,101 @@ See the full [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) for additional i
 ### Project Structure
 
 ```
-arlo/
-├── backend/           # Express API server
-├── frontend/          # React Zoom App (Vite)
-├── rtms/              # RTMS transcript ingestion service
-├── terraform/         # AWS deployment configuration
-├── docs/              # Documentation
-└── docker-compose.yml # Development environment
+backend/                 Express API, WebSocket server, no database
+  src/services/agent/    Arlo's agent: request detection, tool table, policy, texts
+  src/services/          Notes engine, approvals, streams, meeting lifecycle
+  src/storage/           In-memory meeting store
+  scripts/               agent-eval.js (the model test)
+frontend/                React Zoom App (Vite)
+  src/components/arlo/   The Arlo screens
+  src/lib/               Screen choice, SDK actions, Dynamic Indicator, Collaborate
+  src/features/          Classic dashboard verticals
+rtms/                    RTMS transcript ingestion service
+deploy/                  Deployment scaffolding
+docs/                    Documentation
+zoom-app-manifest.json   Marketplace app settings
+docker-compose.yml       Development environment
 ```
 
 ### Common Commands
 
 ```bash
-docker-compose up                    # Start all services
+docker-compose up --build            # Start all services
 docker-compose logs -f backend       # View backend logs
-docker-compose restart backend       # Restart a service
-docker-compose down -v               # Stop and remove volumes
+docker-compose restart rtms          # Restart a service
+npm test -w frontend                 # Frontend tests (Vitest)
+npm run lint -w frontend             # ESLint
+npm run build -w frontend            # Production build
 ```
 
 ### Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Frontend | React 18, Zoom Apps SDK, Base UI |
-| Backend | Node.js 20, Express |
-| Storage | In-memory (demo mode) |
+| Frontend | React 18, Vite, Zoom Apps SDK, Base UI |
+| Backend | Node.js 22, Express |
+| Storage | In memory |
 | AI | OpenRouter (free models available) |
-| Real-time | WebSocket + RTMS SDK |
+| Real-time | WebSocket, `@zoom/rtms` |
+
+### Documentation
+
+| Document | Description |
+|----------|-------------|
+| [CLAUDE.md](./CLAUDE.md) | The current reference: architecture, routes, WebSocket protocol, agent rules |
+| [Architecture](./docs/ARCHITECTURE.md), [Specification](./SPEC.md), [Project Status](./docs/PROJECT_STATUS.md) | Older documents. Parts describe the database version; check them against the code |
 
 ---
 
-## Contributing
+## Known Limits
 
-This is an open-source starter kit designed to be forked and customized!
+**Built from Zoom's reference, only partly verified in real clients.**
 
-1. **Fork** this repository
-2. **Customize** for your use case
-3. **Share** improvements via pull request
+- **Collaborate mode** ("Open notes for everyone") has not been run in a real meeting. Not known: whether the open app switches to Collaborate in place or is loaded anew, whether the meeting id can be read there, and what the app context looks like. If it differs from what the code assumes, the document shows an access notice instead of the notes. A second owner probably cannot end a Collaborate session they did not start.
+- **Dynamic Indicator styling and the timer** rest on guesses about Zoom's API (color format, timer units, how a text update affects a running timer). They are collected in one place, `INDICATOR_GUESSES` in `frontend/src/lib/dynamicIndicator.js`.
+- **Several people using Arlo at once.** Arlo learns of a stream, and whose it is, from Zoom's `meeting.rtms_started` webhook. In a test with two users of the app in one meeting, the second person's start produced no second webhook. Without it Arlo cannot tell whose stream it is, so the second person does not become an owner: "Take notes yourself" ends in a message that Arlo has not joined, with "Try again". The first person's Arlo is not affected, and the second person can still ask for the notes. `ALLOW_OWN_ARLO_STREAM=false` hides the action.
 
-### Ideas for Extension
+**Limits of the platform.**
 
-- Multi-language transcription support
-- Custom AI models (local LLMs)
-- Team workspaces and sharing
-- Calendar integration
-- Video replay with transcript sync
+- The Apps SDK cannot read the meeting chat. Arlo can post to it and never sees what others write there.
+- The SDK cannot pick the window for a screen share: Arlo opens Zoom's share dialog and the owner chooses.
+- Arlo acts only while an owner's panel is open, and admitting and muting need a host's or co-host's panel.
+- Shared notes are seen only in the Arlo panel, inside the meeting. Opening them from a link outside the meeting is not built.
+- A look-alike name written wholly in another script is not caught when Arlo matches a spoken name to a participant.
+
+**Limits of this implementation.**
+
+| Area | Now | For production |
+|------|-----|----------------|
+| Process model | One backend process holds all state in memory | Shared store and pub/sub to run more than one instance |
+| Meeting data | In memory, deleted when the meeting ends | A database behind `backend/src/storage/`, with consent |
+| Sessions and tokens | In memory, encrypted; survive a restart through an encrypted cookie | Database or Redis |
+| Credentials | `.env` file | A secrets manager |
+| HTTPS | ngrok tunnel | Load balancer with TLS |
+| Webhook processing | Synchronous | Queue-based |
 
 ---
 
 ## Zoom for Government
-
-This application supports Zoom for Government (ZfG) deployments:
 
 ```bash
 # In your .env file
 ZOOM_HOST=zoomgov.com
 ```
 
-1. Create your app in the [Zoom for Government Marketplace](https://marketplace.zoomgov.com/)
-2. Use ZfG-specific URLs in your configuration
-
-> **Note:** RTMS availability on ZfG may differ. Contact your Zoom representative for ZfG-specific access.
+Create your app in the [Zoom for Government Marketplace](https://marketplace.zoomgov.com/) and use ZfG URLs in your configuration. RTMS availability on ZfG may differ; contact your Zoom representative.
 
 ---
 
-## Production Deployment
+## Deployment
 
-### Deploy to Render (One-Click)
-
-The easiest way to deploy Arlo to production is with [Render](https://render.com/):
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/zoom/arlo)
-
-This deploys all services (backend, frontend, RTMS) with automatic secret generation. After deployment:
-
-1. Add your Zoom credentials in the Render dashboard:
-   - `ZOOM_CLIENT_ID`
-   - `ZOOM_CLIENT_SECRET`
-   - `ZOOM_WEBHOOK_TOKEN`
-2. Update your Zoom App settings with the Render URLs
-3. That's it — you're live!
-
-See [`render.yaml`](./render.yaml) for the full infrastructure configuration.
+[`render.yaml`](./render.yaml) and [`deploy/`](./deploy/README.md) (AWS Terraform, self-hosted Docker Compose) hold deployment scaffolding. They were written for the database version and expect a MySQL database, which this version does not use. Check them against the current code before relying on them. Whatever the host, this version runs as one backend instance: its state is in that process's memory.
 
 ---
 
-### Deploy to AWS (Terraform)
+## Contributing
 
-For AWS deployment, use the Terraform configuration in the `terraform/` directory:
-
-```bash
-cd terraform
-terraform init
-terraform plan
-terraform apply
-```
-
-This provisions:
-- EC2 instances for backend and RTMS services
-- Application Load Balancer with TLS
-- Auto-generated secrets via AWS Secrets Manager
-
-See the [terraform/README.md](./terraform/README.md) for detailed AWS setup instructions.
-
----
-
-### Production Considerations
-
-This reference implementation is designed for **learning and prototyping**. Before production deployment:
-
-| Area | Development | Production Recommendation |
-|------|-------------|---------------------------|
-| **Credentials** | `.env` file | Secrets manager (AWS, Vault, Azure) |
-| **Tokens** | In-memory + AES | Database with encryption at rest |
-| **Sessions** | In-memory | Redis or database-backed |
-| **HTTPS** | ngrok tunnel | Load balancer with TLS |
-| **WebSockets** | Single instance | Redis pub/sub for scaling |
-| **Data Storage** | None (demo mode) | Add database for persistence |
-
-See [Known Limitations](#known-limitations) for additional considerations.
-
----
-
-## Known Limitations
-
-This is a reference implementation with intentional simplifications:
-
-| Pattern | Current | Production Recommendation |
-|---------|---------|---------------------------|
-| PKCE Storage | In-memory Map | Redis with TTL |
-| WebSocket Scaling | Single-instance | Redis pub/sub adapter |
-| Retry Logic | Basic 401 retry | Exponential backoff |
-| Webhook Processing | Synchronous | Queue-based async |
-| Input Validation | Basic checks | Schema validation (Zod) |
+Fork the repository, change it for your use case, and send improvements as pull requests. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ---
 
@@ -711,8 +569,6 @@ This is a reference implementation with intentional simplifications:
 - [Zoom Apps SDK Reference](https://appssdk.zoom.us/classes/ZoomSdk.ZoomSdk.html)
 - [OpenRouter API](https://openrouter.ai/docs)
 
----
-
 ## Support
 
 - **Issues:** [GitHub Issues](https://github.com/zoom/arlo/issues)
@@ -720,18 +576,6 @@ This is a reference implementation with intentional simplifications:
 - **RTMS Access:** [Request Form](https://www.zoom.com/en/realtime-media-streams/#form)
 - **Zoom Developer Forum:** [devforum.zoom.us](https://devforum.zoom.us/)
 
----
-
 ## License
 
 MIT License — See [LICENSE](./LICENSE) for details.
-
----
-
-<div align="center">
-
-**Ready to build your own meeting assistant?**
-
-[Get Started](#-quick-start) · [Star this repo](https://github.com/zoom/arlo)
-
-</div>
