@@ -110,7 +110,9 @@ test('the authorize URL is GitHub\'s, built by the server, with state and PKCE S
   assert.match(state, /^[A-Za-z0-9_-]{43}$/);
   const parsed = new URL(url);
   assert.equal(`${parsed.origin}${parsed.pathname}`, 'https://github.com/login/oauth/authorize');
-  assert.deepEqual([...parsed.searchParams.keys()].sort(), ['client_id', 'code_challenge', 'code_challenge_method', 'redirect_uri', 'scope', 'state']);
+  assert.deepEqual([...parsed.searchParams.keys()].sort(), ['client_id', 'code_challenge', 'code_challenge_method', 'prompt', 'redirect_uri', 'scope', 'state']);
+  // GitHub's account picker, every time: the person sees and picks which account is connected
+  assert.equal(parsed.searchParams.get('prompt'), 'select_account');
   assert.equal(parsed.searchParams.get('client_id'), CLIENT_ID);
   assert.equal(parsed.searchParams.get('redirect_uri'), `${PUBLIC_URL}/api/connectors/github/callback`);
   assert.equal(parsed.searchParams.get('state'), state);

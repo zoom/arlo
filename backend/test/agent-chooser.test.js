@@ -46,8 +46,9 @@ test.beforeEach(() => openrouter._resetForTests());
 test.after(() => { global.fetch = realFetch; });
 
 const TOOLS = listTools();
-// The table of a deployment with a GitHub repository: it has open_issue
-const WITH_ISSUES = { githubRepo: 'example-org/example-repo' };
+// The table of a deployment with a GitHub repository where people can connect
+// GitHub: it has open_issue and the three GitHub tools
+const WITH_ISSUES = { githubRepo: 'example-org/example-repo', githubConnect: true };
 const choose = (extra = {}) => openrouter.chooseTool({ request: 'what did we decide about the venue', tools: TOOLS, ...extra });
 
 // --- the tool table ---------------------------------------------------------------
@@ -59,7 +60,10 @@ test('the tool table is the eleven tools, and web search only when it is turned 
   ]);
   assert.deepEqual(toolNames({ webSearch: true }).at(-1), 'web_search');
   // an issue only when the deployment has a GitHub repository (test/agent-issue.test.js)
-  assert.deepEqual(ALL_TOOL_NAMES, [...toolNames(), 'open_issue', 'web_search']);
+  // the three GitHub tools only when people can connect their GitHub account (test/agent-github.test.js)
+  assert.deepEqual(ALL_TOOL_NAMES, [...toolNames(), 'open_issue', 'github_list_issues', 'github_get_issue', 'github_create_issue', 'web_search']);
+  assert.equal(getTool('github_create_issue'), null);
+  assert.equal(getTool('github_list_issues', { githubRepo: 'example-org/example-repo' }), null);
   assert.equal(getTool('open_issue'), null);
   assert.equal(getTool('web_search'), null);
   assert.equal(getTool('web_search', { webSearch: true }).runs, 'server');
@@ -359,8 +363,8 @@ test('the reason for a failure never quotes the request or the model', async () 
 
 // --- the fixed test set -----------------------------------------------------------
 
-test('the test set is 70 synthetic cases: each tool three to six times (stopping the timer once), non-requests, injections, ambiguous ones', () => {
-  assert.equal(cases.length, 70);
+test('the test set is 82 synthetic cases: each tool three to six times (stopping the timer once), non-requests, injections, ambiguous ones', () => {
+  assert.equal(cases.length, 82);
   const known = new Set([...toolNames(WITH_ISSUES), 'none']);
   const kinds = {};
   for (const one of cases) {
@@ -371,10 +375,10 @@ test('the test set is 70 synthetic cases: each tool three to six times (stopping
     kinds[one.kind] = (kinds[one.kind] || 0) + 1;
     if (one.context) assert.ok(Array.isArray(one.context) && one.context.every((line) => typeof line === 'string'));
   }
-  assert.deepEqual(kinds, { tool: 46, non_request: 13, injection: 4, ambiguous: 6, no_tool: 1 });
+  assert.deepEqual(kinds, { tool: 55, non_request: 15, injection: 4, ambiguous: 7, no_tool: 1 });
   for (const name of toolNames(WITH_ISSUES)) {
     const count = cases.filter((one) => one.kind === 'tool' && one.expectTool === name).length;
-    const few = ['open_notes_for_everyone', 'send_reaction', 'mute_participant', 'open_issue', 'set_timer'].includes(name) ? 3 : 5;
+    const few = ['open_notes_for_everyone', 'send_reaction', 'mute_participant', 'open_issue', 'set_timer', 'github_list_issues', 'github_get_issue', 'github_create_issue'].includes(name) ? 3 : 5;
     // one more each for the two that opening the notes must not be taken for
     const expected = { stop_timer: 1, share_notes: 6, invite_everyone: 4 };
     assert.equal(count, expected[name] ?? few, name);
@@ -393,10 +397,24 @@ test('the test set is 70 synthetic cases: each tool three to six times (stopping
     ['can you open issue 7 in the browser', 7, false],
   ]);
   // "the issue" without a number, and talk about an issue, never open one
+  // nor does asking what an issue says, or for a new one: "open an issue: …" creates, "open issue 42" opens
   const issueTalk = cases.filter((one) => /\bissue\b/i.test(one.said) && !issues.includes(one));
-  assert.equal(issueTalk.length, 3);
+  assert.equal(issueTalk.length, 9);
   for (const one of issueTalk) assert.equal([].concat(one.expectTool).includes('open_issue'), false, one.said);
   assert.equal(issueTalk.some((one) => one.said === 'open the issue in the chat'), true);
+  // GitHub: listing, what one issue says (its number as digits), and a new issue (never with a number)
+  const github = (name) => cases.filter((one) => one.expectTool === name);
+  assert.deepEqual(github('github_list_issues').map((one) => one.said), ['show the open issues', 'list the open bugs in the repo', 'what issues do we have about the checkout']);
+  assert.deepEqual(github('github_get_issue').map((one) => [one.said, one.expectArgs.number.equals]), [
+    ['what\'s issue 42 about', 42], ['what does issue 315 say', 315], ['is issue 12 still open', 12],
+  ]);
+  assert.deepEqual(github('github_create_issue').map((one) => one.said), [
+    'open an issue: checkout fails on Safari', 'file a bug for the login timeout', 'create an issue that the export button does nothing',
+  ]);
+  for (const one of github('github_create_issue')) assert.equal(/\d/.test(one.said), false);
+  // an issue without a number is never opened in the browser; talk about bugs and issues asks for nothing
+  assert.deepEqual(cases.find((one) => one.said === 'pull up the issue about the login timeout').expectTool, ['github_list_issues', 'none']);
+  assert.equal(cases.filter((one) => one.kind === 'non_request' && /file a bug|open issues/.test(one.said)).length, 2);
   // a request to unmute is a request no tool does: never the tool that mutes
   const unmute = cases.filter((one) => /unmute/i.test(one.said));
   assert.equal(unmute.length, 1);
@@ -504,10 +522,11 @@ test('the script asks every case twice per model, one model at a time, and print
     },
   });
   assert.equal(code, 0);
-  // this table has no open_issue (no GitHub repository): its three cases are left out, and that is said
-  assert.equal(asked.length, 134);
+  // this table has no open_issue and no GitHub tools (no GitHub repository): their cases are left out, and that is said
+  assert.equal(asked.length, 138);
   assert.equal(asked.some((input) => /issue 42 and share|one hundred and seven|issue 7 in the browser/.test(input.request)), false);
-  assert.match(out.join('\n'), /3 case\(s\) skipped: they need a tool that is not in this table \(open_issue\)/);
+  assert.equal(asked.some((input) => /show the open issues|issue 315|login timeout/.test(input.request)), false);
+  assert.match(out.join('\n'), /13 case\(s\) skipped: they need a tool that is not in this table \(open_issue, github_list_issues, github_get_issue, github_create_issue\)/);
   assert.ok(asked.every((input) => input.model === 'b/two:free' && input.fallback === false && Array.isArray(input.tools)));
   assert.equal(asked[0].request, cases[0].said);
   const text = out.join('\n');
@@ -536,8 +555,9 @@ test('with a table that has every tool, every case is asked, and an issue call i
     },
   });
   assert.equal(code, 0);
-  assert.equal(asked.length, 70);
+  assert.equal(asked.length, 82);
   assert.equal(asked.every((input) => input.tools.some((tool) => tool.name === 'open_issue')), true);
+  assert.equal(asked.every((input) => input.tools.some((tool) => tool.name === 'github_create_issue')), true);
   const text = out.join('\n');
   assert.equal(/skipped/.test(text), false);
   const number = (said) => cases.findIndex((one) => one.said === said) + 1;

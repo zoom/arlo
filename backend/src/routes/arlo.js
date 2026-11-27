@@ -240,6 +240,11 @@ const BUSY_MESSAGE = 'Arlo is busy right now. Try again in a moment.';
  * decides whether it runs, needs an owner's approval, or is refused.
  *   - A question about the meeting: `answer` is the answer, for the asker alone.
  *   - A summary: `answer` is the summary, `action.status` 'done'.
+ *   - GitHub issues listed or one looked up, for an owner who connected
+ *     their GitHub account and typed it: `answer` is a short sentence of the
+ *     server and `result` is what GitHub answered, rebuilt by the connector
+ *     (`{ kind: 'github_issues' | 'github_issue', … }`, capped plain text, no
+ *     URL), for this owner alone. It is never stored or logged.
  *   - Something done ("post … to the chat", "share the notes"): `answer` is a
  *     sentence of the server ("Done: …" / "I couldn't do that: …") and
  *     `action.status` is 'done' or 'failed'.
@@ -282,7 +287,12 @@ router.post('/ask', requireAuth, requireMeetingAccess, aiLimiter, requireJson, a
       // A plain answer is the answer and nothing else, as it always was
       return res.json({ answer: result.answer, ...(result.tool === 'answer_from_meeting' ? {} : actionSummary(result.action)) });
     case 'done':
-      return res.json({ answer: result.reply, ...actionSummary(result.action) });
+      // `result`: what GitHub answered this owner's own typed read, rebuilt by the connector
+      return res.json({
+        answer: result.reply,
+        ...(isPlainObject(result.result) && { result: result.result }),
+        ...actionSummary(result.action),
+      });
     case 'waiting_approval':
       // An owner who gets the sheet themselves is told to look at it; anyone else, that the owners were asked
       return res.json({

@@ -6,14 +6,9 @@ h.setTestEnv({ RTMS_SERVICE_URL: 'http://127.0.0.1:9' });
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
-const path = require('node:path');
 const {
   createMcpClient, McpClientError, CODES, DEFAULT_TIMEOUT_MS, MAX_RESPONSE_BYTES,
 } = require('../src/services/connectors/mcpClient');
-const {
-  readGithubMcpUrl, readGithubToken, DEFAULT_GITHUB_MCP_URL, GITHUB_MCP_HOSTS,
-} = require('../src/services/connectors/githubConfig');
 
 const URL_ = 'https://mcp.example.test/mcp/x/issues';
 // Made up for this run; shaped like a token so a leak would be found by its text
@@ -354,68 +349,4 @@ test('only https, no credentials in the URL, plain headers; a refusal never prin
   }
   for (const timeoutMs of [0, -1, 1.5, '10', 120001]) assert.throws(() => createMcpClient({ url: URL_, fetch, timeoutMs }), TypeError);
   assert.throws(() => createMcpClient({ url: URL_, fetch: 'fetch' }), TypeError);
-});
-
-// --- the settings --------------------------------------------------------------------
-
-test('GITHUB_MCP_URL: https, GitHub\'s host, a path under /mcp, and nothing else', () => {
-  assert.deepEqual([...GITHUB_MCP_HOSTS], ['api.githubcopilot.com']);
-  assert.equal(DEFAULT_GITHUB_MCP_URL, 'https://api.githubcopilot.com/mcp/x/issues');
-  for (const raw of [undefined, null, '']) assert.deepEqual(readGithubMcpUrl(raw), { url: DEFAULT_GITHUB_MCP_URL, known: true });
-
-  const accepted = [
-    'https://api.githubcopilot.com/mcp/', 'https://api.githubcopilot.com/mcp', 'https://api.githubcopilot.com/mcp/x/issues',
-    'https://api.githubcopilot.com/mcp/x/issues/readonly', 'https://api.githubcopilot.com/mcp/x/all/',
-  ];
-  for (const raw of accepted) assert.deepEqual(readGithubMcpUrl(raw), { url: raw, known: true }, raw);
-
-  const refused = [
-    'http://api.githubcopilot.com/mcp/', 'https://evil.example.test/mcp/', 'https://api.githubcopilot.com.evil.example.test/mcp/',
-    'https://api.githubcopilot.com@evil.example.test/mcp/', 'https://user:pass@api.githubcopilot.com/mcp/', 'https://api.githubcopilot.com:8443/mcp/',
-    'https://api.githubcopilot.com/mcp/?features=x', 'https://api.githubcopilot.com/mcp/#x', 'https://api.githubcopilot.com/', 'https://api.githubcopilot.com/other',
-    'https://api.githubcopilot.com/mcp/../other', 'https://api.githubcopilot.com/mcp/%2e%2e/other', 'https://API.githubcopilot.com/mcp/', ' https://api.githubcopilot.com/mcp/',
-    'https://api.githubcopilot.com/mcp/\n', 'https://api.githubcopilot.com/mcpx', 'https://api.githubcopilot.com//mcp/', 'api.githubcopilot.com/mcp/',
-    `https://api.githubcopilot.com/mcp/${'a'.repeat(200)}`, 5, {}, ['https://api.githubcopilot.com/mcp/'],
-  ];
-  for (const raw of refused) assert.deepEqual(readGithubMcpUrl(raw), { url: DEFAULT_GITHUB_MCP_URL, known: false }, JSON.stringify(raw));
-});
-
-test('GITHUB_TOKEN: a token as GitHub writes one, or it is not used', () => {
-  for (const raw of [undefined, null, '']) assert.deepEqual(readGithubToken(raw), { token: null, known: true });
-  for (const raw of [TOKEN, `ghp_${'a1B2'.repeat(9)}`]) assert.deepEqual(readGithubToken(raw), { token: raw, known: true });
-  const refused = [
-    'short', `${TOKEN} `, ` ${TOKEN}`, `${TOKEN}\n`, `${TOKEN}\r\nX-Other: 1`, `Bearer ${TOKEN}`, `"${TOKEN}"`, `${TOKEN}-x`, 'x'.repeat(256), 5, {}, [TOKEN],
-  ];
-  for (const raw of refused) assert.deepEqual(readGithubToken(raw), { token: null, known: false }, JSON.stringify(raw));
-});
-
-/** The GitHub settings of `config` and what was printed, in a fresh process with `env` set. */
-function configFor(env) {
-  const script = `
-    require(${JSON.stringify(path.join(__dirname, 'helpers.js'))}).setTestEnv(${JSON.stringify(env)});
-    const printed = [];
-    for (const level of ['log', 'info', 'warn', 'error']) console[level] = (...args) => printed.push(args.map(String).join(' '));
-    const config = require(${JSON.stringify(path.join(__dirname, '..', 'src', 'config.js'))});
-    process.stdout.write(JSON.stringify({ token: config.githubToken, url: config.githubMcpUrl, repo: config.githubRepo, printed }));
-  `;
-  const clean = { ...process.env };
-  for (const name of ['GITHUB_TOKEN', 'GITHUB_MCP_URL', 'GITHUB_DEFAULT_REPO']) delete clean[name];
-  return JSON.parse(execFileSync(process.execPath, ['-e', script], { env: clean, encoding: 'utf8' }));
-}
-
-test('config: the token and the URL are read once; a value that is not accepted is ignored with a warning that does not print it', () => {
-  assert.deepEqual(configFor({}), {
-    token: null, url: DEFAULT_GITHUB_MCP_URL, repo: null, printed: [],
-  });
-  assert.deepEqual(configFor({ GITHUB_TOKEN: TOKEN, GITHUB_MCP_URL: 'https://api.githubcopilot.com/mcp/', GITHUB_DEFAULT_REPO: 'example-org/arlo' }), {
-    token: TOKEN, url: 'https://api.githubcopilot.com/mcp/', repo: 'example-org/arlo', printed: [],
-  });
-
-  const bad = configFor({ GITHUB_TOKEN: `hunter2 ${TOKEN}`, GITHUB_MCP_URL: `https://evil.example.test/mcp/?t=${TOKEN}` });
-  assert.equal(bad.token, null);
-  assert.equal(bad.url, DEFAULT_GITHUB_MCP_URL);
-  assert.equal(bad.printed.length, 2);
-  assert.match(bad.printed[0], /GITHUB_TOKEN/);
-  assert.match(bad.printed[1], /GITHUB_MCP_URL/);
-  assert.equal(/hunter2|evil|TTTT/.test(bad.printed.join('\n')), false);
 });

@@ -152,6 +152,24 @@ export function githubRepoOf(value) {
 }
 
 /**
+ * The one URL an issue is opened at, or null: "https://github.com/", the
+ * repository ("owner/name" in exactly that form), "/issues/", the number (a
+ * whole number as such, 1 to 9999999). It must also parse as plain https at
+ * exactly that host, and read the same parsed. Used for an issue Arlo opens
+ * (`open_issue`, where the server's URL must be this text) and for one the
+ * owner opens from a result (components/arlo/GithubResult.jsx).
+ */
+export function githubIssueUrl(githubRepo, number) {
+  if (typeof number !== 'number' || !Number.isInteger(number) || number < 1 || number > MAX_ISSUE_NUMBER) return null;
+  const repo = githubRepoOf(githubRepo);
+  if (repo === null) return null;
+  const url = `https://${GITHUB_HOST}/${repo}/issues/${number}`;
+  if (url.length > MAX_ISSUE_URL_CHARS) return null;
+  const parsed = httpsUrl(url);
+  return parsed !== null && parsed.hostname === GITHUB_HOST && parsed.port === '' && parsed.href === url ? url : null;
+}
+
+/**
  * What this panel tells the server it can do (`arlo.hands`): the chat, the
  * invitation and a reaction when the client accepted each; the waiting room
  * and muting when the client accepted their APIs and Zoom says this person is
@@ -316,10 +334,8 @@ async function openIssue(zoomSdk, args, stillAllowed, githubRepo) {
   // The one URL this panel opens: github.com, the deployment's repository,
   // "/issues/", the number. Built here again and compared as text; it must
   // also parse as plain https at exactly that host, and read the same parsed
-  const repo = githubRepoOf(githubRepo);
-  if (repo === null || url !== `https://${GITHUB_HOST}/${repo}/issues/${number}`) return fail('unsupported');
-  const parsed = httpsUrl(url);
-  if (parsed === null || parsed.hostname !== GITHUB_HOST || parsed.port !== '' || parsed.href !== url) return fail('unsupported');
+  const built = githubIssueUrl(githubRepo, number);
+  if (built === null || url !== built) return fail('unsupported');
   if (!has(zoomSdk, 'openUrl')) return fail('unsupported');
   if (typeof stillAllowed !== 'function' || stillAllowed() !== true) return fail('not_allowed');
 

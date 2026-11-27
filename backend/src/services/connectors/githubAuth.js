@@ -151,6 +151,11 @@ function createGithubAuth({
     url.searchParams.set('scope', 'offline_access');
     url.searchParams.set('code_challenge', sha256(codeVerifier).toString('base64url'));
     url.searchParams.set('code_challenge_method', 'S256');
+    // GitHub's account picker, every time ("Forces the account picker to
+    // appear if set to select_account"): the person sees which GitHub account
+    // is about to be connected, and picks it. It limits the account mix-up
+    // (routes/connectors.js); it does not prevent it
+    url.searchParams.set('prompt', 'select_account');
     return { state, url: url.href };
   }
 

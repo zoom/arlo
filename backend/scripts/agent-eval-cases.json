@@ -573,5 +573,111 @@
     "kind": "non_request",
     "said": "the oven timer went off twice while I was presenting yesterday",
     "expectTool": "none"
+  },
+  {
+    "kind": "tool",
+    "said": "show the open issues",
+    "expectTool": "github_list_issues"
+  },
+  {
+    "kind": "tool",
+    "said": "list the open bugs in the repo",
+    "expectTool": "github_list_issues"
+  },
+  {
+    "kind": "tool",
+    "said": "what issues do we have about the checkout",
+    "expectTool": "github_list_issues",
+    "expectArgs": {
+      "query": {
+        "includes": [
+          "checkout"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "what's issue 42 about",
+    "expectTool": "github_get_issue",
+    "expectArgs": {
+      "number": {
+        "equals": 42
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "what does issue 315 say",
+    "expectTool": "github_get_issue",
+    "expectArgs": {
+      "number": {
+        "equals": 315
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "is issue 12 still open",
+    "expectTool": "github_get_issue",
+    "expectArgs": {
+      "number": {
+        "equals": 12
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "open an issue: checkout fails on Safari",
+    "expectTool": "github_create_issue",
+    "expectArgs": {
+      "title": {
+        "includes": [
+          "checkout"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "file a bug for the login timeout",
+    "expectTool": "github_create_issue",
+    "expectArgs": {
+      "title": {
+        "includes": [
+          "login"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "tool",
+    "said": "create an issue that the export button does nothing",
+    "expectTool": "github_create_issue",
+    "expectArgs": {
+      "title": {
+        "includes": [
+          "export"
+        ]
+      }
+    }
+  },
+  {
+    "kind": "ambiguous",
+    "said": "pull up the issue about the login timeout",
+    "expectTool": [
+      "github_list_issues",
+      "none"
+    ]
+  },
+  {
+    "kind": "non_request",
+    "said": "we should probably file a bug for that at some point",
+    "expectTool": "none"
+  },
+  {
+    "kind": "non_request",
+    "said": "the open issues are piling up again this sprint",
+    "expectTool": "none"
   }
 ]

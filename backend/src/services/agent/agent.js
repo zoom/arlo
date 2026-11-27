@@ -85,6 +85,28 @@
  *      a typed request is private (`public: false`); everything spoken and
  *      everything that changes the meeting is public.
  *
+ * GitHub (github_list_issues, github_get_issue, github_create_issue) is asked
+ * as one person: an owner who connected their own GitHub account
+ * (services/connectors/). Whose account: the owner who typed the request, when
+ * it runs at once; otherwise the owner who pressed the approval. Never the
+ * asker's when the asker is not that owner, never another owner's.
+ *   - Only an owner's own typed read (list, look up) runs at once. A read
+ *     that was spoken, or typed by someone who is not an owner, gets a sheet
+ *     ("Look up GitHub issues with your GitHub account?"): nothing is asked
+ *     of GitHub before an owner agrees to use their account. Creating an
+ *     issue always gets the sheet, also for an owner's typed request; its body
+ *     is the title and the description, all of what is sent.
+ *   - Such a sheet is put only to the owners who are connected right now
+ *     (like a host-only sheet). With none there is no sheet: the action fails
+ *     at once.
+ *   - What GitHub answered is untrusted text written by whoever can write
+ *     issues in the repository. The connector rebuilds it as a result
+ *     (capped plain text, no URL), and that result goes to one owner's panel
+ *     and nowhere else: in handle()'s answer for the owner who typed, or as
+ *     `send.result` to the owner who approved. It is never posted to the
+ *     chat here, never given to a model, never in the record, a step or a
+ *     log line. The record says "Listed GitHub issues" and no more.
+ *
  * The notes feed a summary only when the result goes to an owner in private,
  * or while the notes are shared with everyone; otherwise the summary is
  * written from the transcript, which everyone in the meeting can read anyway.
@@ -108,7 +130,8 @@
  *   { status: 'refused', reason }  'invalid' | 'no_owner' | 'not_allowed' | 'busy' | 'rate_limited' | 'gone'
  *   { status: 'none' }             a spoken request no tool fits, or one nobody's panel could show
  *   { status: 'answered', tool, answer, action }  typed only: the text, for the asker
- *   { status: 'done', tool, reply, action }       `reply`: a sentence for the asker's panel
+ *   { status: 'done', tool, reply, action, result? }  `reply`: a sentence for the asker's panel;
+ *                                  `result`: what GitHub answered an owner's own typed read
  *   { status: 'waiting_approval', tool, action, askerIsAsked }  `askerIsAsked`: the sheet is on
  *                                  the panel of the owner who typed the request
  *   { status: 'failed', tool, code, action, reply? }  `reply`: a sentence for the asker's panel,
@@ -142,6 +165,7 @@ const { approvalMessageData } = require('../approvals');
 const {
   TOOL_TEXTS, NOT_UNDERSTOOD_LABEL, CHAT_PREFIX, isTimerMinutes, chatText, cleanLine, noHands, TOO_MANY_WAITING_LABEL,
   failedReply, INVITE_NOT_SENT, NOTES_NOT_OPENED, ISSUE_SHARE_FAILED_LABEL,
+  issueSheetBody, createNotConfirmed, GITHUB_CONNECT_FIRST, GITHUB_NOT_CONFIRMED, GITHUB_NOBODY_CONNECTED_LABEL, GITHUB_NOBODY_CONNECTED,
   MAX_CHAT_ANSWER_CHARS, MAX_CHAT_MESSAGE_CHARS, MAX_SHEET_REQUEST_CHARS, MAX_SHEET_NAME_CHARS,
   STEPS, toolStep,
 } = require('./texts');
@@ -162,6 +186,15 @@ const SUMMARY_QUESTION = 'Summarize the meeting so far in a few sentences: what 
 const HANDS_CODES = new Set(['no_hands', 'timeout', 'gone', 'busy', 'not_found', 'several_match', 'no_notes', 'sdk_error', 'unsupported', 'not_allowed', 'share_failed']);
 // The name the store gives a line without a speaker name: nobody's name
 const NO_SPEAKER_NAME = 'Speaker';
+
+// A sheet names at most this many owners (services/approvals.js)
+const MAX_SHEET_OWNERS = 50;
+const CODE = /^[a-z_]{1,40}$/;
+
+/** A tool that acts outside the meeting, as one person who connected their own account. */
+const viaConnector = (tool) => tool.connector === 'github';
+/** Whether people in the meeting see an effect, or something outside it is written. */
+const changes = (tool) => tool.changesMeeting === true || tool.changesOutside === true;
 
 const GONE = Object.freeze({ status: 'refused', reason: 'gone' });
 const refused = (reason) => ({ status: 'refused', reason });
@@ -224,9 +257,14 @@ function createAgent({
   // (meetingId, ownerUserIds) -> whether one of these owners has a panel open
   // in the meeting right now. Without it nothing spoken is heard.
   hasOwnerPanel = () => false,
+  // GitHub as one person (services/connectors/):
+  //   isConnected(userId) -> whether this user has connected their GitHub account right now
+  //   call(tool, args, { userId }) -> Promise<{ ok: true, result } | { ok: false, code }>, with that user's own token
+  github = { isConnected: () => false, call: async () => ({ ok: false, code: 'not_offered' }) },
   // What the panels are told. `thinking(meetingId, userIds, on, { step, channel })`
   // (the fourth only with `on` true; `step` is a sentence of texts.js or null),
-  // `did(meetingId, action, { everyone, userIds })`, `approval(meetingId, userIds, data)`
+  // `did(meetingId, action, { everyone, userIds })`, `approval(meetingId, userIds, data)`,
+  // `result(meetingId, userId, { actionId, result })`: what GitHub answered, for that one owner
   send = {},
   // Passed to the tool table: { webSearch, githubRepo } (tests)
   toolOptions,
@@ -267,6 +305,45 @@ function createAgent({
     } catch {
       return [];
     }
+  }
+
+  /** Whether this person has connected their GitHub account right now. A check that fails says no. */
+  function connected(userId) {
+    try {
+      return isId(userId) && github.isConnected(userId) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** The owners who are connected to GitHub right now: the only people a GitHub sheet is put to. */
+  const connectedAmong = (meetingId) => ownersOf(meetingId).filter(connected).slice(0, MAX_SHEET_OWNERS);
+
+  /**
+   * One GitHub call as this owner, with the run limit: { ok: true, result }
+   * or { ok: false, code }. Only an owner's own connection is ever used, and
+   * only that of the owner named here. Never throws.
+   */
+  async function viaGithub(meetingId, tool, args, userId) {
+    if (!isId(userId) || !ownersOf(meetingId).includes(userId)) return { ok: false, code: 'not_allowed' };
+    if (!connected(userId)) return { ok: false, code: 'not_connected' };
+    try {
+      const answer = await limited(() => github.call(tool.name, args, { userId }), runLimitMs);
+      if (isPlainObject(answer) && answer.ok === true && isPlainObject(answer.result)) return { ok: true, result: answer.result };
+      const known = isPlainObject(answer) && answer.ok === false && typeof answer.code === 'string' && CODE.test(answer.code);
+      return { ok: false, code: known ? answer.code : 'error' };
+    } catch (error) {
+      return { ok: false, code: error && error.code === 'timeout' ? 'timeout' : 'error' };
+    }
+  }
+
+  /**
+   * What GitHub answered goes to the panels of one owner: the one whose
+   * account was asked. Nobody else is told, and nothing of it is kept here.
+   */
+  function tellResult(meetingId, userId, actionId, result) {
+    if (!isId(userId) || !isId(actionId) || !ownersOf(meetingId).includes(userId)) return;
+    tellPanels('result', meetingId, userId, { actionId, result });
   }
 
   /** Whether an owner has a panel open in the meeting right now. A check that fails says no. */
@@ -510,6 +587,8 @@ function createAgent({
     } = ctx;
     try {
       setStep(meetingId, state, toolStep(tool.name, args));
+      // GitHub, as the owner who typed it or agreed to it, with their own connection
+      if (viaConnector(tool)) return await viaGithub(meetingId, tool, args, actorUserId);
       switch (tool.name) {
         case 'answer_from_meeting':
           // From the transcript only, which everyone in the meeting can read
@@ -578,8 +657,12 @@ function createAgent({
     }
   }
 
-  /** How a run ended, recorded and as handle() answers it. `text`: an answer for the asker's own panel. */
-  function ended(ctx, action, outcome, text) {
+  /**
+   * How a run ended, recorded and as handle() answers it. `text`: an answer
+   * for the asker's own panel. `result`: what GitHub answered, when it is the
+   * asker's own to get (an owner's typed read that ran at once).
+   */
+  function ended(ctx, action, outcome, text, result) {
     const {
       meetingId, state, req, tool, args,
     } = ctx;
@@ -601,6 +684,17 @@ function createAgent({
       // without the number (everyone reads it); the asker's own answer has the number
       failedLabel = ISSUE_SHARE_FAILED_LABEL;
     }
+    if (!outcome.ok && viaConnector(tool)) {
+      if (outcome.code === 'nobody_connected') {
+        // No owner could be asked. Connecting is an owner's to do; anyone else is told that nobody has
+        failedLabel = GITHUB_NOBODY_CONNECTED_LABEL;
+        reply = ctx.asker === 'owner' && req.channel === 'panel' ? GITHUB_CONNECT_FIRST : GITHUB_NOBODY_CONNECTED;
+      } else if (createNotConfirmed(tool.name, outcome.code)) {
+        // The issue may exist all the same: the record says so, since the
+        // owner who agreed learns how it ended from the record
+        failedLabel = GITHUB_NOT_CONFIRMED;
+      }
+    }
     const stored = action
       ? finish(meetingId, state, action.id, outcome.ok ? 'done' : 'failed', outcome.ok ? texts.done(args) : failedLabel)
       : null;
@@ -616,7 +710,7 @@ function createAgent({
       };
     }
     return {
-      status: 'done', tool: tool.name, reply: texts.reply(args), action: stored,
+      status: 'done', tool: tool.name, reply: texts.reply(args, isPlainObject(outcome.result) ? outcome.result : null), action: stored, ...(isPlainObject(result) && { result }),
     };
   }
 
@@ -625,12 +719,24 @@ function createAgent({
    * caller, never posted: this is the way of a typed request, and of a tool
    * an owner approved that posts nothing a model wrote.
    */
-  async function runAndFinish(ctx, action, actorUserId) {
+  async function runAndFinish(ctx, action, actorUserId, { approved = false } = {}) {
     const result = await runTool(ctx, actorUserId);
     if (!ctx.alive()) return GONE;
     // Only someone at a panel is handed a text; nothing spoken gets here with one
     const text = result.ok && typeof result.text === 'string' && ctx.req.channel === 'panel' ? result.text : undefined;
-    return ended(ctx, action, result, text);
+    // What GitHub answered is for the owner whose account was asked, and
+    // nobody else: the owner who approved gets it on their panel (before
+    // they are told how it ended); the owner who typed and whose request ran
+    // at once gets it as their answer
+    let own;
+    if (result.ok && isPlainObject(result.result)) {
+      if (approved) {
+        if (action) tellResult(ctx.meetingId, actorUserId, action.id, result.result);
+      } else if (ctx.req.channel === 'panel' && ctx.req.userId === actorUserId) {
+        own = result.result;
+      }
+    }
+    return ended(ctx, action, result, text, own);
   }
 
   /**
@@ -665,7 +771,7 @@ function createAgent({
         store.updateAction(meetingId, action.id, { status: 'pending' });
         // The owner who pressed the button: it runs on their panel, as them
         const approver = isId(byUserId) ? byUserId : null;
-        if (body === null) return runAndFinish(ctx, action, approver);
+        if (body === null) return runAndFinish(ctx, action, approver, { approved: true });
         // The answer the owner saw, as it is: no model is asked again
         const posted = await postLine(meetingId, body, MAX_CHAT_ANSWER_CHARS, approver);
         return alive() ? ended(ctx, action, posted) : GONE;
@@ -709,9 +815,15 @@ function createAgent({
     } = ctx;
     const texts = TOOL_TEXTS[tool.name];
     // Who is asked: the owners; for a tool that needs a host's panel, only
-    // the owners who have one open. It would run on the panel of whoever agrees
-    const audience = tool.needsHost === true ? hostsAmong(meetingId, tool.name) : ownersOf(meetingId);
-    const why = audience.length === 0 ? 'no_hands' : (roomForSheet(meetingId) ? null : 'busy');
+    // the owners who have one open. It would run on the panel of whoever agrees.
+    // For GitHub, only the owners who are connected right now: it would run
+    // with the account of whoever agrees
+    const some = tool.needsHost === true || viaConnector(tool);
+    let audience = ownersOf(meetingId);
+    if (viaConnector(tool)) audience = connectedAmong(meetingId);
+    else if (tool.needsHost === true) audience = hostsAmong(meetingId, tool.name);
+    const nobody = viaConnector(tool) ? 'nobody_connected' : 'no_hands';
+    const why = audience.length === 0 ? nobody : (roomForSheet(meetingId) ? null : 'busy');
     if (why !== null) {
       // No sheet: nobody could do it, or the owners have as many open as they take
       if (answer !== null) return ended(ctx, answer.action, { ok: false, code: why });
@@ -726,8 +838,12 @@ function createAgent({
         tool: tool.name, label: texts.asked(args), askedBy: req.name, channel: req.channel, status: 'waiting_approval', public: true,
       });
     if (!action) return refused('busy');
-    // What will be posted: the answer a model wrote, or the message asked for
-    const body = answer !== null ? answer.body : (tool.name === 'post_to_chat' ? args.message : null);
+    // What will be posted: the answer a model wrote, or the message asked for.
+    // For a new GitHub issue: its title and description, all of what is sent
+    let body = null;
+    if (answer !== null) body = answer.body;
+    else if (tool.name === 'post_to_chat') body = args.message;
+    else if (tool.name === 'github_create_issue') body = issueSheetBody(args);
     const opened = approvals.open(meetingId, {
       kind: 'agent_action',
       askedByUserId: req.userId,
@@ -739,7 +855,7 @@ function createAgent({
       primaryLabel: texts.primary(args),
       body,
       request: cleanLine(req.text, MAX_SHEET_REQUEST_CHARS),
-      ...(tool.needsHost === true && { forUserIds: audience }),
+      ...(some && { forUserIds: audience }),
       onOutcome: (outcome, by) => ownersAnswered(ctx, action, outcome, by ? by.byUserId : null, answer !== null ? answer.body : null),
     });
     // The owners have as many questions open as they take after all
@@ -850,7 +966,7 @@ function createAgent({
       };
     }
 
-    const toolKind = tool === null ? 'none' : (tool.changesMeeting ? 'change' : 'read');
+    const toolKind = tool === null ? 'none' : (changes(tool) ? 'change' : 'read');
     const asker = askerOf(meetingId, req);
     let outcome = decide({
       channel: req.channel, asker, whoCanAsk: store.getMeta(meetingId).whoCanAsk, toolKind, ownerPanelOpen: heard === true,
@@ -867,7 +983,12 @@ function createAgent({
     // An owner typed it, but a model wrote what would be done: when that is
     // not in the owner's own words, they get the sheet like anyone else
     // (read from the request as the model got it: cleaned, nothing invisible in it)
-    if (outcome === 'run' && tool.changesMeeting && (request === null || !typedRequestCovers(request, tool.name, args))) outcome = 'sheet';
+    if (outcome === 'run' && changes(tool) && (request === null || !typedRequestCovers(request, tool.name, args))) outcome = 'sheet';
+    // GitHub is asked as one owner, with their own account. Only an owner's
+    // own typed read runs at once, as them; anything else (spoken, typed by
+    // someone who is not an owner, or a create) waits for an owner who is
+    // connected to agree, and nothing is asked of GitHub before that
+    const asksFirst = viaConnector(tool) && !(req.channel === 'panel' && asker === 'owner' && outcome === 'run');
 
     const ctx = {
       meetingId,
@@ -881,8 +1002,8 @@ function createAgent({
       askerVerified: req.channel === 'panel' || asker === 'owner',
     };
     // Nothing spoken runs without the sheet, whatever was decided above
-    if (req.channel === 'voice') return tool.changesMeeting ? askOwners(ctx) : answerThenAsk(ctx);
-    if (outcome === 'sheet') return askOwners(ctx);
+    if (req.channel === 'voice') return changes(tool) || asksFirst ? askOwners(ctx) : answerThenAsk(ctx);
+    if (outcome === 'sheet' || asksFirst) return askOwners(ctx);
 
     const isPublic = tool.changesMeeting;
     const action = store.appendAction(meetingId, {

@@ -463,3 +463,19 @@
 .settings-classic-link:hover {
   text-decoration: underline;
 }
+
+/* Connectors: one row per account, its status and the one action that fits */
+.settings-connector-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.settings-connector-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}

@@ -20,8 +20,10 @@
  *                   anyone can set. The asker may have no user id (a request
  *                   spoken in the meeting); how often someone may ask is the
  *                   agent's limit, not this module's. `forUserIds`, when
- *                   given, is the owners whose panels can do it (a tool that
- *                   needs a host): only they are shown it and may answer it.
+ *                   given, is the owners who can do it (a tool that needs a
+ *                   host's panel; a GitHub tool, which runs with the GitHub
+ *                   account of whoever agrees, so only the owners who are
+ *                   connected): only they are shown it and may answer it.
  *
  * What an answer means: whoever calls answer() does the work first (for
  * 'share_notes' the route turns sharing on, routes/arlo.js), then reports.

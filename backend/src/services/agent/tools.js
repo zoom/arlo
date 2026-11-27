@@ -13,6 +13,11 @@
  * needs the Zoom Apps SDK, so an owner's open panel does it).
  * `changesMeeting`: whether people in the meeting see an effect.
  * `needsHost`: the panel that runs it must be a host's or co-host's.
+ * `connector`: it acts outside the meeting through a connector
+ * (services/connectors/), as one person who connected their own account:
+ * the owner who typed the request, or the owner who pressed the approval.
+ * `changesOutside`: it writes something there (a new GitHub issue). Such a
+ * tool always needs the approval sheet.
  *
  * An argument is text within a length, or (`enum`) one of a fixed list of
  * names, which is how a reaction is given: a model never writes the emoji.
@@ -28,12 +33,23 @@
  * a JSON integer, or the same written as plain digits ("5"), rebuilt as the
  * number. "5.5", "five" and anything else is refused.
  *
+ * The three GitHub tools (github_list_issues, github_get_issue,
+ * github_create_issue) are in the table only when "Connect GitHub" is
+ * available on the deployment (the GitHub App's settings and the repository);
+ * the table is the meeting's, not one person's, so whether someone is
+ * connected is asked when a tool runs. Their arguments are checked by the
+ * connector's own reader (readArgs, services/connectors/github.js): optional
+ * ones may be left out, text is cleaned to plain text and refused when too
+ * long, and a new issue's title and description must fit the approval sheet
+ * together, which shows all of what is sent.
+ *
  * This file has no code that runs a tool.
  */
 const { showableName } = require('../../lib/displayName');
 const { readGithubRepo, normalizeIssueNumber, MAX_ISSUE_NUMBER } = require('../../lib/github');
+const { readArgs: readGithubArgs } = require('../connectors/github');
 const {
-  NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS, REACTION_NAMES, TIMER_MIN_MINUTES, TIMER_MAX_MINUTES,
+  NOT_IN_TEXT, chatText, MAX_CHAT_MESSAGE_CHARS, MAX_CHAT_ANSWER_CHARS, REACTION_NAMES, TIMER_MIN_MINUTES, TIMER_MAX_MINUTES, issueSheetBody,
 } = require('./texts');
 
 const text = (description, maxLength) => ({ type: 'string', description, maxLength });
@@ -45,8 +61,9 @@ const yesNo = (description) => ({ type: 'boolean', description });
 const whole = (description, minimum, maximum) => ({
   type: 'integer', description, minimum, maximum,
 });
-const parameters = (properties = {}) => ({
-  type: 'object', properties, required: Object.keys(properties), additionalProperties: false,
+// `optional`: the names of the properties that may be left out
+const parameters = (properties = {}, optional = []) => ({
+  type: 'object', properties, required: Object.keys(properties).filter((key) => !optional.includes(key)), additionalProperties: false,
 });
 
 function deepFreeze(value) {
@@ -154,13 +171,50 @@ const TABLE = deepFreeze([
     // The panel of the owner who typed or approved it opens the issue in the
     // system browser and, when asked, Zoom's share dialog, where that owner
     // picks the window. Only with GITHUB_DEFAULT_REPO (listTools below)
-    description: 'Open one issue of the team\'s GitHub repository in the browser, by its number, and bring up screen sharing when that is asked too. Use only when asked to open, pull up or show an issue and the asker gives its number, like issue 42. Not when no number is given, not for a link, a web page or another repository, and not when an issue is only talked about.',
+    description: 'Open one issue that exists in the team\'s GitHub repository in the browser, by its number, and bring up screen sharing when that is asked too. Use only when asked to open, pull up or show an issue and the asker gives its number, like open issue 42, or pull up issue 42 and share it. Not when no number is given (to open an issue about something is creating a new issue), not for what an issue says, not for a link, a web page or another repository, and not when an issue is only talked about.',
     parameters: parameters({
       number: whole('The issue number as digits, from 1 to 9999999. A number that was spoken as words ("forty two") is given as digits (42). Never a link.', 1, MAX_ISSUE_NUMBER),
       share: yesNo('true only when the asker also asked to share it or to share the screen. Otherwise false.'),
     }),
     runs: 'panel',
     changesMeeting: true,
+  },
+  {
+    name: 'github_list_issues',
+    // The server asks GitHub, as the owner who typed it or agreed to it. What
+    // comes back goes to that owner's panel and nowhere else
+    description: 'List the open issues of the team\'s GitHub repository. Use when asked to show, list or look up the open issues, the bugs, or the issues about something or with a label. Not for opening one issue in the browser, not for what one numbered issue says, and not for creating an issue.',
+    parameters: parameters({
+      query: text('Words to look for in the issue titles, only when the asker gave some. Otherwise leave it out.', 100),
+      label: text('One label name, only when the asker named a label. Otherwise leave it out.', 50),
+    }, ['query', 'label']),
+    runs: 'server',
+    changesMeeting: false,
+    connector: 'github',
+  },
+  {
+    name: 'github_get_issue',
+    description: 'Look up what one issue of the team\'s GitHub repository says, by its number. Use when asked what an issue is about, what it says, or for its status, like what is issue 42 about. Not for opening the issue in the browser or sharing it on screen (that is opening an issue).',
+    parameters: parameters({
+      number: whole('The issue number as digits, from 1 to 9999999. A number that was spoken as words ("forty two") is given as digits (42). Never a link.', 1, MAX_ISSUE_NUMBER),
+    }),
+    runs: 'server',
+    changesMeeting: false,
+    connector: 'github',
+  },
+  {
+    name: 'github_create_issue',
+    // Always after the approval sheet, which shows the title and the
+    // description in full; created as the owner who agrees
+    description: 'Create a new issue in the team\'s GitHub repository. Use when asked to create, file, log or open a new issue or a bug and the asker says what it is about, like open an issue: checkout fails on Safari, or file a bug for the login timeout. Not when the asker gives the number of an issue that exists (that is opening or looking up an issue), and not when a problem is only talked about.',
+    parameters: parameters({
+      title: text('A short title for the new issue, in the asker\'s own words. 3 to 200 characters.', 200),
+      body: text('A description, only when the asker gave more than fits a title. At most 300 characters. Otherwise leave it out.', 300),
+    }, ['body']),
+    runs: 'server',
+    changesMeeting: false,
+    changesOutside: true,
+    connector: 'github',
   },
   {
     name: 'web_search',
@@ -205,13 +259,30 @@ function githubRepo(options) {
 }
 
 /**
+ * Whether people can connect their own GitHub account on this deployment (the
+ * GitHub App's settings and a repository, config.githubConnectAvailable). Read
+ * when asked. `{ githubConnect }` overrides the setting (tests, the
+ * evaluation script); without a repository there is none whatever it says.
+ */
+function githubConnectOn(options) {
+  if (githubRepo(options) === null) return false;
+  if (options && typeof options.githubConnect === 'boolean') return options.githubConnect;
+  // An override of the repository alone (tests) says nothing about the app
+  if (options && Object.prototype.hasOwnProperty.call(options, 'githubRepo')) return false;
+  // eslint-disable-next-line global-require
+  return require('../../config').githubConnectAvailable === true;
+}
+
+/**
  * The tools of this deployment, in the table's order. Frozen.
- * `{ webSearch, githubRepo }` override the settings (tests).
+ * `{ webSearch, githubRepo, githubConnect }` override the settings (tests).
  */
 function listTools(options) {
   const search = webSearchOn(options);
   const issues = githubRepo(options) !== null;
-  return TABLE.filter((tool) => (tool.name !== 'web_search' || search) && (tool.name !== 'open_issue' || issues));
+  const connect = githubConnectOn(options);
+  return TABLE.filter((tool) => (tool.name !== 'web_search' || search) && (tool.name !== 'open_issue' || issues)
+    && (tool.connector !== 'github' || connect));
 }
 
 const toolNames = (options) => listTools(options).map((tool) => tool.name);
@@ -264,6 +335,14 @@ function readArgument(key, value, property) {
 function validateToolCall(name, args, options) {
   const tool = getTool(name, options);
   if (!tool || args === null || typeof args !== 'object' || Array.isArray(args)) return { ok: false };
+  if (tool.connector === 'github') {
+    // The connector's own reader: the same check its call() makes again
+    const read = readGithubArgs(tool.name, args);
+    if (read === null) return { ok: false };
+    // A new issue: the sheet shows the title and the description in full, or there is no call
+    if (tool.name === 'github_create_issue' && issueSheetBody(read).length > MAX_CHAT_ANSWER_CHARS) return { ok: false };
+    return { ok: true, args: read };
+  }
   const known = Object.keys(tool.parameters.properties);
   const given = Object.keys(args);
   if (given.length !== known.length || !given.every((key) => known.includes(key))) return { ok: false };

@@ -1,35 +1,42 @@
 /**
- * The GitHub connector: three tools of Arlo's own, each backed by one tool of
- * GitHub's MCP server, all in the deployment's one repository.
+ * The GitHub connector: three tools of Arlo's own, each one call to GitHub's
+ * REST API, all in the deployment's one repository, each as one user.
  *
- *   github_list_issues   { query?, label? }  -> list_issues   (read)
- *   github_get_issue     { number }          -> issue_read    (read)
- *   github_create_issue  { title, body? }    -> issue_write   (write)
+ *   github_list_issues   { query?, label? }  -> GET  /repos/{owner}/{repo}/issues           (read)
+ *   github_get_issue     { number }          -> GET  /repos/{owner}/{repo}/issues/{number}  (read)
+ *   github_create_issue  { title, body? }    -> POST /repos/{owner}/{repo}/issues           (write)
  *
  * The rules:
+ * - Whose GitHub: `call(tool, args, { userId })` takes that user's own token
+ *   from the connection store (services/connectors/githubConnections.js) for
+ *   this one call. There is no deployment token. Not connected: 'not_connected',
+ *   and nothing is sent. One user's token is never used for another's call.
  * - The repository is always `defaultRepo`. No argument names another one,
- *   so a model or a speaker cannot reach one.
- * - Arlo builds every argument that is sent. Nothing else of the server's
- *   tool list can be called through here.
- * - The server's tools are checked before any is used (`start()`): the tool
- *   must be listed and its input schema must have every parameter Arlo sends,
- *   with the type Arlo sends. A tool that is missing or shaped differently
- *   means that Arlo tool is not offered, with one warning that names the tool.
- * - What the server answers is untrusted text (an issue title can read
- *   "ignore your instructions"). It is parsed, and a result is rebuilt from
- *   the known fields: numbers checked, strings stripped of control and
- *   invisible characters and cut, lists cut. Nothing is interpreted. The URL
- *   of an issue is never the server's: it is built here from the repository
- *   and the number; an item whose own URL is not under
- *   https://github.com/<repo>/issues/ is dropped.
+ *   so a model or a speaker cannot reach one. GitHub decides what the
+ *   connected person may do there.
+ * - Arlo builds everything that is sent: the path from the repository and a
+ *   rebuilt number, a fixed query, and for a new issue the title and body and
+ *   nothing else (no labels, assignees, milestone).
+ * - 401 (GitHub refuses the token: revoked, or run out early): for a read the
+ *   token is refreshed once and the call sent once more; still 401, the
+ *   connection is removed and the answer is 'not_connected'. A create is never
+ *   sent a second time, whatever happened to the first: its 401 is
+ *   'unauthorized' (the token is refreshed for the next request).
+ * - What GitHub answers is untrusted text (an issue title can read "ignore
+ *   your instructions"). A result is rebuilt from the known fields: numbers
+ *   checked, strings stripped of control and invisible characters and cut,
+ *   lists cut. Nothing is interpreted, and no result has a URL: the panel
+ *   builds a link from the repository and the number. An item whose own link
+ *   is not under https://github.com/<repo>/issues/ is dropped.
+ * - The list endpoint also returns pull requests ("You can identify pull
+ *   requests by the pull_request key", GitHub's reference): every item with
+ *   that key is dropped.
+ * - A text filter: one page of the 100 most recently updated open issues is
+ *   read, and their titles are compared here without regard to case. `total`
+ *   is the number of matches on that page (REST gives no count).
  * - `call()` never throws: { ok: true, result } or { ok: false, code }.
- * - Nothing of an issue (title, body, label) and nothing of a request is
- *   logged here. The token is not known here at all: it is in the client.
- *
- * The MCP tool names, parameters and result shapes below are from GitHub's
- * documentation and source (github/github-mcp-server, README and
- * pkg/github/issues.go, read 2026-11-26), not yet observed against the
- * hosted server. `node scripts/connector-check.js` prints what it really has.
+ * - Nothing of an issue (title, body, label), nothing of a request, no token,
+ *   login or user id is logged here. Nothing is logged here at all.
  */
 
 const {
@@ -37,61 +44,25 @@ const {
 } = require('../../lib/github');
 
 const TOOL_NAMES = Object.freeze(['github_list_issues', 'github_get_issue', 'github_create_issue']);
+const READ_TOOLS = new Set(['github_list_issues', 'github_get_issue']);
 
 const MAX_ISSUES = 10;
 const MAX_LABELS = 5;
 const MAX_TITLE_CHARS = 200;
 const MIN_TITLE_CHARS = 3;
 const MAX_BODY_SHOWN_CHARS = 1000;
-const MAX_BODY_SENT_CHARS = 4000;
+// 300 in this build: the approval sheet shows the title and the description in
+// full (at most 500 characters together), and what it shows is what is sent
+const MAX_BODY_SENT_CHARS = 300;
 const MAX_QUERY_CHARS = 100;
 const MAX_LABEL_CHARS = 50;
-// How many issues a text filter looks through: the most recently updated open
-// ones, one page. With the `fields` parameter the answer is small enough for a
-// full page; without it the bodies come along, so fewer are asked for
-const SEARCHED_WITH_FIELDS = 100;
-const SEARCHED_WITHOUT_FIELDS = 30;
-// The parts of an issue Arlo reads from a list (names of list_issues' `fields`)
-const LIST_FIELDS = Object.freeze(['number', 'title', 'labels', 'updated_at']);
+// The page that is read: the most recently updated open issues
+const PAGE_SIZE = 100;
+// A page of issues comes with their bodies (REST has no way to leave them
+// out), so its answer may be longer than the 200 KB of the other calls
+const MAX_LIST_BYTES = 2 * 1024 * 1024;
 
 const CREATED_BY_ARLO = 'Opened by Arlo during a Zoom meeting at the request of a meeting participant.';
-
-// What Arlo sends to each MCP tool: the parameter and the JSON type of the
-// value. `values` are sent as they are, so an enum in the schema must have
-// them. `sometimes`: not sent with every call, so the tool must not require it
-const NEEDS = Object.freeze({
-  github_list_issues: {
-    tool: 'list_issues',
-    params: {
-      owner: { type: 'string' },
-      repo: { type: 'string' },
-      state: { type: 'string', values: ['OPEN'] },
-      labels: { type: 'array', sometimes: true },
-      orderBy: { type: 'string', values: ['UPDATED_AT'] },
-      direction: { type: 'string', values: ['DESC'] },
-      perPage: { type: 'number' },
-    },
-  },
-  github_get_issue: {
-    tool: 'issue_read',
-    params: {
-      method: { type: 'string', values: ['get'] },
-      owner: { type: 'string' },
-      repo: { type: 'string' },
-      issue_number: { type: 'number' },
-    },
-  },
-  github_create_issue: {
-    tool: 'issue_write',
-    params: {
-      method: { type: 'string', values: ['create'] },
-      owner: { type: 'string' },
-      repo: { type: 'string' },
-      title: { type: 'string' },
-      body: { type: 'string' },
-    },
-  },
-});
 
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -102,85 +73,24 @@ const UNSHOWN = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/gu;
 const UNSHOWN_BUT_NEWLINE = /(?!\n)[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Cs}\p{Zl}\p{Zp}]/gu;
 // A time as GitHub writes one: 2026-11-26T10:00:00Z
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+// Text longer than this is cut before it is looked at: nothing of it could be kept
+const MAX_READ_CHARS = 20000;
 
 /** The first `max` characters, never half of a pair. */
-const cut = (text, max) => (text.length <= max ? text : Array.from(text).slice(0, max).join(''));
+const cut = (text, max) => (text.length <= max ? text : Array.from(text.slice(0, max * 2)).slice(0, max).join(''));
 
 /** One line of plain text of at most `max` characters, or null when `value` is not text. */
 function line(value, max) {
   if (typeof value !== 'string') return null;
-  return cut(value.replace(/[\r\n\t\p{Zl}\p{Zp}]/gu, ' ').replace(UNSHOWN, '').replace(/\s+/gu, ' ').trim(), max);
+  return cut(value.slice(0, MAX_READ_CHARS).replace(/[\r\n\t\p{Zl}\p{Zp}]/gu, ' ').replace(UNSHOWN, '').replace(/\s+/gu, ' ').trim(), max);
 }
 
 /** Text of several lines, of at most `max` characters, or null when `value` is not text. */
 function lines(value, max) {
   if (typeof value !== 'string') return null;
-  return cut(value.replace(/\r\n?|[\p{Zl}\p{Zp}]/gu, '\n').replace(/\t/g, ' ').replace(UNSHOWN_BUT_NEWLINE, '').replace(/\n{3,}/g, '\n\n').trim(), max);
-}
-
-// --- the server's tools ----------------------------------------------------------------
-
-/** The JSON types a schema property takes, as a list; [] when it does not say. */
-function typesOf(property) {
-  if (!isPlainObject(property)) return [];
-  const { type } = property;
-  if (typeof type === 'string') return [type];
-  if (Array.isArray(type)) return type.filter((one) => typeof one === 'string');
-  return [];
-}
-
-const takes = (property, type) => {
-  const types = typesOf(property);
-  return type === 'number' ? types.includes('number') || types.includes('integer') : types.includes(type);
-};
-
-/**
- * Whether one MCP tool is what an Arlo tool needs: 'ok', 'missing' (not in
- * the list) or 'shape' (a parameter Arlo sends is not in its input schema,
- * takes another type or does not allow the value, or the tool requires a
- * parameter Arlo does not send).
- */
-function fits(need, tools) {
-  const tool = tools.find((one) => isPlainObject(one) && one.name === need.tool);
-  if (!tool) return 'missing';
-  const schema = tool.inputSchema;
-  if (!isPlainObject(schema) || !isPlainObject(schema.properties)) return 'shape';
-  for (const [name, { type, values }] of Object.entries(need.params)) {
-    if (!own(schema.properties, name)) return 'shape';
-    const property = schema.properties[name];
-    if (!takes(property, type)) return 'shape';
-    if (values && Array.isArray(property.enum) && !values.every((value) => property.enum.includes(value))) return 'shape';
-  }
-  if (schema.required !== undefined) {
-    if (!Array.isArray(schema.required)) return 'shape';
-    if (!schema.required.every((name) => typeof name === 'string' && own(need.params, name) && !need.params[name].sometimes)) return 'shape';
-  }
-  return 'ok';
-}
-
-/** Whether list_issues takes `fields` with every part Arlo reads. */
-function takesListFields(tools) {
-  const tool = tools.find((one) => isPlainObject(one) && one.name === NEEDS.github_list_issues.tool);
-  const property = tool && isPlainObject(tool.inputSchema) && isPlainObject(tool.inputSchema.properties) ? tool.inputSchema.properties.fields : null;
-  if (!takes(property, 'array') || !isPlainObject(property.items) || !takes(property.items, 'string')) return false;
-  const allowed = property.items.enum;
-  return !Array.isArray(allowed) || LIST_FIELDS.every((field) => allowed.includes(field));
-}
-
-/**
- * What the server's tool list means for Arlo's three tools:
- * { github_list_issues: { offered, mcpTool, reason?: 'missing' | 'shape' }, …, listFields: boolean }.
- */
-function checkTools(tools) {
-  const listed = Array.isArray(tools) ? tools : [];
-  const checked = {};
-  for (const name of TOOL_NAMES) {
-    const need = NEEDS[name];
-    const verdict = fits(need, listed);
-    checked[name] = verdict === 'ok' ? { offered: true, mcpTool: need.tool } : { offered: false, mcpTool: need.tool, reason: verdict };
-  }
-  checked.listFields = checked.github_list_issues.offered && takesListFields(listed);
-  return checked;
+  return cut(value.slice(0, MAX_READ_CHARS).replace(/\r\n?|[\p{Zl}\p{Zp}]/gu, '\n').replace(/\t/g, ' ').replace(UNSHOWN_BUT_NEWLINE, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim(), max);
 }
 
 // --- Arlo's arguments ------------------------------------------------------------------
@@ -227,22 +137,9 @@ function readArgs(name, args) {
   return null;
 }
 
-// --- the server's answers --------------------------------------------------------------
+// --- GitHub's answers ------------------------------------------------------------------
 
 class BadResponse extends Error {}
-
-/** The JSON object in a tool's answer, or a BadResponse. */
-function parsed(answer) {
-  if (!isPlainObject(answer) || !Array.isArray(answer.texts) || typeof answer.texts[0] !== 'string') throw new BadResponse();
-  let value;
-  try {
-    value = JSON.parse(answer.texts[0]);
-  } catch {
-    throw new BadResponse();
-  }
-  if (!isPlainObject(value)) throw new BadResponse();
-  return value;
-}
 
 /** At most five label names from what an issue has as its labels. */
 function labelsOf(raw) {
@@ -256,196 +153,179 @@ function labelsOf(raw) {
   return labels;
 }
 
+/** Whether GitHub says this item is a pull request. */
+const isPullRequest = (raw) => isPlainObject(raw) && own(raw, 'pull_request') && raw.pull_request !== null && raw.pull_request !== undefined;
+
 /**
- * One issue rebuilt from what the server gave, or null when it cannot be
- * used: { number, title, url, labels, updatedAt }. The url is built here.
+ * The number and title of one issue of this repository, or null when what
+ * GitHub gave cannot be used. GitHub's own link, when there is one, must be an
+ * issue of this repository; it is checked and never kept.
  */
 function issueFrom(raw, repo) {
-  if (!isPlainObject(raw) || !isIssueNumber(raw.number)) return null;
+  if (!isPlainObject(raw) || !isIssueNumber(raw.number) || isPullRequest(raw)) return null;
   const title = line(raw.title, MAX_TITLE_CHARS);
   if (!title) return null;
   const prefix = `https://github.com/${repo}/issues/`;
-  // The server's own link, when it gives one, must be an issue of this repository
   if (raw.html_url !== undefined && (typeof raw.html_url !== 'string' || !raw.html_url.startsWith(prefix))) return null;
-  const url = issueUrl(repo, raw.number);
-  if (!url || !url.startsWith(prefix)) return null;
-  return {
-    number: raw.number,
-    title,
-    url,
-    labels: labelsOf(raw.labels),
-    updatedAt: typeof raw.updated_at === 'string' && TIMESTAMP.test(raw.updated_at) ? raw.updated_at : null,
-  };
+  return { number: raw.number, title };
+}
+
+// What a status that is not 200 / 201 / 401 means. A 5xx may be a call that
+// arrived: after a create it does not say that no issue was created
+function failureOf(status) {
+  if (status === 404 || status === 410) return 'not_found';
+  if (status === 403 || status === 429) return 'forbidden';
+  if (status >= 500) return 'unreachable';
+  return 'refused';
 }
 
 // --- the connector ---------------------------------------------------------------------
 
 /**
- * @param client      an MCP client as createMcpClient() returns one
- * @param defaultRepo "owner/name", the one repository every tool works in
- * @param warn        where the one warning per tool that is not offered goes
+ * @param rest         createGithubRest(): `request({ method, path, query, body, token, maxBytes })`
+ * @param connections  the per-user store: `getAccessToken(userId)`,
+ *                     `refreshAccessToken(userId, refusedToken)`, `drop(userId)`, `status(userId)`
+ * @param defaultRepo  "owner/name", the one repository every tool works in
  */
-function createGithubConnector({ client, defaultRepo, warn = console.warn } = {}) {
-  if (!client || typeof client.listTools !== 'function' || typeof client.callTool !== 'function') throw new TypeError('GitHub connector: an MCP client is required');
+function createGithubConnector({ rest, connections, defaultRepo } = {}) {
+  if (!rest || typeof rest.request !== 'function') throw new TypeError('GitHub connector: a REST client is required');
+  if (!connections || ['getAccessToken', 'refreshAccessToken', 'drop', 'status'].some((name) => typeof connections[name] !== 'function')) {
+    throw new TypeError('GitHub connector: the connection store is required');
+  }
   if (readGithubRepo(defaultRepo).repo !== defaultRepo || !defaultRepo) throw new TypeError('GitHub connector: the repository must be written as owner/name');
-  const [owner, repo] = defaultRepo.split('/');
+  const issuesPath = `/repos/${defaultRepo}/issues`;
 
-  let checked = null; // what checkTools() said, once the server's list was read
-  let starting = null;
-  const warned = new Set();
+  const listIssues = ({ query, label }) => ({
+    send: (token) => rest.request({
+      method: 'GET',
+      path: issuesPath,
+      query: {
+        state: 'open', sort: 'updated', direction: 'desc', per_page: PAGE_SIZE, ...(label && { labels: label }),
+      },
+      token,
+      maxBytes: MAX_LIST_BYTES,
+    }),
+    read: (data) => {
+      if (!Array.isArray(data)) throw new BadResponse();
+      let issues = [];
+      const seen = new Set();
+      for (const raw of data.slice(0, PAGE_SIZE)) {
+        const issue = issueFrom(raw, defaultRepo);
+        if (!issue || seen.has(issue.number)) continue;
+        seen.add(issue.number);
+        issues.push({
+          ...issue,
+          labels: labelsOf(raw.labels),
+          updatedAt: typeof raw.updated_at === 'string' && TIMESTAMP.test(raw.updated_at) ? raw.updated_at : null,
+        });
+      }
+      if (query) {
+        // The text is never sent to GitHub: the titles of the page are compared here
+        const wanted = query.toLowerCase();
+        issues = issues.filter((issue) => issue.title.toLowerCase().includes(wanted));
+      }
+      return {
+        kind: 'github_issues', repo: defaultRepo, total: issues.length, issues: issues.slice(0, MAX_ISSUES),
+      };
+    },
+  });
 
-  function warnOnce(key, sentence) {
-    if (warned.has(key)) return;
-    warned.add(key);
-    warn(sentence);
-  }
-
-  async function check() {
-    let tools;
-    try {
-      tools = await client.listTools();
-    } catch (error) {
-      const code = error && typeof error.code === 'string' ? error.code : 'unreachable';
-      warnOnce(`list:${code}`, `GitHub connector: could not read the MCP server's tool list (${code}); no GitHub tool is offered.`);
-      return { ok: false, code };
-    }
-    checked = checkTools(tools);
-    for (const name of TOOL_NAMES) {
-      if (checked[name].offered) continue;
-      const why = checked[name].reason === 'missing' ? 'is not in the MCP server\'s tool list' : 'has other parameters than expected';
-      warnOnce(`tool:${name}`, `GitHub connector: ${name} is not offered: the tool ${checked[name].mcpTool} ${why}.`);
-    }
-    return { ok: true };
-  }
-
-  /**
-   * Reads the server's tool list and decides which of Arlo's tools are
-   * offered: { ok: true, offered: [names] } or { ok: false, code, offered: [] }.
-   * Never throws. Once the list was read it is not read again.
-   */
-  async function start() {
-    if (!checked) {
-      if (!starting) starting = check().finally(() => { starting = null; });
-      const outcome = await starting;
-      if (!outcome.ok) return { ok: false, code: outcome.code, offered: [] };
-    }
-    return { ok: true, offered: offeredTools() };
-  }
-
-  /** The names of Arlo's tools that can be used; [] before start() has read the server's list. */
-  function offeredTools() {
-    return checked ? TOOL_NAMES.filter((name) => checked[name].offered) : [];
-  }
-
-  async function listIssues({ query, label }) {
-    const searched = checked.listFields ? SEARCHED_WITH_FIELDS : SEARCHED_WITHOUT_FIELDS;
-    const sent = {
-      owner, repo, state: 'OPEN', orderBy: 'UPDATED_AT', direction: 'DESC', perPage: query ? searched : MAX_ISSUES,
-    };
-    if (label) sent.labels = [label];
-    if (checked.listFields) sent.fields = [...LIST_FIELDS];
-    const answer = await client.callTool(NEEDS.github_list_issues.tool, sent);
-    if (answer.isError) return { ok: false, code: 'tool_error' };
-    const data = parsed(answer);
-    if (!Array.isArray(data.issues)) throw new BadResponse();
-
-    let issues = [];
-    const seen = new Set();
-    for (const raw of data.issues.slice(0, SEARCHED_WITH_FIELDS)) {
-      const issue = issueFrom(raw, defaultRepo);
-      if (!issue || seen.has(issue.number)) continue;
-      seen.add(issue.number);
-      issues.push(issue);
-    }
-    let total;
-    if (query) {
-      // The MCP tool has no text filter: the titles of the page that was read
-      // are compared here, without regard to case
-      const wanted = query.toLowerCase();
-      issues = issues.filter((issue) => issue.title.toLowerCase().includes(wanted));
-      total = issues.length;
-    } else {
-      total = Number.isSafeInteger(data.totalCount) && data.totalCount >= issues.length ? data.totalCount : issues.length;
-    }
-    return { ok: true, result: { repo: defaultRepo, total, issues: issues.slice(0, MAX_ISSUES) } };
-  }
-
-  async function getIssue({ number }) {
-    const answer = await client.callTool(NEEDS.github_get_issue.tool, {
-      method: 'get', owner, repo, issue_number: number,
-    });
-    if (answer.isError) return { ok: false, code: 'tool_error' };
-    const data = parsed(answer);
-    const issue = issueFrom(data, defaultRepo);
-    // An answer about another issue than the one asked for is no answer
-    if (!issue || issue.number !== number) throw new BadResponse();
-    const state = typeof data.state === 'string' ? data.state.toLowerCase() : null;
-    return {
-      ok: true,
-      result: {
+  const getIssue = ({ number }) => ({
+    send: (token) => rest.request({ method: 'GET', path: `${issuesPath}/${number}`, token }),
+    read: (data) => {
+      // A pull request has a number of the same kind: it is not an issue
+      if (isPullRequest(data)) return null;
+      const issue = issueFrom(data, defaultRepo);
+      // An answer about another issue than the one asked for is no answer
+      if (!issue || issue.number !== number) throw new BadResponse();
+      const state = typeof data.state === 'string' ? data.state.toLowerCase() : null;
+      return {
+        kind: 'github_issue',
         repo: defaultRepo,
         issue: {
           ...issue,
           state: state === 'open' || state === 'closed' ? state : null,
           body: lines(data.body, MAX_BODY_SHOWN_CHARS) || '',
         },
-      },
-    };
-  }
+      };
+    },
+  });
 
-  async function createIssue({ title, body }) {
-    const answer = await client.callTool(NEEDS.github_create_issue.tool, {
-      method: 'create', owner, repo, title, body: body ? `${body}\n\n${CREATED_BY_ARLO}` : CREATED_BY_ARLO,
-      // A write is not sent a second time once it may have arrived
-    }, { retry: false });
-    if (answer.isError) return { ok: false, code: 'tool_error' };
-    const data = parsed(answer);
-    const prefix = `https://github.com/${defaultRepo}/issues/`;
-    if (typeof data.url !== 'string' || !data.url.startsWith(prefix)) throw new BadResponse();
-    const number = normalizeIssueNumber(data.url.slice(prefix.length));
-    const url = number === null ? null : issueUrl(defaultRepo, number);
-    if (!url) throw new BadResponse();
-    return { ok: true, result: { number, title, url } };
-  }
+  const createIssue = ({ title, body }) => ({
+    send: (token) => rest.request({
+      method: 'POST', path: issuesPath, body: { title, body: body ? `${body}\n\n${CREATED_BY_ARLO}` : CREATED_BY_ARLO }, token,
+    }),
+    read: (data) => {
+      // The new issue is one of this repository, with a number: nothing else is believed
+      if (!isPlainObject(data) || !isIssueNumber(data.number)) throw new BadResponse();
+      if (typeof data.html_url !== 'string' || data.html_url !== issueUrl(defaultRepo, data.number)) throw new BadResponse();
+      return {
+        kind: 'github_issue_created', repo: defaultRepo, number: data.number, title,
+      };
+    },
+  });
 
   const RUN = { github_list_issues: listIssues, github_get_issue: getIssue, github_create_issue: createIssue };
 
+  const stillConnected = (userId) => {
+    try {
+      return connections.status(userId).connected === true;
+    } catch {
+      return false;
+    }
+  };
+
   /**
-   * Runs one of Arlo's tools: { ok: true, result } or { ok: false, code }.
-   * Codes: invalid_args (nothing was sent), not_offered, tool_error (the
-   * server's tool said it failed: no such issue, no permission), and the
-   * client's unreachable, unauthorized, timeout, bad_response. After
-   * github_create_issue, timeout, unreachable and bad_response do not say
-   * that no issue was created.
+   * Runs one of Arlo's tools as one user: { ok: true, result } or { ok: false, code }.
+   * Codes: invalid_args and not_offered (nothing was sent), not_connected
+   * (this user has no connection, or GitHub ended it), unauthorized (GitHub
+   * refused the token), not_found (no such issue, or no access to it),
+   * forbidden (no permission, or rate limited), refused (another 4xx), and
+   * unreachable, timeout, bad_response. After github_create_issue, timeout,
+   * unreachable and bad_response do not say that no issue was created.
    */
-  async function call(name, args) {
+  async function call(name, args, { userId } = {}) {
     try {
       if (!TOOL_NAMES.includes(name)) return { ok: false, code: 'not_offered' };
       const read = readArgs(name, args);
       if (!read) return { ok: false, code: 'invalid_args' };
-      const started = await start();
-      if (!started.ok) return { ok: false, code: started.code };
-      if (!checked[name].offered) return { ok: false, code: 'not_offered' };
-      return await RUN[name](read);
+      if (typeof userId !== 'string' || userId.length === 0) return { ok: false, code: 'not_connected' };
+      const run = RUN[name](read);
+
+      // This user's token, held for this call and no longer
+      const token = await connections.getAccessToken(userId);
+      if (typeof token !== 'string') return { ok: false, code: 'not_connected' };
+      let answer = await run.send(token);
+      if (isPlainObject(answer) && answer.status === 401) {
+        let next = null;
+        try {
+          next = await connections.refreshAccessToken(userId, token);
+        } catch {
+          next = null;
+        }
+        // A write is not sent a second time once it was sent
+        if (!READ_TOOLS.has(name)) return { ok: false, code: stillConnected(userId) ? 'unauthorized' : 'not_connected' };
+        if (typeof next !== 'string') return { ok: false, code: stillConnected(userId) ? 'unauthorized' : 'not_connected' };
+        answer = await run.send(next);
+        if (isPlainObject(answer) && answer.status === 401) {
+          // A new token is refused as well: the connection is over
+          connections.drop(userId);
+          return { ok: false, code: 'not_connected' };
+        }
+      }
+      if (!isPlainObject(answer) || !Number.isInteger(answer.status)) throw new BadResponse();
+      if (answer.status !== 200 && answer.status !== 201) return { ok: false, code: failureOf(answer.status) };
+      const result = run.read(answer.json);
+      return result === null ? { ok: false, code: 'not_found' } : { ok: true, result };
     } catch (error) {
       const code = error && !(error instanceof BadResponse) && typeof error.code === 'string' ? error.code : 'bad_response';
-      return { ok: false, code: ['unreachable', 'unauthorized', 'timeout'].includes(code) ? code : 'bad_response' };
+      return { ok: false, code: ['unreachable', 'timeout'].includes(code) ? code : 'bad_response' };
     }
   }
 
-  async function close() {
-    try {
-      if (typeof client.close === 'function') await client.close();
-    } catch {
-      // closing is best effort
-    }
-  }
-
-  return {
-    name: 'github', repo: defaultRepo, start, offeredTools, call, close,
-  };
+  return { name: 'github', repo: defaultRepo, call };
 }
 
 module.exports = {
-  createGithubConnector, checkTools, readArgs, TOOL_NAMES, NEEDS, CREATED_BY_ARLO, MAX_ISSUES,
+  createGithubConnector, readArgs, TOOL_NAMES, CREATED_BY_ARLO, MAX_ISSUES, MAX_TITLE_CHARS, MAX_BODY_SENT_CHARS,
 };

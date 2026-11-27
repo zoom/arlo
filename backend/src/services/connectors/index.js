@@ -1,52 +1,55 @@
 /**
- * Arlo's connectors: named sets of tools backed by an MCP server. GitHub is
- * the first one.
+ * Arlo's connectors: named sets of tools that act outside the meeting, as the
+ * person who connected their own account. GitHub is the first one.
  *
  * A connector exists only when the deployment configured it. For GitHub that
- * is a valid GITHUB_TOKEN and a valid GITHUB_DEFAULT_REPO, both; the
+ * is the GitHub App a user connects through (GITHUB_APP_CLIENT_ID,
+ * GITHUB_APP_CLIENT_SECRET) and GITHUB_DEFAULT_REPO, all three; the
  * repository alone is enough for "open issue 42" (services/agent/tools.js),
  * which calls nothing.
  *
- * The token is read from the configuration here and handed to the MCP client
- * as its Authorization header. It goes nowhere else: not into a log line, not
- * into what githubStatus() says, not into a URL.
+ * There is no token of the deployment's. Each call runs with the token of one
+ * user, taken from the connection store for that call
+ * (services/connectors/githubConnections.js) and sent to api.github.com
+ * (services/connectors/githubRest.js). It goes nowhere else.
+ *
+ * services/connectors/mcpClient.js is a generic MCP client that no connector
+ * uses in this build (GitHub is called through its REST API).
  *
  * A second connector: its settings and a create function here, its tools in a
- * file of its own beside github.js, with the same `start()`, `offeredTools()`,
- * `call(name, args)` and `close()`.
+ * file of its own beside github.js, with the same `call(name, args, { userId })`.
  */
 
-const { createMcpClient } = require('./mcpClient');
 const { createGithubConnector } = require('./github');
-const { readGithubMcpUrl, GITHUB_MCP_HOSTS } = require('./githubConfig');
+const { createGithubRest } = require('./githubRest');
 
-/** Whether the GitHub connector is configured, and for which repository. Never the token. */
+/** Whether the GitHub connector is configured, and for which repository. Never a secret. */
 function githubStatus(config) {
-  const configured = Boolean(config && config.githubToken && config.githubRepo);
+  const configured = Boolean(config && config.githubAppClientId && config.githubAppClientSecret && config.githubRepo);
   return { configured, repo: configured ? config.githubRepo : null };
 }
 
 /**
  * The GitHub connector for this configuration, or null when it is not
- * configured. Nothing is connected yet: `start()` does that.
+ * configured. `connections`: the per-user store; the running server's when
+ * not given, asked for at the time of each call (tests put another in place).
  */
-function createGithub({ config, fetch, warn = console.warn, timeoutMs } = {}) {
+function createGithub({
+  config, fetch, timeoutMs, connections,
+} = {}) {
   if (!githubStatus(config).configured) return null;
-  // The configuration checked the URL already. It is checked again here: this
-  // is the place the token is attached to a request, and the host it goes to
-  // must be on the list whatever the caller passed
-  const { url, known } = readGithubMcpUrl(config.githubMcpUrl);
-  if (!known || !GITHUB_MCP_HOSTS.includes(new URL(url).hostname)) {
-    warn('GitHub connector: the MCP server URL is not one of GitHub\'s; the connector is off.');
-    return null;
-  }
-  const client = createMcpClient({
-    url,
-    headers: { Authorization: `Bearer ${config.githubToken}` },
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    ...(fetch === undefined ? {} : { fetch }),
+  // eslint-disable-next-line global-require
+  const store = () => connections || require('./githubConnections').getGithubConnections();
+  return createGithubConnector({
+    rest: createGithubRest({ ...(fetch === undefined ? {} : { fetch }), ...(timeoutMs === undefined ? {} : { timeoutMs }) }),
+    connections: {
+      getAccessToken: (userId) => store().getAccessToken(userId),
+      refreshAccessToken: (userId, refused) => store().refreshAccessToken(userId, refused),
+      drop: (userId) => store().drop(userId),
+      status: (userId) => store().status(userId),
+    },
+    defaultRepo: config.githubRepo,
   });
-  return createGithubConnector({ client, defaultRepo: config.githubRepo, warn });
 }
 
 let github; // undefined until asked for; null when not configured
@@ -60,4 +63,11 @@ function getGithubConnector() {
   return github;
 }
 
-module.exports = { githubStatus, createGithub, getGithubConnector };
+/** Tests: put another connector in place, or none (undefined: built again from the configuration). */
+function _setForTests(replacement) {
+  github = replacement;
+}
+
+module.exports = {
+  githubStatus, createGithub, getGithubConnector, _setForTests,
+};

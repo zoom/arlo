@@ -616,6 +616,23 @@ function sendArloDid(meetingId, action, { everyone = false, userIds = [] } = {})
 }
 
 /**
+ * What a connector answered for one owner (services/agent/agent.js): to the
+ * sockets that are this signed-in user's right now and verified to be in this
+ * meeting, and to nobody else. Not another owner, not a participant, not a
+ * guest, not this user's panel in another meeting. `result` is rebuilt by the
+ * connector from known fields; nothing of it is logged.
+ */
+function sendArloResult(meetingId, userId, { actionId, result } = {}) {
+  if (typeof userId !== 'string' || userId.length === 0 || typeof actionId !== 'string') return 0;
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return 0;
+  return sendToMeetingSockets(meetingId, (ws) => (
+    ws.allowedMeetingId === meetingId && userOf(ws) === userId
+      ? { type: 'arlo.result', data: { meetingId, actionId, result } }
+      : null
+  ));
+}
+
+/**
  * The open panels that announced hands (`arlo.hands`) and are verified to be
  * in this meeting, each with a way to send it a message. Never a guest's
  * socket, and never one verified for another meeting, though it may be listed
@@ -944,6 +961,7 @@ module.exports = {
   sendApprovalClosed,
   sendArloThinking,
   sendArloDid,
+  sendArloResult,
   handsPanels,
   hasNotesReaderPanel,
   hasOwnerPanel,

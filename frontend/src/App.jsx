@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ZoomSdkProvider, useZoomSdk } from './contexts/ZoomSdkContext';
 import { MeetingProvider } from './contexts/MeetingContext';
 import { ArloProvider } from './contexts/ArloContext';
+import { ConnectorsProvider } from './contexts/ConnectorsContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { VerticalProvider } from './contexts/VerticalContext';
 import { ServerSettingsProvider } from './contexts/ServerSettingsContext';
@@ -144,6 +145,8 @@ function App() {
               <DemoDataProvider>
                 <FeatureLayoutProvider>
                   <MeetingProvider>
+                  {/* The signed-in person's connected accounts (GitHub); hears of a change on the meeting's socket */}
+                  <ConnectorsProvider>
                   <ArloProvider>
                   <ToastProvider>
                 <ErrorBoundary>
@@ -203,6 +206,7 @@ function App() {
                 </ErrorBoundary>
                 </ToastProvider>
                   </ArloProvider>
+                  </ConnectorsProvider>
                   </MeetingProvider>
                 </FeatureLayoutProvider>
               </DemoDataProvider>

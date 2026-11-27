@@ -29,8 +29,10 @@ function getAgentRuntime() {
     const { getArloPresence } = require('../arloPresence');
     const { getApprovals } = require('../approvals');
     const {
-      sendApprovalOpened, sendArloThinking, sendArloDid, hasOwnerPanel,
+      sendApprovalOpened, sendArloThinking, sendArloDid, sendArloResult, hasOwnerPanel,
     } = require('../websocket');
+    const { getGithubConnector } = require('../connectors');
+    const { getGithubConnections } = require('../connectors/githubConnections');
     const { shareNotes } = require('../notesSharing');
     const openrouter = require('../openrouter');
     /* eslint-enable global-require */
@@ -53,7 +55,18 @@ function getAgentRuntime() {
       isVerifiedOwnerSpeaker: createSpeakerMatch({ mode: config.agentSpeakerMatch, store }),
       // A spoken request is looked at only while an owner's panel is open
       hasOwnerPanel,
-      send: { thinking: sendArloThinking, did: sendArloDid, approval: sendApprovalOpened },
+      // GitHub as one person: their own connection, asked for at the time of
+      // each call. Without the connector (not set up) nothing is called
+      github: {
+        isConnected: (userId) => getGithubConnector() !== null && getGithubConnections().status(userId).connected === true,
+        call: (tool, args, { userId }) => {
+          const connector = getGithubConnector();
+          return connector === null ? Promise.resolve({ ok: false, code: 'not_offered' }) : connector.call(tool, args, { userId });
+        },
+      },
+      send: {
+        thinking: sendArloThinking, did: sendArloDid, approval: sendApprovalOpened, result: sendArloResult,
+      },
     });
 
     const detector = createCommandDetector({

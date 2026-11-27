@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import StatusLine from './StatusLine';
 import NotesDocument from './NotesDocument';
 import AskArlo from './AskArlo';
+import GithubResult from './GithubResult';
 import WhoCanAsk from './WhoCanAsk';
 import PostNotesToChat from './PostNotesToChat';
 import ShareNotes from './ShareNotes';
@@ -16,6 +17,8 @@ import OpenNotesForEveryone from './OpenNotesForEveryone';
  * post them to the chat (a one-time copy), and open them for everyone as a
  * document (Zoom's Collaborate mode; while it lasts this screen gives way to
  * components/arlo/CollaborateNotes.jsx).
+ * Above the input: what Arlo last found or did on GitHub for this owner
+ * (components/arlo/GithubResult.jsx), private like an answer.
  * When someone asks the owner for something, a sheet rises over this screen
  * as over any other (components/arlo/ApprovalHost.jsx, in the app shell).
  * `actions`: what Arlo was asked and did, listed at the end of the notes.
@@ -48,6 +51,8 @@ export default function LiveNotes({
         {canControl && <OpenNotesForEveryone notes={notes} />}
         {canControl && <PostNotesToChat notes={notes} />}
       </div>
+      {/* What Arlo found on GitHub for this owner: private, so on this screen only */}
+      <GithubResult />
       <AskArlo />
       {canControl && <WhoCanAsk value={whoCanAsk} onChange={onWhoCanAskChange} />}
     </div>

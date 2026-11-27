@@ -11,6 +11,7 @@ import { handsFor, runArloAction } from '../lib/arloActions';
 import { indicatorTimer, endTimerStoppedElsewhere } from '../lib/indicatorTimer';
 import { parseAction, mergeActions } from '../lib/arloDid';
 import { readThinkingStep, readThinkingChannel } from '../lib/thinkingStep';
+import { parseGithubResult } from '../lib/githubResult';
 import { useZoomSdk } from './ZoomSdkContext';
 import { useServerSettings } from './ServerSettingsContext';
 
@@ -268,6 +269,9 @@ export function ArloProvider({ children }) {
 
   // What Arlo was asked and did in this meeting, oldest first
   const [actions, setActions] = useState(NO_ACTIONS);
+  // What Arlo last found or did on GitHub for this owner (lib/githubResult.js), or null.
+  // Private to them: from their own typed request, or one they approved
+  const [githubResult, setGithubResult] = useState(null);
   // Arlo is handling a request: null, or { step, channel } as the last "on"
   // said. A new object per "on", so each restarts the wait
   const [thinkingNow, setThinkingNow] = useState(null);
@@ -316,6 +320,7 @@ export function ArloProvider({ children }) {
     setAwaitingState(false);
     setActions(NO_ACTIONS);
     setThinkingNow(null);
+    setGithubResult(null);
     ranActionsRef.current = new Set();
     dropApprovals();
   }, [meetingId, dropApprovals]);
@@ -336,6 +341,7 @@ export function ArloProvider({ children }) {
     setAwaitingState(false);
     setActions(NO_ACTIONS);
     setThinkingNow(null);
+    setGithubResult(null);
     dropApprovals();
   }, [identity, dropApprovals]);
 
@@ -348,6 +354,20 @@ export function ArloProvider({ children }) {
   useEffect(() => {
     endedRef.current = meetingOver;
   }, [meetingOver]);
+
+  // A GitHub result is for the meeting it was asked in: gone when that is over or left
+  useEffect(() => {
+    if (meetingOver || !meetingId) setGithubResult(null);
+  }, [meetingOver, meetingId]);
+
+  // A result from the server, for an owner in a meeting that is not over.
+  // One this panel may not show (lib/githubResult.js) changes nothing
+  const takeGithubResult = useCallback((value) => {
+    if (stateRef.current.role !== 'owner' || !signedInRef.current || endedRef.current) return;
+    const parsed = parseGithubResult(value, githubRepoRef.current);
+    if (parsed !== null) setGithubResult(parsed);
+  }, []);
+  const dismissGithubResult = useCallback(() => setGithubResult(null), []);
 
   const applyState = useCallback((data) => {
     const parsed = parseState(data);
@@ -597,6 +617,10 @@ export function ArloProvider({ children }) {
           }
           break;
         }
+        case 'arlo.result':
+          // What a GitHub request this owner approved came to
+          takeGithubResult(data.result);
+          break;
         case 'arlo.thinking':
           // For owners; anything but `true` is "off"
           if (data.on === true && stateRef.current.role === 'owner' && signedInRef.current && !endedRef.current) {
@@ -614,7 +638,7 @@ export function ArloProvider({ children }) {
       ws.removeEventListener('message', onMessage);
       setAwaitingState(false);
     };
-  }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval, runAction, addActions, reportArloDid]);
+  }, [ws, serverMeetingId, applyState, applyNotes, addApprovals, closeApproval, runAction, addActions, reportArloDid, takeGithubResult]);
 
   // What Arlo did so far, once the server lets this panel ask and its state is
   // known. Again when the role changes (an owner gets their private ones),
@@ -870,6 +894,8 @@ export function ArloProvider({ children }) {
         return { error: ASK_MESSAGES.failed };
       }
       const answer = data.answer.trim().slice(0, MAX_ANSWER_CHARS);
+      // What Arlo found or did on GitHub, for the same meeting it was asked in
+      if (data.result !== undefined && serverMeetingIdRef.current === id) takeGithubResult(data.result);
       // The request was something to do: how it stands
       const { id: actionId, tool, status } = data.action ?? {};
       const known = typeof actionId === 'string' && actionId.length > 0 && actionId.length <= MAX_ACTION_ID_CHARS
@@ -882,7 +908,7 @@ export function ArloProvider({ children }) {
       askingRef.current = false;
       setAsking(false);
     }
-  }, []);
+  }, [takeGithubResult]);
 
   /**
    * The owner's answer: { approve: true | false }. Agreeing is all the panel
@@ -984,6 +1010,8 @@ export function ArloProvider({ children }) {
     setArloThinking(thinkingAloud);
   }, [thinkingAloud, setArloThinking]);
   const shownActions = switchingMeeting ? NO_ACTIONS : actions;
+  // Only for an owner, and not about a meeting that is over
+  const shownGithubResult = switchingMeeting || role !== 'owner' || !isAuthenticated || meetingOver ? null : githubResult;
 
   // The render between Zoom reporting another meeting and the reset above
   // already shows nothing of the previous one
@@ -1037,7 +1065,9 @@ export function ArloProvider({ children }) {
     thinking,
     thinkingStep,
     thinkingChannel,
-  }), [shownActions, thinking, thinkingStep, thinkingChannel, shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, shareNotesForOpening, ask, asking,
+    githubResult: shownGithubResult,
+    dismissGithubResult,
+  }), [shownGithubResult, dismissGithubResult, shownActions, thinking, thinkingStep, thinkingChannel, shown, everPresent, switchingMeeting, shownNotes, notesPending, awaitingState, meetingOver, afterNotesMeetingId, setWhoCanAsk, setShareNotes, shareNotesForOpening, ask, asking,
     shownApprovals, answerApproval, shownNotesRequest, requestNotes, requestingNotes]);
 
   return (

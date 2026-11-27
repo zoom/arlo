@@ -9,6 +9,7 @@ import LiveNotes from './LiveNotes';
 vi.mock('./StatusLine', () => ({ default: ({ canControl }) => <div data-testid="status-line" data-can-control={String(canControl)} /> }));
 vi.mock('./NotesDocument', () => ({ default: () => <div data-testid="notes-document" /> }));
 vi.mock('./AskArlo', () => ({ default: () => <div data-testid="ask-arlo" /> }));
+vi.mock('./GithubResult', () => ({ default: () => <div data-testid="github-result" /> }));
 vi.mock('./WhoCanAsk', () => ({ default: () => <div data-testid="who-can-ask" /> }));
 vi.mock('./PostNotesToChat', () => ({ default: () => <button type="button">Post notes to chat</button> }));
 vi.mock('./OpenNotesForEveryone', () => ({ default: () => <button type="button">Open notes for everyone</button> }));

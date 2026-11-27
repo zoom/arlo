@@ -25,6 +25,9 @@ import { useServerSettings } from '../contexts/ServerSettingsContext';
 import { useComplianceSettings } from '../hooks/useComplianceSettings';
 import { useMeeting } from '../contexts/MeetingContext';
 import { useZoomSdk } from '../contexts/ZoomSdkContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useConnectors } from '../contexts/ConnectorsContext';
+import GithubConnector from '../components/GithubConnector';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Textarea from '../components/ui/Textarea';
@@ -62,6 +65,9 @@ export default function SettingsView() {
   const { complianceEnabled, setComplianceEnabled } = useComplianceSettings();
   const { meetingId, rtmsActive, rtmsLoading, startRTMSViaAPI, stopRTMSViaAPI, apiActionLoading, apiActionError } = useMeeting();
   const { runningContext } = useZoomSdk();
+  // Connected accounts are a signed-in person's: a guest has none
+  const { isAuthenticated } = useAuth();
+  const { github } = useConnectors();
   const inMeeting = runningContext === 'inMeeting' && Boolean(meetingId);
   const [apiStartSuccess, setApiStartSuccess] = useState(false);
   const [autoOpen, setAutoOpen] = useState(true);
@@ -404,6 +410,18 @@ export default function SettingsView() {
           </div>
         </Card>
       </section>
+      )}
+
+      {/* Connectors: accounts Arlo acts with as this person */}
+      {isAuthenticated && github && (
+        <section className="settings-section">
+          <h2 className="text-serif text-xl">Connectors</h2>
+          <Card>
+            <div className="settings-card-inner">
+              <GithubConnector />
+            </div>
+          </Card>
+        </section>
       )}
 
       {/* Transcription Preferences */}

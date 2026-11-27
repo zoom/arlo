@@ -23,6 +23,13 @@
  * has the number: it says "an issue". The number is in what the owners see
  * (the sheet, the step) and in what the asker's own panel is answered.
  *
+ * What Arlo is asked to do on GitHub (list, look up, create an issue) is in
+ * the record without anything of GitHub's: no number, no title, no
+ * repository. What GitHub answered goes to one owner's panel as a result
+ * (services/agent/agent.js), never into a sentence of this file; the two
+ * things of it in a sentence are the repository (the deployment's setting)
+ * and a number the server rebuilt, and only in what that one owner is told.
+ *
  * Arlo posts no line of its own to the chat: not "I am busy", not "the host
  * declined". A line nobody approved is unapproved content; those outcomes are
  * in the record only.
@@ -135,6 +142,23 @@ const isTimerMinutes = (value) => Number.isInteger(value) && value >= TIMER_MIN_
 /** "a 5 minute timer", or "a timer" for minutes that are not the tool table's (it lets none through). */
 const aTimer = (args) => (args !== null && typeof args === 'object' && isTimerMinutes(args.minutes) ? `a ${args.minutes} minute timer` : 'a timer');
 
+// Both reads of GitHub are recorded the same way while they wait or when they fail
+const GITHUB_ASKED_TO_LOOK = 'Asked to look at GitHub issues';
+// The repository in a connector's result: the deployment's own setting, as "owner/name"
+const repoOf = (result) => (result !== null && typeof result === 'object' && typeof result.repo === 'string'
+  && /^[A-Za-z0-9-]{1,39}\/[A-Za-z0-9_.-]{1,100}$/.test(result.repo) ? result.repo : null);
+
+/**
+ * What the sheet for a new GitHub issue shows, and so what is sent: the
+ * title, and when there is a description a blank line and the description.
+ * (GitHub also gets one fixed last line that says Arlo opened it,
+ * services/connectors/github.js.)
+ */
+function issueSheetBody(args) {
+  if (args === null || typeof args !== 'object' || typeof args.title !== 'string') return '';
+  return typeof args.body === 'string' && args.body.length > 0 ? `${args.title}\n\n${args.body}` : args.title;
+}
+
 // The sheet for text a model wrote (an answer, a summary): the text is the body
 const POST_ANSWER_QUESTION = 'Post Arlo\'s answer in the meeting chat?';
 const POST_ANSWER_PRIMARY = 'Post answer';
@@ -230,6 +254,40 @@ const TOOL_TEXTS = Object.freeze({
     primary: (args) => (sharesToo(args) ? 'Open and share' : 'Open'),
     reply: (args) => `Done: opened ${issueName(args)}${sharesToo(args) ? ' and opened the share dialog' : ''}.`,
   }),
+  // The record is read by everyone in the meeting: nothing of GitHub's in it.
+  // reply(args, result): `result` is what the connector rebuilt, for the one
+  // owner whose GitHub was asked
+  github_list_issues: Object.freeze({
+    asked: () => GITHUB_ASKED_TO_LOOK,
+    done: () => 'Listed GitHub issues',
+    // "your GitHub account": the owner who agrees is the one GitHub is asked as
+    question: () => 'Look up GitHub issues with your GitHub account?',
+    primary: () => 'Look up',
+    reply: (args, result) => {
+      const repo = repoOf(result);
+      const some = result !== null && typeof result === 'object' && Array.isArray(result.issues) && result.issues.length > 0;
+      if (some) return repo === null ? 'Open issues:' : `Open issues in ${repo}:`;
+      const filtered = args !== null && typeof args === 'object' && (Boolean(args.query) || Boolean(args.label));
+      return `No ${filtered ? 'matching ' : ''}open issues${repo === null ? '' : ` in ${repo}`}.`;
+    },
+  }),
+  github_get_issue: Object.freeze({
+    asked: () => GITHUB_ASKED_TO_LOOK,
+    done: () => 'Looked up a GitHub issue',
+    question: (args) => (issueName(args) === AN_ISSUE ? 'Look up an issue with your GitHub account?' : `Look up ${issueName(args)} with your GitHub account?`),
+    primary: () => 'Look up',
+    reply: (args) => (issueName(args) === AN_ISSUE ? 'The issue:' : `Issue #${args.number}:`),
+  }),
+  github_create_issue: Object.freeze({
+    asked: () => 'Asked to create a GitHub issue',
+    done: () => 'Created a GitHub issue',
+    // The title and the description are the sheet's body: what the owner approves is what is sent
+    question: () => 'Create this GitHub issue as you?',
+    primary: () => 'Create issue',
+    reply: (args, result) => (result !== null && typeof result === 'object' && isIssueNumber(result.number)
+      ? `Done: created issue #${result.number}.`
+      : 'Done: created the issue.'),
+  }),
   web_search: Object.freeze({
     asked: () => 'Asked for a web search',
     done: () => 'Searched the web',
@@ -278,9 +336,37 @@ const TOOL_FAILURES = Object.freeze({
   }),
 });
 
+/**
+ * GitHub, as one person. What their panel is told when it did not work:
+ * they have not connected GitHub; a create that may have arrived all the
+ * same (no answer, or one that could not be read); anything else.
+ */
+const GITHUB_CONNECT_FIRST = 'Connect GitHub in Settings to let Arlo do that.';
+const GITHUB_NOT_CONFIRMED = 'GitHub didn\'t confirm. Check whether the issue was created.';
+const GITHUB_NO_ANSWER = 'GitHub didn\'t answer.';
+// The record of a request no owner could be asked about: none of them has connected GitHub
+const GITHUB_NOBODY_CONNECTED_LABEL = 'Asked to use GitHub. Nobody who brought Arlo in has connected it.';
+// What someone who is not an owner is answered then: connecting is not theirs to do
+const GITHUB_NOBODY_CONNECTED = 'Nobody who brought Arlo in has connected GitHub.';
+const GITHUB_TOOLS = new Set(['github_list_issues', 'github_get_issue', 'github_create_issue']);
+// After a create these do not say that no issue was created
+const MAYBE_CREATED = new Set(['timeout', 'unreachable', 'bad_response', 'error']);
+// Outcomes that are not GitHub's: said as for any other tool
+const NOT_GITHUBS = new Set(['busy', 'not_allowed', 'unsupported']);
+
+/** Whether a create that ended with this code may have created the issue all the same. */
+const createNotConfirmed = (toolName, code) => toolName === 'github_create_issue' && MAYBE_CREATED.has(code);
+
+function githubFailedReply(toolName, code) {
+  if (NOT_GITHUBS.has(code)) return null;
+  if (code === 'not_connected') return GITHUB_CONNECT_FIRST;
+  return createNotConfirmed(toolName, code) ? GITHUB_NOT_CONFIRMED : GITHUB_NO_ANSWER;
+}
+
 /** The sentence of its own for this tool and code, or null when there is none. */
 function failedReply(toolName, code, args) {
   if (typeof toolName !== 'string' || typeof code !== 'string') return null;
+  if (GITHUB_TOOLS.has(toolName)) return githubFailedReply(toolName, code);
   if (!Object.prototype.hasOwnProperty.call(TOOL_FAILURES, toolName)) return null;
   const byCode = TOOL_FAILURES[toolName];
   return Object.prototype.hasOwnProperty.call(byCode, code) ? byCode[code](args) : null;
@@ -360,6 +446,9 @@ const STEPS = Object.freeze({
   reacting: 'Sending a reaction',
   mutingSomeone: 'Muting someone',
   openingIssue: 'Opening an issue',
+  // Nothing of what is looked up or created: every owner is told the step of a spoken request
+  lookingAtGithub: 'Looking at GitHub issues',
+  creatingGithubIssue: 'Creating a GitHub issue',
   stoppingTimer: 'Stopping the timer',
 });
 // The name came with the request: shown only when it is a name (lib/displayName.js), and short
@@ -384,6 +473,9 @@ const TOOL_STEPS = Object.freeze({
   // The minutes only as the tool table gives them
   set_timer: (args) => `Starting ${aTimer(args)}`,
   stop_timer: () => STEPS.stoppingTimer,
+  github_list_issues: () => STEPS.lookingAtGithub,
+  github_get_issue: () => STEPS.lookingAtGithub,
+  github_create_issue: () => STEPS.creatingGithubIssue,
   // The number only as the tool table rebuilt it; whether it is shared is not part of the step
   open_issue: (args) => (issueName(args) === AN_ISSUE ? STEPS.openingIssue : `Opening ${issueName(args)}`),
 });
@@ -410,6 +502,13 @@ module.exports = {
   NOTES_NOT_OPENED,
   issueShareFailed,
   ISSUE_SHARE_FAILED_LABEL,
+  issueSheetBody,
+  createNotConfirmed,
+  GITHUB_CONNECT_FIRST,
+  GITHUB_NOT_CONFIRMED,
+  GITHUB_NO_ANSWER,
+  GITHUB_NOBODY_CONNECTED_LABEL,
+  GITHUB_NOBODY_CONNECTED,
   REACTIONS,
   REACTION_NAMES,
   TIMER_MIN_MINUTES,

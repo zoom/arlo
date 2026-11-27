@@ -553,3 +553,75 @@
 .arlo-view [data-arlo-focus]:focus {
   outline: none;
 }
+
+/* What Arlo found on GitHub, for this owner only: a card like an answer.
+   Everything in it is text from GitHub, shown as text */
+.arlo-github {
+  max-height: 40vh;
+  overflow-y: auto;
+  padding: 10px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.arlo-github-heading {
+  margin: 0 0 4px;
+  font-family: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.arlo-github-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.arlo-github-list > li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.arlo-github .arlo-github-issue {
+  height: auto;
+  padding: 0;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.arlo-github-labels,
+.arlo-github-more {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.arlo-github-body {
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.arlo-github-created {
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.arlo-github-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0 8px;
+}

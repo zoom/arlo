@@ -44,7 +44,7 @@ const { cleanName } = require('../lib/displayName');
 const {
   getGithubAuth, START_PATH, RANDOM_VALUE, CODE, STATE_TTL_MS,
 } = require('../services/connectors/githubAuth');
-const { getGithubConnections } = require('../services/connectors/githubConnections');
+const { getGithubConnections, disconnectGithubUser } = require('../services/connectors/githubConnections');
 
 const router = express.Router();
 
@@ -256,26 +256,19 @@ router.get('/github/callback', async (req, res) => {
 /**
  * DELETE /api/connectors/github
  * Forget the caller's connection. GitHub is asked to delete the grant as
- * well; when that fails the connection is gone here all the same.
+ * well; when that fails the connection is gone here all the same. The
+ * caller's open panels are told (`connectors.updated`).
  */
 router.delete('/github', requireAuth, async (req, res) => {
-  const connections = getGithubConnections();
   const userId = req.user.id;
-  try {
-    const wasConnected = connections.status(userId).connected;
-    // Revoking needs a token that still works (an expired one is refreshed first)
-    const accessToken = wasConnected ? await connections.getAccessToken(userId) : null;
-    connections.remove(userId);
-    if (accessToken) {
-      const revoked = await getGithubAuth().revokeGrant(accessToken);
-      if (!revoked.ok) console.warn(`GitHub disconnect: the grant was not revoked at GitHub (${revoked.code})`);
-    } else if (wasConnected) {
-      console.warn('GitHub disconnect: the grant was not revoked at GitHub (no_token)');
-    }
-    if (wasConnected) console.log('GitHub disconnected');
-  } catch {
-    connections.remove(userId);
-    console.warn('GitHub disconnect: the grant was not revoked at GitHub (error)');
+  // Gone from memory at once; GitHub is asked next, and its failure is logged as a code
+  const { wasConnected, revoked } = disconnectGithubUser(userId);
+  await revoked;
+  if (wasConnected) {
+    console.log('GitHub disconnected');
+    // Their other open panels show it without a reload
+    // eslint-disable-next-line global-require
+    require('../services/websocket').sendConnectorsUpdated(userId);
   }
   return res.json({ connected: false });
 });

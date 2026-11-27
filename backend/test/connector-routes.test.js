@@ -208,6 +208,7 @@ test('the whole flow: ticket, start page, GitHub, callback, connected', async ()
   assert.equal(to.searchParams.get('client_id'), CLIENT_ID);
   assert.equal(to.searchParams.get('redirect_uri'), `${ORIGIN}/api/connectors/github/callback`);
   assert.equal(to.searchParams.get('code_challenge_method'), 'S256');
+  assert.equal(to.searchParams.get('prompt'), 'select_account');
   assert.match(clicked.state, /^[A-Za-z0-9_-]{43}$/);
   for (const hidden of [ticket, start.ghCookie, CLIENT_SECRET, ana.user.id]) assert.equal(clicked.location.includes(hidden), false);
   assert.equal(github.calls.length, 0);
@@ -530,6 +531,159 @@ test('disconnect: when GitHub does not revoke, the connection is gone here all t
   assert.deepEqual(await res.json(), { connected: false });
   assert.equal((await connectors(ana)).body.github.connected, false);
   assert.ok(logged.includes('GitHub disconnect: the grant was not revoked at GitHub (refused)'));
+});
+
+/** Open panels in one meeting for these sessions (null: a guest). */
+async function panelsIn(meetingId, sessions) {
+  const pass = async (session) => (await h.postJson(
+    `${srv.base}/api/auth/meeting-access`,
+    { appContext: h.makeAppContext(h.meetingPayload({ mid: meetingId })) },
+    session ? { cookie: session } : {},
+  )).cookie;
+  const panels = [];
+  for (const session of sessions) {
+    const ws = await h.openWs(`${srv.wsBase}?meeting_id=${encodeURIComponent(meetingId)}`, { cookie: [await pass(session), session].filter(Boolean).join('; ') });
+    assert.equal(ws.open, true);
+    panels.push(ws);
+  }
+  return panels;
+}
+const updatesOn = (ws) => ws.messages.filter((msg) => msg.type === 'connectors.updated');
+const revokes = () => github.calls.filter((call) => call.url === `https://api.github.com/applications/${CLIENT_ID}/grant`);
+
+test('disconnect: that user\'s own panels are told, and nobody else\'s', async () => {
+  const ana = person('Ana Ruiz');
+  const ben = person('Ben Okafor');
+  await connect(ana, { login: 'ana-gh' });
+  const [anaPanel, benPanel, guestPanel] = await panelsIn('GH-DISCONNECT-WS==', [ana.session, ben.session, null]);
+  const res = await fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } });
+  assert.deepEqual(await res.json(), { connected: false });
+  await h.wait(100);
+  assert.deepEqual(updatesOn(anaPanel), [{ type: 'connectors.updated' }]);
+  assert.deepEqual(updatesOn(benPanel), []);
+  assert.deepEqual(updatesOn(guestPanel), []);
+  // not connected: nothing changed, nobody is told again
+  await fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } });
+  await h.wait(50);
+  assert.equal(updatesOn(anaPanel).length, 1);
+  for (const ws of [anaPanel, benPanel, guestPanel]) ws.socket.close();
+});
+
+test('a connection GitHub ends (a refused refresh) is told to that user\'s panels: the running server\'s own store does it', async () => {
+  const ana = person('Ana Ruiz');
+  const ben = person('Ben Okafor');
+  const testStore = githubConnections.getGithubConnections();
+  // The store the server builds for itself: the real clock, and its own way of telling the panels
+  githubConnections._setForTests(undefined);
+  try {
+    const store = githubConnections.getGithubConnections();
+    assert.notEqual(store, testStore);
+    const record = (login) => ({
+      accessToken: secret(made('ghu')), expiresAt: Date.now() + 1000, refreshToken: secret(made('ghr')), refreshExpiresAt: Date.now() + HOUR, login, githubUserId: 7,
+    });
+    assert.equal(store.set(ana.user.id, record('ana-gh')), true);
+    assert.equal(store.set(ben.user.id, { ...record('ben-gh'), expiresAt: Date.now() + HOUR }), true);
+    const [anaPanel, benPanel] = await panelsIn('GH-REFUSED-WS==', [ana.session, ben.session]);
+    githubAnswers({ token: () => json({ error: 'bad_refresh_token', error_description: 'The refresh token passed is incorrect or expired.' }) });
+    assert.equal(await store.getAccessToken(ana.user.id), null);
+    await h.wait(100);
+    assert.deepEqual(updatesOn(anaPanel), [{ type: 'connectors.updated' }]);
+    assert.deepEqual(updatesOn(benPanel), []);
+    assert.deepEqual((await connectors(ana)).body.github, { available: true, connected: false, login: null });
+    assert.equal((await connectors(ben)).body.github.connected, true);
+    store.remove(ben.user.id);
+    for (const ws of [anaPanel, benPanel]) ws.socket.close();
+  } finally {
+    githubConnections._setForTests(testStore);
+  }
+});
+
+test('logout also asks GitHub to delete the grant, and does not wait for it', async () => {
+  const ana = person('Ana Ruiz');
+  const ben = person('Ben Okafor');
+  const { tokens } = await connect(ana, { login: 'ana-gh' });
+  await connect(ben, { login: 'ben-gh', id: 22 });
+  let answerRevoke;
+  const asked = new Promise((resolve) => {
+    githubAnswers({ revoke: () => { resolve(); return new Promise((done) => { answerRevoke = done; }); } });
+  });
+  const out = await h.postJson(`${srv.base}/api/auth/logout`, {}, { cookie: ana.session });
+  // signed out while GitHub has not answered yet
+  assert.equal(out.status, 200);
+  assert.equal(githubConnections.getGithubConnections().status(ana.user.id).connected, false);
+  await asked;
+  assert.equal(revokes().length, 1);
+  const [{ init }] = revokes();
+  assert.equal(init.method, 'DELETE');
+  assert.deepEqual(JSON.parse(init.body), { access_token: tokens.access_token });
+  assert.equal(init.headers.Authorization, `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')}`);
+  // GitHub says no in the end: logged as a code, and nothing else changes
+  answerRevoke(json({ message: 'Validation Failed' }, 422));
+  await h.wait(50);
+  assert.ok(logged.includes('GitHub disconnect: the grant was not revoked at GitHub (refused)'));
+  assert.equal(githubConnections.getGithubConnections().status(ben.user.id).connected, true);
+
+  // someone who never connected: GitHub is not asked
+  const cy = person('Cy Young');
+  githubAnswers();
+  assert.equal((await h.postJson(`${srv.base}/api/auth/logout`, {}, { cookie: cy.session })).status, 200);
+  await h.wait(50);
+  assert.equal(github.calls.length, 0);
+});
+
+test('logout when GitHub cannot be reached: signed out all the same, the connection gone, a code logged', async () => {
+  const ana = person('Ana Ruiz');
+  await connect(ana);
+  githubAnswers({ revoke: () => { throw new TypeError('fetch failed'); } });
+  assert.equal((await h.postJson(`${srv.base}/api/auth/logout`, {}, { cookie: ana.session })).status, 200);
+  await h.wait(50);
+  assert.equal(githubConnections.getGithubConnections().status(ana.user.id).connected, false);
+  assert.ok(logged.includes('GitHub disconnect: the grant was not revoked at GitHub (unreachable)'));
+});
+
+test('removing the app (app_deauthorized) also asks GitHub to delete the grant', async () => {
+  const ana = person('Ana Ruiz');
+  const { tokens } = await connect(ana);
+  githubAnswers();
+  const res = await h.postWebhook(srv.base, {
+    event: 'app_deauthorized',
+    payload: {
+      account_id: 'acct-1', user_id: ana.zoomUserId, signature: 'uninstall-2', deauthorization_time: new Date().toISOString(), client_id: 'test-client-id',
+    },
+  });
+  assert.equal(res.status, 200);
+  await h.wait(50);
+  assert.equal(revokes().length, 1);
+  assert.deepEqual(JSON.parse(revokes()[0].init.body), { access_token: tokens.access_token });
+  assert.equal(githubConnections.getGithubConnections().status(ana.user.id).connected, false);
+  deauthorized._resetForTests();
+});
+
+test('disconnect with a token that has run out: it is refreshed first, and the new one is what GitHub is asked to revoke', async () => {
+  const ana = person('Ana Ruiz');
+  const { tokens } = await connect(ana);
+  const next = githubAnswers();
+  const before = clock.at;
+  clock.at += 9 * HOUR;
+  try {
+    // The store's clock says the token ran out; the route's own check uses the real time,
+    // so the stored expiry is put in the past as well
+    const store = githubConnections.getGithubConnections();
+    const held = store.take(ana.user.id);
+    assert.equal(held.accessToken, tokens.access_token);
+    store.set(ana.user.id, {
+      ...held, expiresAt: Date.now() - 1000, refreshExpiresAt: Date.now() + 1000 * HOUR, login: 'octo-cat', githubUserId: 583231,
+    });
+    const res = await fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } });
+    assert.deepEqual(await res.json(), { connected: false });
+    const exchange = github.calls.find((call) => call.url === 'https://github.com/login/oauth/access_token');
+    assert.equal(new URLSearchParams(exchange.init.body).get('grant_type'), 'refresh_token');
+    assert.equal(new URLSearchParams(exchange.init.body).get('refresh_token'), tokens.refresh_token);
+    assert.deepEqual(JSON.parse(revokes()[0].init.body), { access_token: next.access_token });
+    assert.equal(store.status(ana.user.id).connected, false);
+  } finally {
+    clock.at = before;
+  }
 });
 
 test('logout removes the user\'s GitHub connection, and a flow they had started connects nothing', async () => {

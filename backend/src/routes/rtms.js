@@ -374,7 +374,7 @@ router.post('/webhook', express.raw({ type: 'application/json' }), async (req, r
       if (user) {
         disconnectUser(user.id);
         apiTokens.revokeAllFor(user.id);
-        forgetGithubUser(user.id); // their GitHub connection, and a connect flow they had started
+        forgetGithubUser(user.id); // their GitHub connection (the grant at GitHub is revoked, best effort), and a connect flow they had started
         userStore.delete(user.id); // also deletes their OAuth tokens
       }
       console.log(`app_deauthorized: user data removed (${user ? 'user was in memory' : 'no data held'})`);

@@ -1,124 +1,115 @@
 #!/usr/bin/env node
 /**
- * Can Arlo's GitHub connector use the MCP server it is configured for?
+ * Is "Connect GitHub" set up on this deployment, and which of GitHub's
+ * endpoints take a user's own token?
  *
- *   node scripts/connector-check.js        (in the backend container:
- *   docker-compose exec backend node scripts/connector-check.js)
+ *   node scripts/connector-check.js
+ *       prints whether the GitHub App settings and the repository are set
+ *       (never their values). Nothing is called.
  *
- * Connects with GITHUB_TOKEN to GITHUB_MCP_URL (GitHub's hosted MCP server
- * when not set), asks for the server's tool list and prints:
- * - whether the token and the repository are set (never their values),
- * - the names of the server's tools,
- * - for the issue tools, the names and types of their input fields,
- * - for each of Arlo's three tools, whether it would be offered.
+ *   node scripts/connector-check.js --user-token-from-stdin < file-with-one-token
+ *       also reads ONE token from standard input (a GitHub App user token,
+ *       "ghu_…") and makes two calls with it:
+ *         - REST:  GET https://api.github.com/repos/<repo>/issues?per_page=1
+ *         - MCP:   tools/list at https://api.githubcopilot.com/mcp/x/issues
+ *       and prints only the REST status code and, for MCP, "ok" or an error
+ *       code. (In the backend container:
+ *       docker-compose exec -T backend node scripts/connector-check.js --user-token-from-stdin)
  *
- * It calls no tool: nothing of a repository or an issue is read or printed.
- * The token is never printed. Exit code 0 when all three tools would be
- * offered, 1 otherwise.
+ * The token is read from standard input only: never a command-line argument
+ * (those show in the process list and the shell history) and never an
+ * environment variable. It is never printed, and nothing GitHub answers is
+ * printed: not a repository, an issue, a tool name or an error text. Both
+ * hosts are GitHub's own and fixed here; no setting changes them.
+ *
+ * Arlo itself uses the REST API. The MCP call only answers whether GitHub's
+ * hosted MCP server takes such a token, for a later build.
+ *
+ * Exit code 0 when everything is set (and, with a token, REST answered 200);
+ * 1 otherwise.
  */
 const path = require('node:path');
 
-const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
-const FIELD = /^[A-Za-z0-9_]{1,60}$/;
-const WORD = /^[A-Za-z0-9_]{1,30}$/;
-const JSON_TYPES = ['string', 'number', 'integer', 'boolean', 'array', 'object', 'null'];
-const MAX_FIELDS = 60;
-const MAX_VALUES = 12;
+// GitHub's hosted MCP server with the issues toolset only
+const GITHUB_MCP_URL = 'https://api.githubcopilot.com/mcp/x/issues';
+const FLAG = '--user-token-from-stdin';
+const TOKEN = /^[A-Za-z0-9_]{20,255}$/;
+const CODE = /^[a-z_]{1,30}$/;
+const MAX_STDIN_CHARS = 1000;
 
-const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-
-/** The type of a schema property in known words only: "string", "array of string", "number | null", "?". */
-function typeWords(property) {
-  if (!isPlainObject(property)) return '?';
-  const types = (Array.isArray(property.type) ? property.type : [property.type]).filter((type) => JSON_TYPES.includes(type));
-  if (types.length === 0) return '?';
-  const words = types.join(' | ');
-  if (types.includes('array') && isPlainObject(property.items)) {
-    const inner = typeWords(property.items);
-    return inner === '?' ? words : `${words} of ${inner.split(',')[0]}`;
+/** Everything on standard input, as text; null when it is longer than a token could be. */
+async function readAll(stream) {
+  let text = '';
+  for await (const chunk of stream) {
+    text += String(chunk);
+    if (text.length > MAX_STDIN_CHARS) return null;
   }
-  return words;
+  return text;
 }
 
-/** The values a property allows, when they are plain words: " (one of: get, get_comments)". */
-function allowedWords(property) {
-  const values = isPlainObject(property) && Array.isArray(property.enum) ? property.enum : null;
-  if (!values) return '';
-  const words = values.filter((value) => typeof value === 'string' && WORD.test(value)).slice(0, MAX_VALUES);
-  return words.length > 0 ? ` (one of: ${words.join(', ')}${values.length > words.length ? ', …' : ''})` : '';
-}
+async function main({
+  argv = process.argv.slice(2), stdin = process.stdin, print = console.log, fetch,
+} = {}) {
+  const src = (...parts) => path.join(__dirname, '..', 'src', ...parts);
+  // eslint-disable-next-line global-require
+  const config = require(src('config.js'));
 
-/** The lines that describe one tool's input: field names, types, which are required. Never a description. */
-function describe(tool) {
-  const schema = isPlainObject(tool.inputSchema) ? tool.inputSchema : {};
-  const properties = isPlainObject(schema.properties) ? schema.properties : {};
-  const required = Array.isArray(schema.required) ? schema.required : [];
-  const out = [];
-  for (const [field, property] of Object.entries(properties).slice(0, MAX_FIELDS)) {
-    if (!FIELD.test(field)) continue;
-    const of = isPlainObject(property) && isPlainObject(property.items) ? allowedWords(property.items) : allowedWords(property);
-    out.push(`    ${field}: ${typeWords(property)}${required.includes(field) ? ', required' : ''}${of}`);
+  if (argv.some((arg) => arg !== FLAG)) {
+    // Not echoed: someone may have passed a token as an argument
+    print(`Unknown argument. The only one is ${FLAG}; a token is never given as an argument.`);
+    return 1;
   }
-  return out;
-}
+  const state = (value) => (value ? 'set' : 'not set (or not accepted)');
+  print(`GITHUB_APP_CLIENT_ID: ${state(config.githubAppClientId)}`);
+  print(`GITHUB_APP_CLIENT_SECRET: ${state(config.githubAppClientSecret)}`);
+  print(`GITHUB_DEFAULT_REPO: ${state(config.githubRepo)}`);
+  print(`Connect GitHub: ${config.githubConnectAvailable ? 'available' : 'not available (it needs all three)'}`);
+  if (!argv.includes(FLAG)) return config.githubConnectAvailable ? 0 : 1;
 
-async function main({ print = console.log, fetch } = {}) {
-  // eslint-disable-next-line global-require
-  const config = require(path.join(__dirname, '..', 'src', 'config.js'));
-  // eslint-disable-next-line global-require
-  const { createMcpClient } = require(path.join(__dirname, '..', 'src', 'services', 'connectors', 'mcpClient.js'));
-  // eslint-disable-next-line global-require
-  const { checkTools, TOOL_NAMES } = require(path.join(__dirname, '..', 'src', 'services', 'connectors', 'github.js'));
-
-  print(`GITHUB_TOKEN: ${config.githubToken ? 'set' : 'not set (or not accepted)'}`);
-  print(`GITHUB_DEFAULT_REPO: ${config.githubRepo ? 'set' : 'not set (or not accepted)'}`);
-  print(`MCP server: ${config.githubMcpUrl}`);
-  if (!config.githubToken || !config.githubRepo) {
-    print('The GitHub connector is not configured: it needs both. Nothing was called.');
+  if (!config.githubRepo) {
+    print('No repository is set: nothing was called.');
+    return 1;
+  }
+  const given = await readAll(stdin);
+  const token = given === null ? null : given.trim();
+  if (token === null || !TOKEN.test(token)) {
+    print('Standard input did not hold one GitHub token: nothing was called.');
     return 1;
   }
 
-  const client = createMcpClient({
-    url: config.githubMcpUrl, headers: { Authorization: `Bearer ${config.githubToken}` }, ...(fetch ? { fetch } : {}),
-  });
-  let tools;
+  /* eslint-disable global-require */
+  const { createGithubRest } = require(src('services', 'connectors', 'githubRest.js'));
+  const { createMcpClient } = require(src('services', 'connectors', 'mcpClient.js'));
+  /* eslint-enable global-require */
+
+  let rest;
   try {
-    tools = await client.listTools();
+    // The same client Arlo uses; the one query parameter that is not Arlo's own is the page size
+    const answer = await createGithubRest(fetch ? { fetch } : {}).request({
+      method: 'GET', path: `/repos/${config.githubRepo}/issues`, query: { per_page: 1 }, token,
+    });
+    rest = String(answer.status);
   } catch (error) {
-    const code = error && typeof error.code === 'string' && WORD.test(error.code) ? error.code : 'unreachable';
-    print(`Could not read the server's tool list: ${code}.`);
-    if (code === 'unauthorized') print('The server refused the token. Check that it has not expired and may be used with this server.');
-    return 1;
+    rest = error && typeof error.code === 'string' && CODE.test(error.code) ? error.code : 'error';
+  }
+  print(`REST GET /repos/<repo>/issues?per_page=1: ${rest}`);
+
+  let mcp = 'ok';
+  let client = null;
+  try {
+    client = createMcpClient({ url: GITHUB_MCP_URL, headers: { Authorization: `Bearer ${token}` }, ...(fetch ? { fetch } : {}) });
+    await client.listTools();
+  } catch (error) {
+    mcp = error && typeof error.code === 'string' && CODE.test(error.code) ? error.code : 'error';
   } finally {
-    await client.close();
-  }
-
-  const names = tools.map((tool) => tool.name).filter((name) => NAME.test(name)).sort();
-  print(`\nThe server's tools (${names.length}):`);
-  print(names.length > 0 ? `  ${names.join(', ')}` : '  none');
-
-  print('\nInput fields of the issue tools:');
-  const issueTools = tools.filter((tool) => NAME.test(tool.name) && /issue/.test(tool.name)).sort((a, b) => a.name.localeCompare(b.name));
-  if (issueTools.length === 0) print('  no tool with "issue" in its name');
-  for (const tool of issueTools) {
-    print(`  ${tool.name}`);
-    for (const one of describe(tool)) print(one);
-  }
-
-  const checked = checkTools(tools);
-  print('\nArlo\'s tools:');
-  let all = true;
-  for (const name of TOOL_NAMES) {
-    const { offered, mcpTool, reason } = checked[name];
-    if (offered) {
-      print(`  ${name}: offered (through ${mcpTool})`);
-    } else {
-      all = false;
-      print(`  ${name}: NOT offered: ${mcpTool} ${reason === 'missing' ? 'is not in the server\'s tool list' : 'has other parameters than Arlo sends'}`);
+    try {
+      if (client) await client.close();
+    } catch {
+      // closing is best effort
     }
   }
-  if (checked.github_list_issues.offered) print(`  list_issues takes "fields": ${checked.listFields ? 'yes' : 'no (a text filter looks through fewer issues)'}`);
-  return all ? 0 : 1;
+  print(`MCP tools/list: ${mcp}`);
+  return rest === '200' ? 0 : 1;
 }
 
 if (require.main === module) {
@@ -133,4 +124,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, describe, typeWords };
+module.exports = { main, GITHUB_MCP_URL };

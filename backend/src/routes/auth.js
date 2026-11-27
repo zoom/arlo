@@ -570,7 +570,8 @@ router.post('/logout', async (req, res) => {
     tokenStore.delete(req.user.id);
     apiTokens.revokeAllFor(req.user.id);
     // Their GitHub connection goes with the session (and a connect flow they
-    // had started). The grant at GitHub is left: "Disconnect" revokes it
+    // had started). GitHub is asked to delete the grant too, which is not
+    // waited for: signing out never hangs on GitHub
     forgetGithubUser(req.user.id);
 
     // Their open panels stop being theirs now: the sockets are closed, and a

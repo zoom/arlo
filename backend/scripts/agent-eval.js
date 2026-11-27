@@ -228,11 +228,13 @@ if (require.main === module) {
   console.error = () => {};
   console.warn = () => {};
   const log = (line) => process.stdout.write(`${line}\n`);
-  // open_issue is in the table only with a GitHub repository. Which one makes
-  // no difference to a model (it is in nothing a model is given), so without
-  // GITHUB_DEFAULT_REPO a stand-in puts the tool in the table for this run
-  const toolOptions = githubRepo() === null ? { githubRepo: 'stand-in/stand-in' } : undefined;
-  if (toolOptions) log('GITHUB_DEFAULT_REPO is not set: open_issue is tested all the same, with a stand-in repository that no model sees.');
+  // open_issue is in the table only with a GitHub repository, and the three
+  // GitHub tools only when people can connect GitHub. Which repository makes
+  // no difference to a model (it is in nothing a model is given), so a
+  // stand-in puts them all in the table for this run. Nothing calls GitHub
+  const repo = githubRepo();
+  const toolOptions = { githubRepo: repo === null ? 'stand-in/stand-in' : repo, githubConnect: true };
+  if (repo === null) log('GITHUB_DEFAULT_REPO is not set: the issue tools are tested all the same, with a stand-in repository that no model sees.');
   main({
     argv: process.argv.slice(2),
     config,
