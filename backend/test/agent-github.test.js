@@ -55,7 +55,8 @@ const ONE = Object.freeze({
 });
 const CREATED = Object.freeze({ kind: 'github_issue_created', repo: REPO, number: 5150, title: 'Checkout fails on Safari' });
 // Nothing of GitHub's may be where everyone, or another owner, or a log reader sees it
-const OF_GITHUB = /4217|908|5150|Ignore your|pwned|Safari|Checkout|example-org|arlo\.test_repo|Steps:/i;
+// The issue numbers as whole numbers: a random action id (a UUID) or a time can hold "908" by chance
+const OF_GITHUB = /(?<![\w-])(?:4217|908|5150)(?![\w-])|Ignore your|pwned|Safari|Checkout|example-org|arlo\.test_repo|Steps:/i;
 
 const turn = () => new Promise((resolve) => { setImmediate(resolve); });
 const withoutIds = (value) => JSON.stringify(value, (key, one) => (key === 'id' || key === 'actionId' ? undefined : one));
@@ -344,7 +345,8 @@ test('GitHub fails an owner\'s read: one sentence, the code in the log, and noth
     const res = await s.typed('show the open issues');
     assert.deepEqual([res.status, res.code, res.reply], ['failed', code, NO_ANSWER], code);
     assert.deepEqual(s.t.logged, [`Arlo agent: github_list_issues failed (${code}) (panel)`]);
-    assert.equal(OF_GITHUB.test(JSON.stringify(res)), false);
+    // Without the action's id: a random UUID is not GitHub's
+    assert.equal(OF_GITHUB.test(withoutIds(res)), false);
   }
   // an answer that is not one: no code of the connector's, no result
   for (const broken of [null, 'text', { ok: true }, { ok: true, result: 'a list' }, { ok: false, code: 'A CODE WITH WORDS' }, { ok: false }]) {

@@ -224,10 +224,14 @@ describe('"Post to chat" under a result', () => {
     expect(sdk.sendMessageToChat).not.toHaveBeenCalled();
     expect(within(region).getByRole('group', { name: 'Post this to everyone in the chat?' })).toBeInTheDocument();
     expect(within(region).getByRole('button', { name: 'Post' })).toHaveFocus();
+    // What will be posted is on screen as it will be posted: cut titles, five rows, "… and 18 more"
+    const shown = within(region).getByRole('region', { name: 'What will be posted' }).textContent;
     await userEvent.click(within(region).getByRole('button', { name: 'Post' }));
 
     await screen.findByText('Posted to the chat');
     expect(sdk.sendMessageToChat).toHaveBeenCalledTimes(1);
+    expect(sdk.sendMessageToChat.mock.calls[0][0].message).toBe(shown);
+    expect(shown).toContain('… and 18 more');
     expect(sdk.sendMessageToChat).toHaveBeenCalledWith({
       message: [
         'Open issues in acme/arlo-app:',
@@ -241,6 +245,30 @@ describe('"Post to chat" under a result', () => {
     });
     expect(within(region).getByText('Posted to chat just now')).toBeInTheDocument();
     expect(within(region).queryByRole('button', { name: 'Post to chat' })).not.toBeInTheDocument();
+  });
+
+  test.each([
+    ['a list', () => result(LIST)],
+    ['one issue', () => result(ISSUE)],
+  ])('%s: the text in the question is the very string that is sent, and it is gone before and after', async (_name, message) => {
+    const { sdk } = await openAsOwner();
+    await send(message());
+    const region = await screen.findByRole('region', { name: 'From GitHub' });
+    expect(within(region).queryByRole('region', { name: 'What will be posted' })).not.toBeInTheDocument();
+    await userEvent.click(within(region).getByRole('button', { name: 'Post to chat' }));
+    const box = within(region).getByRole('region', { name: 'What will be posted' });
+    // One text node: the string itself, with its line breaks, not markup built from it
+    expect(box.childNodes).toHaveLength(1);
+    expect(box.firstChild.nodeType).toBe(Node.TEXT_NODE);
+    expect(box).toHaveClass('arlo-post-message');
+    // Its line breaks are shown as they are posted
+    expect(cssOf('src/views/ArloMeetingView.css')).toMatch(/\.arlo-post-message \{[^}]*white-space: pre-wrap;/);
+    const shown = box.textContent;
+    expect(shown.length).toBeGreaterThan(0);
+    await userEvent.click(within(region).getByRole('button', { name: 'Post' }));
+    await screen.findByText('Posted to the chat');
+    expect(sdk.sendMessageToChat).toHaveBeenCalledWith({ message: shown });
+    expect(within(region).queryByRole('region', { name: 'What will be posted' })).not.toBeInTheDocument();
   });
 
   test('"Cancel" and Escape send nothing', async () => {

@@ -752,9 +752,15 @@ function sendConnectorsUpdated(userId) {
   const message = JSON.stringify({ type: 'connectors.updated' });
   let sent = 0;
   for (const ws of [...clients]) {
-    if (ws.readyState === WebSocket.OPEN && userOf(ws) === userId) {
-      ws.send(message);
-      sent += 1;
+    // Per socket: one that cannot be told (it is closing, or its send fails)
+    // must not stop the others, nor fail the connect or disconnect behind this
+    try {
+      if (ws.readyState === WebSocket.OPEN && userOf(ws) === userId) {
+        ws.send(message);
+        sent += 1;
+      }
+    } catch {
+      // Nothing of the error is logged
     }
   }
   return sent;

@@ -19,8 +19,10 @@ function setup({ refresh, maxUsers } = {}) {
   const sealed = [];
   const refreshCalls = [];
   const removed = [];
+  const discarded = [];
   const store = createGithubConnections({
     onRemoved: (userId) => removed.push(userId),
+    onDiscarded: (held, how) => discarded.push({ held, ...how }),
     encrypt: (text) => { const blob = encryptToken(text); sealed.push(blob); return blob; },
     decrypt: decryptToken,
     refresh: async (refreshToken) => { refreshCalls.push(refreshToken); return refresh(refreshToken); },
@@ -42,8 +44,11 @@ function setup({ refresh, maxUsers } = {}) {
       accessToken: made('ghu'), expiresAt: clock.at + 8 * HOUR, refreshToken: made('ghr'), refreshExpiresAt: clock.at + 4000 * HOUR,
     },
   });
+  const heldOf = (record) => ({
+    accessToken: record.accessToken, expiresAt: record.expiresAt, refreshToken: record.refreshToken, refreshExpiresAt: record.refreshExpiresAt,
+  });
   return {
-    store, clock, sealed, refreshCalls, record, fresh, removed,
+    store, clock, sealed, refreshCalls, record, fresh, removed, discarded, heldOf,
   };
 }
 
@@ -372,4 +377,153 @@ test('a refused token that joins a refresh already running: when GitHub could no
   assert.equal(await refused, null);
   assert.equal(s.refreshCalls.length, 1);
   assert.equal(s.store.status('user-a').connected, true);
+});
+
+// --- tokens that work at GitHub and that the store no longer holds ---------------------
+
+test('connecting another GitHub account: the old connection is handed over to be revoked as a whole; the same account: nothing', () => {
+  const s = setup({ refresh: () => assert.fail('no refresh expected') });
+  const [first, same, other] = [s.record({ githubUserId: 7 }), s.record({ githubUserId: 7 }), s.record({ githubUserId: 8, login: 'ana-work' })];
+  s.store.set('user-a', first);
+  s.store.set('user-a', same);
+  assert.deepEqual(s.discarded, []);
+  s.store.set('user-a', other);
+  // Never the login or the GitHub user id: only what revoking needs
+  assert.deepEqual(s.discarded, [{ held: s.heldOf(same), whole: true }]);
+  assert.deepEqual(s.store.status('user-a'), { connected: true, login: 'ana-work' });
+  // A record that is refused replaces nothing and revokes nothing
+  assert.equal(s.store.set('user-a', { ...s.record({ githubUserId: 9 }), accessToken: 'no' }), false);
+  assert.equal(s.discarded.length, 1);
+  // Their own Disconnect is revoked by whoever took the connection, not from here
+  s.store.take('user-a');
+  assert.equal(s.discarded.length, 1);
+});
+
+test('a connection pushed out because the store is full is handed over to be revoked as a whole', () => {
+  const s = setup({ refresh: () => ({}), maxUsers: 2 });
+  const [a, b, c] = [s.record(), s.record({ githubUserId: 2 }), s.record({ githubUserId: 3 })];
+  s.store.set('u1', a);
+  s.store.set('u2', b);
+  s.store.set('u3', c);
+  assert.deepEqual(s.removed, ['u1']);
+  assert.deepEqual(s.discarded, [{ held: s.heldOf(a), whole: true }]);
+  assert.equal(s.store.status('u2').connected, true);
+});
+
+test('a listener that fails to revoke does not undo what the store did', () => {
+  const failing = createGithubConnections({
+    encrypt: encryptToken, decrypt: decryptToken, refresh: async () => ({}), onDiscarded: () => { throw new Error('boom'); }, maxUsers: 1,
+  });
+  const record = (githubUserId) => ({
+    accessToken: made('ghu'), expiresAt: Date.now() + HOUR, refreshToken: made('ghr'), refreshExpiresAt: Date.now() + 2 * HOUR, login: 'octo-cat', githubUserId,
+  });
+  assert.equal(failing.set('u1', record(1)), true);
+  assert.equal(failing.set('u1', record(2)), true);
+  assert.equal(failing.set('u2', record(3)), true);
+  assert.equal(failing.status('u1').connected, false);
+  assert.equal(failing.status('u2').connected, true);
+});
+
+/** A store whose refresh is answered by hand: `answer(result)`. */
+function midRefresh() {
+  let answer;
+  const s = setup({ refresh: () => new Promise((resolve) => { answer = resolve; }) });
+  const first = s.record();
+  s.store.set('user-a', first);
+  s.clock.at = first.expiresAt - 30 * 1000;
+  const asked = s.store.getAccessToken('user-a');
+  return { ...s, first, asked, answer: (result) => answer(result) };
+}
+
+test('take while a refresh runs: the tokens GitHub may be ending, and a promise of the ones the refresh brings', async () => {
+  const s = midRefresh();
+  const held = s.store.take('user-a');
+  assert.equal(held.accessToken, s.first.accessToken);
+  assert.ok(held.refreshed instanceof Promise);
+  assert.equal(s.store.status('user-a').connected, false);
+  const fresh = s.fresh();
+  s.answer(fresh);
+  // To whoever took the connection, in the shape that is revoked with; and not revoked from here as well
+  assert.deepEqual(await held.refreshed, fresh.tokens);
+  assert.equal(await s.asked, null);
+  assert.deepEqual(s.discarded, []);
+  assert.equal(s.store.status('user-a').connected, false);
+  assert.equal(s.store.size(), 0);
+});
+
+test('take while a refresh runs that brings nothing: the promise is of null, whatever went wrong', async () => {
+  for (const result of [{ ok: false, code: 'unreachable', refused: false }, { ok: false, code: 'bad_refresh_token', refused: true }, null, { ok: true, tokens: { accessToken: 'no' } }]) {
+    const s = midRefresh();
+    const held = s.store.take('user-a');
+    s.answer(result);
+    assert.equal(await held.refreshed, null);
+    assert.deepEqual(s.discarded, []);
+  }
+  // A refresh that throws
+  const s = setup({ refresh: async () => { await Promise.resolve(); throw new Error('boom'); } });
+  const first = s.record();
+  s.store.set('user-a', first);
+  s.clock.at = first.expiresAt - 30 * 1000;
+  const asked = s.store.getAccessToken('user-a');
+  const held = s.store.take('user-a');
+  assert.equal(await held.refreshed, null);
+  assert.equal(await asked, null);
+});
+
+test('take without a refresh running has no promise, and a refresh of the connection made since is not handed to it', async () => {
+  const s = midRefresh();
+  const fresh = s.fresh();
+  s.answer(fresh);
+  await s.asked;
+  const held = s.store.take('user-a');
+  assert.equal('refreshed' in held, false);
+  assert.equal(held.accessToken, fresh.tokens.accessToken);
+});
+
+test('a refresh that lands after its connection was replaced or removed: the new token is handed over to be revoked, that token only', async () => {
+  // Replaced by a new connection to the same account: the grant is the new connection's too
+  const replaced = midRefresh();
+  const again = replaced.record();
+  replaced.store.set('user-a', again);
+  assert.deepEqual(replaced.discarded, []);
+  const fresh = replaced.fresh();
+  replaced.answer(fresh);
+  assert.equal(await replaced.asked, null);
+  assert.deepEqual(replaced.discarded, [{ held: fresh.tokens, whole: false }]);
+  // The new connection is as it was set
+  replaced.clock.at = again.expiresAt - 2 * HOUR;
+  assert.equal(await replaced.store.getAccessToken('user-a'), again.accessToken);
+
+  // Removed
+  const removed = midRefresh();
+  removed.store.remove('user-a');
+  const next = removed.fresh();
+  removed.answer(next);
+  await removed.asked;
+  assert.deepEqual(removed.discarded, [{ held: next.tokens, whole: false }]);
+
+  // The refresh brought nothing: nothing to revoke
+  const nothing = midRefresh();
+  nothing.store.remove('user-a');
+  nothing.answer({ ok: false, code: 'unreachable', refused: false });
+  await nothing.asked;
+  assert.deepEqual(nothing.discarded, []);
+});
+
+test('a connection that is over while its refresh runs (another account, pushed out) is revoked as a whole with what the refresh brought', async () => {
+  const s = midRefresh();
+  s.store.set('user-a', s.record({ githubUserId: 99, login: 'ana-work' }));
+  // Not with the tokens GitHub is ending right now
+  assert.deepEqual(s.discarded, []);
+  const fresh = s.fresh();
+  s.answer(fresh);
+  await s.asked;
+  assert.deepEqual(s.discarded, [{ held: fresh.tokens, whole: true }]);
+
+  // The refresh could not be asked: the tokens it had still work
+  const failed = midRefresh();
+  failed.store.set('user-a', failed.record({ githubUserId: 99 }));
+  failed.answer({ ok: false, code: 'unreachable', refused: false });
+  await failed.asked;
+  assert.deepEqual(failed.discarded, [{ held: failed.heldOf(failed.first), whole: true }]);
 });

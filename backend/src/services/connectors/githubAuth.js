@@ -13,6 +13,10 @@
  *   state   made when the ticket is used, 10 minutes, one use. Bound to the
  *           user, to the cookie and to a PKCE verifier. GitHub hands it back
  *           on the callback.
+ *   undo    made when an account was connected, 10 minutes, one use, one per
+ *           user. Its value is a cookie in the browser that finished the
+ *           flow: the "Not right? Disconnect" button on the last page works
+ *           only there.
  *
  * Tickets and states are kept as sha256 hashes: what is in memory cannot be
  * replayed. Everything is in memory and gone with a restart.
@@ -37,12 +41,15 @@ const AUTHORIZE_URL = 'https://github.com/login/oauth/authorize';
 const TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const USER_URL = 'https://api.github.com/user';
 const grantUrl = (clientId) => `https://api.github.com/applications/${encodeURIComponent(clientId)}/grant`;
+// One token, not the whole grant: "Delete an app token" in GitHub's reference
+const singleUrl = (clientId) => `https://api.github.com/applications/${encodeURIComponent(clientId)}/token`;
 const CALLBACK_PATH = '/api/connectors/github/callback';
 const START_PATH = '/api/connectors/github/start';
 const API_VERSION = '2026-03-10';
 
 const TICKET_TTL_MS = 5 * 60 * 1000;
 const STATE_TTL_MS = 10 * 60 * 1000;
+const UNDO_TTL_MS = 10 * 60 * 1000;
 const MAX_TICKETS_PER_USER = 3;
 const MAX_TICKETS = 5000;
 const MAX_STATES = 5000;
@@ -81,9 +88,11 @@ function createGithubAuth({
   fetch: fetchImpl = (...args) => globalThis.fetch(...args),
   now = () => Date.now(),
   timeoutMs = CALL_TIMEOUT_MS,
+  log = console,
 } = {}) {
   const tickets = new Map(); // sha256(ticket) -> { userId, expiresAt }
   const states = new Map(); // sha256(state) -> { userId, cookieHash, codeVerifier, expiresAt }
+  const undos = new Map(); // sha256(undo value) -> { userId, hash, expiresAt }
   const callbacks = new Set(); // callbacks that are asking GitHub right now: { userId, cancelled }
   const available = Boolean(clientId && clientSecret && publicUrl);
   const redirectUri = `${String(publicUrl || '').replace(/\/+$/, '')}${CALLBACK_PATH}`;
@@ -147,7 +156,12 @@ function createGithubAuth({
     url.searchParams.set('client_id', clientId);
     url.searchParams.set('redirect_uri', redirectUri);
     url.searchParams.set('state', state);
-    // An expiring token with a refresh token, whatever the app's own setting
+    // Asks for an expiring token with a refresh token for this authorization.
+    // GitHub's page documents that for an app that has token expiry off too;
+    // that was not tried here, so the setup asks for "Expire user
+    // authorization tokens" to be on for the GitHub App. Either way an answer
+    // without a refresh token is refused, and the token it holds is revoked
+    // (readTokenAnswer, discardToken)
     url.searchParams.set('scope', 'offline_access');
     url.searchParams.set('code_challenge', sha256(codeVerifier).toString('base64url'));
     url.searchParams.set('code_challenge_method', 'S256');
@@ -193,9 +207,42 @@ function createGithubAuth({
     };
   }
 
-  /** Drop what is open for a user (they signed out, or removed the app). */
+  /**
+   * An account was just connected for this user: the value for the cookie
+   * that lets the browser which finished the flow undo it, for ten minutes.
+   * One per user: a new connect ends the one before. null without a user id.
+   */
+  function createUndo(userId) {
+    if (typeof userId !== 'string' || userId.length === 0) return null;
+    prune(undos);
+    for (const [key, entry] of undos) {
+      if (entry.userId === userId) undos.delete(key);
+    }
+    makeRoom(undos, MAX_STATES);
+    const value = randomValue();
+    const hash = sha256(value);
+    undos.set(hash.toString('hex'), { userId, hash, expiresAt: now() + UNDO_TTL_MS });
+    return value;
+  }
+
+  /** Whose connect this cookie value may undo, used up by asking: `{ userId }` or null. */
+  function consumeUndo(value) {
+    if (!isShaped(value, RANDOM_VALUE)) return null;
+    const hash = sha256(value);
+    const key = hash.toString('hex');
+    const entry = undos.get(key);
+    if (!entry) return null;
+    undos.delete(key);
+    if (entry.expiresAt <= now() || !sameBytes(hash, entry.hash)) return null;
+    return { userId: entry.userId };
+  }
+
+  /**
+   * Drop what is open for a user (they signed out, removed the app, or
+   * disconnected: an undo is for the connection that just ended).
+   */
   function forgetUser(userId) {
-    for (const map of [tickets, states]) {
+    for (const map of [tickets, states, undos]) {
       for (const [key, entry] of map) {
         if (entry.userId === userId) map.delete(key);
       }
@@ -232,8 +279,23 @@ function createGithubAuth({
     }
   }
 
-  /** GitHub's answer to a token request, rebuilt: `{ ok: true, tokens }` or `{ ok: false, code }`. */
+  /**
+   * GitHub's answer to a token request, rebuilt: `{ ok: true, tokens }` or
+   * `{ ok: false, code }`. An answer that holds a token and is not kept all
+   * the same (no refresh token, no expiry: the app's tokens do not expire)
+   * leaves a token at GitHub that nobody holds: it is revoked.
+   */
   function readTokenAnswer(answer) {
+    const result = rebuildTokenAnswer(answer);
+    const body = answer.json;
+    if (!result.ok && result.code === 'bad_response' && answer.status === 200
+      && body !== null && typeof body === 'object' && isShaped(body.access_token, TOKEN)) {
+      discardToken(body.access_token);
+    }
+    return result;
+  }
+
+  function rebuildTokenAnswer(answer) {
     if (answer.failed) return { ok: false, code: answer.failed };
     const body = answer.json;
     if (body === null || typeof body !== 'object' || Array.isArray(body)) return { ok: false, code: 'bad_response' };
@@ -331,8 +393,53 @@ function createGithubAuth({
     return answer.status === 204 ? { ok: true } : { ok: false, code: 'refused' };
   }
 
+  /**
+   * Ask GitHub to delete this one token (not the grant: the same person may
+   * hold a connection that must go on working): `{ ok: true }` or `{ ok:
+   * false, code }`. Basic authentication, as for the grant.
+   */
+  async function revokeToken(accessToken) {
+    if (!available) return { ok: false, code: 'not_available' };
+    if (!isShaped(accessToken, TOKEN)) return { ok: false, code: 'bad_request' };
+    const answer = await call(singleUrl(clientId), {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`, 'utf8').toString('base64')}`,
+        'Content-Type': 'application/json',
+        'X-GitHub-Api-Version': API_VERSION,
+      },
+      body: JSON.stringify({ access_token: accessToken }),
+    });
+    if (answer.failed) return { ok: false, code: answer.failed };
+    return answer.status === 204 ? { ok: true } : { ok: false, code: 'refused' };
+  }
+
+  /**
+   * A token GitHub issued that Arlo does not keep (the user lookup failed,
+   * the user signed out meanwhile, the answer was not one to keep): revoked
+   * at GitHub, best effort. Returns a promise that never rejects, for a
+   * caller that wants to wait; a failure is logged as a code, never a token.
+   */
+  function discardToken(accessToken) {
+    return revokeToken(accessToken).catch(() => ({ ok: false, code: 'error' })).then((outcome) => {
+      if (!outcome.ok) {
+        try {
+          log.warn(`GitHub: a token that was not kept was not revoked at GitHub (${/^[a-z_]{1,40}$/.test(outcome.code) ? outcome.code : 'error'})`);
+        } catch {
+          // A log that fails changes nothing
+        }
+      }
+      return outcome;
+    });
+  }
+
   return {
     available,
+    createUndo,
+    consumeUndo,
+    revokeToken,
+    discardToken,
     issueTicket,
     peekTicket,
     consumeTicket,
@@ -371,5 +478,5 @@ function _setForTests(replacement) {
 module.exports = {
   createGithubAuth, getGithubAuth, _setForTests,
   START_PATH, CALLBACK_PATH, RANDOM_VALUE, CODE, TOKEN, LOGIN,
-  TICKET_TTL_MS, STATE_TTL_MS,
+  TICKET_TTL_MS, STATE_TTL_MS, UNDO_TTL_MS,
 };

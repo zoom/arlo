@@ -19,6 +19,12 @@ const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 export const CONNECT_WAIT_MS = 5 * 60 * 1000;
 /** How often the server is asked meanwhile whether the account is connected. */
 export const CONNECT_POLL_MS = 3000;
+/**
+ * When no connect waits, looking at the panel again (focus, back in view)
+ * asks the server at most this often. Zoom gives a panel the focus many
+ * times a minute, and every read counts against the server's rate limit.
+ */
+export const GLANCE_MIN_MS = 10 * 1000;
 
 /** The server's URL when it is the one this panel may open, else null. */
 export function connectStartUrl(url, origin = window.location.origin) {

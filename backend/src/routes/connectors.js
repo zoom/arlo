@@ -8,6 +8,7 @@
  *   POST   /github/start     form `ticket`: the click on that page; redirects to GitHub
  *   GET    /github/callback  ?code=&state=: GitHub's redirect back; keeps the tokens
  *   DELETE /github           forget the caller's connection and revoke it at GitHub
+ *   POST   /github/undo      the "Not right? Disconnect" button on the connected page
  *
  * The panel runs inside Zoom and GitHub's pages open in the system browser,
  * which has no Arlo session. The three browser routes therefore take no
@@ -23,28 +24,39 @@
  *   whose Arlo is being connected and needs a click, the ticket lives five
  *   minutes and works once, the GitHub App asks for Issues only, the
  *   repository is the deployment's, and creating anything still needs the
- *   approval sheet.
+ *   approval sheet. The connected page names both accounts and has a
+ *   button that undoes the connect, for ten minutes, from that browser only.
  * - A ticket, code, state, token and the client secret are secrets, and a
  *   GitHub login is personal data: none is logged, none is in an error
  *   message. A log line here says that something happened and, on failure, a
  *   code from a fixed list. The access log prints no query string
  *   (lib/accessLog.js).
- * - The two pages are fixed strings. The one variable part, a Zoom display
- *   name, is untrusted: cleaned, cut and HTML-escaped. No script, and a
+ * - The pages are fixed strings. The variable parts are untrusted: a Zoom
+ *   display name is cleaned, cut and HTML-escaped; a GitHub login is shown
+ *   (on the connected page only) when it has the form of one. No script, and a
  *   Content-Security-Policy that allows none.
  * - Request bodies are exactly the known fields. Nothing is cached.
- * - Rate limited with the auth limiter (server.js).
+ * - The pages' forms are accepted only from this origin: `Origin` must be
+ *   PUBLIC_URL's (never "null"), and `Sec-Fetch-Site`, when the browser sends
+ *   it, must be "same-origin". A page with a form therefore has
+ *   `Referrer-Policy: same-origin`: with "no-referrer" browsers send
+ *   `Origin: null` on its POST.
+ * - Rate limits (middleware/authLimiter.js): the steps of the flow share the
+ *   auth limiter; reading and ending a connection have a limiter of their
+ *   own, so the panel's polling cannot use up what signing in needs.
+ * - A token GitHub issued that is not kept after all is revoked there.
  */
 const crypto = require('crypto');
 const express = require('express');
 const config = require('../config');
 const { requireAuth } = require('../middleware/auth');
+const { authLimiter, connectorsLimiter } = require('../middleware/authLimiter');
 const { userStore } = require('../lib/memoryStore');
 const { cleanName } = require('../lib/displayName');
 const {
-  getGithubAuth, START_PATH, RANDOM_VALUE, CODE, STATE_TTL_MS,
+  getGithubAuth, START_PATH, RANDOM_VALUE, CODE, STATE_TTL_MS, UNDO_TTL_MS,
 } = require('../services/connectors/githubAuth');
-const { getGithubConnections, disconnectGithubUser } = require('../services/connectors/githubConnections');
+const { getGithubConnections, disconnectGithubUser, tellPanels } = require('../services/connectors/githubConnections');
 
 const router = express.Router();
 
@@ -54,7 +66,17 @@ const COOKIE = 'ghConnect';
 const COOKIE_OPTIONS = Object.freeze({
   httpOnly: true, secure: true, sameSite: 'lax', path: '/api/connectors/github',
 });
+// Set when an account was connected: only the browser that finished the flow
+// can undo it. Strict: sent with the connected page's own form and nothing else
+const UNDO_COOKIE = 'ghUndo';
+const UNDO_PATH = '/api/connectors/github/undo';
+const UNDO_COOKIE_OPTIONS = Object.freeze({
+  httpOnly: true, secure: true, sameSite: 'strict', path: '/api/connectors/github',
+});
 const MAX_NAME_CHARS = 60;
+// A GitHub login as github.com writes one: 1 to 39 letters, digits and inner
+// hyphens. What is shown on a page is this or nothing
+const SHOWN_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/;
 
 const PAGE_HEADERS = Object.freeze({
   'Content-Type': 'text/html; charset=utf-8',
@@ -62,6 +84,10 @@ const PAGE_HEADERS = Object.freeze({
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 });
+// A page with a form that posts back here. With "no-referrer" a browser sends
+// `Origin: null` on that POST, which the POST routes refuse; "same-origin"
+// sends the origin to this server and still nothing to any other
+const FORM_PAGE_REFERRER = 'same-origin';
 const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'";
 // The start page's form posts to this server, which answers with a redirect
 // to GitHub. Browsers that apply form-action to that redirect (Chrome,
@@ -93,7 +119,23 @@ const page = (title, body) => '<!doctype html>\n<html lang="en"><head><meta char
 
 const EXPIRED_PAGE = page('Arlo', '<h1>This link has expired. Start again from Arlo\'s settings.</h1>');
 const NOT_CONNECTED_PAGE = page('Arlo', '<h1>GitHub was not connected. Start again from Arlo\'s settings.</h1>');
-const CONNECTED_PAGE = page('Arlo', '<h1>GitHub is connected. You can close this tab and go back to Zoom.</h1>');
+const DISCONNECTED_PAGE = page('Arlo', '<h1>Disconnected.</h1>');
+const NOT_UNDONE_PAGE = page('Arlo', '<h1>That did not work. Disconnect GitHub from Arlo\'s settings.</h1>');
+
+/**
+ * The page after a connect: both accounts by name, so a person who connected
+ * their GitHub to someone else's Arlo can see it, and a button that undoes
+ * it. `login` is GitHub's and `name` a Zoom display name: both untrusted.
+ */
+function connectedPage(login, name) {
+  const account = isShaped(login, SHOWN_LOGIN) ? `GitHub account <strong>${escapeHtml(login)}</strong>` : 'A GitHub account';
+  const shown = cleanName(name, MAX_NAME_CHARS);
+  const whose = shown.length > 0 ? ` for <strong>${escapeHtml(shown)}</strong>` : '';
+  return page('Arlo', `<h1>${account} is now connected to Arlo${whose}.</h1>`
+    + '<p>You can close this tab and go back to Zoom.</p>'
+    + `<form method="post" action="${UNDO_PATH}">`
+    + '<button type="submit">Not right? Disconnect</button></form>');
+}
 
 /** The start page for one ticket. `name` is a Zoom display name: untrusted. */
 function startPage(name, ticket) {
@@ -108,8 +150,53 @@ function startPage(name, ticket) {
     + '<p>Not you? Close this tab.</p>');
 }
 
-function sendPage(res, status, html, csp = PAGE_CSP) {
-  res.status(status).set(PAGE_HEADERS).set('Content-Security-Policy', csp).send(html);
+function sendPage(res, status, html, csp = PAGE_CSP, referrerPolicy = PAGE_HEADERS['Referrer-Policy']) {
+  res.status(status).set(PAGE_HEADERS).set('Referrer-Policy', referrerPolicy).set('Content-Security-Policy', csp).send(html);
+}
+
+/**
+ * True when a form POST comes from a page of this server: `Origin` is
+ * PUBLIC_URL's origin (a missing one and "null" are not), and the browser's
+ * own word on it, when there is one, is "same-origin".
+ */
+function fromThisOrigin(req) {
+  if (req.get('origin') !== new URL(config.publicUrl).origin) return false;
+  const site = req.get('sec-fetch-site');
+  return site === undefined || site === 'same-origin';
+}
+
+/**
+ * An async handler whose failure never becomes an unhandled rejection
+ * (Express 4 does not look at a handler's promise). Nothing of the error is
+ * logged: it could quote a request.
+ */
+const guarded = (handler, onError) => (req, res, next) => {
+  Promise.resolve().then(() => handler(req, res, next)).catch(() => {
+    if (res.headersSent) return;
+    try {
+      onError(req, res);
+    } catch {
+      // The connection is gone: nothing left to answer
+    }
+  });
+};
+const jsonError = (req, res) => res.status(500).json({ error: 'Internal Server Error' });
+
+/**
+ * End this user's connection the way "Disconnect" does: gone from memory at
+ * once, the grant revoked at GitHub (waited for, best effort), their open
+ * panels told. True when there was a connection.
+ */
+async function disconnect(userId) {
+  // Gone from memory at once; GitHub is asked next, and its failure is logged as a code
+  const { wasConnected, revoked } = disconnectGithubUser(userId);
+  await revoked;
+  if (wasConnected) {
+    console.log('GitHub disconnected');
+    // Their other open panels show it without a reload. Never throws
+    tellPanels(userId);
+  }
+  return wasConnected;
 }
 
 /** What is known about the caller's GitHub connection. Never a token. */
@@ -138,7 +225,7 @@ function requireJson(req, res, next) {
  * GET /api/connectors
  * What the caller has connected. The login is the caller's own.
  */
-router.get('/', requireAuth, (req, res) => {
+router.get('/', connectorsLimiter, requireAuth, (req, res) => {
   res.json({ github: githubFor(req.user.id) });
 });
 
@@ -146,7 +233,7 @@ router.get('/', requireAuth, (req, res) => {
  * POST /api/connectors/github/ticket
  * A link for the signed-in caller that starts the flow in their browser.
  */
-router.post('/github/ticket', requireAuth, requireJson, (req, res) => {
+router.post('/github/ticket', authLimiter, requireAuth, requireJson, (req, res) => {
   if (!hasExactly(req.body, [])) {
     return res.status(400).json({ error: 'Invalid request', message: 'Send an empty JSON object' });
   }
@@ -165,14 +252,14 @@ router.post('/github/ticket', requireAuth, requireJson, (req, res) => {
  * button. The ticket is looked at, not used: a link preview or a reload must
  * not spend it.
  */
-router.get('/github/start', (req, res) => {
+router.get('/github/start', authLimiter, (req, res) => {
   const auth = getGithubAuth();
   const { ticket } = req.query;
   const found = auth.available && isShaped(ticket, RANDOM_VALUE) ? auth.peekTicket(ticket) : null;
   const user = found ? userStore.findById(found.userId) : null;
   if (!user) return sendPage(res, 400, EXPIRED_PAGE);
   res.cookie(COOKIE, crypto.randomBytes(32).toString('base64url'), { ...COOKIE_OPTIONS, maxAge: STATE_TTL_MS });
-  return sendPage(res, 200, startPage(user.displayName, ticket), START_PAGE_CSP);
+  return sendPage(res, 200, startPage(user.displayName, ticket), START_PAGE_CSP, FORM_PAGE_REFERRER);
 });
 
 /**
@@ -180,10 +267,10 @@ router.get('/github/start', (req, res) => {
  * The click on the start page. Only from that page in that browser: the
  * cookie it set must be there and the form must come from this origin.
  */
-router.post('/github/start', (req, res) => {
+router.post('/github/start', authLimiter, (req, res) => {
   const auth = getGithubAuth();
   const cookieValue = req.cookies ? req.cookies[COOKIE] : undefined;
-  const sameOrigin = req.get('origin') === new URL(config.publicUrl).origin;
+  const sameOrigin = fromThisOrigin(req);
   if (!auth.available || !sameOrigin || !isShaped(cookieValue, RANDOM_VALUE)
     || !req.is('application/x-www-form-urlencoded') || !hasExactly(req.body, ['ticket'])
     || !isShaped(req.body.ticket, RANDOM_VALUE)) {
@@ -203,11 +290,16 @@ router.post('/github/start', (req, res) => {
  * GitHub's redirect back, in the browser that started the flow. Every failure
  * is the same page: it says nothing about why.
  */
-router.get('/github/callback', async (req, res) => {
+router.get('/github/callback', authLimiter, guarded(async (req, res) => {
   const auth = getGithubAuth();
   let flow = null;
+  // The token GitHub issued in this request, until it is kept
+  let issued = null;
   const failed = (code) => {
     if (flow) flow.end();
+    // Issued and not kept: revoked at GitHub, best effort and not waited for
+    if (issued) auth.discardToken(issued);
+    issued = null;
     // A code from this file's and githubAuth's fixed lists, never a value
     console.warn(`GitHub connect failed (${code})`);
     res.clearCookie(COOKIE, COOKIE_OPTIONS);
@@ -226,6 +318,7 @@ router.get('/github/callback', async (req, res) => {
 
     const exchanged = await auth.exchangeCode({ code, codeVerifier: flow.codeVerifier });
     if (!exchanged.ok) return failed(exchanged.code);
+    issued = exchanged.tokens.accessToken;
     const who = await auth.fetchUser(exchanged.tokens.accessToken);
     if (!who.ok) return failed(who.code);
 
@@ -239,19 +332,49 @@ router.get('/github/callback', async (req, res) => {
       ...exchanged.tokens, login: who.login, githubUserId: who.githubUserId,
     });
     if (!kept) return failed('bad_response');
+    issued = null;
 
     res.clearCookie(COOKIE, COOKIE_OPTIONS);
-    // Required here: the socket server's neighbours require this module's neighbours
-    // eslint-disable-next-line global-require
-    require('../services/websocket').sendConnectorsUpdated(userId);
+    // This browser, and no other, may undo the connect for ten minutes
+    const undo = auth.createUndo(userId);
+    if (undo) res.cookie(UNDO_COOKIE, undo, { ...UNDO_COOKIE_OPTIONS, maxAge: UNDO_TTL_MS });
+    // Their open panels read the connectors again. Never throws: a panel
+    // that cannot be told does not make a connect a failure
+    tellPanels(userId);
     // That it happened, never who or as whom
     console.log('GitHub connected');
-    return sendPage(res, 200, CONNECTED_PAGE);
+    const user = userStore.findById(userId);
+    return sendPage(res, 200, connectedPage(who.login, user ? user.displayName : ''), PAGE_CSP, FORM_PAGE_REFERRER);
   } catch {
     // Nothing of the error is logged: it could quote a request
     return failed('error');
   }
-});
+}, (req, res) => sendPage(res, 400, NOT_CONNECTED_PAGE)));
+
+/**
+ * POST /api/connectors/github/undo
+ * "Not right? Disconnect" on the connected page: ends the connection that
+ * was just made. Only from that page in that browser, within ten minutes,
+ * once: the cookie the callback set says whose connect it was. No session
+ * (the system browser has none) and no field: the cookie is everything.
+ */
+router.post('/github/undo', authLimiter, guarded(async (req, res) => {
+  const auth = getGithubAuth();
+  const cookieValue = req.cookies ? req.cookies[UNDO_COOKIE] : undefined;
+  const sameOrigin = fromThisOrigin(req);
+  const noFields = req.body === undefined || hasExactly(req.body, []);
+  if (!auth.available || !sameOrigin || !isShaped(cookieValue, RANDOM_VALUE) || !noFields) {
+    // Such a request does not use the undo up
+    return sendPage(res, sameOrigin ? 400 : 403, NOT_UNDONE_PAGE);
+  }
+  res.clearCookie(UNDO_COOKIE, UNDO_COOKIE_OPTIONS);
+  // Used up by asking; null when unknown, used, expired, or the connection it
+  // was for has ended since (disconnect and logout drop it)
+  const found = auth.consumeUndo(cookieValue);
+  if (!found) return sendPage(res, 400, NOT_UNDONE_PAGE);
+  await disconnect(found.userId);
+  return sendPage(res, 200, DISCONNECTED_PAGE);
+}, (req, res) => sendPage(res, 400, NOT_UNDONE_PAGE)));
 
 /**
  * DELETE /api/connectors/github
@@ -259,18 +382,9 @@ router.get('/github/callback', async (req, res) => {
  * well; when that fails the connection is gone here all the same. The
  * caller's open panels are told (`connectors.updated`).
  */
-router.delete('/github', requireAuth, async (req, res) => {
-  const userId = req.user.id;
-  // Gone from memory at once; GitHub is asked next, and its failure is logged as a code
-  const { wasConnected, revoked } = disconnectGithubUser(userId);
-  await revoked;
-  if (wasConnected) {
-    console.log('GitHub disconnected');
-    // Their other open panels show it without a reload
-    // eslint-disable-next-line global-require
-    require('../services/websocket').sendConnectorsUpdated(userId);
-  }
+router.delete('/github', connectorsLimiter, requireAuth, guarded(async (req, res) => {
+  await disconnect(req.user.id);
   return res.json({ connected: false });
-});
+}, jsonError));
 
 module.exports = router;

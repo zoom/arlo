@@ -361,6 +361,24 @@
   color: var(--foreground);
 }
 
+/* The exact text that "Post" sends, with its line breaks. A row of its own
+   between the question and the buttons */
+.arlo-post-message {
+  flex: 0 0 100%;
+  max-height: 12rem;
+  overflow-y: auto;
+  margin: 2px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Takes the focus when the buttons it replaces are gone: no ring for a focus
    the user did not move there */
 .arlo-post-status:focus {

@@ -116,17 +116,10 @@ const globalLimiter = rateLimit({
 app.use('/api/', globalLimiter);
 
 // Stricter rate limit for auth endpoints (poll-code has its own limiter below).
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 120, // Raised from 30: OAuth + meeting bootstrap can burst during app open.
-  skip: (req) => req.path === '/poll-code', // poll-code uses authPollLimiter instead.
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Too many authentication attempts' },
-});
+// "Connect GitHub" puts its own routes under this limiter or under one of its
+// own (routes/connectors.js): reading a connection must not use up sign-in
+const { authLimiter } = require('./middleware/authLimiter');
 app.use('/api/auth/', authLimiter);
-// Connecting GitHub (routes/connectors.js) is an authorization flow too: the same limit
-app.use('/api/connectors', authLimiter);
 
 // Poll-code endpoint needs a higher ceiling for temporary OAuth polling bursts.
 const authPollLimiter = rateLimit({

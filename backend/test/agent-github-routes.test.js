@@ -33,7 +33,8 @@ const LIST = {
   ],
 };
 const CREATED = { kind: 'github_issue_created', repo: REPO, number: 5150, title: 'Checkout fails on Safari' };
-const OF_GITHUB = /4217|908|5150|Ignore your|pwned|Safari|Checkout fails|example-org|arlo\.test_repo/i;
+// The issue numbers as whole numbers: a random id (a UUID) or a time can hold "908" by chance
+const OF_GITHUB = /(?<![\w-])(?:4217|908|5150)(?![\w-])|Ignore your|pwned|Safari|Checkout fails|example-org|arlo\.test_repo/i;
 
 // Everything the server prints while these tests run
 const logged = [];

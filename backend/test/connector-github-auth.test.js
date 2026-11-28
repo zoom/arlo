@@ -342,6 +342,115 @@ test('revoking deletes the grant at api.github.com with the app\'s Basic credent
   assert.deepEqual(await setup({ answer: () => { throw new TypeError('x'); } }).auth.revokeGrant(accessToken), { ok: false, code: 'unreachable' });
 });
 
+test('revoking one token deletes that token, not the grant, with the app\'s Basic credentials', async () => {
+  const accessToken = made('ghu');
+  const { auth, calls } = setup({ answer: () => new Response(null, { status: 204 }) });
+  assert.deepEqual(await auth.revokeToken(accessToken), { ok: true });
+  const [{ url, init }] = calls;
+  assert.equal(url, `https://api.github.com/applications/${CLIENT_ID}/token`);
+  assert.equal(init.method, 'DELETE');
+  assert.equal(init.redirect, 'manual');
+  assert.equal(init.headers.Authorization, `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')}`);
+  assert.deepEqual(JSON.parse(init.body), { access_token: accessToken });
+
+  assert.deepEqual(await setup({ answer: () => json({ message: 'Validation Failed' }, 422) }).auth.revokeToken(accessToken), { ok: false, code: 'refused' });
+  assert.deepEqual(await setup({ answer: () => { throw new TypeError('x'); } }).auth.revokeToken(accessToken), { ok: false, code: 'unreachable' });
+  const none = setup({ answer: () => assert.fail('nothing is sent') });
+  assert.deepEqual(await none.auth.revokeToken('not a token'), { ok: false, code: 'bad_request' });
+});
+
+test('a token that is not kept is revoked, best effort: a failure is a code in the log and never the token', async () => {
+  const accessToken = made('ghu');
+  const lines = [];
+  const withLog = (answer) => createGithubAuth({
+    clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, publicUrl: PUBLIC_URL, fetch: async (url, init) => answer(String(url), init), log: { warn: (line) => lines.push(line) },
+  });
+  assert.deepEqual(await withLog(() => new Response(null, { status: 204 })).discardToken(accessToken), { ok: true });
+  assert.deepEqual(lines, []);
+  assert.deepEqual(await withLog(() => json({ message: `no ${accessToken}` }, 422)).discardToken(accessToken), { ok: false, code: 'refused' });
+  assert.deepEqual(await withLog(() => { throw new Error(accessToken); }).discardToken(accessToken), { ok: false, code: 'unreachable' });
+  assert.deepEqual(lines, [
+    'GitHub: a token that was not kept was not revoked at GitHub (refused)',
+    'GitHub: a token that was not kept was not revoked at GitHub (unreachable)',
+  ]);
+  // A log that throws changes nothing
+  const loud = createGithubAuth({
+    clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, publicUrl: PUBLIC_URL, fetch: async () => json({}, 500), log: { warn: () => { throw new Error('boom'); } },
+  });
+  assert.deepEqual(await loud.discardToken(accessToken), { ok: false, code: 'refused' });
+});
+
+test('a token answer that is not kept but holds a token: that token is revoked; one without a token, an error or another status: nothing is', async () => {
+  const TOKEN_URL = 'https://github.com/login/oauth/access_token';
+  const SINGLE_URL = `https://api.github.com/applications/${CLIENT_ID}/token`;
+  const run = async (body, status = 200, how = 'exchange') => {
+    const s = setup({ answer: (url) => (url === TOKEN_URL ? json(body, status) : new Response(null, { status: 204 })) });
+    const result = how === 'exchange'
+      ? await s.auth.exchangeCode({ code: 'c'.repeat(20), codeVerifier: COOKIE() })
+      : await s.auth.refresh(made('ghr'));
+    await new Promise((resolve) => { setImmediate(resolve); });
+    return { result, revoked: s.calls.filter((call) => call.url === SINGLE_URL).map((call) => JSON.parse(call.init.body)), calls: s.calls };
+  };
+  // The app's tokens do not expire: no refresh token, no expiry
+  const forever = made('ghu');
+  const noRefresh = await run({ access_token: forever, scope: '', token_type: 'bearer' });
+  assert.deepEqual(noRefresh.result, { ok: false, code: 'bad_response' });
+  assert.deepEqual(noRefresh.revoked, [{ access_token: forever }]);
+  assert.equal(noRefresh.calls.length, 2);
+  // Also when a refresh is answered that way: the token it issued is nobody's
+  const viaRefresh = await run({ access_token: forever, scope: '', token_type: 'bearer' }, 200, 'refresh');
+  assert.equal(viaRefresh.result.code, 'bad_response');
+  assert.deepEqual(viaRefresh.revoked, [{ access_token: forever }]);
+  const badLifetime = await run(tokenAnswer({ access_token: forever, expires_in: -1 }));
+  assert.deepEqual(badLifetime.revoked, [{ access_token: forever }]);
+
+  // Nothing to revoke, or nothing that is a token: GitHub is not asked
+  for (const [body, status] of [
+    [{ error: 'bad_verification_code' }, 200],
+    [tokenAnswer(), 500],
+    [tokenAnswer({ access_token: 'has space and is long enough' }), 200],
+    [{ scope: '', token_type: 'bearer' }, 200],
+    [[tokenAnswer()], 200],
+  ]) {
+    const none = await run(body, status);
+    assert.equal(none.result.ok, false);
+    assert.deepEqual(none.revoked, [], JSON.stringify(body));
+  }
+  // An answer that is kept is not revoked
+  const kept = await run(tokenAnswer());
+  assert.equal(kept.result.ok, true);
+  assert.deepEqual(kept.revoked, []);
+});
+
+test('an undo is 32 random bytes, names its user, works once, for ten minutes, one per user', () => {
+  const { auth, clock } = setup();
+  const value = auth.createUndo('user-a');
+  assert.match(value, /^[A-Za-z0-9_-]{43}$/);
+  assert.notEqual(auth.createUndo('user-b'), value);
+  assert.deepEqual(auth.consumeUndo(value), { userId: 'user-a' });
+  assert.equal(auth.consumeUndo(value), null);
+  for (const bad of [undefined, null, 42, '', 'x', `${value}x`, COOKIE(), { toString: () => value }]) assert.equal(auth.consumeUndo(bad), null);
+  assert.equal(auth.createUndo(''), null);
+  assert.equal(auth.createUndo(undefined), null);
+
+  // Ten minutes
+  const late = auth.createUndo('user-a');
+  clock.at += 10 * 60 * 1000;
+  assert.equal(auth.consumeUndo(late), null);
+  const inTime = auth.createUndo('user-a');
+  clock.at += 10 * 60 * 1000 - 1;
+  assert.deepEqual(auth.consumeUndo(inTime), { userId: 'user-a' });
+
+  // A new connect ends the undo of the one before, and nobody else's
+  const [first, other] = [auth.createUndo('user-a'), auth.createUndo('user-c')];
+  const second = auth.createUndo('user-a');
+  assert.equal(auth.consumeUndo(first), null);
+  assert.deepEqual(auth.consumeUndo(other), { userId: 'user-c' });
+  // The connection ended (disconnect, logout): its undo goes too
+  auth.forgetUser('user-a');
+  assert.equal(auth.consumeUndo(second), null);
+});
+
 test('every call goes to github.com or api.github.com over https', async () => {
   const { auth, calls } = setup({ answer: () => json(tokenAnswer()) });
   await auth.exchangeCode({ code: 'c'.repeat(20), codeVerifier: COOKIE() });

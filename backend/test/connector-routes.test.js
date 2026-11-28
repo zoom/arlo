@@ -41,7 +41,7 @@ const secret = (value) => { secrets.add(value); return value; };
 const clock = { at: Date.now() };
 const github = { calls: [], answers: {} };
 const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-function githubAnswers({ login = 'octo-cat', id = 583231, token, user, revoke } = {}) {
+function githubAnswers({ login = 'octo-cat', id = 583231, token, user, revoke, single } = {}) {
   const tokens = {
     access_token: secret(made('ghu')), expires_in: 28800, refresh_token: secret(made('ghr')),
     refresh_token_expires_in: 15897600, scope: '', token_type: 'bearer',
@@ -51,6 +51,7 @@ function githubAnswers({ login = 'octo-cat', id = 583231, token, user, revoke } 
     'https://github.com/login/oauth/access_token': token || (() => json(tokens)),
     'https://api.github.com/user': user || (() => json({ login, id })),
     [`https://api.github.com/applications/${CLIENT_ID}/grant`]: revoke || (() => new Response(null, { status: 204 })),
+    [`https://api.github.com/applications/${CLIENT_ID}/token`]: single || (() => new Response(null, { status: 204 })),
   };
   secrets.add(login);
   return tokens;
@@ -73,6 +74,8 @@ test.before(async () => {
     decrypt: decryptToken,
     refresh: (refreshToken) => githubAuth.getGithubAuth().refresh(refreshToken),
     now: () => clock.at,
+    // As the server's own store does it
+    onDiscarded: githubConnections.discardAtGithub,
   }));
 });
 test.after(() => { srv.server.closeAllConnections?.(); srv.server.close(); });
@@ -115,13 +118,14 @@ async function openStart(ticket) {
   };
 }
 /** The click on "Continue to GitHub". */
-async function click(ticket, ghCookie, { origin = ORIGIN, contentType = 'application/x-www-form-urlencoded', body } = {}) {
+async function click(ticket, ghCookie, { origin = ORIGIN, contentType = 'application/x-www-form-urlencoded', body, secFetchSite } = {}) {
   const res = await fetch(api('/github/start'), {
     method: 'POST',
     redirect: 'manual',
     headers: {
       'content-type': contentType,
       ...(origin ? { origin } : {}),
+      ...(secFetchSite ? { 'sec-fetch-site': secFetchSite } : {}),
       ...(ghCookie ? { cookie: `ghConnect=${ghCookie}` } : {}),
     },
     body: body === undefined ? new URLSearchParams({ ticket }).toString() : body,
@@ -137,11 +141,30 @@ async function callbackAs(query, ghCookie) {
   const res = await fetch(`${api('/github/callback')}?${new URLSearchParams(query)}`, {
     headers: ghCookie ? { cookie: `ghConnect=${ghCookie}` } : {},
   });
+  const undoSet = res.headers.getSetCookie().find((line) => line.startsWith('ghUndo=')) || '';
+  const undoValue = (undoSet.match(/^ghUndo=([^;]*)/) || [])[1];
+  return {
+    status: res.status, html: await res.text(), headers: res.headers, setCookie: res.headers.get('set-cookie') || '', undoSet, undoCookie: undoValue ? secret(undoValue) : undefined,
+  };
+}
+const callback = callbackAs;
+/** The click on "Not right? Disconnect", in the browser that holds `undoCookie`. */
+async function undo(undoCookie, { origin = ORIGIN, secFetchSite, body = '', contentType = 'application/x-www-form-urlencoded' } = {}) {
+  const res = await fetch(api('/github/undo'), {
+    method: 'POST',
+    redirect: 'manual',
+    headers: {
+      'content-type': contentType,
+      ...(origin ? { origin } : {}),
+      ...(secFetchSite ? { 'sec-fetch-site': secFetchSite } : {}),
+      ...(undoCookie ? { cookie: `ghUndo=${undoCookie}` } : {}),
+    },
+    body,
+  });
   return {
     status: res.status, html: await res.text(), headers: res.headers, setCookie: res.headers.get('set-cookie') || '',
   };
 }
-const callback = callbackAs;
 /** Everything up to GitHub's page: { ghCookie, state }. */
 async function upToGithub(who) {
   const ticket = await ticketFor(who);
@@ -161,14 +184,17 @@ async function connect(who, answers) {
 
 const EXPIRED = 'This link has expired. Start again from Arlo\'s settings.';
 const NOT_CONNECTED = 'GitHub was not connected. Start again from Arlo\'s settings.';
-const CONNECTED = 'GitHub is connected. You can close this tab and go back to Zoom.';
+const CLOSE_TAB = 'You can close this tab and go back to Zoom.';
+const DISCONNECTED = '<h1>Disconnected.</h1>';
+const NOT_UNDONE = 'That did not work. Disconnect GitHub from Arlo\'s settings.';
+const START_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://github.com; frame-ancestors 'none'";
 const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'";
 
-function assertPage(res, csp = PAGE_CSP) {
+function assertPage(res, csp = PAGE_CSP, referrerPolicy = 'no-referrer') {
   assert.match(res.headers.get('content-type'), /^text\/html; charset=utf-8/);
   assert.equal(res.headers.get('content-security-policy'), csp);
   assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
-  assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(res.headers.get('referrer-policy'), referrerPolicy);
   assert.equal(res.headers.get('cache-control'), 'no-store');
   assert.equal(/<script/i.test(res.html), false);
   assert.equal(/\son[a-z]+=/i.test(res.html), false);
@@ -189,7 +215,8 @@ test('the whole flow: ticket, start page, GitHub, callback, connected', async ()
   // 2. The browser, which has no Arlo session, shows whose Arlo it is
   const start = await openStart(ticket);
   assert.equal(start.status, 200);
-  assertPage(start, "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://github.com; frame-ancestors 'none'");
+  // "same-origin": with "no-referrer" the browser would send `Origin: null` on the form's POST
+  assertPage(start, START_CSP, 'same-origin');
   assert.match(start.html, /Connect a GitHub account to Arlo for <strong>Ana Ruiz<\/strong>/);
   assert.match(start.html, /<form method="post" action="\/api\/connectors\/github\/start">/);
   assert.match(start.html, /<button type="submit">Continue to GitHub<\/button>/);
@@ -203,6 +230,8 @@ test('the whole flow: ticket, start page, GitHub, callback, connected', async ()
   // 3. The click: a redirect to GitHub that the server built
   const clicked = await click(ticket, start.ghCookie);
   assert.equal(clicked.status, 303);
+  // The redirect to GitHub carries the state: GitHub learns nothing of the page before
+  assert.equal(clicked.headers.get('referrer-policy'), 'no-referrer');
   const to = new URL(clicked.location);
   assert.equal(`${to.origin}${to.pathname}`, 'https://github.com/login/oauth/authorize');
   assert.equal(to.searchParams.get('client_id'), CLIENT_ID);
@@ -218,8 +247,14 @@ test('the whole flow: ticket, start page, GitHub, callback, connected', async ()
   const code = secret(made('code'));
   const back = await callback({ code, state: clicked.state }, start.ghCookie);
   assert.equal(back.status, 200);
-  assertPage(back);
-  assert.ok(back.html.includes(CONNECTED));
+  // The page has a form (the undo button): "same-origin", as the start page
+  assertPage(back, PAGE_CSP, 'same-origin');
+  // Both sides by name: whose GitHub, and whose Arlo
+  assert.ok(back.html.includes('<h1>GitHub account <strong>ana-on-github</strong> is now connected to Arlo for <strong>Ana Ruiz</strong>.</h1>'));
+  assert.ok(back.html.includes(CLOSE_TAB));
+  assert.ok(back.html.includes('<form method="post" action="/api/connectors/github/undo"><button type="submit">Not right? Disconnect</button></form>'));
+  assert.match(back.undoCookie, /^[A-Za-z0-9_-]{43}$/);
+  for (const part of ['; Max-Age=600', '; Path=/api/connectors/github', '; HttpOnly', '; Secure', '; SameSite=Strict']) assert.ok(back.undoSet.includes(part), part);
   assert.match(back.setCookie, /^ghConnect=;/); // cleared
   assert.match(back.setCookie, /Path=\/api\/connectors\/github/);
 
@@ -238,10 +273,12 @@ test('the whole flow: ticket, start page, GitHub, callback, connected', async ()
 
   // No page told the browser anything it must not know
   for (const html of [start.html, clicked.html, back.html]) {
-    for (const hidden of [code, clicked.state, tokens.access_token, tokens.refresh_token, CLIENT_SECRET, ana.user.id, 'ana-on-github']) {
+    for (const hidden of [code, clicked.state, tokens.access_token, tokens.refresh_token, CLIENT_SECRET, ana.user.id, back.undoCookie]) {
       assert.equal(html.includes(hidden), false);
     }
   }
+  // The GitHub login is on the connected page and nowhere before it
+  for (const html of [start.html, clicked.html]) assert.equal(html.includes('ana-on-github'), false);
   assert.equal(back.html.includes(ticket), false);
 });
 
@@ -253,7 +290,7 @@ test('GET /api/connectors is for a signed-in caller, about the caller only, and 
   assert.equal((await connectors(null)).status, 401);
   const mine = await connectors(ana);
   assert.equal(mine.headers.get('cache-control'), 'no-store');
-  assert.equal(mine.headers.get('ratelimit-limit'), '120'); // the auth limiter
+  assert.equal(mine.headers.get('ratelimit-limit'), '300'); // a limiter of its own, not the auth limiter's 120
   assert.deepEqual(mine.body, { github: { available: true, connected: true, login: 'ana-gh' } });
   const text = JSON.stringify(mine.body);
   for (const hidden of [tokens.access_token, tokens.refresh_token, CLIENT_SECRET]) assert.equal(text.includes(hidden), false);
@@ -324,7 +361,7 @@ test('a display name is shown as text: markup in it is escaped', async () => {
   const eve = person('<script>alert(1)</script> & "Eve" <b>');
   const res = await openStart(await ticketFor(eve));
   assert.equal(res.status, 200);
-  assertPage(res, "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://github.com; frame-ancestors 'none'");
+  assertPage(res, START_CSP, 'same-origin');
   assert.ok(res.html.includes('<strong>&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;Eve&quot; &lt;b&gt;</strong>'));
   assert.equal(res.html.includes('<b>'), false);
 
@@ -347,6 +384,11 @@ test('the click is refused from another origin, without the cookie, or in anothe
     [await click(ticket, ghCookie, { origin: 'https://evil.example.test' }), 403],
     [await click(ticket, ghCookie, { origin: null }), 403],
     [await click(ticket, ghCookie, { origin: 'null' }), 403],
+    // The browser's own word on where the request comes from, when it gives one
+    [await click(ticket, ghCookie, { secFetchSite: 'cross-site' }), 403],
+    [await click(ticket, ghCookie, { secFetchSite: 'same-site' }), 403],
+    [await click(ticket, ghCookie, { secFetchSite: 'none' }), 403],
+    [await click(ticket, ghCookie, { origin: 'null', secFetchSite: 'same-origin' }), 403],
     [await click(ticket, undefined), 400],
     [await click(ticket, 'not-the-cookie-shape'), 400],
     [await click(ticket, ghCookie, { contentType: 'application/json', body: JSON.stringify({ ticket }) }), 400],
@@ -360,7 +402,14 @@ test('the click is refused from another origin, without the cookie, or in anothe
     assertPage(res);
     assert.ok(res.html.includes(EXPIRED));
   }
-  // The page's own click still works
+  // The page's own click still works, as a browser sends it
+  assert.equal((await click(ticket, ghCookie, { secFetchSite: 'same-origin' })).status, 303);
+});
+
+test('a browser that sends no Sec-Fetch-Site (an older one) is let through on its Origin alone', async () => {
+  const ana = person('Ana Ruiz');
+  const ticket = await ticketFor(ana);
+  const { ghCookie } = await openStart(ticket);
   assert.equal((await click(ticket, ghCookie)).status, 303);
 });
 
@@ -767,6 +816,439 @@ test('GitHub not set up on the server: nothing is offered and no page starts a f
   } finally {
     githubAuth._setForTests(real);
   }
+});
+
+// --- tokens GitHub issued that Arlo does not keep -------------------------------------
+
+const tokenRevokes = () => github.calls.filter((call) => call.url === `https://api.github.com/applications/${CLIENT_ID}/token`);
+const BASIC = `Basic ${Buffer.from(`${CLIENT_ID}:${CLIENT_SECRET}`).toString('base64')}`;
+const NOT_REVOKED = (code) => `GitHub: a token that was not kept was not revoked at GitHub (${code})`;
+
+test('a token GitHub issued and Arlo does not keep is revoked: the user lookup failed', async () => {
+  const ana = person('Ana Ruiz');
+  for (const user of [() => json({ message: 'Bad credentials' }, 401), () => json({ login: '<img src=x>', id: 1 }), () => { throw new TypeError('fetch failed'); }]) {
+    const res = await connect(ana, { user });
+    assert.equal(res.status, 400);
+    await h.wait(50);
+    // That one token, not the grant: the person may hold a connection that must go on working
+    assert.equal(revokes().length, 0);
+    assert.equal(tokenRevokes().length, 1);
+    const [{ init }] = tokenRevokes();
+    assert.equal(init.method, 'DELETE');
+    assert.equal(init.headers.Authorization, BASIC);
+    assert.deepEqual(JSON.parse(init.body), { access_token: res.tokens.access_token });
+  }
+  assert.equal((await connectors(ana)).body.github.connected, false);
+});
+
+test('a token GitHub issued and Arlo does not keep is revoked: the user signed out meanwhile', async () => {
+  const ana = person('Ana Ruiz');
+  const { ghCookie, state } = await upToGithub(ana);
+  const tokens = githubAnswers({
+    user: async () => {
+      await h.postJson(`${srv.base}/api/auth/logout`, {}, { cookie: ana.session });
+      return json({ login: 'ana-gh', id: 11 });
+    },
+  });
+  assert.equal((await callback({ code: secret(made('code')), state }, ghCookie)).status, 400);
+  await h.wait(50);
+  assert.deepEqual(tokenRevokes().map((call) => JSON.parse(call.init.body)), [{ access_token: tokens.access_token }]);
+  assert.equal(githubConnections.getGithubConnections().status(ana.user.id).connected, false);
+});
+
+test('a token answer without expiry or refresh token is refused, and the token it holds is revoked', async () => {
+  const ana = person('Ana Ruiz');
+  const forever = secret(made('ghu'));
+  const res = await connect(ana, { token: () => json({ access_token: forever, token_type: 'bearer', scope: '' }) });
+  assert.equal(res.status, 400);
+  assert.equal(failedCodes().pop(), 'bad_response');
+  await h.wait(50);
+  assert.deepEqual(tokenRevokes().map((call) => JSON.parse(call.init.body)), [{ access_token: forever }]);
+  // GitHub was not asked whose it is: nothing of it was used
+  assert.equal(github.calls.some((call) => call.url === 'https://api.github.com/user'), false);
+  assert.equal((await connectors(ana)).body.github.connected, false);
+});
+
+test('an exchange GitHub refuses holds no token: nothing is revoked', async () => {
+  const ana = person('Ana Ruiz');
+  await connect(ana, { token: () => json({ error: 'bad_verification_code' }) });
+  await h.wait(50);
+  assert.equal(tokenRevokes().length + revokes().length, 0);
+});
+
+test('revoking a token that was not kept is best effort: a failure is a code in the log, and the page is the same', async () => {
+  const ana = person('Ana Ruiz');
+  const res = await connect(ana, { user: () => json({}, 500), single: () => json({ message: 'Validation Failed' }, 422) });
+  assert.equal(res.status, 400);
+  assert.ok(res.html.includes(NOT_CONNECTED));
+  await h.wait(50);
+  assert.ok(logged.includes(NOT_REVOKED('refused')));
+  await connect(ana, { user: () => json({}, 500), single: () => { throw new TypeError('fetch failed'); } });
+  await h.wait(50);
+  assert.ok(logged.includes(NOT_REVOKED('unreachable')));
+});
+
+test('connecting again as another GitHub account revokes the old account\'s grant; as the same account, nothing', async () => {
+  const ana = person('Ana Ruiz');
+  const first = await connect(ana, { login: 'ana-gh', id: 11 });
+  // The same account again: its grant is the one the new tokens belong to
+  const second = await connect(ana, { login: 'ana-gh', id: 11 });
+  await h.wait(50);
+  assert.equal(revokes().length + tokenRevokes().length, 0);
+  assert.notEqual(first.tokens.access_token, second.tokens.access_token);
+  // Another account: the old one is no longer connected to anything here
+  const third = await connect(ana, { login: 'ana-work', id: 12 });
+  await h.wait(50);
+  assert.deepEqual(revokes().map((call) => JSON.parse(call.init.body)), [{ access_token: second.tokens.access_token }]);
+  assert.equal(tokenRevokes().length, 0);
+  assert.deepEqual((await connectors(ana)).body.github, { available: true, connected: true, login: 'ana-work' });
+  assert.equal(await githubConnections.getGithubConnections().getAccessToken(ana.user.id), third.tokens.access_token);
+});
+
+test('the running server\'s own store revokes what it lets go of: another account\'s grant, and the token of a refresh that landed too late', async () => {
+  const ana = person('Ana Ruiz');
+  const testStore = githubConnections.getGithubConnections();
+  githubConnections._setForTests(undefined);
+  try {
+    const store = githubConnections.getGithubConnections();
+    assert.notEqual(store, testStore);
+    const record = (githubUserId, expiresAt = Date.now() + HOUR) => ({
+      accessToken: secret(made('ghu')), expiresAt, refreshToken: secret(made('ghr')), refreshExpiresAt: Date.now() + 100 * HOUR, login: 'ana-gh', githubUserId,
+    });
+    const [first, second] = [record(7), record(8, Date.now() + 1000)];
+    store.set(ana.user.id, first);
+    githubAnswers();
+    store.set(ana.user.id, second);
+    await h.wait(50);
+    assert.deepEqual(revokes().map((call) => JSON.parse(call.init.body)), [{ access_token: first.accessToken }]);
+
+    // A refresh is running when the same account is connected anew: what it brings is nobody's
+    let answerRefresh;
+    const asked = new Promise((resolve) => {
+      githubAnswers({ token: () => { resolve(); return new Promise((done) => { answerRefresh = done; }); } });
+    });
+    const next = {
+      access_token: secret(made('ghu')), expires_in: 28800, refresh_token: secret(made('ghr')), refresh_token_expires_in: 15897600, scope: '', token_type: 'bearer',
+    };
+    const using = store.getAccessToken(ana.user.id);
+    await asked;
+    const third = record(8);
+    store.set(ana.user.id, third);
+    answerRefresh(json(next));
+    assert.equal(await using, null);
+    await h.wait(50);
+    // That one token; the grant is the new connection's too
+    assert.deepEqual(tokenRevokes().map((call) => JSON.parse(call.init.body)), [{ access_token: next.access_token }]);
+    assert.equal(revokes().length, 0);
+    assert.equal(await store.getAccessToken(ana.user.id), third.accessToken);
+    store.remove(ana.user.id);
+  } finally {
+    githubConnections._setForTests(testStore);
+  }
+});
+
+test('disconnect while a refresh is running: GitHub is asked to revoke with the token the refresh brought, not the one it ended', async () => {
+  const ana = person('Ana Ruiz');
+  const { tokens } = await connect(ana);
+  const store = githubConnections.getGithubConnections();
+  const before = clock.at;
+  // The access token is about to run out: the next use refreshes it
+  clock.at += 8 * HOUR - 30 * 1000;
+  try {
+    let answerRefresh;
+    const asked = new Promise((resolve) => {
+      githubAnswers({ token: () => { resolve(); return new Promise((done) => { answerRefresh = done; }); } });
+    });
+    const next = {
+      access_token: secret(made('ghu')), expires_in: 28800, refresh_token: secret(made('ghr')), refresh_token_expires_in: 15897600, scope: '', token_type: 'bearer',
+    };
+    const using = store.getAccessToken(ana.user.id);
+    await asked;
+    // GitHub has the refresh token now: the old pair is as good as gone
+    const deleting = fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } });
+    await h.wait(50);
+    assert.equal(store.status(ana.user.id).connected, false);
+    assert.equal(revokes().length, 0);
+    answerRefresh(json(next));
+    assert.deepEqual(await (await deleting).json(), { connected: false });
+    assert.equal(await using, null);
+    assert.deepEqual(revokes().map((call) => JSON.parse(call.init.body)), [{ access_token: next.access_token }]);
+    assert.equal(revokes().some((call) => call.init.body.includes(tokens.access_token)), false);
+    assert.equal(tokenRevokes().length, 0);
+    assert.equal(store.status(ana.user.id).connected, false);
+  } finally {
+    clock.at = before;
+  }
+});
+
+test('logout while a refresh is running revokes with the refreshed token too, and does not wait for it', async () => {
+  const ana = person('Ana Ruiz');
+  await connect(ana);
+  const store = githubConnections.getGithubConnections();
+  const before = clock.at;
+  clock.at += 8 * HOUR - 30 * 1000;
+  try {
+    let answerRefresh;
+    const asked = new Promise((resolve) => {
+      githubAnswers({ token: () => { resolve(); return new Promise((done) => { answerRefresh = done; }); } });
+    });
+    const next = {
+      access_token: secret(made('ghu')), expires_in: 28800, refresh_token: secret(made('ghr')), refresh_token_expires_in: 15897600, scope: '', token_type: 'bearer',
+    };
+    const using = store.getAccessToken(ana.user.id);
+    await asked;
+    assert.equal((await h.postJson(`${srv.base}/api/auth/logout`, {}, { cookie: ana.session })).status, 200);
+    assert.equal(revokes().length, 0);
+    answerRefresh(json(next));
+    await using;
+    await h.wait(50);
+    assert.deepEqual(revokes().map((call) => JSON.parse(call.init.body)), [{ access_token: next.access_token }]);
+  } finally {
+    clock.at = before;
+  }
+});
+
+// --- a panel that cannot be told ------------------------------------------------------
+
+test('a socket whose send fails does not turn a connect into a failure, reject a disconnect, or stop the other sockets', async () => {
+  const ana = person('Ana Ruiz');
+  const { WebSocket } = require('ws');
+  const websocket = require('../src/services/websocket');
+  const [broken, fine] = await panelsIn('GH-BROKEN-SEND==', [ana.session, ana.session]);
+  const realSend = WebSocket.prototype.send;
+  let failures = 0;
+  // The first socket that is told fails; the one after it is told all the same
+  WebSocket.prototype.send = function send(data, ...rest) {
+    if (String(data).includes('connectors.updated') && failures === 0) {
+      failures += 1;
+      throw new Error('socket is gone');
+    }
+    return realSend.call(this, data, ...rest);
+  };
+  try {
+    assert.doesNotThrow(() => websocket.sendConnectorsUpdated(ana.user.id));
+    await h.wait(50);
+    assert.equal(failures, 1);
+    assert.equal(updatesOn(broken).length + updatesOn(fine).length, 1);
+
+    failures = 0;
+    const connected = await connect(ana);
+    assert.equal(connected.status, 200);
+    assert.ok(connected.html.includes('is now connected to Arlo'));
+    failures = 0;
+    const res = await fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { connected: false });
+  } finally {
+    WebSocket.prototype.send = realSend;
+    for (const ws of [broken, fine]) ws.socket.close();
+  }
+});
+
+test('telling the panels fails altogether: the connect is still a connect and the disconnect still answers', async () => {
+  const ana = person('Ana Ruiz');
+  const websocket = require('../src/services/websocket');
+  const real = websocket.sendConnectorsUpdated;
+  const rejections = [];
+  const onRejection = (reason) => rejections.push(reason);
+  process.on('unhandledRejection', onRejection);
+  websocket.sendConnectorsUpdated = () => { throw new Error('no socket server'); };
+  try {
+    const connected = await connect(ana);
+    assert.equal(connected.status, 200);
+    assert.equal((await connectors(ana)).body.github.connected, true);
+    const res = await fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { connected: false });
+    await h.wait(20);
+    assert.deepEqual(rejections, []);
+  } finally {
+    websocket.sendConnectorsUpdated = real;
+    process.off('unhandledRejection', onRejection);
+  }
+});
+
+test('a handler that fails answers, and leaves no unhandled rejection', async () => {
+  const ana = person('Ana Ruiz');
+  await connect(ana);
+  const rejections = [];
+  const onRejection = (reason) => rejections.push(reason);
+  process.on('unhandledRejection', onRejection);
+  const real = githubConnections.getGithubConnections();
+  // A store that fails where the handlers use it
+  githubConnections._setForTests({
+    ...real, status: () => { throw new Error('store is broken'); }, take: () => { throw new Error('store is broken'); },
+  });
+  try {
+    const res = await fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } });
+    assert.equal(res.status, 500);
+    assert.deepEqual(await res.json(), { error: 'Internal Server Error' });
+    await h.wait(20);
+    assert.deepEqual(rejections, []);
+  } finally {
+    githubConnections._setForTests(real);
+    process.off('unhandledRejection', onRejection);
+  }
+});
+
+// --- the connected page and its undo --------------------------------------------------
+
+test('the connected page: a login that is not a GitHub login is not shown, and a display name is escaped', async () => {
+  // An enterprise-managed login has a "_": kept as the connection's login, not put on a page
+  const eve = person('<b>Eve</b> & "co"');
+  const odd = await connect(eve, { login: 'eve_corp', id: 31 });
+  assert.equal(odd.status, 200);
+  assertPage(odd, PAGE_CSP, 'same-origin');
+  assert.ok(odd.html.includes('<h1>A GitHub account is now connected to Arlo for <strong>&lt;b&gt;Eve&lt;/b&gt; &amp; &quot;co&quot;</strong>.</h1>'));
+  assert.equal(odd.html.includes('eve_corp'), false);
+  assert.equal(odd.html.includes('<b>Eve'), false);
+  // 40 characters: one more than GitHub allows
+  const long = await connect(eve, { login: 'a'.repeat(40), id: 32 });
+  assert.ok(long.html.includes('<h1>A GitHub account is now connected'));
+  // No name to show
+  const nameless = person('‮');
+  const bare = await connect(nameless, { login: 'someone-1', id: 33 });
+  assert.ok(bare.html.includes('<h1>GitHub account <strong>someone-1</strong> is now connected to Arlo.</h1>'));
+});
+
+test('undo: the button on the connected page disconnects, revokes at GitHub, tells the panels, and works once', async () => {
+  const ana = person('Ana Ruiz');
+  const ben = person('Ben Okafor');
+  const benConnected = await connect(ben, { login: 'ben-gh', id: 22 });
+  const connected = await connect(ana, { login: 'ana-gh', id: 11 });
+  const [anaPanel, benPanel] = await panelsIn('GH-UNDO-WS==', [ana.session, ben.session]);
+  githubAnswers();
+
+  const res = await undo(connected.undoCookie, { secFetchSite: 'same-origin' });
+  assert.equal(res.status, 200);
+  assertPage(res);
+  assert.ok(res.html.includes(DISCONNECTED));
+  assert.match(res.setCookie, /^ghUndo=;/); // cleared
+  await h.wait(100);
+
+  // The normal disconnect: gone here, the grant revoked, the panels told
+  assert.deepEqual((await connectors(ana)).body.github, { available: true, connected: false, login: null });
+  assert.deepEqual(revokes().map((call) => JSON.parse(call.init.body)), [{ access_token: connected.tokens.access_token }]);
+  assert.deepEqual(updatesOn(anaPanel), [{ type: 'connectors.updated' }]);
+  assert.ok(logged.includes('GitHub disconnected'));
+  // Nobody else's connection is touched
+  assert.deepEqual(updatesOn(benPanel), []);
+  assert.equal(await githubConnections.getGithubConnections().getAccessToken(ben.user.id), benConnected.tokens.access_token);
+
+  // Once: the same cookie again does nothing, also after connecting anew
+  github.calls = [];
+  const again = await undo(connected.undoCookie);
+  assert.equal(again.status, 400);
+  assertPage(again);
+  assert.ok(again.html.includes(NOT_UNDONE));
+  const anew = await connect(ana, { login: 'ana-gh', id: 11 });
+  github.calls = [];
+  assert.equal((await undo(connected.undoCookie)).status, 400);
+  assert.equal((await connectors(ana)).body.github.connected, true);
+  assert.equal(github.calls.length, 0);
+  // Ben's cookie undoes Ben's, never Ana's
+  assert.equal((await undo(benConnected.undoCookie)).status, 200);
+  assert.equal((await connectors(ana)).body.github.connected, true);
+  assert.equal((await connectors(ben)).body.github.connected, false);
+  assert.equal((await undo(anew.undoCookie)).status, 200);
+  for (const ws of [anaPanel, benPanel]) ws.socket.close();
+});
+
+test('undo is refused without the cookie, with a wrong one, from another origin or with fields, and such a request does not use it up', async () => {
+  const ana = person('Ana Ruiz');
+  const connected = await connect(ana);
+  github.calls = [];
+  const other = crypto.randomBytes(32).toString('base64url');
+  const refusals = [
+    [await undo(undefined), 400],
+    [await undo(other), 400],
+    [await undo('not-the-cookie-shape'), 400],
+    [await undo(connected.undoCookie, { origin: 'https://evil.example.test' }), 403],
+    [await undo(connected.undoCookie, { origin: null }), 403],
+    [await undo(connected.undoCookie, { origin: 'null' }), 403],
+    [await undo(connected.undoCookie, { secFetchSite: 'cross-site' }), 403],
+    [await undo(connected.undoCookie, { secFetchSite: 'same-site' }), 403],
+    [await undo(connected.undoCookie, { body: 'user=someone-else' }), 400],
+    [await undo(connected.undoCookie, { contentType: 'application/json', body: JSON.stringify({ userId: 'x' }) }), 400],
+  ];
+  for (const [res, status] of refusals) {
+    assert.equal(res.status, status);
+    assertPage(res);
+    assert.ok(res.html.includes(NOT_UNDONE));
+    assert.equal(res.html.includes(DISCONNECTED), false);
+  }
+  assert.equal((await connectors(ana)).body.github.connected, true);
+  assert.equal(github.calls.length, 0);
+  // The cookie that starts the flow is not the one that undoes it
+  assert.equal((await undo(connected.ghCookie)).status, 400);
+  // The page's own click still works
+  assert.equal((await undo(connected.undoCookie)).status, 200);
+  assert.equal((await connectors(ana)).body.github.connected, false);
+});
+
+test('undo works for ten minutes', async () => {
+  const ana = person('Ana Ruiz');
+  const before = clock.at;
+  try {
+    const late = await connect(ana);
+    clock.at += 10 * 60 * 1000;
+    assert.equal((await undo(late.undoCookie)).status, 400);
+    assert.equal((await connectors(ana)).body.github.connected, true);
+    clock.at = before;
+    const inTime = await connect(ana);
+    clock.at += 10 * 60 * 1000 - 1000;
+    assert.equal((await undo(inTime.undoCookie)).status, 200);
+    assert.equal((await connectors(ana)).body.github.connected, false);
+  } finally {
+    clock.at = before;
+  }
+});
+
+test('an undo is for the connection it was made with: after a disconnect, a logout or a new connect it undoes nothing', async () => {
+  const ana = person('Ana Ruiz');
+  const first = await connect(ana);
+  await fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } });
+  const second = await connect(ana);
+  // The first connect's cookie, in another browser: the connection made since is not its to end
+  assert.equal((await undo(first.undoCookie)).status, 400);
+  const third = await connect(ana);
+  assert.equal((await undo(second.undoCookie)).status, 400);
+  assert.equal((await connectors(ana)).body.github.connected, true);
+  assert.equal((await h.postJson(`${srv.base}/api/auth/logout`, {}, { cookie: ana.session })).status, 200);
+  assert.equal((await undo(third.undoCookie)).status, 400);
+});
+
+// --- rate limits ----------------------------------------------------------------------
+
+test('reading the connection has a limit of its own: polling never uses up what signing in needs', async () => {
+  const ana = person('Ana Ruiz');
+  // More than the auth limiter allows, as a five-minute wait at 3 seconds plus glances would ask
+  for (let i = 0; i < 150; i += 1) assert.equal((await connectors(ana)).status, 200);
+  // The sign-in budget of this client is untouched
+  const me = await fetch(`${srv.base}/api/auth/me`, { headers: { cookie: ana.session } });
+  assert.notEqual(me.status, 429);
+  assert.equal(Number(me.headers.get('ratelimit-remaining')), 119);
+  assert.equal((await openStart('x')).status, 400);
+  // Its own limit: 300 per 15 minutes
+  let last;
+  for (let i = 0; i < 151; i += 1) last = await connectors(ana);
+  assert.equal(last.status, 429);
+  assert.equal((await fetch(api('/github'), { method: 'DELETE', headers: { cookie: ana.session } })).status, 429);
+  // And being stopped there does not stop signing in or the flow
+  assert.notEqual((await fetch(`${srv.base}/api/auth/me`, { headers: { cookie: ana.session } })).status, 429);
+  assert.equal((await askTicket(ana)).status, 200);
+});
+
+test('the steps of the flow share the auth limit with signing in', async () => {
+  const ana = person('Ana Ruiz');
+  for (let i = 0; i < 118; i += 1) await fetch(api('/github/start?ticket=x'));
+  await undo(undefined);
+  await callback({}, undefined);
+  assert.equal((await fetch(`${srv.base}/api/auth/me`, { headers: { cookie: ana.session } })).status, 429);
+  assert.equal((await askTicket(ana)).status, 429);
+  assert.equal((await undo(undefined)).status, 429);
+  // Reading is not stopped by it
+  assert.equal((await connectors(ana)).status, 200);
 });
 
 test('the routes are rate limited: one client is stopped after 120 requests in the window', async () => {

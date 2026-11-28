@@ -10,13 +10,15 @@ import Button from './ui/Button';
  *
  * "Connect GitHub" sends the system browser to GitHub's sign-in
  * (lib/connectGithub.js); the row reads "Finish in your browser…" until the
- * server says the connectors changed, the panel is looked at again, or five
- * minutes passed. "Disconnect" asks first, in the row.
+ * server says the account is connected or five minutes passed, with a quiet
+ * "Cancel" that ends the wait at once. "Disconnect" asks first, in the row.
  *
  * Renders nothing until the server has said how things stand.
  */
 export default function GithubConnector() {
-  const { github, githubConnect, connectGithub, disconnectGithub } = useConnectors();
+  const {
+    github, githubConnect, connectGithub, cancelGithubConnect, disconnectGithub,
+  } = useConnectors();
   const { addToast } = useToast();
   const questionId = useId();
   // 'idle' | 'confirming' | 'disconnecting'
@@ -77,6 +79,8 @@ export default function GithubConnector() {
     );
   } else if (githubConnect === 'waiting') {
     status = 'Finish in your browser…';
+    // The browser tab was closed, or it was not meant: no five minutes to sit out
+    action = <Button variant="ghost" size="sm" onClick={cancelGithubConnect}>Cancel</Button>;
   } else {
     status = githubConnect === 'timeout' ? 'That took too long. Try again.' : 'Not connected';
     action = (

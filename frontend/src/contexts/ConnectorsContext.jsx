@@ -3,7 +3,7 @@ import { useAuth } from './AuthContext';
 import { useMeeting } from './MeetingContext';
 import { useZoomSdk } from './ZoomSdkContext';
 import {
-  CONNECT_POLL_MS, CONNECT_WAIT_MS, disconnectGithub as disconnectOnServer, readConnectors, startGithubConnect,
+  CONNECT_POLL_MS, CONNECT_WAIT_MS, GLANCE_MIN_MS, disconnectGithub as disconnectOnServer, readConnectors, startGithubConnect,
 } from '../lib/connectGithub';
 
 const ConnectorsContext = createContext();
@@ -14,7 +14,8 @@ const ConnectorsContext = createContext();
  * someone else is signed in, and read again when the server says it changed
  * (`connectors.updated` on the meeting's socket: about the person, not about
  * a meeting, and nothing in it is used) and when the panel comes back into
- * view or gets the focus back. While it waits for the browser it also asks
+ * view or gets the focus back (outside a wait at most once per
+ * GLANCE_MIN_MS). While it waits for the browser it also asks
  * every CONNECT_POLL_MS: the account is connected in the system browser,
  * outside a meeting there is no socket to say so, and inside Zoom the panel
  * may never lose the focus.
@@ -24,10 +25,14 @@ const ConnectorsContext = createContext();
  *                   (the browser was opened: "Finish in your browser…") |
  *                   'timeout' (CONNECT_WAIT_MS passed without word)
  *   connectGithub() 'opened' | 'failed' | 'refused' | 'busy'
+ *   cancelGithubConnect() ends a wait at once (the row is "Not connected"
+ *                   again and nothing is asked any more)
  *   disconnectGithub() true when the server disconnected the account
  *
- * The wait ends only when a read says the account is connected, or when
- * CONNECT_WAIT_MS has passed. A read that says "not connected" (someone
+ * The wait ends only when a read says the account is connected, when
+ * CONNECT_WAIT_MS has passed, or when the person cancels it (an account
+ * connected in the browser after that still shows up: on the socket, or the
+ * next time the panel is looked at). A read that says "not connected" (someone
  * glanced back at the panel before finishing) or that fails changes nothing.
  * The GitHub login is for Settings only: no meeting view reads this context.
  */
@@ -103,15 +108,26 @@ export function ConnectorsProvider({ children }) {
     return () => ws.removeEventListener('message', onMessage);
   }, [ws, identity, refresh]);
 
-  // Back from the browser
+  // Back from the browser. While a connect waits every look asks; otherwise
+  // at most once per GLANCE_MIN_MS, however often the panel gets the focus
+  const lastGlanceRef = useRef(-Infinity);
   useEffect(() => {
     if (identity === null) return undefined;
-    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    lastGlanceRef.current = -Infinity;
+    const glance = () => {
+      if (connectRef.current !== 'waiting') {
+        const at = Date.now();
+        if (at - lastGlanceRef.current < GLANCE_MIN_MS) return;
+        lastGlanceRef.current = at;
+      }
+      refresh();
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') glance(); };
     document.addEventListener('visibilitychange', onVisible);
-    window.addEventListener('focus', refresh);
+    window.addEventListener('focus', glance);
     return () => {
       document.removeEventListener('visibilitychange', onVisible);
-      window.removeEventListener('focus', refresh);
+      window.removeEventListener('focus', glance);
     };
   }, [identity, refresh]);
 
@@ -140,6 +156,12 @@ export function ConnectorsProvider({ children }) {
     return went;
   }, [putConnect]);
 
+  // "Cancel" on the waiting row. Only a wait is ended: a ticket that is being
+  // asked for ('starting') runs its course
+  const cancelGithubConnect = useCallback(() => {
+    if (connectRef.current === 'waiting') putConnect(null);
+  }, [putConnect]);
+
   const disconnectGithub = useCallback(async () => {
     const asked = identityRef.current;
     if (asked === null) return false;
@@ -154,8 +176,9 @@ export function ConnectorsProvider({ children }) {
     github: identity === null ? null : github,
     githubConnect: identity === null ? null : githubConnect,
     connectGithub,
+    cancelGithubConnect,
     disconnectGithub,
-  }), [identity, github, githubConnect, connectGithub, disconnectGithub]);
+  }), [identity, github, githubConnect, connectGithub, cancelGithubConnect, disconnectGithub]);
 
   return (
     <ConnectorsContext.Provider value={value}>

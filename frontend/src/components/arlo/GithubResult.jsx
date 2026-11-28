@@ -11,7 +11,10 @@ const STATES = Object.freeze({ open: 'Open', closed: 'Closed' });
  * "Post to chat" under a result: everyone in the meeting sees the message and
  * it cannot be taken back, so the first click only asks; "Post" sends (as
  * components/arlo/PostNotesToChat.jsx does for the notes). What is posted is
- * text this panel built from the result the owner sees. Never logged.
+ * text this panel built from the result, and it is not what the result looks
+ * like above (titles are cut, a list is five rows). So the question shows
+ * `message` itself, the one string that is then sent, as the approval sheet
+ * shows its `body`: the owner posts what they read. Never logged.
  */
 function PostResultToChat({ message }) {
   const { zoomSdk } = useZoomSdk();
@@ -60,6 +63,8 @@ function PostResultToChat({ message }) {
         // onKeyDown: Escape from either button
         <div className="arlo-post-confirm" role="group" aria-labelledby={questionId} onKeyDown={onKeyDown}>
           <span className="arlo-post-question" id={questionId}>Post this to everyone in the chat?</span>
+          {/* The string that is sent, as one text node (CSS keeps its line breaks) */}
+          <p className="arlo-post-message" role="region" aria-label="What will be posted" tabIndex={0}>{message}</p>
           <Button variant="outline" size="sm" ref={postRef} onClick={post} disabled={step === 'sending'}>Post</Button>
           <Button variant="ghost" size="sm" onClick={() => setStep('idle')} disabled={step === 'sending'}>Cancel</Button>
         </div>

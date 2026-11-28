@@ -199,6 +199,103 @@ describe('connecting', () => {
     expect(sdk.openUrl).toHaveBeenCalledTimes(1);
   });
 
+  test('"Cancel" while it waits: the row is back to "Not connected" at once, and the server is no longer asked', async () => {
+    const { fetchMock, current } = await openSettings();
+    await screen.findByRole('button', { name: 'Connect GitHub' });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText('Finish in your browser…')).toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    const before = connectorReads(fetchMock);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByText('Not connected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connect GitHub' })).toBeEnabled();
+    expect(screen.queryByText('Finish in your browser…')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+
+    // No polling, and no "took too long" five minutes later
+    await act(async () => { await vi.advanceTimersByTimeAsync(6 * 60 * 1000); });
+    expect(connectorReads(fetchMock)).toBe(before);
+    expect(screen.getByText('Not connected')).toBeInTheDocument();
+    expect(screen.queryByText('That took too long. Try again.')).not.toBeInTheDocument();
+
+    // Finished in the browser after all: the next look at the panel shows it
+    current.github = CONNECTED;
+    await becomeVisible();
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText('Connected as octo-ana')).toBeInTheDocument();
+  });
+
+  test('after "Cancel" a new connect starts as the first one did', async () => {
+    const { sdk } = await openSettings();
+    await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Connect GitHub' }));
+    expect(await screen.findByText('Finish in your browser…')).toBeInTheDocument();
+    expect(sdk.openUrl).toHaveBeenCalledTimes(2);
+  });
+
+  test('no "Cancel" where nothing waits', async () => {
+    await openSettings();
+    await screen.findByRole('button', { name: 'Connect GitHub' });
+    expect(screen.queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
+  });
+
+  describe('looking at the panel again when no connect waits', () => {
+    const focus = () => act(async () => { window.dispatchEvent(new Event('focus')); });
+
+    test('the server is asked at most once per 10 seconds, however often the panel gets the focus or comes into view', async () => {
+      const { fetchMock, current } = await openSettings({ github: CONNECTED });
+      await screen.findByText('Connected as octo-ana');
+      vi.useFakeTimers();
+      const before = connectorReads(fetchMock);
+
+      await becomeVisible();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(connectorReads(fetchMock)).toBe(before + 1);
+      for (let i = 0; i < 5; i += 1) {
+        await focus();
+        await becomeVisible();
+      }
+      await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
+      await focus();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(connectorReads(fetchMock)).toBe(before + 1);
+
+      // Ten seconds after the read: the next look asks again
+      current.github = NOT_CONNECTED;
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      await focus();
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      expect(connectorReads(fetchMock)).toBe(before + 2);
+      expect(screen.getByText('Not connected')).toBeInTheDocument();
+    });
+
+    test('word on the socket is read at once all the same', async () => {
+      const { fetchMock, current } = await openSettings({ github: CONNECTED, viaMeeting: true });
+      await screen.findByText('Connected as octo-ana');
+      await becomeVisible();
+      const before = connectorReads(fetchMock);
+      current.github = NOT_CONNECTED;
+      await send({ type: 'connectors.updated' });
+      await waitFor(() => expect(connectorReads(fetchMock)).toBe(before + 1));
+      expect(await screen.findByText('Not connected')).toBeInTheDocument();
+    });
+
+    test('while a connect waits, every look asks', async () => {
+      const { fetchMock } = await openSettings();
+      await userEvent.click(await screen.findByRole('button', { name: 'Connect GitHub' }));
+      await screen.findByText('Finish in your browser…');
+      const before = connectorReads(fetchMock);
+      await becomeVisible();
+      await waitFor(() => expect(connectorReads(fetchMock)).toBe(before + 1));
+      await becomeVisible();
+      await waitFor(() => expect(connectorReads(fetchMock)).toBe(before + 2));
+    });
+  });
+
   test('five minutes without word: "That took too long. Try again.", not before', async () => {
     await openSettings();
     const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
